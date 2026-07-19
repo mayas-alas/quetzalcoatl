@@ -110,7 +110,14 @@ esac
 
 cd "$app_dir"
 docker compose --project-name "$project" --env-file .env -f compose.yaml config --quiet
-docker compose --project-name "$project" --env-file .env -f compose.yaml pull --policy missing --quiet >/dev/null
+rm -f "$compose_log"
+if ! docker compose --project-name "$project" --env-file .env -f compose.yaml \
+  pull --policy missing --quiet > "$compose_log" 2>&1; then
+  tail -n 80 "$compose_log" >&2 || true
+  rm -f "$compose_log"
+  exit 72
+fi
+rm -f "$compose_log"
 tailscale_image='docker.io/tailscale/tailscale@sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e'
 test "$(docker image inspect --format '{{.Id}}' "$tailscale_image")" = 'sha256:1e26d7400ae5dd99fb62f0d7706908d5a9dd8ee9fed3a5100611521cfccbd645'
 case "$service" in
@@ -124,7 +131,6 @@ case "$service" in
     ;;
 esac
 test "$(docker image inspect --format '{{.Id}}' "$app_image")" = "$app_config"
-rm -f "$compose_log"
 if ! docker compose --project-name "$project" --env-file .env -f compose.yaml \
   up --detach --pull never --wait --wait-timeout 300 > "$compose_log" 2>&1; then
   tail -n 80 "$compose_log" >&2 || true
