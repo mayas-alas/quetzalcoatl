@@ -228,7 +228,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "8c73e8f499d0e1bae23e2f995e4281ae69ee35030b7207b2b663ae4a08d2795f"
+      "sha256": "fd6c8eca4d5acb2f9644b519eabd45fd5fc92b4400a052b586fe648f17e19aad"
     },
     {
       "path": "config/node/serve.json",
