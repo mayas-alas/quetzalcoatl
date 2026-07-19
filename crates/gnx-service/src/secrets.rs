@@ -1,5 +1,5 @@
 use std::env;
-use std::ffi::c_void;
+use std::ffi::{OsString, c_void};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::mem::size_of;
@@ -139,7 +139,7 @@ fn configuration_path() -> Result<PathBuf, ConfigurationError> {
     Ok(product_root()?.join("secrets").join(BLOB_NAME))
 }
 
-fn product_root() -> Result<PathBuf, ConfigurationError> {
+pub(crate) fn product_root() -> Result<PathBuf, ConfigurationError> {
     let program_data = env::var_os("ProgramData")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
@@ -200,15 +200,21 @@ fn apply_acl(path: &[u16], descriptor: PSECURITY_DESCRIPTOR) -> Result<(), Confi
     }
 }
 
-fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), ConfigurationError> {
+pub(crate) fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), ConfigurationError> {
     let directory = path
         .parent()
-        .ok_or_else(|| ConfigurationError::storage("DPAPI blob path has no parent"))?;
+        .ok_or_else(|| ConfigurationError::storage("protected file path has no parent"))?;
     secure_directory(directory)?;
-    let temporary = directory.join(format!(".{BLOB_NAME}.tmp"));
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| ConfigurationError::storage("protected file path has no name"))?;
+    let mut temporary_name = OsString::from(".");
+    temporary_name.push(file_name);
+    temporary_name.push(".tmp");
+    let temporary = directory.join(temporary_name);
     if temporary.exists() {
         fs::remove_file(&temporary).map_err(|error| {
-            ConfigurationError::io("cannot remove stale DPAPI temporary", &error)
+            ConfigurationError::io("cannot remove stale protected temporary", &error)
         })?;
     }
 
@@ -217,11 +223,11 @@ fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), ConfigurationError> 
             .create_new(true)
             .write(true)
             .open(&temporary)
-            .map_err(|error| ConfigurationError::io("cannot create DPAPI temporary", &error))?;
+            .map_err(|error| ConfigurationError::io("cannot create protected temporary", &error))?;
         file.write_all(contents)
-            .map_err(|error| ConfigurationError::io("cannot write DPAPI temporary", &error))?;
+            .map_err(|error| ConfigurationError::io("cannot write protected temporary", &error))?;
         file.sync_all()
-            .map_err(|error| ConfigurationError::io("cannot flush DPAPI temporary", &error))?;
+            .map_err(|error| ConfigurationError::io("cannot flush protected temporary", &error))?;
         let descriptor = SecurityDescriptor::new()?;
         apply_acl(&wide_path(&temporary)?, descriptor.0)
     })();
@@ -243,7 +249,10 @@ fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), ConfigurationError> 
     {
         let error = unsafe { GetLastError() };
         let _ = fs::remove_file(&temporary);
-        return Err(ConfigurationError::win32("cannot commit DPAPI blob", error));
+        return Err(ConfigurationError::win32(
+            "cannot commit protected file",
+            error,
+        ));
     }
     let descriptor = SecurityDescriptor::new()?;
     apply_acl(&target_wide, descriptor.0)
