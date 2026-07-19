@@ -192,7 +192,7 @@ Responsabilidades:
 
 - MSI posee los archivos inmutables en `%ProgramFiles%\Quetzalcoatl`.
 - MSI instala la imagen WSL fijada; `gnx-service` verifica su tamaño y SHA-256 antes de crear la máquina.
-- `%ProgramData%\Quetzalcoatl` posee estado mutable, checkpoints y blobs DPAPI.
+- `%ProgramData%\Quetzalcoatl.Runtime` posee estado mutable, checkpoints y blobs DPAPI.
 - `gnx-service` verifica y aplica el payload dentro de la máquina administrada.
 - systemd genera y supervisa unidades a partir de Quadlets.
 - Podman ejecuta el pod y sus contenedores.
@@ -249,9 +249,9 @@ sequenceDiagram
     Burn->>Burn: HostPreflight Windows/WSL2/reboot
     Burn->>MSI: instalar producto inmutable
     MSI->>Service: registrar e iniciar servicio
-    Burn->>Operator: solicitar flags + auth_key + nuevo password PVE
-    Operator->>Burn: entregar entradas
-    Burn->>Service: secretos por Named Pipe protegido
+    Burn->>Operator: finalizar instalación y señalar gnx configure
+    Operator->>CLI: flags + auth_key + nuevo password PVE
+    CLI->>Service: entradas por Named Pipe protegido
     Service->>Service: cifrar inmediatamente con DPAPI
     Service->>Machine: RuntimeGate + crear máquina + validar devices
     Service->>Machine: aplicar runtime payload v1
@@ -407,7 +407,7 @@ Reglas:
 - Burn no pasa secretos como propiedades MSI, argumentos o variables registradas en logs.
 - El instalador registra una sola cuenta virtual runtime, `NT SERVICE\Quetzalcoatl`; WinSW, DPAPI y Podman Machine deben usar su mismo SID estable. No existe contraseña de cuenta; SCM crea el token y carga el perfil antes de que `gnx-service` descifre o invoque Podman.
 - El servicio recibe y cifra el secreto con DPAPI user-scope bajo esa identidad.
-- Los blobs viven en `%ProgramData%\Quetzalcoatl\secrets` con ACL para SYSTEM y la identidad del servicio.
+- Los blobs viven en `%ProgramData%\Quetzalcoatl.Runtime\secrets` con ACL para SYSTEM y la identidad del servicio.
 - El plaintext sólo cruza a Fedora/LXC por stdin o un canal temporal y vive en `/run` con modo `0600`.
 - Los snippets que contienen `TS_AUTHKEY` son referencias, no archivos de producto. El Quadlet y los Compose canónicos nunca contienen el valor.
 - Antes de habilitar `tailscaled.container`, `gnx-service` inicia exclusivamente `gnx-tailscale-enroll.service`. El one-shot usa la misma imagen Tailscale fijada, consume `/run/gnx/ts-authkey`, solicita el tag host y escribe el state en `/var/lib/quetzalcoatl/tailscale/host` (`0700`, root).
@@ -449,9 +449,9 @@ La ejecución canónica del controller selecciona Garage y Forgejo. Desmarcar un
 
 Estado mutable Windows:
 
-- `%ProgramData%\Quetzalcoatl\state.json`: etapa, rol, identidad controller, opciones y último error; nunca secretos.
-- `%ProgramData%\Quetzalcoatl\secrets\*.bin`: blobs DPAPI.
-- `%ProgramData%\Quetzalcoatl\logs`: logs acotados y redactados.
+- `%ProgramData%\Quetzalcoatl.Runtime\state.json`: etapa, rol, identidad controller y opciones; nunca secretos.
+- `%ProgramData%\Quetzalcoatl.Runtime\secrets\*.bin`: blobs DPAPI.
+- I1 no persiste logs del servicio. `gnx status` entrega únicamente etapa, código y error acotado por Named Pipe.
 
 Máquina de estados:
 
@@ -488,12 +488,11 @@ Cada transición escribe checkpoint sólo después de verificar su postcondició
 
 CLI mínima:
 
+- `gnx configure`
 - `gnx status`
 - `gnx status --json`
-- `gnx runtime status`
-- `gnx cluster status`
 
-Todos los comandos consultan `gnx-service` por Named Pipe. Ninguno modifica WSL, Podman, PVE o OpenTofu directamente.
+`gnx configure` entrega una sola vez las entradas interactivas al servicio; deshabilita eco para secretos y no los incluye en argv. Los comandos de estado consultan `gnx-service` por Named Pipe. La CLI no modifica WSL, Podman, PVE u OpenTofu directamente.
 
 Esquema mínimo de `gnx status --json`:
 
@@ -536,7 +535,7 @@ Camino canónico:
 
 1. Ejecutar Setup en un Windows limpio.
 2. Habilitar/reusar WSL2, reiniciar y reanudar si hace falta.
-3. Instalar MSI, servicio y CLI.
+3. Instalar MSI, servicio y CLI; ejecutar `gnx configure` para entregar opciones y secretos al servicio.
 4. Crear la máquina Podman administrada y pasar el gate KVM.
 5. Aplicar payload v1 y registrar Tailscale con `auth_key`.
 6. No encontrar otros hosts GNX y persistir `controller`.
@@ -544,7 +543,7 @@ Camino canónico:
 8. Desplegar Garage y Forgejo cuando están seleccionados.
 9. Terminar con `gnx status --json` en `READY` y sin puertos Windows publicados.
 
-Criterio de cierre: el EXE realiza el recorrido completo en un host objetivo y existe evidencia de PVE, Tailscale, OpenTofu y los servicios seleccionados funcionando.
+Criterio de cierre: el EXE y la configuración mínima por CLI realizan el recorrido completo en un host objetivo y existe evidencia de PVE, Tailscale, OpenTofu y los servicios seleccionados funcionando.
 
 ### Incremento 2 — Member funcional
 
