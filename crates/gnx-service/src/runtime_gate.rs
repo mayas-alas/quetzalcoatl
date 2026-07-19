@@ -22,6 +22,7 @@ const MACHINE_CPUS: u64 = 6;
 const MACHINE_MEMORY_MIB: u64 = 8192;
 const MACHINE_DISK_GIB: u64 = 100;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const OPENTOFU_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-opentofu-prepare";
 const PVE_CLUSTER_CREATE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-cluster-create";
 const PVE_CONFIGURE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-configure";
 const TAILSCALE_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-tailscale-prepare";
@@ -281,6 +282,13 @@ test -z "$(podman ps -aq --filter name='^gnx-host-enroll$')"
 printf 'TAILSCALE_SECRET_CLEAN=ready\n'
 "#;
 
+const OPENTOFU_SECRET_CLEANUP_PROBE: &str = r#"set -eu
+test ! -e /run/gnx/opentofu-password
+test ! -e /run/gnx/opentofu.env
+test -z "$(podman ps -aq --filter name='^gnx-opentofu$')"
+printf 'OPENTOFU_SECRET_CLEAN=ready\n'
+"#;
+
 pub fn run(status: Arc<RwLock<StatusResponse>>) {
     set_stage(&status, "RUNTIME_IDENTITY");
     if let Err(error) = run_inner(&status) {
@@ -365,23 +373,47 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
     set_component(status, Component::TailscaleServe, "ready");
     set_stage(status, "TAILSCALE_READY");
 
-    if controller.stage == "ROLE_RESOLVED" {
-        set_stage(status, "CONTROLLER_CLUSTER_PRECHECK");
-        confirm_empty_controller_inventory(&podman, &controller)?;
-    } else if controller.stage != "CONTROLLER_CLUSTER_READY" {
-        return Err(GateError::new(
-            "STATE_STAGE_UNSUPPORTED",
-            Component::None,
-            "persisted controller state has an unsupported I1 stage",
-        ));
+    match controller.stage.as_str() {
+        "ROLE_RESOLVED" => {
+            set_stage(status, "CONTROLLER_CLUSTER_PRECHECK");
+            confirm_empty_controller_inventory(&podman, &controller)?;
+        }
+        "CONTROLLER_CLUSTER_READY" | "OPENTOFU_READY" => {}
+        _ => {
+            return Err(GateError::new(
+                "STATE_STAGE_UNSUPPORTED",
+                Component::None,
+                "persisted controller state has an unsupported I1 stage",
+            ));
+        }
     }
 
     set_stage(status, "CONTROLLER_CLUSTER_CREATING");
     create_controller_cluster(&podman, controller.self_ip, &controller.controller.hostname)?;
-    controller.stage = "CONTROLLER_CLUSTER_READY".into();
-    store_persisted_state(&controller)?;
+    if controller.stage == "ROLE_RESOLVED" {
+        controller.stage = "CONTROLLER_CLUSTER_READY".into();
+        store_persisted_state(&controller)?;
+    }
     set_cluster_ready(status);
     set_stage(status, "CONTROLLER_CLUSTER_READY");
+
+    set_stage(status, "OPENTOFU_PREPARING");
+    let mut infrastructure_configuration = load_protected_configuration()?;
+    infrastructure_configuration.auth_key.zeroize();
+    validate_state_configuration(&controller, &infrastructure_configuration)?;
+    let opentofu_result = apply_opentofu(
+        &podman,
+        &infrastructure_configuration.pve_root_password,
+        &controller.controller.hostname,
+        controller.install_garage,
+        controller.install_forgejo,
+    );
+    infrastructure_configuration.pve_root_password.zeroize();
+    opentofu_result?;
+    set_component(status, Component::OpenTofu, "ready");
+    controller.stage = "OPENTOFU_READY".into();
+    store_persisted_state(&controller)?;
+    set_stage(status, "OPENTOFU_READY");
     Ok(())
 }
 
@@ -790,6 +822,22 @@ fn wait_for_configuration() -> Result<InstallerConfiguration, GateError> {
     }
 }
 
+fn load_protected_configuration() -> Result<InstallerConfiguration, GateError> {
+    match crate::secrets::load_optional() {
+        Ok(Some(configuration)) => Ok(configuration),
+        Ok(None) => Err(GateError::new(
+            "CONFIGURATION_MISSING",
+            Component::None,
+            "protected installer inputs disappeared after runtime configuration",
+        )),
+        Err(error) => Err(GateError::new(
+            error.code(),
+            Component::None,
+            error.message(),
+        )),
+    }
+}
+
 fn load_persisted_state() -> Result<Option<crate::state::PersistedState>, GateError> {
     crate::state::load_optional()
         .map_err(|error| GateError::new("STATE_STORAGE_FAILED", Component::None, error.message()))
@@ -939,6 +987,58 @@ fn create_controller_cluster(
             "PVE_CLUSTER_CREATE_FAILED",
             Component::Proxmox,
             "PVE did not confirm the controller cluster contract",
+        ));
+    }
+    Ok(())
+}
+
+fn apply_opentofu(
+    podman: &Path,
+    password: &str,
+    hostname: &str,
+    install_garage: bool,
+    install_forgejo: bool,
+) -> Result<(), GateError> {
+    let mut input = Vec::with_capacity(password.len() + hostname.len() + 8);
+    input.extend_from_slice(password.as_bytes());
+    input.push(b'\n');
+    input.extend_from_slice(hostname.as_bytes());
+    input.push(b'\n');
+    input.extend_from_slice(if install_garage { b"1\n" } else { b"0\n" });
+    input.extend_from_slice(if install_forgejo { b"1\n" } else { b"0\n" });
+    let result = machine_stdin(podman, [OPENTOFU_PREPARE_BIN], &input);
+    input.zeroize();
+
+    let output = match result {
+        Ok(output) => output,
+        Err(error) => {
+            verify_opentofu_secret_cleanup(podman)?;
+            return Err(error.with_code("OPENTOFU_APPLY_FAILED", Component::OpenTofu));
+        }
+    };
+    verify_opentofu_secret_cleanup(podman)?;
+    if String::from_utf8_lossy(&output.stdout).trim() != "OPENTOFU=ready" {
+        return Err(GateError::new(
+            "OPENTOFU_APPLY_FAILED",
+            Component::OpenTofu,
+            "OpenTofu one-shot did not confirm the controller workspace",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_opentofu_secret_cleanup(podman: &Path) -> Result<(), GateError> {
+    let output = machine_stdin(
+        podman,
+        ["sh", "-s"],
+        OPENTOFU_SECRET_CLEANUP_PROBE.as_bytes(),
+    )
+    .map_err(|error| error.with_code("OPENTOFU_SECRET_CLEANUP_FAILED", Component::OpenTofu))?;
+    if String::from_utf8_lossy(&output.stdout).trim() != "OPENTOFU_SECRET_CLEAN=ready" {
+        return Err(GateError::new(
+            "OPENTOFU_SECRET_CLEANUP_FAILED",
+            Component::OpenTofu,
+            "OpenTofu did not confirm transient credential cleanup",
         ));
     }
     Ok(())
@@ -1593,6 +1693,7 @@ enum Component {
     Proxmox,
     Tailscale,
     TailscaleServe,
+    OpenTofu,
 }
 
 impl Component {
@@ -1605,6 +1706,7 @@ impl Component {
             Self::Proxmox => status.components.proxmox = value.into(),
             Self::Tailscale => status.components.tailscale = value.into(),
             Self::TailscaleServe => status.components.tailscale_serve = value.into(),
+            Self::OpenTofu => status.components.opentofu = value.into(),
         }
     }
 }
