@@ -120,7 +120,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "1e0775a3b12dcd86a5ae0ea6bc99d359e6f561ddf88ad257a93f861df76a921e"
+      "sha256": "6b4230e8c6aa936788c4f1c13cbc173c568a5125d8f4f6b84b45dc782be2d5e1"
     },
     {
       "path": "bin/gnx-pve-configure",
@@ -128,6 +128,13 @@
       "version": 1,
       "mode": "0755",
       "sha256": "23a54979bf1cd1e7928845812c41ddd215c15187dfc947de9bc4513092e62c17"
+    },
+    {
+      "path": "bin/gnx-pve-cluster-create",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0755",
+      "sha256": "0ce2278095e403395d8049314100fa592ee28fb2ad4bcf645fe9df95e8051f4d"
     },
     {
       "path": "bin/gnx-tailscale-prepare",
@@ -176,7 +183,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "ea1f83c085974e2dfbb8e80f71a05d5320668eb19439d558d47cddd3cf436bcd"
+      "sha256": "b3ec74b7d670407ce35718d1043be198c617e677c26d62597597d527b937e278"
     },
     {
       "path": "quadlet/tailscaled.container",

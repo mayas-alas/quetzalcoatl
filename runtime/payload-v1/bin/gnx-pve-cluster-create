@@ -1,0 +1,113 @@
+#!/bin/sh
+set -eu
+umask 077
+
+script='/usr/libexec/quetzalcoatl/gnx-pve-cluster-create'
+pve_env='/etc/quetzalcoatl/node/pve.env'
+
+validate_input() {
+  case "$pve_hostname" in
+    ''|*[!a-z0-9-]*|-*|*-) exit 64 ;;
+  esac
+  case "$pve_hostname" in
+    gnx-controller-*[a-z0-9]) ;;
+    *) exit 64 ;;
+  esac
+  [ "${#pve_hostname}" -le 63 ] || exit 64
+  case "$pve_ip" in
+    *[!0-9.]*|'') exit 65 ;;
+  esac
+  old_ifs=$IFS
+  IFS=.
+  set -- $pve_ip
+  IFS=$old_ifs
+  [ "$#" -eq 4 ] || exit 65
+  [ "$1" -eq 100 ] && [ "$2" -ge 64 ] && [ "$2" -le 127 ] || exit 65
+  for octet in "$1" "$2" "$3" "$4"; do
+    [ "$octet" -ge 0 ] && [ "$octet" -le 255 ] || exit 65
+  done
+}
+
+load_pve_env() {
+  [ -s "$pve_env" ] || return 1
+  pve_hostname=$(sed -n 's/^PVE_HOSTNAME=//p' "$pve_env")
+  pve_ip=$(sed -n 's/^PVE_IP=//p' "$pve_env")
+  [ "$(grep -c '^PVE_HOSTNAME=' "$pve_env")" -eq 1 ] || exit 66
+  [ "$(grep -c '^PVE_IP=' "$pve_env")" -eq 1 ] || exit 66
+  validate_input
+}
+
+apply_hostname() {
+  hostname "$pve_hostname"
+  printf '%s\n' "$pve_hostname" > /etc/hostname
+  hosts_tmp=/run/gnx-hosts.tmp
+  grep -v '[[:space:]]# quetzalcoatl-managed$' /etc/hosts > "$hosts_tmp" || true
+  printf '%s %s # quetzalcoatl-managed\n' "$pve_ip" "$pve_hostname" >> "$hosts_tmp"
+  cat "$hosts_tmp" > /etc/hosts
+  rm -f "$hosts_tmp"
+  getent ahostsv4 "$pve_hostname" |
+    awk -v expected="$pve_ip" '$1 == expected { found=1 } END { exit !found }'
+}
+
+verify_network() {
+  ip -o -4 address show |
+    awk -v expected="$pve_ip" '{ split($4, address, "/"); if (address[1] == expected) found=1 } END { exit !found }'
+}
+
+mode=${1:-host}
+case "$mode" in
+  prepare-hostname)
+    load_pve_env || exit 0
+    apply_hostname
+    exit 0
+    ;;
+  inside)
+    IFS= read -r pve_ip
+    IFS= read -r pve_hostname
+    validate_input
+    apply_hostname
+    verify_network
+    ;;
+  host)
+    IFS= read -r pve_ip
+    IFS= read -r pve_hostname
+    validate_input
+    install -d -m 0755 "$(dirname "$pve_env")"
+    temporary="${pve_env}.tmp"
+    rm -f "$temporary"
+    trap 'rm -f "$temporary"' EXIT HUP INT TERM
+    printf 'PVE_HOSTNAME=%s\nPVE_IP=%s\n' "$pve_hostname" "$pve_ip" > "$temporary"
+    chmod 0600 "$temporary"
+    mv "$temporary" "$pve_env"
+    printf '%s\n%s\n' "$pve_ip" "$pve_hostname" |
+      podman exec -i gnx-proxmox "$script" inside
+    exit 0
+    ;;
+  *) exit 64 ;;
+esac
+
+config=/etc/pve/corosync.conf
+if [ ! -s "$config" ]; then
+  pvecm create quetzalcoatl --link0 "$pve_ip"
+elif ! systemctl is-active --quiet corosync.service; then
+  systemctl restart corosync.service
+fi
+
+attempt=0
+while [ "$attempt" -lt 90 ]; do
+  attempt=$((attempt + 1))
+  status=$(pvecm status 2>/dev/null || true)
+  if systemctl is-active --quiet pve-cluster.service corosync.service &&
+     printf '%s\n' "$status" | grep -Eq '^[[:space:]]*Name:[[:space:]]+quetzalcoatl[[:space:]]*$' &&
+     printf '%s\n' "$status" | grep -Eq '^[[:space:]]*Nodes:[[:space:]]+1[[:space:]]*$' &&
+     printf '%s\n' "$status" | grep -Eq '^[[:space:]]*Quorate:[[:space:]]+Yes[[:space:]]*$' &&
+     awk -v expected="$pve_hostname" '$1 == "name:" && $2 == expected { found=1 } END { exit !found }' "$config" &&
+     awk -v expected="$pve_ip" '$1 == "ring0_addr:" && $2 == expected { found=1 } END { exit !found }' "$config"; then
+    printf 'PVE_CLUSTER=ready\n'
+    exit 0
+  fi
+  sleep 2
+done
+
+printf '%s\n' "$status" >&2
+exit 70

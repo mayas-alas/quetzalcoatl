@@ -26,6 +26,8 @@ ShmSize=1g
 Volume=/var/lib/quetzalcoatl/proxmox/vz:/var/lib/vz
 Volume=/var/lib/quetzalcoatl/proxmox/cluster:/var/lib/pve-cluster
 Volume=/usr/libexec/quetzalcoatl/gnx-proxmox-entrypoint:/usr/local/sbin/gnx-proxmox-entrypoint:ro
+Volume=/usr/libexec/quetzalcoatl/gnx-pve-cluster-create:/usr/libexec/quetzalcoatl/gnx-pve-cluster-create:ro
+Volume=/etc/quetzalcoatl/node:/etc/quetzalcoatl/node:ro
 
 [Service]
 Restart=on-failure
