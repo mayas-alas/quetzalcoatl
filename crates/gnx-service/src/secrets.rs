@@ -259,14 +259,28 @@ pub(crate) fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), Configura
 }
 
 fn protect(plaintext: &[u8]) -> Result<Vec<u8>, ConfigurationError> {
-    crypt(plaintext, true)
+    crypt(plaintext, DPAPI_ENTROPY, true)
 }
 
 fn unprotect(ciphertext: &[u8]) -> Result<Vec<u8>, ConfigurationError> {
-    crypt(ciphertext, false)
+    crypt(ciphertext, DPAPI_ENTROPY, false)
 }
 
-fn crypt(input: &[u8], protect_data: bool) -> Result<Vec<u8>, ConfigurationError> {
+pub(crate) fn protect_payload(
+    plaintext: &[u8],
+    entropy: &[u8],
+) -> Result<Vec<u8>, ConfigurationError> {
+    crypt(plaintext, entropy, true)
+}
+
+pub(crate) fn unprotect_payload(
+    ciphertext: &[u8],
+    entropy: &[u8],
+) -> Result<Vec<u8>, ConfigurationError> {
+    crypt(ciphertext, entropy, false)
+}
+
+fn crypt(input: &[u8], entropy: &[u8], protect_data: bool) -> Result<Vec<u8>, ConfigurationError> {
     let input_len = u32::try_from(input.len())
         .map_err(|_| ConfigurationError::storage("DPAPI input is too large"))?;
     let input_blob = CRYPT_INTEGER_BLOB {
@@ -274,8 +288,9 @@ fn crypt(input: &[u8], protect_data: bool) -> Result<Vec<u8>, ConfigurationError
         pbData: input.as_ptr().cast_mut(),
     };
     let entropy_blob = CRYPT_INTEGER_BLOB {
-        cbData: DPAPI_ENTROPY.len() as u32,
-        pbData: DPAPI_ENTROPY.as_ptr().cast_mut(),
+        cbData: u32::try_from(entropy.len())
+            .map_err(|_| ConfigurationError::storage("DPAPI entropy is too large"))?,
+        pbData: entropy.as_ptr().cast_mut(),
     };
     let mut output_blob = CRYPT_INTEGER_BLOB::default();
     let ok = if protect_data {

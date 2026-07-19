@@ -435,6 +435,13 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
         set_stage(status, "FORGEJO_LXC_DOCKER_PREPARING");
         prepare_lxc_docker(&podman, ServiceKind::Forgejo)?;
     }
+    set_stage(status, "SERVICE_SECRETS_PREPARING");
+    let service_secrets = crate::service_secrets::load_or_create(
+        controller.install_garage,
+        controller.install_forgejo,
+    )
+    .map_err(|error| GateError::new("SERVICE_SECRETS_FAILED", Component::None, error.message()))?;
+    drop(service_secrets);
     if stage_rank < 3 {
         controller.stage = "LXC_DOCKER_READY".into();
         store_persisted_state(&controller)?;
