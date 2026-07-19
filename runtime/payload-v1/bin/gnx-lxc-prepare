@@ -14,6 +14,7 @@ bootstrap='/usr/libexec/quetzalcoatl/gnx-lxc-docker-bootstrap'
 guest_bootstrap='/root/gnx-lxc-docker-bootstrap'
 test -s "$config"
 test -x "$bootstrap"
+install -d -m 0700 /run/gnx
 pct config "$vmid" | grep -Eq "^hostname: gnx-$service$"
 pct config "$vmid" | grep -Eq '^features: .*nesting=1'
 
@@ -40,7 +41,14 @@ EOF
 fi
 
 if pct status "$vmid" | grep -q 'status: stopped'; then
-  pct start "$vmid" --debug 1>&2
+  start_log="/run/gnx/lxc-$vmid-start.log"
+  rm -f "$start_log"
+  if ! pct start "$vmid" --debug > "$start_log" 2>&1; then
+    tail -n 80 "$start_log" >&2 || true
+    rm -f "$start_log"
+    exit 70
+  fi
+  rm -f "$start_log"
 fi
 
 attempt=0
