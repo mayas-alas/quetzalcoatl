@@ -1,0 +1,9 @@
+<service>
+  <id>Quetzalcoatl</id>
+  <name>Quetzalcoatl</name>
+  <description>Supervises the Quetzalcoatl managed runtime.</description>
+  <executable>%BASE%\gnx-service.exe</executable>
+  <workingdirectory>%BASE%</workingdirectory>
+  <stoptimeout>15sec</stoptimeout>
+  <log mode="none" />
+</service>

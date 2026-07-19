@@ -1,0 +1,78 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Quetzalcoatl"
+    Manufacturer="Quetzalcoatl"
+    Version="0.1.0"
+    UpgradeCode="{47D5BD44-D061-407B-913B-47D17EC3BEA9}"
+    Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer Quetzalcoatl version is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Quetzalcoatl">
+        <Directory Id="RuntimePayloadFolder" Name="runtime" />
+        <Directory Id="LicensesFolder" Name="licenses" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="ProductFeature" Title="Quetzalcoatl" Level="1">
+      <ComponentRef Id="CliComponent" />
+      <ComponentRef Id="ServiceComponent" />
+      <ComponentRef Id="LicensesComponent" />
+      <Files Include="$(var.RuntimePayload)\**" Directory="RuntimePayloadFolder" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="CliComponent" Guid="*">
+        <File Id="GnxCli" Source="$(var.GnxCli)" Name="gnx.exe" KeyPath="yes" />
+        <Environment
+          Id="SystemPath"
+          Name="PATH"
+          Value="[INSTALLFOLDER]"
+          Action="set"
+          Part="last"
+          Permanent="no"
+          System="yes" />
+      </Component>
+
+      <Component Id="ServiceComponent" Guid="*">
+        <File
+          Id="WinSW"
+          Source="$(var.WinSW)"
+          Name="Quetzalcoatl.Service.exe"
+          KeyPath="yes" />
+        <File
+          Id="WinSWConfig"
+          Source="$(var.ServiceConfig)"
+          Name="Quetzalcoatl.Service.xml" />
+        <File Id="GnxService" Source="$(var.GnxService)" Name="gnx-service.exe" />
+        <ServiceInstall
+          Id="QuetzalcoatlService"
+          Name="Quetzalcoatl"
+          DisplayName="Quetzalcoatl"
+          Description="Supervises the Quetzalcoatl managed runtime."
+          Type="ownProcess"
+          Start="auto"
+          ErrorControl="normal"
+          Account="NT SERVICE\Quetzalcoatl"
+          Vital="yes" />
+        <ServiceControl
+          Id="QuetzalcoatlServiceControl"
+          Name="Quetzalcoatl"
+          Start="install"
+          Stop="both"
+          Remove="uninstall"
+          Wait="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="LicensesFolder">
+      <Component Id="LicensesComponent" Guid="*">
+        <File Id="WinSWLicense" Source="$(var.WinSWLicense)" Name="WinSW.txt" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

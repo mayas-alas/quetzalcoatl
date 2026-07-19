@@ -1,0 +1,69 @@
+<Wix
+  xmlns="http://wixtoolset.org/schemas/v4/wxs"
+  xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle
+    Name="Quetzalcoatl"
+    Manufacturer="Quetzalcoatl"
+    Version="0.1.0"
+    UpgradeCode="{10B764B2-36AE-4911-A8C8-2F1A2A963769}">
+
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+        Theme="hyperlinkLicense"
+        LicenseUrl="" />
+    </BootstrapperApplication>
+
+    <Chain>
+      <ExePackage
+        Id="PrepareWsl"
+        SourceFile="$(var.HostPreflight)"
+        Name="gnx-host-prepare.exe"
+        CacheId="gnx-host-prepare-0.1.0"
+        DetectCondition="0"
+        InstallArguments="prepare-wsl --format json"
+        PerMachine="yes"
+        Permanent="yes"
+        Vital="yes">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
+      <MsiPackage
+        Id="Wsl"
+        SourceFile="$(var.WslMsi)"
+        Compressed="yes"
+        Permanent="yes"
+        Vital="yes" />
+
+      <MsiPackage
+        Id="Podman"
+        SourceFile="$(var.PodmanMsi)"
+        Compressed="yes"
+        ForcePerMachine="yes"
+        Permanent="yes"
+        Vital="yes" />
+
+      <ExePackage
+        Id="ValidateHost"
+        SourceFile="$(var.HostPreflight)"
+        Name="gnx-host-validate.exe"
+        CacheId="gnx-host-validate-0.1.0"
+        DetectCondition="0"
+        InstallArguments="--format json"
+        PerMachine="yes"
+        Permanent="yes"
+        Vital="yes">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
+      <MsiPackage
+        Id="QuetzalcoatlProduct"
+        SourceFile="$(var.ProductMsi)"
+        Compressed="yes"
+        Visible="yes"
+        Vital="yes" />
+    </Chain>
+  </Bundle>
+</Wix>
