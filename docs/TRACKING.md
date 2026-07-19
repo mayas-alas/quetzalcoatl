@@ -1,8 +1,8 @@
 # Seguimiento del PoC Quetzalcoatl
 
 Última actualización: 2026-07-18  
-Estado global: `ESPECIFICADO · CÓDIGO NO INICIADO`  
-Siguiente trabajo: `A-01 · Workspace Rust + HostPreflight`
+Estado global: `CÓDIGO EN CURSO`  
+Siguiente trabajo: `A-01 · validar ruta elevada completa de HostPreflight`
 
 ## 1. Objetivo de seguimiento
 
@@ -34,11 +34,11 @@ Estados de trabajo permitidos: `NO INICIADO`, `EN CURSO`, `BLOQUEADO`, `CERRADO`
 
 - La definición original está en `PoC.md`.
 - La arquitectura normativa está en `docs/ARCHITECTURE.md`.
-- No existe código fuente del producto.
-- No existen workspace Rust, Burn, MSI, WinSW configurado ni binarios GNX.
+- Existe workspace Rust y `gnx-host-preflight` en commit `62d43a4`.
+- Burn/MSI/WinSW/otros binarios siguen ausentes.
 - No existe todavía `QuetzalcoatlSetup.exe`.
 - La imagen PVE y los ejemplos Garage/Forgejo son referencias externas, todavía no payload fijado del producto.
-- No hay evidencia ejecutada en un Windows objetivo.
+- Existe evidencia local fail-stop hasta elevación, pero no de la ruta elevada completa ni de Windows limpio.
 
 ## 4. Resultado de los dos incrementos
 
@@ -86,7 +86,7 @@ Un hallazgo que no bloquee alguno de los dos incrementos no pertenece aquí.
 
 | Orden | ID | Trabajo | Estado | Terminado cuando |
 |---:|---|---|---|---|
-| 1 | A-01 | Crear el workspace Rust único e implementar `HostPreflight` Windows/WSL2 | `NO INICIADO` | Un binario reusable entrega códigos estables; no captura secretos |
+| 1 | A-01 | Crear el workspace Rust único e implementar `HostPreflight` Windows/WSL2 | `EN CURSO` | Un binario reusable entrega códigos estables; no captura secretos |
 | 2 | A-02 | Fijar referencias externas y construir `runtime manifest v1` | `NO INICIADO` | Cierra B-02 sin copiar contenido no utilizado |
 | 3 | A-03 | Crear WiX 5 Burn/MSI + WinSW, identidad runtime y primer EXE | `NO INICIADO` | Setup reanuda reboot, instala servicio/CLI y mantiene el mismo SID |
 | 4 | A-04 | Implementar `RuntimeGate` dentro de `gnx-service` | `NO INICIADO` | La identidad dedicada crea la máquina y cierra G0-01 y B-01 |
@@ -128,7 +128,9 @@ I2 no comienza hasta que I1 está cerrado.
 
 | Fecha | ID | Host | Artefacto o comando | Resultado | Ruta/hash |
 |---|---|---|---|---|---|
-| — | — | — | — | Sin evidencia de ejecución todavía | — |
+| 2026-07-18 | A-01 | Windows 11 x64 · desarrollo sin elevación | `cargo fmt --all -- --check` + `cargo check --workspace` | Formato y compilación correctos | commit `62d43a4` |
+| 2026-07-18 | A-01 | Windows 11 x64 · desarrollo sin elevación | `gnx-host-preflight --format json` | `windows_host` pass, elevación fail, salida JSON única y exit 11 | commit `62d43a4` |
+| 2026-07-18 | A-01 | Windows 11 x64 · desarrollo sin elevación | `gnx-host-preflight --format yaml` | Uso rechazado por stderr y exit 64 | commit `62d43a4` |
 
 Reglas de evidencia:
 
@@ -160,12 +162,14 @@ Reglas de evidencia:
 | D-15 | `HostPreflight` pertenece a Burn y `RuntimeGate` al servicio | Respeta el perfil/SID que posee Podman y DPAPI |
 | D-16 | Corosync usa `link0` fijado a IP tailnet | Evita que PVE elija otra interfaz |
 | D-17 | El bootstrap LXC usa `pct push/exec` antes del sidecar | Elimina el ciclo de depender de SSH/Tailscale aún inexistente |
+| D-18 | Podman CLI 6.0.1 queda fijado; HostPreflight identifica producto instalado y Burn futuro valida el paquete por hash | Separa observación del host de instalación sin duplicar ownership |
 
 ## 12. Registro de avance
 
 | Fecha | Cambio | Efecto |
 |---|---|---|
 | 2026-07-18 | Se cerró la arquitectura y el alcance de dos incrementos | Listo para iniciar A-01 |
+| 2026-07-18 | A-01 implementado y contrato fail-stop parcial ejecutado | Permanece `EN CURSO` hasta evidencia elevada completa |
 
 Al actualizar este archivo:
 

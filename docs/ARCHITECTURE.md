@@ -138,6 +138,8 @@ La única topología de aceptación contiene exactamente un controller y un memb
 | Puertos Windows | Ningún puerto PVE se publica en Windows | Todo acceso ocurre por tailnet |
 | Errores | Fallo explícito con etapa y código, seguido de reanudación manual | Sin rollback general ni caminos alternativos |
 
+Podman CLI para Windows queda fijado a 6.0.1 x64 MSI; ProductCode `{661EDED1-C5BC-430C-8802-015B34A382FA}`; UpgradeCode `{A6A9DD9C-0732-44BA-9279-FFE22EA50671}`; SHA-256 `3B65848F2D9AE652A15C35F2496A9ECE2E07F28746FA651415D519AE7C5902AD`. HostPreflight verifica producto instalado por ProductCode/nombre/versión; el futuro Burn verificará el SHA-256 del MSI antes de instalar.
+
 ## 5. `runtime payload v1` y Quadlets
 
 El antiguo término “versioned runtime profile” se reemplaza por **`runtime payload v1`**. No es un proceso, un servicio ni un framework de migraciones. Es el conjunto inmutable de archivos que corresponde exactamente a la versión del MSI:
@@ -547,6 +549,7 @@ El código informa etapa, código y evidencia acotada. No inventa un segundo cam
 - [PoC original](../PoC.md)
 - [WiX Toolset y Burn](https://docs.firegiant.com/wix/tools/burn/)
 - [Podman Machine](https://docs.podman.io/en/latest/markdown/podman-machine.1.html)
+- [Podman v6.0.1](https://github.com/podman-container-tools/podman/releases/tag/v6.0.1)
 - [Podman Machine rootful](https://docs.podman.io/en/stable/markdown/podman-machine-set.1.html)
 - [Configuración avanzada de WSL](https://learn.microsoft.com/es-es/windows/wsl/wsl-config)
 - [API KVM](https://docs.kernel.org/virt/kvm/api.html)
