@@ -1,0 +1,10 @@
+pub const OK: i32 = 0;
+pub const WINDOWS_INCOMPATIBLE: i32 = 10;
+pub const NOT_ELEVATED: i32 = 11;
+pub const VIRTUALIZATION_DISABLED: i32 = 12;
+pub const FEATURES_DISABLED: i32 = 13;
+pub const REBOOT_PENDING: i32 = 14;
+pub const WSL_UNAVAILABLE: i32 = 15;
+pub const PODMAN_INCOMPATIBLE: i32 = 16;
+pub const OPERATIONAL_ERROR: i32 = 20;
+pub const USAGE: i32 = 64;
