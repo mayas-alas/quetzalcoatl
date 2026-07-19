@@ -40,7 +40,7 @@ EOF
 fi
 
 if pct status "$vmid" | grep -q 'status: stopped'; then
-  pct start "$vmid" >/dev/null
+  pct start "$vmid" --debug >/dev/null
 fi
 
 attempt=0

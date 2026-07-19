@@ -151,7 +151,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "65faaa58cbbd598f0f66790db8a95ae6f67501d3775d43456ef4128eb6850913"
+      "sha256": "8e0b80b110a718fa151e708605af939202ac5ad8271b077907a5989993cd1a57"
     },
     {
       "path": "bin/gnx-lxc-service-bootstrap",
