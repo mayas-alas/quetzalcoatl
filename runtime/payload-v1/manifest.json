@@ -148,7 +148,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "3ba53df1dcf0673547ca4a25d4643fdc488c3f59b61597c49702518650bc0ecb"
+      "sha256": "3d31d8216b75c49b07229ca54f29e172b65558fc9ca744a00c29e2d9ae97f876"
     },
     {
       "path": "quadlet/tailscaled.container",

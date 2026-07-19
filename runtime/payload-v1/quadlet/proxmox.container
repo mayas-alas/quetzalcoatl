@@ -23,7 +23,6 @@ SecurityLabelDisable=true
 ShmSize=1g
 Volume=/var/lib/quetzalcoatl/proxmox/vz:/var/lib/vz
 Volume=/var/lib/quetzalcoatl/proxmox/cluster:/var/lib/pve-cluster
-Volume=/sys/fs/cgroup:/sys/fs/cgroup:rw
 
 [Service]
 Restart=on-failure

@@ -6,6 +6,8 @@ use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, RwLock};
+use std::thread;
+use std::time::Duration;
 
 use gnx_protocol::StatusResponse;
 use serde::Deserialize;
@@ -27,6 +29,69 @@ const MACHINE_IMAGE_COMMIT: &str = "137982aea62947e436bfb58408676e246414ea47";
 const MACHINE_IMAGE_ARTIFACT: &str = "podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_URL: &str = "https://github.com/podman-container-tools/podman-machine-os/releases/download/v6.0.1/podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_SIZE: u64 = 249_510_008;
+
+const PAYLOAD_FILES: [PayloadSpec; 12] = [
+    PayloadSpec::new(
+        "bin/gnx-tailscale-enroll",
+        "/usr/libexec/quetzalcoatl/gnx-tailscale-enroll",
+        "0755",
+    ),
+    PayloadSpec::new(
+        "config/node/serve.json",
+        "/etc/quetzalcoatl/node/serve.json",
+        "0644",
+    ),
+    PayloadSpec::new(
+        "quadlet/gnx-node.pod",
+        "/etc/containers/systemd/gnx-node.pod",
+        "0644",
+    ),
+    PayloadSpec::new(
+        "quadlet/opentofu.image",
+        "/etc/containers/systemd/opentofu.image",
+        "0644",
+    ),
+    PayloadSpec::new(
+        "quadlet/proxmox.container",
+        "/etc/containers/systemd/proxmox.container",
+        "0644",
+    ),
+    PayloadSpec::new(
+        "quadlet/tailscaled.container",
+        "/etc/containers/systemd/tailscaled.container",
+        "0644",
+    ),
+    PayloadSpec::new(
+        "services/forgejo/compose.yaml",
+        "/usr/share/quetzalcoatl/services/forgejo/compose.yaml",
+        "0644",
+    ),
+    PayloadSpec::new(
+        "services/forgejo/serve/serve.json",
+        "/usr/share/quetzalcoatl/services/forgejo/serve/serve.json",
+        "0644",
+    ),
+    PayloadSpec::new(
+        "services/garage/compose.yaml",
+        "/usr/share/quetzalcoatl/services/garage/compose.yaml",
+        "0644",
+    ),
+    PayloadSpec::new(
+        "services/garage/garage.toml.template",
+        "/usr/share/quetzalcoatl/services/garage/garage.toml.template",
+        "0644",
+    ),
+    PayloadSpec::new(
+        "services/garage/serve/serve.json",
+        "/usr/share/quetzalcoatl/services/garage/serve/serve.json",
+        "0644",
+    ),
+    PayloadSpec::new(
+        "systemd/gnx-tailscale-enroll.service",
+        "/etc/systemd/system/gnx-tailscale-enroll.service",
+        "0644",
+    ),
+];
 
 const WSL_CONFIG: &str = "[wsl2]\nprocessors=6\nmemory=8GB\nswap=2GB\nnestedVirtualization=true\n";
 
@@ -67,6 +132,44 @@ os.close(fuse)
 print("KVM_API_VERSION=12;TUN=ready;FUSE=ready")
 "#;
 
+const PAYLOAD_HEREDOC: &str = "__GNX_PAYLOAD_V1_EOF__";
+
+const START_PROXMOX: &str = r#"set -eu
+install -d -m 0755 \
+  /var/lib/quetzalcoatl/proxmox/vz \
+  /var/lib/quetzalcoatl/proxmox/cluster
+install -d -m 0755 /run/gnx
+date --iso-8601=seconds > /run/gnx/proxmox-started-at
+systemctl daemon-reload
+systemctl reset-failed gnx-node-pod.service proxmox.service >/dev/null 2>&1 || true
+if ! systemctl start proxmox.service >/dev/null 2>&1; then
+  journalctl --no-pager -o cat -r -n 30 -u proxmox.service >&2 || true
+  exit 1
+fi
+systemctl is-active --quiet proxmox.service
+printf 'PROXMOX_SERVICE=active\n'
+"#;
+
+const PVE_READY_PROBE: &str = r#"set -eu
+test "$(podman inspect --format '{{.State.Status}}' gnx-proxmox)" = running
+podman exec gnx-proxmox sh -eu -c '
+  test "$(ps -p 1 -o comm= | tr -d " ")" = systemd
+  test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs
+  systemctl is-active --quiet pve-cluster.service
+  systemctl is-active --quiet pvedaemon.service
+  systemctl is-active --quiet pveproxy.service
+  pvesh get /version --output-format json >/dev/null
+'
+printf 'PVE=ready;SYSTEMD=ready;CGROUP=ready\n'
+"#;
+
+const PROXMOX_DIAGNOSTICS: &str = r#"set -eu
+since="$(cat /run/gnx/proxmox-started-at)"
+journalctl --no-pager -o cat --since "$since" -u proxmox.service \
+  | grep -avE 'image pull|container (create|init|start|died|remove|cleanup)|pod (create|start|stop)' \
+  | head -n 60
+"#;
+
 pub fn run(status: Arc<RwLock<StatusResponse>>) {
     set_stage(&status, "RUNTIME_IDENTITY");
     if let Err(error) = run_inner(&status) {
@@ -94,6 +197,17 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
     validate_devices(&podman)?;
     set_component(status, Component::Kvm, "ready");
     set_stage(status, "KVM_READY");
+
+    set_stage(status, "PAYLOAD_APPLYING");
+    apply_runtime_payload(&podman)?;
+
+    set_stage(status, "PROXMOX_STARTING");
+    start_proxmox(&podman)?;
+    set_stage(status, "PROXMOX_CHECKING");
+    validate_proxmox_devices(&podman)?;
+    wait_for_proxmox(&podman)?;
+    set_component(status, Component::Proxmox, "ready");
+    set_stage(status, "PROXMOX_READY");
     Ok(())
 }
 
@@ -319,7 +433,7 @@ fn inspect_machine(podman: &Path) -> Result<MachineInspect, GateError> {
 }
 
 fn validate_fedora(podman: &Path) -> Result<(), GateError> {
-    let output = machine_stdin(podman, "sh", "-s", FEDORA_PROBE)
+    let output = machine_stdin(podman, ["sh", "-s"], FEDORA_PROBE.as_bytes())
         .map_err(|error| error.with_code("FEDORA_RUNTIME_UNSUPPORTED", Component::PodmanMachine))?;
     if String::from_utf8_lossy(&output.stdout).trim() != "SYSTEMD=ready;CGROUP=ready" {
         return Err(GateError::new(
@@ -332,7 +446,7 @@ fn validate_fedora(podman: &Path) -> Result<(), GateError> {
 }
 
 fn validate_devices(podman: &Path) -> Result<(), GateError> {
-    let output = machine_stdin(podman, "python3", "-", DEVICE_PROBE)
+    let output = machine_stdin(podman, ["python3", "-"], DEVICE_PROBE.as_bytes())
         .map_err(|error| error.with_code("REQUIRED_DEVICE_MISSING", Component::Kvm))?;
     if String::from_utf8_lossy(&output.stdout).trim() != "KVM_API_VERSION=12;TUN=ready;FUSE=ready" {
         return Err(GateError::new(
@@ -344,23 +458,157 @@ fn validate_devices(podman: &Path) -> Result<(), GateError> {
     Ok(())
 }
 
-fn machine_stdin(
-    podman: &Path,
-    interpreter: &str,
-    input_argument: &str,
-    input: &str,
-) -> Result<Output, GateError> {
+fn apply_runtime_payload(podman: &Path) -> Result<(), GateError> {
+    let files = load_payload_files()
+        .map_err(|error| error.with_code("RUNTIME_PAYLOAD_INVALID", Component::Proxmox))?;
+    for file in files {
+        let script = payload_install_script(&file)?;
+        machine_stdin(podman, ["sh", "-s"], &script)
+            .map_err(|error| error.with_code("RUNTIME_PAYLOAD_INVALID", Component::Proxmox))?;
+    }
+    Ok(())
+}
+
+fn payload_install_script(file: &PayloadFile) -> Result<Vec<u8>, GateError> {
+    let delimiter_present = file
+        .contents
+        .split(|byte| *byte == b'\n')
+        .any(|line| line == PAYLOAD_HEREDOC.as_bytes());
+    if file.destination.contains('\'')
+        || file.mode.contains('\'')
+        || file.sha256.contains('\'')
+        || file.contents.contains(&b'\r')
+        || file.contents.contains(&0)
+        || !file.contents.ends_with(b"\n")
+        || delimiter_present
+    {
+        return Err(GateError::new(
+            "RUNTIME_PAYLOAD_INVALID",
+            Component::Proxmox,
+            "payload file cannot be represented by the fixed LF text transport",
+        ));
+    }
+
+    let mut script = format!(
+        "set -eu\ndestination='{}'\nmode='{}'\nexpected='{}'\ndirectory=\"$(dirname \"$destination\")\"\ntemporary=\"${{destination}}.gnx-new\"\ninstall -d -m 0755 \"$directory\"\numask 077\ncat > \"$temporary\" <<'{}'\n",
+        file.destination, file.mode, file.sha256, PAYLOAD_HEREDOC
+    )
+    .into_bytes();
+    script.extend_from_slice(&file.contents);
+    script.extend_from_slice(
+        format!(
+            "{}\nchmod \"$mode\" \"$temporary\"\nactual=\"$(sha256sum \"$temporary\" | cut -d ' ' -f 1)\"\ntest \"$actual\" = \"$expected\"\nmv -f \"$temporary\" \"$destination\"\n",
+            PAYLOAD_HEREDOC
+        )
+        .as_bytes(),
+    );
+    Ok(script)
+}
+
+fn start_proxmox(podman: &Path) -> Result<(), GateError> {
+    let output = machine_stdin(podman, ["sh", "-s"], START_PROXMOX.as_bytes())
+        .map_err(|error| error.with_code("NESTED_RUNTIME_FAILED", Component::Proxmox))?;
+    if String::from_utf8_lossy(&output.stdout).trim() != "PROXMOX_SERVICE=active" {
+        return Err(GateError::new(
+            "NESTED_RUNTIME_FAILED",
+            Component::Proxmox,
+            "systemd did not confirm the generated Proxmox Quadlet service",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_proxmox_devices(podman: &Path) -> Result<(), GateError> {
+    let mut last_error = String::from("Proxmox container did not become executable");
+    for attempt in 0..30 {
+        match machine_stdin(
+            podman,
+            ["podman", "exec", "-i", "gnx-proxmox", "python3", "-"],
+            DEVICE_PROBE.as_bytes(),
+        ) {
+            Ok(output)
+                if String::from_utf8_lossy(&output.stdout).trim()
+                    == "KVM_API_VERSION=12;TUN=ready;FUSE=ready" =>
+            {
+                return Ok(());
+            }
+            Ok(output) => {
+                last_error = format!(
+                    "unexpected device probe output: {}",
+                    bounded_text(&output.stdout)
+                );
+            }
+            Err(error) => last_error = error.message,
+        }
+        if machine_stdin(
+            podman,
+            ["sh", "-s"],
+            b"systemctl is-failed --quiet proxmox.service\n",
+        )
+        .is_ok()
+        {
+            break;
+        }
+        if attempt + 1 < 30 {
+            thread::sleep(Duration::from_secs(2));
+        }
+    }
+    let diagnostics = proxmox_diagnostics(podman);
+    Err(GateError::new(
+        "NESTED_RUNTIME_FAILED",
+        Component::Proxmox,
+        format!("container did not confirm KVM API 12, TUN and FUSE: {last_error}; {diagnostics}"),
+    ))
+}
+
+fn wait_for_proxmox(podman: &Path) -> Result<(), GateError> {
+    let mut last_error = String::from("Proxmox services are not ready");
+    for attempt in 0..120 {
+        match machine_stdin(podman, ["sh", "-s"], PVE_READY_PROBE.as_bytes()) {
+            Ok(output)
+                if String::from_utf8_lossy(&output.stdout).trim()
+                    == "PVE=ready;SYSTEMD=ready;CGROUP=ready" =>
+            {
+                return Ok(());
+            }
+            Ok(output) => {
+                last_error = format!(
+                    "unexpected PVE probe output: {}",
+                    bounded_text(&output.stdout)
+                );
+            }
+            Err(error) => last_error = error.message,
+        }
+        if attempt + 1 < 120 {
+            thread::sleep(Duration::from_secs(5));
+        }
+    }
+    Err(GateError::new(
+        "NESTED_RUNTIME_FAILED",
+        Component::Proxmox,
+        format!(
+            "PVE did not become healthy within 10 minutes: {last_error}; {}",
+            proxmox_diagnostics(podman)
+        ),
+    ))
+}
+
+fn proxmox_diagnostics(podman: &Path) -> String {
+    match machine_stdin(podman, ["sh", "-s"], PROXMOX_DIAGNOSTICS.as_bytes()) {
+        Ok(output) => bounded_text(&output.stdout),
+        Err(error) => format!("diagnostics unavailable: {}", error.message),
+    }
+}
+
+fn machine_stdin<I, S>(podman: &Path, args: I, input: &[u8]) -> Result<Output, GateError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
     let mut command = Command::new(podman);
     command
-        .args([
-            "machine",
-            "ssh",
-            "--username",
-            "root",
-            MACHINE_NAME,
-            interpreter,
-            input_argument,
-        ])
+        .args(["machine", "ssh", "--username", "root", MACHINE_NAME])
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -372,7 +620,7 @@ fn machine_stdin(
         .stdin
         .take()
         .ok_or_else(|| GateError::command("podman machine probe stdin is unavailable"))?
-        .write_all(input.as_bytes())
+        .write_all(input)
         .map_err(|error| GateError::command(format!("cannot write machine probe: {error}")))?;
     let output = child
         .wait_with_output()
@@ -381,24 +629,7 @@ fn machine_stdin(
 }
 
 fn load_machine_image() -> Result<MachineImage, GateError> {
-    let executable = env::current_exe().map_err(|error| {
-        GateError::new(
-            "RUNTIME_PAYLOAD_INVALID",
-            Component::PodmanMachine,
-            format!("cannot locate gnx-service executable: {error}"),
-        )
-    })?;
-    let manifest = executable
-        .parent()
-        .ok_or_else(|| {
-            GateError::new(
-                "RUNTIME_PAYLOAD_INVALID",
-                Component::PodmanMachine,
-                "gnx-service executable has no parent directory",
-            )
-        })?
-        .join("runtime")
-        .join("manifest.json");
+    let manifest = runtime_root()?.join("manifest.json");
     let bytes = fs::read(&manifest).map_err(|error| {
         GateError::new(
             "RUNTIME_PAYLOAD_INVALID",
@@ -407,6 +638,129 @@ fn load_machine_image() -> Result<MachineImage, GateError> {
         )
     })?;
     parse_machine_image(&bytes)
+}
+
+fn runtime_root() -> Result<PathBuf, GateError> {
+    let executable = env::current_exe().map_err(|error| {
+        GateError::new(
+            "RUNTIME_PAYLOAD_INVALID",
+            Component::PodmanMachine,
+            format!("cannot locate gnx-service executable: {error}"),
+        )
+    })?;
+    executable
+        .parent()
+        .ok_or_else(|| {
+            GateError::new(
+                "RUNTIME_PAYLOAD_INVALID",
+                Component::PodmanMachine,
+                "gnx-service executable has no parent directory",
+            )
+        })
+        .map(|parent| parent.join("runtime"))
+}
+
+fn load_payload_files() -> Result<Vec<PayloadFile>, GateError> {
+    let root = runtime_root()?;
+    let manifest_path = root.join("manifest.json");
+    let bytes = fs::read(&manifest_path).map_err(|error| {
+        GateError::new(
+            "RUNTIME_PAYLOAD_INVALID",
+            Component::Proxmox,
+            format!("cannot read runtime manifest: {error}"),
+        )
+    })?;
+    let entries = parse_payload_manifest(&bytes)?;
+    let mut files = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let source = root.join(&entry.relative_path);
+        let contents = fs::read(&source).map_err(|error| {
+            GateError::new(
+                "RUNTIME_PAYLOAD_INVALID",
+                Component::Proxmox,
+                format!("cannot read payload file {}: {error}", entry.relative_path),
+            )
+        })?;
+        if sha256_bytes(&contents) != entry.sha256 {
+            return Err(GateError::new(
+                "RUNTIME_PAYLOAD_INVALID",
+                Component::Proxmox,
+                format!(
+                    "payload file {} does not match its locked SHA-256",
+                    entry.relative_path
+                ),
+            ));
+        }
+        files.push(PayloadFile {
+            destination: entry.destination,
+            mode: entry.mode,
+            sha256: entry.sha256,
+            contents,
+        });
+    }
+    Ok(files)
+}
+
+fn parse_payload_manifest(bytes: &[u8]) -> Result<Vec<LockedPayloadFile>, GateError> {
+    let manifest: RuntimeManifest = serde_json::from_slice(bytes).map_err(|error| {
+        GateError::new(
+            "RUNTIME_PAYLOAD_INVALID",
+            Component::Proxmox,
+            format!("runtime manifest is invalid JSON: {error}"),
+        )
+    })?;
+    if manifest.payload_version != 1 || manifest.files.len() != PAYLOAD_FILES.len() {
+        return Err(GateError::new(
+            "RUNTIME_PAYLOAD_INVALID",
+            Component::Proxmox,
+            "runtime manifest does not contain the exact payload v1 file set",
+        ));
+    }
+
+    let mut locked = Vec::with_capacity(PAYLOAD_FILES.len());
+    for spec in PAYLOAD_FILES {
+        let matches = manifest
+            .files
+            .iter()
+            .filter(|file| file.path == spec.relative_path)
+            .collect::<Vec<_>>();
+        if matches.len() != 1 {
+            return Err(GateError::new(
+                "RUNTIME_PAYLOAD_INVALID",
+                Component::Proxmox,
+                format!(
+                    "runtime manifest must contain {} exactly once",
+                    spec.relative_path
+                ),
+            ));
+        }
+        let file = matches[0];
+        if file.mode != spec.mode || !valid_file_sha256(&file.sha256) {
+            return Err(GateError::new(
+                "RUNTIME_PAYLOAD_INVALID",
+                Component::Proxmox,
+                format!("runtime manifest metadata is invalid for {}", file.path),
+            ));
+        }
+        locked.push(LockedPayloadFile {
+            relative_path: file.path.clone(),
+            destination: spec.destination.to_owned(),
+            mode: file.mode.clone(),
+            sha256: file.sha256.clone(),
+        });
+    }
+    Ok(locked)
+}
+
+fn valid_file_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 fn parse_machine_image(bytes: &[u8]) -> Result<MachineImage, GateError> {
@@ -533,7 +887,11 @@ fn check_output(output: Output, operation: &str) -> Result<Output, GateError> {
 
 fn bounded_text(bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes).replace(['\r', '\n'], " ");
-    text.chars().take(400).collect::<String>().trim().to_owned()
+    text.chars()
+        .take(1600)
+        .collect::<String>()
+        .trim()
+        .to_owned()
 }
 
 fn set_stage(status: &Arc<RwLock<StatusResponse>>, stage: &str) {
@@ -565,6 +923,7 @@ enum Component {
     Wsl,
     PodmanMachine,
     Kvm,
+    Proxmox,
 }
 
 impl Component {
@@ -574,6 +933,7 @@ impl Component {
             Self::Wsl => status.components.wsl = value.into(),
             Self::PodmanMachine => status.components.podman_machine = value.into(),
             Self::Kvm => status.components.kvm = value.into(),
+            Self::Proxmox => status.components.proxmox = value.into(),
         }
     }
 }
@@ -607,7 +967,16 @@ impl GateError {
 
 #[derive(Deserialize)]
 struct RuntimeManifest {
+    payload_version: u64,
     components: Vec<RuntimeComponent>,
+    files: Vec<RuntimeFile>,
+}
+
+#[derive(Deserialize)]
+struct RuntimeFile {
+    path: String,
+    mode: String,
+    sha256: String,
 }
 
 #[derive(Deserialize)]
@@ -638,6 +1007,41 @@ struct MachineImage {
     artifact: String,
     size: u64,
     sha256: String,
+}
+
+#[derive(Clone, Copy)]
+struct PayloadSpec {
+    relative_path: &'static str,
+    destination: &'static str,
+    mode: &'static str,
+}
+
+impl PayloadSpec {
+    const fn new(
+        relative_path: &'static str,
+        destination: &'static str,
+        mode: &'static str,
+    ) -> Self {
+        Self {
+            relative_path,
+            destination,
+            mode,
+        }
+    }
+}
+
+struct LockedPayloadFile {
+    relative_path: String,
+    destination: String,
+    mode: String,
+    sha256: String,
+}
+
+struct PayloadFile {
+    destination: String,
+    mode: String,
+    sha256: String,
+    contents: Vec<u8>,
 }
 
 #[derive(Deserialize)]
@@ -681,6 +1085,24 @@ mod tests {
         assert_eq!(image.artifact, MACHINE_IMAGE_ARTIFACT);
         assert_eq!(image.size, MACHINE_IMAGE_SIZE);
         assert_eq!(image.sha256, MACHINE_IMAGE_LAYER);
+    }
+
+    #[test]
+    fn payload_manifest_matches_all_installed_files() {
+        let manifest = include_bytes!("../../../runtime/payload-v1/manifest.json");
+        let files = parse_payload_manifest(manifest).expect("payload v1 file set");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/payload-v1");
+
+        assert_eq!(files.len(), PAYLOAD_FILES.len());
+        for file in files {
+            let contents = fs::read(root.join(&file.relative_path)).expect("payload file");
+            assert_eq!(
+                sha256_bytes(&contents),
+                file.sha256,
+                "{}",
+                file.relative_path
+            );
+        }
     }
 
     #[test]
