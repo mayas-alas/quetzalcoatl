@@ -291,7 +291,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "caa5fd971b588eab86b736fb58a7e88688aa2bc4be4977769a4e7854cfc04d1c"
+      "sha256": "20f77acf9c4d4fa2922df46bec59ff2c90942f05d13b59c8023edae2f70f7709"
     },
     {
       "path": "services/forgejo/git_probe.sh",
