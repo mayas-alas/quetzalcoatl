@@ -23,27 +23,27 @@ write_runtime_evidence() {
 }
 
 verify_runtime() {
-  test "$(dpkg-query -W -f='${Version}' docker-ce)" = "$docker_version"
-  test "$(dpkg-query -W -f='${Version}' docker-ce-cli)" = "$docker_version"
-  test "$(dpkg-query -W -f='${Version}' containerd.io)" = "$containerd_version"
-  test "$(dpkg-query -W -f='${Version}' docker-buildx-plugin)" = "$buildx_version"
-  test "$(dpkg-query -W -f='${Version}' docker-compose-plugin)" = "$compose_version"
-  systemctl is-enabled --quiet docker.service
-  systemctl is-active --quiet docker.service
-  test "$(docker version --format '{{.Server.Version}}')" = '29.6.2'
-  test "$(docker info --format '{{.Driver}}')" = 'fuse-overlayfs'
-  docker compose version --short | grep -Eq '^5\.3\.1$'
-  docker buildx version | grep -Eq 'v?0\.35\.0([[:space:]]|$)'
-  test "$(stat -fc %T /sys/fs/cgroup)" = 'cgroup2fs'
-  test -w /sys/fs/cgroup
-  test -c /dev/net/tun
-  test -r /dev/net/tun
-  test -w /dev/net/tun
-  test -c /dev/fuse
-  test -r /dev/fuse
-  test -w /dev/fuse
-  command -v python3 >/dev/null
-  python3 -c 'import datetime, hashlib, hmac, http.client, re, secrets'
+  test "$(dpkg-query -W -f='${Version}' docker-ce)" = "$docker_version" || return 1
+  test "$(dpkg-query -W -f='${Version}' docker-ce-cli)" = "$docker_version" || return 1
+  test "$(dpkg-query -W -f='${Version}' containerd.io)" = "$containerd_version" || return 1
+  test "$(dpkg-query -W -f='${Version}' docker-buildx-plugin)" = "$buildx_version" || return 1
+  test "$(dpkg-query -W -f='${Version}' docker-compose-plugin)" = "$compose_version" || return 1
+  systemctl is-enabled --quiet docker.service || return 1
+  systemctl is-active --quiet docker.service || return 1
+  test "$(docker version --format '{{.Server.Version}}')" = '29.6.2' || return 1
+  test "$(docker info --format '{{.Driver}}')" = 'fuse-overlayfs' || return 1
+  docker compose version --short | grep -Eq '^5\.3\.1$' || return 1
+  docker buildx version | grep -Eq 'v?0\.35\.0([[:space:]]|$)' || return 1
+  test "$(stat -fc %T /sys/fs/cgroup)" = 'cgroup2fs' || return 1
+  test -w /sys/fs/cgroup || return 1
+  test -c /dev/net/tun || return 1
+  test -r /dev/net/tun || return 1
+  test -w /dev/net/tun || return 1
+  test -c /dev/fuse || return 1
+  test -r /dev/fuse || return 1
+  test -w /dev/fuse || return 1
+  command -v python3 >/dev/null || return 1
+  python3 -c 'import datetime, hashlib, hmac, http.client, re, secrets' || return 1
 }
 
 if verify_runtime >/dev/null 2>&1; then
