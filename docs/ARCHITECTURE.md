@@ -1,0 +1,567 @@
+# Arquitectura del PoC Quetzalcoatl
+
+Estado: contrato normativo para implementación  
+Alcance: Incremento 1 (controller) e Incremento 2 (member)  
+Prioridad: obtener `QuetzalcoatlSetup.exe` funcionando en un host real cuanto antes
+
+## 1. Objetivo
+
+El PoC debe producir un único instalador Windows que deje operativo el sistema completo en dos pasos acumulativos:
+
+1. La primera instalación autorizada no encuentra otros nodos Quetzalcoatl en Tailscale, se designa automáticamente `controller` y converge el runtime local y la infraestructura seleccionada.
+2. La siguiente instalación encuentra al controller en Tailscale, se designa automáticamente `member`, levanta el mismo runtime local y une su Proxmox al clúster existente.
+
+El PoC termina cuando ambos recorridos funcionan en hosts Windows objetivo y `gnx status --json` lo demuestra. No termina cuando el código solamente compila.
+
+## 2. Regla de alcance
+
+Sólo se implementa lo que aparece en este documento. Una condición no contemplada termina con un error explícito y reanudable; no habilita fallbacks, proveedores alternativos, elecciones distribuidas ni lógica de recuperación general.
+
+### Incluido
+
+- WiX Toolset 5 Burn para `QuetzalcoatlSetup.exe`.
+- WiX Toolset 5 MSI para archivos inmutables y registro del servicio.
+- Habilitación de WSL2 con reanudación después de reinicio.
+- Podman fijado a una versión y una máquina administrada con nombre fijo.
+- Preflight obligatorio de virtualización y KVM dentro de WSL2/Podman Machine.
+- `gnx-service.exe` en Rust como única autoridad privilegiada del producto.
+- `gnx.exe` en Rust como CLI sin privilegios.
+- Named Pipe local con ACL para la comunicación CLI/instalador/servicio.
+- Tailscale, Proxmox y OpenTofu como componentes obligatorios.
+- Rol automático mediante descubrimiento de nodos etiquetados en `tailscale status --json`.
+- Garage S3 y Forgejo como opciones independientes, desplegadas únicamente por el controller.
+- Docker Compose dentro de LXC para Garage y Forgejo.
+- DPAPI para secretos persistidos en Windows.
+- Un solo escritor OpenTofu: el controller.
+
+### Fuera de los dos incrementos
+
+- Invitaciones, enrolamiento firmado o selección manual de rol.
+- OAuth, `client_id` o `client_secret` de Tailscale.
+- Headscale y Forgejo Runner.
+- Tauri Tray.
+- Upgrades, migraciones generales, uninstall destructivo y purge.
+- Compatibilidad con varios proveedores de VM, red, runtime o infraestructura.
+- Elección automática de controller, failover o promoción de member.
+- Instalaciones iniciales concurrentes.
+- Benchmarks y frameworks de pruebas.
+- Garage como backend de OpenTofu.
+
+La aceptación será manual y reproducible con comandos y artefactos reales. Esto no autoriza construir un framework de testing.
+
+## 3. Topología soportada
+
+```mermaid
+flowchart LR
+    Operator["Operador administrador"]
+
+    subgraph WindowsController["Windows · controller"]
+        SetupC["WiX 5 Burn + MSI"]
+        ServiceC["gnx-service"]
+        CLIC["gnx CLI"]
+        DPAPIC["DPAPI + ProgramData"]
+    end
+
+    subgraph FedoraController["Podman Machine Fedora · administrada"]
+        SystemdC["systemd + Quadlets"]
+        PodC["gnx-node.pod"]
+        TailscaleC["tailscaled.container"]
+        ProxmoxC["proxmox.container"]
+        TofuC["OpenTofu one-shot"]
+    end
+
+    subgraph PVEGuests["Guests creados por el controller"]
+        GarageLXC["LXC Garage + Docker Compose"]
+        ForgejoLXC["LXC Forgejo + Docker Compose"]
+        GarageTS["Tailscale sidecar"]
+        ForgejoTS["Tailscale sidecar"]
+    end
+
+    subgraph WindowsMember["Windows · member"]
+        SetupM["Mismo Setup.exe"]
+        ServiceM["gnx-service"]
+        CLIM["gnx CLI"]
+    end
+
+    subgraph FedoraMember["Podman Machine Fedora · administrada"]
+        SystemdM["systemd + Quadlets"]
+        TailscaleM["tailscaled.container"]
+        ProxmoxM["proxmox.container"]
+        TofuM["OpenTofu presente · ejecución denegada"]
+    end
+
+    Tailnet["Tailscale SaaS · overlay privado"]
+
+    Operator --> SetupC
+    Operator --> SetupM
+    CLIC -->|"Named Pipe"| ServiceC
+    CLIM -->|"Named Pipe"| ServiceM
+    SetupC --> ServiceC --> SystemdC --> PodC
+    PodC --> TailscaleC
+    PodC --> ProxmoxC
+    ServiceC --> DPAPIC
+    ServiceC -->|"bajo demanda"| TofuC
+    TofuC -->|"PVE API"| ProxmoxC
+    TofuC --> GarageLXC
+    TofuC --> ForgejoLXC
+    GarageLXC --- GarageTS
+    ForgejoLXC --- ForgejoTS
+    SetupM --> ServiceM --> SystemdM
+    SystemdM --> TailscaleM
+    SystemdM --> ProxmoxM
+    TailscaleC --- Tailnet
+    TailscaleM --- Tailnet
+    GarageTS --- Tailnet
+    ForgejoTS --- Tailnet
+    ProxmoxM -->|"pvecm join por tailnet"| ProxmoxC
+```
+
+La única topología de aceptación contiene exactamente un controller y un member. Un tercer host GNX produce `TOPOLOGY_UNSUPPORTED`; no se implementan HA, promoción ni elecciones.
+
+## 4. Decisiones e invariantes
+
+| Área | Decisión normativa | Límite del PoC |
+|---|---|---|
+| Instalador | WiX 5 Burn encadena prerrequisitos y MSI | Se fija una versión exacta; no se implementa abstracción de instaladores |
+| Windows | Un baseline Windows 11 x64 físico con virtualización habilitada | No hay matriz multi-versión |
+| Runtime Linux | Una Podman Machine Fedora nombrada `quetzalcoatl` | No se adoptan máquinas del usuario |
+| Identidad | La máquina pertenece a una cuenta Windows dedicada | La CLI no ejecuta privilegios directamente |
+| SID de servicio | WinSW ejecuta `gnx-service` bajo esa misma cuenta y carga su perfil | El SID no se recrea en reboot/reanudación; DPAPI es user-scope |
+| Autoridad | `gnx-service` contiene toda la lógica privilegiada | WinSW sólo supervisa el proceso; no contiene lógica de dominio |
+| Runtime local | systemd y Quadlets mantienen Podman | Quadlet no administra Windows, WSL ni infraestructura PVE |
+| Red | Tailscale SaaS conecta los nodos host | Headscale queda fuera |
+| Rol | Cero hosts GNX implica controller; cualquier host GNX implica member | El PoC sólo acepta 0 o 1 peer; el rol se decide una vez y se persiste |
+| Infraestructura | OpenTofu está presente en todos los nodos | Sólo el controller puede ejecutar `init/plan/apply` |
+| Estado OpenTofu | Backend local persistente y `0600` en el controller | Garage no es backend en estos incrementos |
+| Apps remotas | Garage y Forgejo viven en LXC con Docker Compose | Ninguna app remota es Quadlet local |
+| Secretos | Tailscale usa únicamente `auth_key` | No OAuth; ningún secreto entra en MSI properties, argv o logs |
+| Puertos Windows | Ningún puerto PVE se publica en Windows | Todo acceso ocurre por tailnet |
+| Errores | Fallo explícito con etapa y código, seguido de reanudación manual | Sin rollback general ni caminos alternativos |
+
+## 5. `runtime payload v1` y Quadlets
+
+El antiguo término “versioned runtime profile” se reemplaza por **`runtime payload v1`**. No es un proceso, un servicio ni un framework de migraciones. Es el conjunto inmutable de archivos que corresponde exactamente a la versión del MSI:
+
+- manifiesto con versión, hashes y digests;
+- `gnx-node.pod`;
+- `tailscaled.container`;
+- `proxmox.container`;
+- `opentofu.image`;
+- ejecutable/script fijado `gnx-tailscale-enroll` y su unidad one-shot;
+- unidad de soporte `gnx-opentofu.service` para ejecución one-shot;
+- configuración base de Tailscale Serve;
+- scripts cerrados `pve-init`, `pve-join` y `pve-status`;
+- módulos OpenTofu utilizados por el controller;
+- Compose y configuración fijados para Garage y Forgejo.
+
+El flujo de ownership es único:
+
+```mermaid
+flowchart LR
+    MSI["MSI instala payload inmutable"]
+    Service["gnx-service verifica hashes"]
+    Fedora["Fedora administrada"]
+    Quadlet["Archivos Quadlet"]
+    Generator["systemd generator"]
+    Units["Unidades systemd"]
+    Podman["Podman"]
+    Core["Tailscale + Proxmox"]
+    Tofu["OpenTofu one-shot · controller"]
+
+    MSI --> Service --> Fedora --> Quadlet --> Generator --> Units --> Podman --> Core
+    Fedora --> Tofu
+```
+
+Responsabilidades:
+
+- MSI posee los archivos inmutables en `%ProgramFiles%\Quetzalcoatl`.
+- `%ProgramData%\Quetzalcoatl` posee estado mutable, checkpoints y blobs DPAPI.
+- `gnx-service` verifica y aplica el payload dentro de la máquina administrada.
+- systemd genera y supervisa unidades a partir de Quadlets.
+- Podman ejecuta el pod y sus contenedores.
+- OpenTofu se invoca sólo cuando el controller debe converger recursos PVE; no queda como daemon.
+
+En los incrementos 1 y 2 el payload tiene versión `1`. El campo existe para comprobar compatibilidad y reanudar; no se crea código de migraciones.
+
+## 6. Preflight Windows, WSL2 y KVM
+
+Hay dos gates con ownership distinto. Burn no administra la Podman Machine y `gnx-service` no habilita features Windows.
+
+### HostPreflight — Burn, antes del MSI
+
+| Orden | Verificación o acción | Resultado permitido | Fallo |
+|---|---|---|---|
+| 1 | Windows 11 x64 y privilegios de administrador | Baseline soportado | `UNSUPPORTED_WINDOWS` |
+| 2 | Virtualización habilitada en firmware e hipervisor activo | Disponible | `VIRTUALIZATION_DISABLED` |
+| 3 | WSL2 y Virtual Machine Platform | Reusar o habilitar | `WSL_ENABLE_FAILED` |
+| 4 | Reinicio requerido | Persistir sólo checkpoint no secreto y reanudar Burn | `REBOOT_RESUME_FAILED` |
+| 5 | WSL Store/version fijada y proveedor WSL2 | Compatible | `WSL_VERSION_UNSUPPORTED` |
+| 6 | Podman MSI fijado | Instalar o reutilizar sólo versión compatible | `PODMAN_INSTALL_FAILED` |
+
+### RuntimeGate — `gnx-service`, después del MSI
+
+| Orden | Verificación o acción | Resultado permitido | Fallo |
+|---|---|---|---|
+| 1 | SID y perfil de la identidad runtime | Cuenta estable, perfil cargado | `RUNTIME_IDENTITY_INVALID` |
+| 2 | `.wslconfig` de esa identidad con nested virtualization | Configuración efectiva después de `wsl --shutdown` | `WSL_NESTED_VIRT_FAILED` |
+| 3 | Máquina `quetzalcoatl` propiedad de esa identidad | Crear o reutilizar únicamente la propia | `MACHINE_CREATE_FAILED` |
+| 4 | systemd y cgroup v2 dentro de Fedora | Saludables | `FEDORA_RUNTIME_UNSUPPORTED` |
+| 5 | `/dev/kvm`, `/dev/net/tun` y `/dev/fuse` | `KVM_GET_API_VERSION=12`; TUN y FUSE utilizables | `REQUIRED_DEVICE_MISSING` |
+| 6 | Contenedor PVE privilegiado con esos devices | Arranca y abre KVM correctamente | `NESTED_RUNTIME_FAILED` |
+
+La conexión Podman del producto será rootful y estará aislada bajo la identidad dedicada. La mera existencia de `/dev/kvm` no basta: RuntimeGate invoca el ioctl `KVM_GET_API_VERSION` y exige el valor `12` dentro de la máquina y del contenedor PVE. Si falla, la instalación se detiene; no existe fallback a emulación por software ni a otro proveedor.
+
+Docker dentro de LXC es una restricción aceptada. Antes de integrar Garage o Forgejo se debe demostrar dentro del LXC: Docker Engine, Compose, cgroup v2, `fuse-overlayfs`, `/dev/net/tun` y reinicio persistente. No se implementará fallback a QEMU VM.
+
+## 7. Secuencia de instalación y rol automático
+
+```mermaid
+sequenceDiagram
+    actor Operator as Operador
+    participant Burn as WiX Burn
+    participant MSI as MSI
+    participant Service as gnx-service
+    participant Machine as Podman/Fedora
+    participant TS as tailscaled
+    participant PVE as Proxmox
+    participant Tofu as OpenTofu
+
+    Operator->>Burn: aceptar licencia
+    Burn->>Burn: HostPreflight Windows/WSL2/reboot
+    Burn->>MSI: instalar producto inmutable
+    MSI->>Service: registrar e iniciar servicio
+    Burn->>Operator: solicitar flags + auth_key + nuevo password PVE
+    Operator->>Burn: entregar entradas
+    Burn->>Service: secretos por Named Pipe protegido
+    Service->>Service: cifrar inmediatamente con DPAPI
+    Service->>Machine: RuntimeGate + crear máquina + validar devices
+    Service->>Machine: aplicar runtime payload v1
+    Machine->>TS: iniciar tailscaled y registrar nodo
+    TS-->>Service: tailscale status --json
+    Service->>Service: filtrar self + tag de hosts y estabilizar inventario
+
+    alt no existen otros nodos GNX
+        Service->>TS: confirmar de nuevo cero peers
+        Service->>Service: persistir role=controller
+        Service->>TS: hostname gnx-controller-<node-id>
+        Service->>PVE: pvecm create quetzalcoatl --link0 <self-ts-ip>
+        Service->>Tofu: init/apply local backend
+        Tofu->>PVE: crear LXC seleccionados
+        Service->>PVE: configurar Docker/Compose y secretos
+        Service-->>Operator: gnx status --json = ready
+    else existe exactamente un host GNX
+        Service->>Service: persistir role=member
+        Service->>TS: hostname gnx-member-<node-id>
+        Service->>PVE: iniciar nodo local
+        Service->>PVE: pvecm add <controller-ts-ip> --link0 <self-ts-ip>
+        Service-->>Tofu: ejecución prohibida
+        Service-->>Operator: gnx status --json = ready
+    else existen más hosts
+        Service-->>Operator: TOPOLOGY_UNSUPPORTED
+    end
+```
+
+### Contrato de descubrimiento
+
+Precondiciones Tailscale:
+
+- El operador entrega una `auth_key` reutilizable, preautorizada y no efímera, sin tags fijados en la propia key. La identidad que la creó figura en `tagOwners` para los dos tags del producto.
+- El bootstrap host solicita explícitamente sólo `--advertise-tags=tag:quetzalcoatl-node` y verifica que `Self.Tags` contiene exactamente ese tag.
+- El bootstrap de Garage/Forgejo solicita sólo `--advertise-tags=tag:quetzalcoatl-service` y verifica el tag exacto antes de arrancar la aplicación.
+- La ACL permite visibilidad y tráfico únicamente entre identidades GNX autorizadas.
+- El descubrimiento de rol filtra exclusivamente `tag:quetzalcoatl-node`, excluye `Self` y peers expirados; los sidecars nunca cuentan como hosts.
+- La tailnet tiene HTTPS/Serve habilitado y `CertDomains` contiene el dominio esperado; no se permite un consentimiento web durante Setup.
+- `tailscaled` debe estar autenticado y el mismo inventario debe observarse en dos lecturas consecutivas antes de decidir.
+- Un peer host conocido cuenta aunque esté temporalmente offline; así nunca se crea un segundo controller por una caída de red.
+
+Con sólo `auth_key`, “cero peers” significa “cero peers visibles”. El instalador no puede distinguir una tailnet vacía de una ACL que oculta máquinas existentes. La visibilidad correcta del tag es una precondición externa bajo control del operador; una ACL incorrecta no habilita otro mecanismo de descubrimiento.
+
+Matriz:
+
+| Estado persistido | Peers host distintos de self | Controller identificable | Acción |
+|---|---:|---:|---|
+| Existe | Cualquiera | Cualquiera | Reusar el rol persistido; no redetectar ni cambiar |
+| No existe | 0 | 0 | Persistir `controller`, fijar hostname y crear clúster |
+| No existe | 1 | Es `gnx-controller-*` y está online | Persistir `member` y unirse a ese controller |
+| No existe | 1 | No identificable u offline | Persistir `member`; `CONTROLLER_UNAVAILABLE`; no mutar PVE y permitir reanudación |
+| No existe | Más de 1 | Cualquiera | Clasificar como member, detener con `TOPOLOGY_UNSUPPORTED` y no mutar PVE |
+
+La regla de negocio es automática: si existe cualquier otra máquina host autorizada, el nuevo nodo es member. El hostname sólo identifica al controller para `pvecm`; no cambia la decisión. El límite de exactamente dos hosts evita escribir selección de controller o soporte para un tercer nodo. Antes de `pvecm create`, el futuro controller vuelve a confirmar que el inventario continúa vacío.
+
+En una reanudación, “no redetectar el rol” significa no volver a decidir controller/member. Un member sí vuelve a consultar el peer guardado para comprobar su identidad, disponibilidad e IP actual antes del join. El `Self.ID` de Tailscale y el ID del controller se persisten; un cambio de identidad es fail-stop.
+
+Las instalaciones se ejecutan secuencialmente. No se escribe código de elección para dos primeras instalaciones simultáneas.
+
+## 8. Red y exposición
+
+La exposición completa se define mediante tres controles complementarios:
+
+1. El `serve.conf` mencionado en el PoC se materializa como el `serve.json` consumido por `TS_SERVE_CONFIG` y publica endpoints TCP/HTTPS aprobados.
+2. La política Tailscale por tags autoriza tráfico directo entre nodos.
+3. El firewall dentro del runtime limita puertos y peers.
+
+`serve.json` no sustituye la conectividad directa que necesitan el join de PVE y Corosync.
+
+| Tráfico | Transporte | Ruta | Control | Publicación Windows |
+|---|---|---|---|---|
+| PVE UI operacional | TCP 443 hacia backend HTTPS 8006 | Tailscale Serve en el sidecar del nodo | `serve.json` + ACL | Ninguna |
+| PVE API de cluster/join | TCP 8006 | IP tailnet directa, mismo namespace del pod | ACL `node → node` + firewall | Ninguna |
+| SSH PVE | TCP 22 | IP tailnet directa, mismo namespace del pod | ACL `node → node` + firewall | Ninguna |
+| Corosync | UDP 5405-5412 | IP tailnet directa, mismo namespace del pod | ACL `node → node` + firewall | Ninguna |
+| OpenTofu → PVE | HTTPS `127.0.0.1:8006` | Loopback dentro de `gnx-node.pod` | Provider PVE fijado con `insecure=true` únicamente para ese backend local | Ninguna |
+| Garage S3 | TCP 443 hacia 3900 | Tailscale Serve del sidecar Garage | `serve.json` + tag service | Ninguna |
+| Forgejo web | TCP 443 hacia 3000 | Tailscale Serve del sidecar Forgejo | `serve.json` + tag service | Ninguna |
+| Forgejo SSH | TCP 2222 hacia 22 | TCP forward del sidecar Forgejo | `serve.json` + tag service | Ninguna |
+
+El proxy de la UI PVE usa como backend local `https+insecure://127.0.0.1:8006` porque PVE inicia con certificado propio; esto sólo desactiva la validación entre el sidecar y su backend local. El acceso del usuario sigue siendo HTTPS de Tailscale. El directorio `/config`, no el archivo suelto, se monta en el sidecar y `TS_SERVE_CONFIG=/config/serve.json`; la configuración se valida con `tailscale serve status --json`.
+
+Corosync queda fijado a la tailnet: el controller ejecuta `pvecm create quetzalcoatl --link0 <controller-ts-ip>` y el member `pvecm add <controller-ts-ip> --link0 <member-ts-ip>`. Los nombres PVE resuelven a esas IP y la postcondición verifica que `ring0_addr` en `corosync.conf` coincide; no se acepta la interfaz que Proxmox elija por defecto.
+
+Antes de `pvecm join`, el servicio debe comprobar en ambos sentidos:
+
+- identidad y reachability del controller;
+- PVE API privada;
+- SSH TCP/22;
+- Corosync UDP por la interfaz tailnet;
+- resolución de nombres estable;
+- fecha y hora sincronizadas;
+- camino Tailscale directo, pérdida cero y RTT menor a 5 ms; no se acepta DERP para el cluster.
+
+Si cualquiera falla, el member queda `failed-resumable` y no intenta otra red ni otro puerto.
+
+## 9. Secretos y DPAPI
+
+### Entradas del instalador
+
+- aceptación de licencia;
+- nombre esperado de la tailnet;
+- `auth_key` Tailscale, en control enmascarado;
+- nuevo password `root` de Proxmox, en control enmascarado, para reemplazar la credencial bootstrap de la imagen;
+- `install_garage`;
+- `install_forgejo`.
+
+No existe campo de rol, invitación, OAuth ni `client_id`.
+
+Burn solicita `auth_key` y password PVE únicamente después de completar HostPreflight, cualquier reboot, el MSI y el arranque de `gnx-service`. Antes del reboot sólo persiste el checkpoint de etapa; nunca necesita almacenar plaintext para reanudar.
+
+### Flujo de secretos
+
+```mermaid
+flowchart LR
+    UI["Burn BA · memoria"]
+    Pipe["Named Pipe con ACL"]
+    Service["gnx-service · identidad dedicada"]
+    DPAPI["DPAPI user-scope"]
+    Blob["ProgramData · blob cifrado + ACL"]
+    Stdin["stdin / canal temporal"]
+    RunFile["Linux /run · 0600"]
+    Bootstrap["gnx-tailscale-enroll · one-shot"]
+    TSState["Estado persistente tailscaled"]
+    LXCSecret["LXC secret file · root 0600"]
+
+    UI --> Pipe --> Service --> DPAPI --> Blob
+    Service --> Stdin --> RunFile
+    RunFile --> Bootstrap --> TSState
+    RunFile --> LXCSecret
+```
+
+Reglas:
+
+- Burn no pasa secretos como propiedades MSI, argumentos o variables registradas en logs.
+- El instalador crea una sola cuenta runtime local; WinSW, DPAPI y Podman Machine usan el mismo SID estable. El SCM conserva su credencial de logon y `gnx-service` carga el perfil antes de descifrar o invocar Podman.
+- El servicio recibe y cifra el secreto con DPAPI user-scope bajo esa identidad.
+- Los blobs viven en `%ProgramData%\Quetzalcoatl\secrets` con ACL para SYSTEM y la identidad del servicio.
+- El plaintext sólo cruza a Fedora/LXC por stdin o un canal temporal y vive en `/run` con modo `0600`.
+- Los snippets que contienen `TS_AUTHKEY` son referencias, no archivos de producto. El Quadlet y los Compose canónicos nunca contienen el valor.
+- Antes de habilitar `tailscaled.container`, `gnx-service` inicia exclusivamente `gnx-tailscale-enroll.service`. El one-shot usa la misma imagen Tailscale fijada, consume `/run/gnx/ts-authkey`, solicita el tag host y escribe el state en `/var/lib/quetzalcoatl/tailscale/host` (`0700`, root).
+- En cada LXC, el mismo script fijado ejecuta un `docker run --rm` de enrolamiento, solicita el tag service y escribe en `/var/lib/quetzalcoatl/tailscale/<servicio>` antes de `docker compose up`.
+- Tras verificar IP, identidad y tag exacto, el one-shot elimina contenedor y archivo temporal. El contenedor permanente monta el mismo state como `TS_STATE_DIR`, usa `TS_AUTH_ONCE=true` y nunca recibe `TS_AUTHKEY`.
+- La credencial fija de build de la imagen PVE sólo permite el bootstrap local. Antes de habilitar Serve, API o join, `gnx-service` establece el password solicitado, verifica que la credencial de build dejó de funcionar y conserva únicamente el nuevo valor cifrado con DPAPI.
+- `gnx-service` genera una sola vez con CSPRNG el RPC secret/admin tokens de Garage y las claves internas requeridas por Forgejo; los blobs DPAPI son la fuente de recuperación. Después del arranque, la CLI oficial de Garage genera la credencial S3 y el servicio captura su salida una vez para cifrarla con DPAPI.
+- Los secretos Linux se materializan fuera del Compose y del repositorio, administrados por root y legibles sólo por root y el UID de aplicación estrictamente necesario.
+- OpenTofu crea infraestructura, pero no recibe secretos de aplicación ni los guarda en `tfvars` o state.
+
+## 10. OpenTofu y servicios remotos
+
+OpenTofu es obligatorio como motor de infraestructura, pero su autoridad depende del rol:
+
+| Componente | Controller | Member |
+|---|---|---|
+| Imagen OpenTofu fijada | Presente | Presente |
+| Workspace y state | Presente, local y `0600` | Ausente |
+| Credenciales PVE | DPAPI, entrega temporal | Ausentes |
+| `init/plan/apply` | Permitido por `gnx-service` | Denegado antes de ejecutar |
+| Garage/Forgejo LXC | Crea sólo los seleccionados | Nunca crea ni reconverge |
+
+Garage no puede ser backend del state durante estos incrementos porque es opcional y todavía no existe durante el primer `apply`. El state local del controller es la única implementación del PoC. No se escribe migración a S3.
+
+La vía de ejecución es única: `gnx-service → systemctl start gnx-opentofu.service → contenedor OpenTofu fijado`. El workspace vive en `/var/lib/quetzalcoatl/opentofu/controller` (`0700`), se monta como `/workspace`, y `terraform.tfstate` y su backup son `0600`. El member no crea esa ruta. OpenTofu apunta sólo a `https://127.0.0.1:8006/api2/json` dentro del pod; debido al certificado bootstrap de PVE usa `insecure=true` sólo en loopback y nunca usa Serve ni la IP tailnet.
+
+Secuencia por servicio seleccionado:
+
+1. OpenTofu crea el LXC, red, almacenamiento y metadatos estrictamente necesarios.
+2. OpenTofu devuelve el VMID; antes de existir el sidecar, `gnx-service` usa exclusivamente el PVE local para ejecutar `pct push/exec` dentro del guest.
+3. Por ese canal host-mediated instala/verifica Docker Engine y Compose mediante el script fijado del payload.
+4. El servicio genera secretos, copia Compose sin valores sensibles y materializa archivos con owner/mode mínimos para el UID de la aplicación.
+5. Ejecuta el enrolamiento Tailscale one-shot y después `docker compose up` con el contenedor permanente sin auth key.
+6. Comprueba endpoint privado y persiste sólo estado no secreto. SSH por tailnet queda disponible después; no participa en el bootstrap.
+
+La ejecución canónica del controller selecciona Garage y Forgejo. Desmarcar una opción sólo omite su recurso; no introduce perfiles, dependencias ni caminos de recuperación adicionales.
+
+## 11. Estado, reanudación y CLI
+
+Estado mutable Windows:
+
+- `%ProgramData%\Quetzalcoatl\state.json`: etapa, rol, identidad controller, opciones y último error; nunca secretos.
+- `%ProgramData%\Quetzalcoatl\secrets\*.bin`: blobs DPAPI.
+- `%ProgramData%\Quetzalcoatl\logs`: logs acotados y redactados.
+
+Máquina de estados:
+
+```mermaid
+stateDiagram-v2
+    [*] --> PREFLIGHT_WINDOWS
+    PREFLIGHT_WINDOWS --> REBOOT_PENDING: WSL2 requiere reinicio
+    REBOOT_PENDING --> PREFLIGHT_WINDOWS: Burn reanuda
+    PREFLIGHT_WINDOWS --> PRODUCT_INSTALLED
+    PRODUCT_INSTALLED --> SERVICE_READY
+    SERVICE_READY --> MACHINE_READY
+    MACHINE_READY --> KVM_READY
+    KVM_READY --> TAILSCALE_READY
+    TAILSCALE_READY --> ROLE_RESOLVED
+    ROLE_RESOLVED --> CONTROLLER_CLUSTER_READY: controller
+    ROLE_RESOLVED --> MEMBER_JOINED: member
+    CONTROLLER_CLUSTER_READY --> INFRA_READY
+    INFRA_READY --> READY
+    MEMBER_JOINED --> READY
+    READY --> [*]
+
+    PREFLIGHT_WINDOWS --> FAILED
+    MACHINE_READY --> FAILED
+    KVM_READY --> FAILED
+    TAILSCALE_READY --> FAILED
+    ROLE_RESOLVED --> FAILED
+    CONTROLLER_CLUSTER_READY --> FAILED
+    MEMBER_JOINED --> FAILED
+    INFRA_READY --> FAILED
+    FAILED --> PREFLIGHT_WINDOWS: reanudar explícitamente
+```
+
+Cada transición escribe checkpoint sólo después de verificar su postcondición. Reanudar repite la operación actual de forma idempotente; no ejecuta rollback del trabajo ya convergido.
+
+CLI mínima:
+
+- `gnx status`
+- `gnx status --json`
+- `gnx runtime status`
+- `gnx cluster status`
+
+Todos los comandos consultan `gnx-service` por Named Pipe. Ninguno modifica WSL, Podman, PVE o OpenTofu directamente.
+
+Esquema mínimo de `gnx status --json`:
+
+```json
+{
+  "schema_version": 1,
+  "overall": "ready",
+  "stage": "READY",
+  "role": "controller",
+  "controller": "gnx-controller-<node-id>",
+  "components": {
+    "service": "ready",
+    "wsl": "ready",
+    "podman_machine": "ready",
+    "kvm": "ready",
+    "tailscale": "ready",
+    "tailscale_serve": "ready",
+    "proxmox": "ready",
+    "opentofu": "ready"
+  },
+  "cluster": {
+    "joined": true,
+    "quorate": true
+  },
+  "services": {
+    "garage": "ready",
+    "forgejo": "ready"
+  },
+  "last_error": null
+}
+```
+
+Los únicos valores necesarios para estados de componentes son `pending`, `ready`, `failed`, `not_selected` y `not_applicable`.
+
+## 12. Los dos incrementos
+
+### Incremento 1 — Controller funcional
+
+Camino canónico:
+
+1. Ejecutar Setup en un Windows limpio.
+2. Habilitar/reusar WSL2, reiniciar y reanudar si hace falta.
+3. Instalar MSI, servicio y CLI.
+4. Crear la máquina Podman administrada y pasar el gate KVM.
+5. Aplicar payload v1 y registrar Tailscale con `auth_key`.
+6. No encontrar otros hosts GNX y persistir `controller`.
+7. Levantar PVE, crear el clúster y habilitar OpenTofu.
+8. Desplegar Garage y Forgejo cuando están seleccionados.
+9. Terminar con `gnx status --json` en `READY` y sin puertos Windows publicados.
+
+Criterio de cierre: el EXE realiza el recorrido completo en un host objetivo y existe evidencia de PVE, Tailscale, OpenTofu y los servicios seleccionados funcionando.
+
+### Incremento 2 — Member funcional
+
+Camino canónico:
+
+1. Ejecutar el mismo Setup en un segundo Windows.
+2. Repetir la preparación local y registrar Tailscale.
+3. Encontrar exactamente un host GNX, clasificar y persistir `member`.
+4. Confirmar que ese único host es el controller y está online.
+5. Levantar PVE local, comprobar SSH/Corosync/API y ejecutar `pvecm join`.
+6. Denegar OpenTofu y no crear servicios remotos.
+7. Terminar con `gnx status --json` en `READY` y clúster visible desde ambos nodos.
+
+Criterio de cierre: el mismo EXE agrega el member y existe una sola autoridad OpenTofu y una sola instancia de cada servicio remoto seleccionado.
+
+## 13. Condiciones fail-stop
+
+No se agrega lógica alterna. La instalación se detiene cuando:
+
+- falta KVM o cualquiera de los devices requeridos;
+- la versión o hash del runtime payload no coincide;
+- la `auth_key` es inválida o no produce los tags requeridos;
+- HTTPS/Serve no está habilitado o `CertDomains` no contiene el dominio esperado;
+- la credencial bootstrap PVE continúa activa después de la convergencia local;
+- el descubrimiento encuentra más de un peer host en esta topología de dos nodos;
+- cambia la identidad Tailscale propia o desaparece la identidad controller persistida;
+- PVE API, SSH o Corosync no son viables antes del join;
+- un member intenta ejecutar OpenTofu;
+- Docker dentro del LXC no pasa su gate;
+- Garage o Forgejo seleccionados no alcanzan estado saludable;
+- aparece un secreto en logs, argumentos, Compose, OpenTofu state o archivos sin protección.
+
+El código informa etapa, código y evidencia acotada. No inventa un segundo camino.
+
+## 14. Referencias normativas
+
+- [PoC original](../PoC.md)
+- [WiX Toolset y Burn](https://docs.firegiant.com/wix/tools/burn/)
+- [Podman Machine](https://docs.podman.io/en/latest/markdown/podman-machine.1.html)
+- [Podman Machine rootful](https://docs.podman.io/en/stable/markdown/podman-machine-set.1.html)
+- [Configuración avanzada de WSL](https://learn.microsoft.com/es-es/windows/wsl/wsl-config)
+- [API KVM](https://docs.kernel.org/virt/kvm/api.html)
+- [Tailscale auth keys](https://tailscale.com/docs/features/access-control/auth-keys)
+- [Tailscale tags](https://tailscale.com/docs/features/tags)
+- [Tailscale Docker parameters](https://tailscale.com/docs/features/containers/docker/docker-params)
+- [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve)
+- [Tipos de conexión Tailscale](https://tailscale.com/docs/reference/connection-types)
+- [Tailscale en Proxmox](https://tailscale.com/docs/integrations/proxmox)
+- [OpenTofu local backend](https://opentofu.org/docs/language/settings/backends/local/)
+- [Windows DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata)
+- [Proxmox VE Administration Guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf)
+- [Garage Quick Start](https://garagehq.deuxfleurs.fr/documentation/)
+- [Forgejo con Docker](https://forgejo.org/docs/latest/admin/installation/docker/)
+- [Imagen de referencia tailnet-proxmox](https://github.com/mayas-alas/tailnet-proxmox/tree/c277d63f76fd2d1f95594221c2ef913ba8f4f5ca)
+- [Snippet base de Tailscale/Garage](https://github.com/tailscale-dev/video-code-snippets/tree/ba499312d243e882f7577017065f5d7f2e7982ca/2026/2026-03-s3-garage/docker)
+
+Las referencias demuestran piezas. Los gates de este documento demuestran la integración específica del producto.
