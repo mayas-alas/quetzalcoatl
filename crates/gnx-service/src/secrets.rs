@@ -3,6 +3,7 @@ use std::ffi::c_void;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::mem::size_of;
+use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 
@@ -19,11 +20,13 @@ use windows_sys::Win32::Security::{
     SECURITY_ATTRIBUTES, SetFileSecurityW,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateDirectoryW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    CreateDirectoryW, FILE_ATTRIBUTE_REPARSE_POINT, MOVEFILE_REPLACE_EXISTING,
+    MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
 use zeroize::Zeroize;
 
 const SERVICE_SID: &str = "S-1-5-80-1414281857-1943412974-186110390-2486725240-2230548587";
+const MANAGED_DIRECTORY: &str = "managed";
 const BLOB_NAME: &str = "installer-inputs.bin";
 const DPAPI_ENTROPY: &[u8] = b"Quetzalcoatl/installer-inputs/v1";
 
@@ -119,8 +122,43 @@ fn secrets_directory() -> Result<PathBuf, ConfigurationError> {
         .filter(|path| path.is_absolute())
         .ok_or_else(|| ConfigurationError::storage("ProgramData is unavailable"))?;
     let root = program_data.join("Quetzalcoatl");
-    secure_directory(&root)?;
-    Ok(root.join("secrets"))
+    ensure_product_root(&root)?;
+    let managed = root.join(MANAGED_DIRECTORY);
+    secure_directory(&managed)?;
+    Ok(managed.join("secrets"))
+}
+
+fn ensure_product_root(path: &Path) -> Result<(), ConfigurationError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => verify_real_directory(&metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let descriptor = SecurityDescriptor::new()?;
+            let wide_path = wide_path(path)?;
+            let attributes = SECURITY_ATTRIBUTES {
+                nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+                lpSecurityDescriptor: descriptor.0,
+                bInheritHandle: 0,
+            };
+            // Safety: path and descriptor remain valid for the duration of this call.
+            if unsafe { CreateDirectoryW(wide_path.as_ptr(), &attributes) } == 0 {
+                let error = unsafe { GetLastError() };
+                if error != ERROR_ALREADY_EXISTS {
+                    return Err(ConfigurationError::win32(
+                        "cannot create product data directory",
+                        error,
+                    ));
+                }
+            }
+            let metadata = fs::symlink_metadata(path).map_err(|error| {
+                ConfigurationError::io("cannot inspect product data directory", &error)
+            })?;
+            verify_real_directory(&metadata)
+        }
+        Err(error) => Err(ConfigurationError::io(
+            "cannot inspect product data directory",
+            &error,
+        )),
+    }
 }
 
 fn secure_directory(path: &Path) -> Result<(), ConfigurationError> {
@@ -134,14 +172,27 @@ fn secure_directory(path: &Path) -> Result<(), ConfigurationError> {
     // Safety: path and descriptor are NUL-terminated/valid for the duration of the call.
     if unsafe { CreateDirectoryW(wide_path.as_ptr(), &attributes) } == 0 {
         let error = unsafe { GetLastError() };
-        if error != ERROR_ALREADY_EXISTS || !path.is_dir() {
+        if error != ERROR_ALREADY_EXISTS {
             return Err(ConfigurationError::win32(
                 "cannot create protected configuration directory",
                 error,
             ));
         }
     }
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        ConfigurationError::io("cannot inspect protected configuration directory", &error)
+    })?;
+    verify_real_directory(&metadata)?;
     apply_acl(&wide_path, descriptor.0)
+}
+
+fn verify_real_directory(metadata: &fs::Metadata) -> Result<(), ConfigurationError> {
+    if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(ConfigurationError::storage(
+            "protected configuration path is not a real directory",
+        ));
+    }
+    Ok(())
 }
 
 fn apply_acl(path: &[u16], descriptor: PSECURITY_DESCRIPTOR) -> Result<(), ConfigurationError> {
