@@ -1,9 +1,9 @@
 # Seguimiento del PoC Quetzalcoatl
 
-Última actualización: 2026-07-18  
+Última actualización: 2026-07-19
 Estado global: `VALIDACIÓN I1 EN CURSO`
 
-Siguiente trabajo: `A-03 · reiniciar el host, ejecutar el EXE final elevado y verificar servicio, CLI y SID estable`
+Siguiente trabajo: `A-05 · recibir secretos por el pipe, protegerlos con DPAPI y registrar Tailscale`
 
 ## 1. Objetivo de seguimiento
 
@@ -38,10 +38,10 @@ Estados de trabajo permitidos: `NO INICIADO`, `EN CURSO`, `BLOQUEADO`, `CERRADO`
 - El workspace Rust contiene HostPreflight, servicio, CLI y contrato Named Pipe local.
 - Burn/MSI incorporan WinSW, WSL 2.7.10, Podman 6.0.1, la imagen WSL de Podman Machine OS 6.0.1 y el `runtime payload v1` fijado.
 - El primer bundle completó una instalación elevada y permitió descubrir un defecto real del resolvedor OCI de Podman 6.0.1. El camino quedó corregido con el artefacto oficial embebido, sin fallback ni resolución por red.
-- El `QuetzalcoatlSetup.exe` final está validado estáticamente. Su primera ejecución elevada se detuvo correctamente con exit 14 porque Windows conserva un reinicio pendiente producido durante la desinstalación controlada del bundle anterior.
-- El payload de PVE, Tailscale, OpenTofu, Garage y Forgejo está fijado por manifest; su ejecución real pertenece a A-04/A-05.
-- El host conserva WSL 2.7.10 y Podman 6.0.1. El producto y el servicio están ausentes hasta reiniciar y reanudar el EXE final.
-- La base de RuntimeGate ya está implementada, pero no se contabiliza como evidencia A-04 hasta cerrar A-03 bajo la identidad instalada.
+- El `QuetzalcoatlSetup.exe` final completó la instalación elevada con exit 0 después de limpiarse la señal real de reboot. Tras el reinicio de Windows del 2026-07-19, el servicio volvió en modo `Auto` con la misma cuenta y SID, y la máquina persistida regresó a `KVM_READY`.
+- RuntimeGate verifica y aplica los 12 archivos fijados, levanta el Quadlet PVE y alcanza `PROXMOX_READY` sólo después de obtener KVM API 12, TUN y FUSE dentro de la máquina y del contenedor, más systemd, cgroup v2 y `pvesh` saludables.
+- El host conserva WSL 2.7.10 y Podman 6.0.1. El producto y el servicio están instalados; el binario runtime actual es una sustitución de desarrollo y todavía debe incorporarse a un nuevo EXE final al cerrar I1.
+- Tailscale, rol, clúster, OpenTofu, Garage y Forgejo continúan pendientes dentro de A-05; no se ha iniciado I2.
 
 ## 4. Resultado de los dos incrementos
 
@@ -58,8 +58,8 @@ Gate 0 no es un tercer incremento. Cada gate debe cerrarse antes del camino de c
 
 | ID | Resultado requerido | Estado | Evidencia |
 |---|---|---|---|
-| G0-01 | WSL2 y Podman Machine exponen KVM utilizable | `NO INICIADO` | `KVM_GET_API_VERSION=12` dentro de la máquina |
-| G0-02 | El contenedor PVE privilegiado arranca con KVM, TUN, FUSE, cgroup v2 y persistencia | `NO INICIADO` | `pvesh get /version` y `pvecm status` antes/después de reinicio; `/etc/pve` preservado |
+| G0-01 | WSL2 y Podman Machine exponen KVM utilizable | `CERRADO` | `KVM_GET_API_VERSION=12` dentro de la máquina |
+| G0-02 | El contenedor PVE privilegiado arranca con KVM, TUN, FUSE, cgroup v2 y persistencia | `EN CURSO` | Arranque y probes pasan; faltan `pvecm status` y persistencia PVE después de reinicio |
 | G0-03 | Dos nodos Tailscale con tag de producto obtienen camino directo y RTT menor a 5 ms | `NO INICIADO` | `tailscale ping`, pérdida y RTT |
 | G0-04 | PVE API/SSH/Corosync funcionan por la tailnet sin puertos Windows | `NO INICIADO` | Relojes sincronizados; probes TCP 22/8006; tráfico UDP 5405-5412 capturado sobre tailnet; ACL/firewall efectivos; cero listeners PVE en Windows |
 | G0-05 | Los LXC PVE ejecutan los Compose canónicos de Garage y Forgejo con TUN y `fuse-overlayfs` después de reiniciar | `NO INICIADO` | `docker info`; ambos sidecars saludables; S3 PUT/GET y push/clone Forgejo después de reinicio |
@@ -74,7 +74,7 @@ Sólo se registran brechas de factibilidad o seguridad que bloquean I1 o I2. No 
 
 | ID | Stopper | Impacto | Condición de cierre | Estado |
 |---|---|---|---|---|
-| B-01 | WSL2 → Podman Machine → KVM aún no está demostrado | Impide PVE | Gate obtiene `KVM_GET_API_VERSION=12` desde la máquina y el contenedor privilegiado | `ABIERTO` |
+| B-01 | WSL2 → Podman Machine → KVM aún no está demostrado | Impide PVE | Gate obtiene `KVM_GET_API_VERSION=12` desde la máquina y el contenedor privilegiado | `CERRADO` |
 | B-02 | Imagen de máquina, PVE, Tailscale, OpenTofu, Quadlets y Compose no están fijados por digest/commit | Runtime no reproducible | Manifest v1 contiene fuente, versión, digest y hash de cada entrada | `CERRADO` |
 | B-03 | Arranque y persistencia de PVE OCI privilegiado no demostrados | Impide controller y member | PVE vuelve saludable después de reiniciar máquina/contenedor sin perder estado | `ABIERTO` |
 | B-04 | Docker dentro de LXC con TUN/FUSE/cgroup no demostrado | Impide Garage y Forgejo | Los Compose canónicos sobreviven reinicio y ambos sidecars quedan saludables | `ABIERTO` |
@@ -91,24 +91,24 @@ Un hallazgo que no bloquee alguno de los dos incrementos no pertenece aquí.
 |---:|---|---|---|---|
 | 1 | A-01 | Crear el workspace Rust único e implementar `HostPreflight` Windows/WSL2 | `CERRADO` | Un binario reusable entrega códigos estables; no captura secretos |
 | 2 | A-02 | Fijar referencias externas y construir `runtime manifest v1` | `CERRADO` | Cierra B-02 sin copiar contenido no utilizado |
-| 3 | A-03 | Crear WiX 5 Burn/MSI + WinSW, identidad runtime y primer EXE | `EN CURSO` | Setup reanuda reboot, instala servicio/CLI y mantiene el mismo SID |
-| 4 | A-04 | Implementar `RuntimeGate` dentro de `gnx-service` | `NO INICIADO` | La identidad dedicada crea la máquina y cierra G0-01 y B-01 |
-| 5 | A-05 | Integrar verticalmente I1, sin desarrollar I2 en paralelo | `NO INICIADO` | Cierra G0-02, G0-05, G0-07, B-03, B-04, B-07, B-08 y toda evidencia I1 |
+| 3 | A-03 | Crear WiX 5 Burn/MSI + WinSW, identidad runtime y primer EXE | `CERRADO` | Setup reanuda reboot, instala servicio/CLI y mantiene el mismo SID |
+| 4 | A-04 | Implementar `RuntimeGate` dentro de `gnx-service` | `CERRADO` | La identidad dedicada crea la máquina y cierra G0-01 y B-01 |
+| 5 | A-05 | Integrar verticalmente I1, sin desarrollar I2 en paralelo | `EN CURSO` | Cierra G0-02, G0-05, G0-07, B-03, B-04, B-07, B-08 y toda evidencia I1 |
 | 6 | A-06 | Probar red directa de dos hosts, `pvecm create/add` y canal protegido de join | `NO INICIADO` | Cierra G0-03, G0-04, G0-06, B-05 y B-06 |
 | 7 | A-07 | Implementar únicamente descubrimiento y join de I2 | `NO INICIADO` | Toda la evidencia I2 está registrada |
 
 La siguiente acción siempre es la primera fila no cerrada. No se inicia una fila posterior “para avanzar en paralelo” si la anterior define su contrato.
 
-El código base de A-04 existe para poder ejecutar la misma instalación vertical, pero A-04 permanece `NO INICIADO`: sólo la ejecución bajo `NT SERVICE\Quetzalcoatl` puede convertirlo en evidencia y cerrar G0-01.
+La evidencia de A-04 proviene de la ejecución bajo `NT SERVICE\Quetzalcoatl`; compilar o ejecutar bajo el usuario interactivo no cierra ningún gate.
 
 ## 8. Desglose de Incremento 1
 
 | ID | Entregable | Estado | Dependencia |
 |---|---|---|---|
-| I1-01 | Burn HostPreflight, checkpoint de reboot y MSI base | `EN CURSO` | A-03 |
-| I1-02 | Cuenta dedicada, WinSW, `gnx-service` y Named Pipe | `NO INICIADO` | I1-01 |
-| I1-03 | RuntimeGate, máquina `quetzalcoatl` y aplicación de payload v1 | `NO INICIADO` | I1-02, A-04 |
-| I1-04 | Quadlets de Tailscale/PVE y OpenTofu one-shot | `NO INICIADO` | I1-03 |
+| I1-01 | Burn HostPreflight, checkpoint de reboot y MSI base | `CERRADO` | A-03 |
+| I1-02 | Cuenta dedicada, WinSW, `gnx-service` y Named Pipe | `CERRADO` | I1-01 |
+| I1-03 | RuntimeGate, máquina `quetzalcoatl` y aplicación de payload v1 | `CERRADO` | I1-02, A-04 |
+| I1-04 | Quadlets de Tailscale/PVE y OpenTofu one-shot | `EN CURSO` | I1-03 |
 | I1-05 | DPAPI y `gnx-tailscale-enroll` one-shot sólo con `auth_key` | `NO INICIADO` | I1-02 |
 | I1-06 | Descubrimiento cero peers y persistencia controller | `NO INICIADO` | I1-04, I1-05 |
 | I1-07 | `pvecm create` y PVE privado saludable | `NO INICIADO` | I1-06 |
@@ -139,12 +139,15 @@ I2 no comienza hasta que I1 está cerrado.
 | 2026-07-18 | A-01 | Windows 11 x64 · desarrollo sin elevación | `gnx-host-preflight --format yaml` | Uso rechazado por stderr y exit 64 | commit `62d43a4` |
 | 2026-07-18 | A-01 | Windows 11 x64 · ejecución elevada | `gnx-host-preflight --format json` | Detectó y corrigió falsos negativos en hipervisor y salida OEM de DISM; Windows, elevación, virtualización, WSL y VMP pasan; fail-stop exit 14 por reinicio pendiente real | SHA-256 `154ADAF4928D3731FF8757DE90F4E4408C734AC0CFE361CC518C72545CBA81B7` · commit `acccf66` |
 | 2026-07-18 | A-01 | Windows 11 x64 · ejecución elevada después de reinicio | `gnx-host-preflight --format json` | Seis gates previos pasan; la ruta completa alcanza `podman_msi` y rechaza Podman 6.0.0 con exit 16 frente al pin 6.0.1 | SHA-256 `154ADAF4928D3731FF8757DE90F4E4408C734AC0CFE361CC518C72545CBA81B7` · commit `acccf66` |
-| 2026-07-18 | A-02/B-02 | Validación estática del payload `linux/amd64` y máquina WSL x86_64 | Manifest, hashes, parsers JSON/TOML/YAML y `dash -n` | 8 componentes y 12 archivos fijados; la imagen de máquina enlaza commit, índice OCI, manifest de plataforma y layer/release exacto; LF; `AllowFunnel=false`; sin tags mutables, auth keys ni secretos embebidos | manifest SHA-256 `3AAAA9594A553B7D6A980345E7DF1F17B57569FF3F180A981BA196D2AFE84C6B` · commits `68e7a16`, `5853866` |
+| 2026-07-19 | A-02/B-02 | Validación estática del payload `linux/amd64` y máquina WSL x86_64 | Manifest, hashes y prueba `payload_manifest_matches_all_installed_files` | 8 componentes y 12 archivos fijados; el Quadlet PVE delega el mount cgroup v2 escribible al modo systemd de Podman 6.0.1; sin tags mutables, auth keys ni secretos embebidos | manifest SHA-256 `C71133A097770E0A5EBEA50BA46BA01DC252F041089A8613381DDEC4082049F8` · commits `68e7a16`, `5853866`, `5fe7a57` |
 | 2026-07-18 | A-03/I1-01 | Windows 11 x64 · ejecución elevada | `gnx-host-preflight prepare-wsl --format json` | Windows, elevación, virtualización, WSL y VMP pasan; no requirió cambios ni reinicio | `gnx-host-preflight.exe` SHA-256 `C24A4411ABF79A549A6484A2403C8C7397D238C47852552C6579627CAC5A21EE` · commit `5410abd` |
 | 2026-07-18 | A-03/A-04 | Windows 11 x64 · servicio en consola bajo usuario interactivo | `gnx status --json` contra `\\.\pipe\Quetzalcoatl` | Named Pipe autenticado respondió y RuntimeGate rechazó la identidad incorrecta con `RUNTIME_IDENTITY_INVALID`; no creó ni modificó máquinas. Es una prueba fail-stop, no evidencia del SID de servicio | `gnx-service.exe` SHA-256 `58FDC9F66881C072E1BF5233BE3A365C02C967624E628F92EB8911D393B98F6C`; `gnx.exe` SHA-256 `75643597BEF5F6FC6366F7650AE8CFA633CDB4ED17CFA5BB606147FA03A277C2` · commits `3caff3b`, `fd8293c`, `5853866` |
 | 2026-07-18 | A-03/I1-01 | Validación estática WiX 5.0.2 | `build.ps1`; `wix msi validate`; decompile MSI; extract Burn/MSI | MSI válido con 19 archivos, cuenta `NT SERVICE\Quetzalcoatl`, ProductCode fijo y cadena de 5 paquetes. La extracción recuperó la imagen de 249,510,008 bytes con SHA-256 exacto; WSL 2.7.10 y Podman 6.0.1 están embebidos. El EXE aún está sin firma Authenticode | MSI SHA-256 `EAEE5B906700794EB47190EDF7315DA486FA22179DD27296A79DA31573A5FD93`; EXE SHA-256 `1929C0CFFFB7A127D787FE3C98B2A5625281EA8424B25399270308FE6DF906D0` · commits `7860ade`, `7d0cf23`, `5853866`, `11fa964` |
 | 2026-07-18 | A-03 | Windows 11 x64 · primera instalación elevada | Burn `install-20260718-215228.log` | PrepareWsl, Podman 6.0.1, ValidateHost y QuetzalcoatlProduct terminaron `0x0`; producto registrado y servicio iniciado. RuntimeGate alcanzó WSL y expuso el defecto tag+digest del resolvedor OCI de Podman 6.0.1; no se degradó a otra imagen | Burn exit `0x0`; corrección `5853866` |
 | 2026-07-18 | A-03 | Windows 11 x64 · sustitución controlada del bundle | Burn uninstall + ejecución del EXE final | El bundle anterior se retiró con exit `0x0`, conservando WSL/Podman permanentes. El EXE final verificó sus payloads y PrepareWsl terminó con exit 14 por señal real de reinicio; QuetzalcoatlProduct quedó ausente | bundle final SHA-256 `1929C0CFFFB7A127D787FE3C98B2A5625281EA8424B25399270308FE6DF906D0`; `PendingFileRenameOperations` contiene sólo tres temporales `DEL*.tmp` |
+| 2026-07-18 | A-03 | Windows 11 x64 · instalación final elevada | `QuetzalcoatlSetup.exe -quiet -norestart` | Burn terminó exit 0; servicio `Auto` bajo `NT SERVICE\Quetzalcoatl`, CLI, manifest e imagen WSL instalados con hashes exactos | EXE SHA-256 `1929C0CFFFB7A127D787FE3C98B2A5625281EA8424B25399270308FE6DF906D0` |
+| 2026-07-19 | A-03 | Windows 11 x64 · reinicio real a las 01:57:21 | SCM + `gnx status --json` | Producto sobrevivió el reboot; servicio volvió automáticamente con SID `S-1-5-80-1414281857-1943412974-186110390-2486725240-2230548587`; máquina persistida regresó a `KVM_READY` | A-03 cerrado; bundle SHA-256 `1929C0CFFFB7A127D787FE3C98B2A5625281EA8424B25399270308FE6DF906D0` |
+| 2026-07-19 | A-04/G0-01/B-01 | Windows 11 x64 · cuenta virtual instalada | `gnx status --json` después de hot-swap controlado | `PROXMOX_READY`: el binario sólo alcanza ese estado si ambos probes devuelven `KVM_API_VERSION=12;TUN=ready;FUSE=ready` y PVE confirma systemd, cgroup v2, `pve-cluster`, `pvedaemon`, `pveproxy` y `pvesh /version` | `gnx-service.exe` SHA-256 `664F4006A2CBC8E2ACB53FB2560A56E71D201733F687BAAE510577E7B53B4A16`; manifest SHA-256 `C71133A097770E0A5EBEA50BA46BA01DC252F041089A8613381DDEC4082049F8`; commit `5fe7a57` |
 
 Reglas de evidencia:
 
@@ -193,6 +196,8 @@ Reglas de evidencia:
 | 2026-07-18 | A-03 produjo y validó estáticamente el primer setup completo | A-03 permanece abierto hasta ejecutar el bundle elevado, comprobar servicio/CLI y demostrar el mismo SID después de reiniciar |
 | 2026-07-18 | La primera instalación elevada reveló el defecto tag+digest de Podman 6.0.1 | La imagen WSL oficial quedó fijada y embebida; no se añadió fallback ni resolución por red |
 | 2026-07-18 | El bundle anterior se desinstaló y el EXE final alcanzó el gate de reinicio real | WSL 2.7.10 y Podman 6.0.1 permanecen; producto/servicio están ausentes hasta reiniciar y reanudar A-03 |
+| 2026-07-19 | A-03 cerró después de instalación final y reboot real | Servicio/SID, perfil, máquina y CLI persistieron; A-04 pasó a ser el único trabajo activo |
+| 2026-07-19 | A-04 cerró G0-01 y B-01 con `PROXMOX_READY` bajo la cuenta virtual | A-05 inicia por DPAPI/Tailscale; G0-02 permanece abierto hasta probar PVE después de reboot |
 
 Al actualizar este archivo:
 

@@ -226,6 +226,8 @@ Hay dos gates con ownership distinto. Burn no administra la Podman Machine y `gn
 
 La conexión Podman del producto será rootful y estará aislada bajo la identidad dedicada. La mera existencia de `/dev/kvm` no basta: RuntimeGate invoca el ioctl `KVM_GET_API_VERSION` y exige el valor `12` dentro de la máquina y del contenedor PVE. Si falla, la instalación se detiene; no existe fallback a emulación por software ni a otro proveedor.
 
+El Quadlet PVE usa `--privileged`, pasa KVM, TUN y FUSE y conserva únicamente los dos bind mounts de datos PVE. No monta `/sys/fs/cgroup` desde el host: al detectar `/sbin/init`, el modo systemd de Podman 6.0.1 monta cgroup v2 escribible dentro del contenedor. RuntimeGate crea previamente los directorios persistentes, arranca la unidad generada y exige systemd, cgroup v2 y servicios PVE saludables.
+
 Docker dentro de LXC es una restricción aceptada. Antes de integrar Garage o Forgejo se debe demostrar dentro del LXC: Docker Engine, Compose, cgroup v2, `fuse-overlayfs`, `/dev/net/tun` y reinicio persistente. No se implementará fallback a QEMU VM.
 
 ## 7. Secuencia de instalación y rol automático
