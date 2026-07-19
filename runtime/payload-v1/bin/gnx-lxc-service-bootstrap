@@ -1,0 +1,257 @@
+#!/bin/sh
+set -eu
+umask 077
+export LC_ALL=C
+
+bootstrap_dir='/run/gnx/service-bootstrap'
+input="$bootstrap_dir/input"
+install_form='/run/gnx/forgejo-install.form'
+install_response='/run/gnx/forgejo-install.response'
+curl_config='/run/gnx/forgejo-curl.conf'
+curl_output='/run/gnx/forgejo-user.json'
+tailscale_status='/run/gnx/service-tailscale-status.json'
+serve_status='/run/gnx/service-serve-status.json'
+
+cleanup() {
+  rm -f \
+    /run/gnx/ts-authkey \
+    /run/gnx/tailscale-status.json \
+    /run/gnx/tailscale-status.json.tmp \
+    "$input" \
+    "$install_form" \
+    "$install_response" \
+    "$curl_config" \
+    "$curl_output" \
+    "$tailscale_status" \
+    "$serve_status"
+  if [ -n "${garage_temporary:-}" ]; then
+    rm -f "$garage_temporary"
+  fi
+}
+trap cleanup EXIT HUP INT TERM
+
+exec 3< "$input"
+IFS= read -r service <&3 || exit 64
+IFS= read -r hostname <&3 || exit 64
+IFS= read -r tailnet <&3 || exit 64
+IFS= read -r auth_key <&3 || exit 64
+IFS= read -r secret_one <&3 || exit 64
+IFS= read -r secret_two <&3 || exit 64
+IFS= read -r secret_three <&3 || exit 64
+IFS= read -r secret_four <&3 || exit 64
+if IFS= read -r extra <&3; then
+  exit 64
+fi
+exec 3<&-
+
+case "$service" in garage|forgejo) ;; *) exit 64 ;; esac
+case "$hostname" in "gnx-$service-"*) ;; *) exit 64 ;; esac
+case "$hostname" in ''|*[!a-z0-9-]*|-*|*-) exit 64 ;; esac
+case "$tailnet" in *.ts.net) ;; *) exit 64 ;; esac
+case "$auth_key" in tskey-auth-*) ;; *) exit 64 ;; esac
+fqdn="$hostname.$tailnet"
+app_dir="/opt/quetzalcoatl/$service"
+project="gnx-$service"
+
+install -d -m 0700 /run/gnx
+install -d -m 0755 "$app_dir" "$app_dir/serve"
+install -m 0644 "$bootstrap_dir/compose.yaml" "$app_dir/compose.yaml"
+install -m 0644 "$bootstrap_dir/serve.json" "$app_dir/serve/serve.json"
+printf 'TS_HOSTNAME=%s\nTS_CERT_DOMAIN=%s\n' "$hostname" "$fqdn" > "$app_dir/.env"
+chmod 0600 "$app_dir/.env"
+
+printf '%s' "$auth_key" > /run/gnx/ts-authkey
+chmod 0400 /run/gnx/ts-authkey
+unset auth_key
+"$bootstrap_dir/gnx-tailscale-enroll" docker "$service" "$hostname"
+test ! -e /run/gnx/ts-authkey
+
+case "$service" in
+  garage)
+    install -d -m 0755 /var/lib/quetzalcoatl/garage/data /var/lib/quetzalcoatl/garage/meta
+    install -d -m 0700 /var/lib/quetzalcoatl/secrets
+    garage_config='/var/lib/quetzalcoatl/secrets/garage.toml'
+    garage_temporary="$garage_config.gnx-new"
+    : > "$garage_temporary"
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        'rpc_secret = "__GNX_RPC_SECRET__"') printf 'rpc_secret = "%s"\n' "$secret_one" ;;
+        'admin_token = "__GNX_ADMIN_TOKEN__"') printf 'admin_token = "%s"\n' "$secret_two" ;;
+        *) printf '%s\n' "$line" ;;
+      esac
+    done < "$bootstrap_dir/garage.toml.template" > "$garage_temporary"
+    chmod 0600 "$garage_temporary"
+    mv -f "$garage_temporary" "$garage_config"
+    test "$(stat -c '%u:%g:%a' "$garage_config")" = '0:0:600'
+    ! grep -q '__GNX_' "$garage_config"
+    ;;
+  forgejo)
+    forgejo_secret_dir='/var/lib/quetzalcoatl/secrets/forgejo'
+    install -d -o 1000 -g 1000 -m 0700 "$forgejo_secret_dir"
+    printf '%s\n' "$secret_one" > "$forgejo_secret_dir/secret_key"
+    printf '%s\n' "$secret_two" > "$forgejo_secret_dir/internal_token"
+    chown 1000:1000 "$forgejo_secret_dir/secret_key" "$forgejo_secret_dir/internal_token"
+    chmod 0400 "$forgejo_secret_dir/secret_key" "$forgejo_secret_dir/internal_token"
+    install -d -m 0755 /var/lib/quetzalcoatl/forgejo/data
+    ;;
+esac
+
+cd "$app_dir"
+docker compose --project-name "$project" --env-file .env -f compose.yaml config --quiet
+docker compose --project-name "$project" --env-file .env -f compose.yaml pull --policy missing --quiet >/dev/null
+tailscale_image='docker.io/tailscale/tailscale@sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e'
+test "$(docker image inspect --format '{{.Id}}' "$tailscale_image")" = 'sha256:1e26d7400ae5dd99fb62f0d7706908d5a9dd8ee9fed3a5100611521cfccbd645'
+case "$service" in
+  garage)
+    app_image='docker.io/dxflrs/garage@sha256:dac0c92add4f1a0b41035e94b41036a270ffbe88a37c7ac9c3f19e6dc5bdccf2'
+    app_config='sha256:5eda3acb72a0b6c3432233d19b07dffabd9ee7eb93be90031bae75e4b81e6324'
+    ;;
+  forgejo)
+    app_image='codeberg.org/forgejo/forgejo@sha256:49b5cdd63e2eaab3e3484ffb21a3317e0b782633a2f29672ca295e2c001e6edf'
+    app_config='sha256:e0e4e92c0e67e528308905ca028f38354608247f2a8c1de371df4e8555001b01'
+    ;;
+esac
+test "$(docker image inspect --format '{{.Id}}' "$app_image")" = "$app_config"
+docker compose --project-name "$project" --env-file .env -f compose.yaml up --detach --pull never --wait --wait-timeout 300 >/dev/null
+
+wait_tailscale() {
+  attempt=0
+  while [ "$attempt" -lt 60 ]; do
+    attempt=$((attempt + 1))
+    if docker exec "gnx-$service-tailscale" tailscale status --json > "$tailscale_status" 2>/dev/null &&
+      jq -e --arg host "$hostname" --arg tailnet "$tailnet" --arg fqdn "$fqdn" '
+        .BackendState == "Running" and
+        .TUN == true and
+        .CurrentTailnet.MagicDNSSuffix == $tailnet and
+        .CurrentTailnet.MagicDNSEnabled == true and
+        .Self.HostName == $host and
+        .Self.DNSName == ($fqdn + ".") and
+        .Self.Tags == ["tag:quetzalcoatl-service"] and
+        (.Self.ID | type == "string" and length > 0) and
+        (.CertDomains | index($fqdn) != null) and
+        ([.TailscaleIPs[]? |
+          select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")) |
+          split(".") | map(tonumber) |
+          select(length == 4 and .[0] == 100 and .[1] >= 64 and .[1] <= 127)] | length == 1)
+      ' "$tailscale_status" >/dev/null &&
+      docker exec "gnx-$service-tailscale" tailscale serve status --json > "$serve_status" 2>/dev/null; then
+      host_port="$fqdn:443"
+      if [ "$service" = garage ]; then
+        jq -e --arg host_port "$host_port" '
+          (.TCP | keys) == ["443"] and
+          .TCP["443"].HTTPS == true and
+          (.Web | keys) == [$host_port] and
+          (.Web[$host_port].Handlers | keys) == ["/"] and
+          .Web[$host_port].Handlers["/"].Proxy == "http://127.0.0.1:3900" and
+          ([.AllowFunnel[]? | select(. == true)] | length == 0)
+        ' "$serve_status" >/dev/null && return 0
+      else
+        jq -e --arg host_port "$host_port" '
+          (.TCP | keys) == ["2222", "443"] and
+          .TCP["443"].HTTPS == true and
+          .TCP["2222"].TCPForward == "127.0.0.1:22" and
+          (.Web | keys) == [$host_port] and
+          (.Web[$host_port].Handlers | keys) == ["/"] and
+          .Web[$host_port].Handlers["/"].Proxy == "http://127.0.0.1:3000" and
+          ([.AllowFunnel[]? | select(. == true)] | length == 0)
+        ' "$serve_status" >/dev/null && return 0
+      fi
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+wait_tailscale
+
+case "$service" in
+  garage)
+    key_request='{"id":null,"search":"gnx-i1","showSecretKey":true}'
+    if ! key_json=$(printf '%s' "$key_request" | docker exec -i gnx-garage /garage json-api GetKeyInfo - 2>/dev/null); then
+      if [ -n "$secret_three" ]; then
+        import_key=$(printf '{"accessKeyId":"%s","secretAccessKey":"%s","name":"gnx-i1"}' "$secret_three" "$secret_four")
+        key_json=$(printf '%s' "$import_key" | docker exec -i gnx-garage /garage json-api ImportKey -)
+        unset import_key
+      else
+        create_key='{"name":"gnx-i1","expiration":null,"neverExpires":true,"allow":null,"deny":null}'
+        key_json=$(printf '%s' "$create_key" | docker exec -i gnx-garage /garage json-api CreateKey -)
+      fi
+    fi
+    access_key=$(printf '%s' "$key_json" | jq -er '.accessKeyId | select(test("^GK[0-9a-f]{24}$"))')
+    secret_key=$(printf '%s' "$key_json" | jq -er '.secretAccessKey | select(test("^[0-9a-f]{64}$"))')
+    unset key_json
+    if [ -n "$secret_three" ] || [ -n "$secret_four" ]; then
+      [ "$access_key" = "$secret_three" ]
+      [ "$secret_key" = "$secret_four" ]
+    fi
+
+    bucket_request='{"id":null,"globalAlias":"gnx-i1","search":null}'
+    if ! bucket_json=$(printf '%s' "$bucket_request" | docker exec -i gnx-garage /garage json-api GetBucketInfo - 2>/dev/null); then
+      create_bucket='{"globalAlias":"gnx-i1","localAlias":null}'
+      bucket_json=$(printf '%s' "$create_bucket" | docker exec -i gnx-garage /garage json-api CreateBucket -)
+    fi
+    bucket_id=$(printf '%s' "$bucket_json" | jq -er '.id | select(test("^[0-9a-f]{64}$"))')
+    unset bucket_json
+    allow_request=$(printf '{"bucketId":"%s","accessKeyId":"%s","permissions":{"read":true,"write":true,"owner":true}}' "$bucket_id" "$access_key")
+    printf '%s' "$allow_request" | docker exec -i gnx-garage /garage json-api AllowBucketKey - >/dev/null
+    unset allow_request
+    key_json=$(printf '%s' "$key_request" | docker exec -i gnx-garage /garage json-api GetKeyInfo -)
+    printf '%s' "$key_json" | jq -e --arg bucket "$bucket_id" '
+      any(.buckets[]?; .id == $bucket and .permissions.read == true and .permissions.write == true and .permissions.owner == true)
+    ' >/dev/null
+    unset key_json
+
+    inspect=$(docker inspect gnx-garage gnx-garage-tailscale)
+    case "$inspect" in *tskey-auth-*|*"$secret_one"*|*"$secret_two"*|*"$secret_key"*) exit 70 ;; esac
+    unset inspect
+    printf 'GARAGE_ACCESS_KEY=%s\n' "$access_key"
+    printf 'GARAGE_SECRET_KEY=%s\n' "$secret_key"
+    printf 'LXC_SERVICE=ready;SERVICE=garage;VMID=200\n'
+    ;;
+  forgejo)
+    app_ini='/var/lib/quetzalcoatl/forgejo/data/gitea/conf/app.ini'
+    if ! grep -Eq '^INSTALL_LOCK[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$app_ini"; then
+      printf '%s' \
+        "db_type=sqlite3&db_path=/data/gitea/forgejo.db&app_name=Forgejo&repo_root_path=/data/git/repositories&lfs_root_path=/data/gitea/lfs&run_user=git&domain=$fqdn&ssh_port=22&http_port=3000&app_url=https://$fqdn/&log_root_path=/data/gitea/log&disable_registration=on&offline_mode=on&disable_gravatar=on&admin_name=gnx-admin&admin_passwd=$secret_three&admin_confirm_passwd=$secret_three&admin_email=gnx-admin@example.invalid" \
+        > "$install_form"
+      chmod 0400 "$install_form"
+      curl -sS -o "$install_response" \
+        -H 'Content-Type: application/x-www-form-urlencoded' \
+        --data-binary "@$install_form" \
+        http://127.0.0.1:3000/ >/dev/null 2>&1 || true
+      rm -f "$install_form" "$install_response"
+    fi
+
+    attempt=0
+    installed=0
+    while [ "$attempt" -lt 90 ]; do
+      attempt=$((attempt + 1))
+      if grep -Eq '^INSTALL_LOCK[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$app_ini" &&
+        curl -fsS http://127.0.0.1:3000/api/healthz >/dev/null 2>&1; then
+        installed=1
+        break
+      fi
+      sleep 2
+    done
+    [ "$installed" -eq 1 ]
+    grep -Eq '^SECRET_KEY_URI[[:space:]]*=[[:space:]]*file:/run/secrets/forgejo/secret_key[[:space:]]*$' "$app_ini"
+    grep -Eq '^INTERNAL_TOKEN_URI[[:space:]]*=[[:space:]]*file:/run/secrets/forgejo/internal_token[[:space:]]*$' "$app_ini"
+    test "$(stat -c '%u:%g:%a' /var/lib/quetzalcoatl/secrets/forgejo/secret_key)" = '1000:1000:400'
+    test "$(stat -c '%u:%g:%a' /var/lib/quetzalcoatl/secrets/forgejo/internal_token)" = '1000:1000:400'
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in *"$secret_one"*|*"$secret_two"*|*"$secret_three"*) exit 71 ;; esac
+    done < "$app_ini"
+
+    printf 'silent\nshow-error\nfail\nuser = "gnx-admin:%s"\noutput = "%s"\nurl = "http://127.0.0.1:3000/api/v1/user"\n' \
+      "$secret_three" "$curl_output" > "$curl_config"
+    chmod 0400 "$curl_config"
+    curl --config "$curl_config"
+    jq -e '.login == "gnx-admin" and .is_admin == true' "$curl_output" >/dev/null
+    rm -f "$curl_config" "$curl_output"
+
+    inspect=$(docker inspect gnx-forgejo gnx-forgejo-tailscale)
+    case "$inspect" in *tskey-auth-*|*"$secret_one"*|*"$secret_two"*|*"$secret_three"*) exit 72 ;; esac
+    unset inspect
+    printf 'LXC_SERVICE=ready;SERVICE=forgejo;VMID=201\n'
+    ;;
+esac

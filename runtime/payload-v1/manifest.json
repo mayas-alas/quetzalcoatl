@@ -154,6 +154,20 @@
       "sha256": "65faaa58cbbd598f0f66790db8a95ae6f67501d3775d43456ef4128eb6850913"
     },
     {
+      "path": "bin/gnx-lxc-service-bootstrap",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0755",
+      "sha256": "b6d1432327195a56012e0aaade8fb17e0a9b43beb2928181194d61087f74b4c1"
+    },
+    {
+      "path": "bin/gnx-lxc-service-prepare",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0755",
+      "sha256": "4da6e3a59bacda243f60850f94e76200dcfd7b126e4f42965f7530ae273a0e41"
+    },
+    {
       "path": "bin/gnx-proxmox-entrypoint",
       "source": "quetzalcoatl",
       "version": 1,
@@ -242,7 +256,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "85f090b9ee74f3e90d7784f2fc604f1ab1d1fd288a58453c872154fc9d023d2a"
+      "sha256": "0b329c3a2c2e3210e301a5b3977761c4e871d1bd8482ef5fbf6251cd8db03436"
     },
     {
       "path": "quadlet/tailscaled.container",
@@ -277,7 +291,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "cb326aed2ab6faf9b8b2dd201c955e5847da78f76d8a0a9514199eb4989c10ad"
+      "sha256": "caa5fd971b588eab86b736fb58a7e88688aa2bc4be4977769a4e7854cfc04d1c"
     },
     {
       "path": "services/forgejo/serve/serve.json",
@@ -291,7 +305,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "6c6c5a6d0059abdf1418f3249b1146ca56f71af8ecdfce753fb910b53db0839d"
+      "sha256": "6c37c79a40d3538f2aeb2a827c356659b34acc15c835cb0617c4501a3cd84368"
     },
     {
       "path": "services/garage/garage.toml.template",

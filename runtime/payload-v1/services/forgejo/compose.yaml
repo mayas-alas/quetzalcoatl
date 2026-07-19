@@ -40,12 +40,11 @@ services:
       FORGEJO__server__ROOT_URL: https://${TS_CERT_DOMAIN:?TS_CERT_DOMAIN is required}/
       FORGEJO__server__SSH_DOMAIN: ${TS_CERT_DOMAIN:?TS_CERT_DOMAIN is required}
       FORGEJO__server__SSH_PORT: "2222"
-      FORGEJO__actions__ENABLED: "true"
       FORGEJO__database__DB_TYPE: sqlite3
       FORGEJO__database__PATH: /data/gitea/forgejo.db
-      FORGEJO__security__INSTALL_LOCK: "true"
-      FORGEJO__security__SECRET_KEY__FILE: /run/secrets/forgejo/secret_key
-      FORGEJO__security__INTERNAL_TOKEN__FILE: /run/secrets/forgejo/internal_token
+      FORGEJO__security__SECRET_KEY_URI: file:/run/secrets/forgejo/secret_key
+      FORGEJO__security__INTERNAL_TOKEN_URI: file:/run/secrets/forgejo/internal_token
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
     volumes:
       - /var/lib/quetzalcoatl/forgejo/data:/data
       - /var/lib/quetzalcoatl/secrets/forgejo:/run/secrets/forgejo:ro

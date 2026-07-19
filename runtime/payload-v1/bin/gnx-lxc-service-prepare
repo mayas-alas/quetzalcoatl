@@ -1,0 +1,135 @@
+#!/bin/sh
+set -eu
+umask 077
+export LC_ALL=C
+
+runtime_dir='/run/gnx/lxc-service-bootstrap'
+input="$runtime_dir/input"
+guest_dir='/run/gnx/service-bootstrap'
+guest_input="$guest_dir/input"
+guest_bootstrap="$guest_dir/gnx-lxc-service-bootstrap"
+guest_enroll="$guest_dir/gnx-tailscale-enroll"
+vmid=''
+
+cleanup() {
+  rm -f "$input"
+  rmdir "$runtime_dir" >/dev/null 2>&1 || true
+  if [ -n "$vmid" ]; then
+    pct exec "$vmid" -- rm -f \
+      "$guest_input" \
+      "$guest_bootstrap" \
+      "$guest_enroll" \
+      "$guest_dir/compose.yaml" \
+      "$guest_dir/serve.json" \
+      "$guest_dir/garage.toml.template" >/dev/null 2>&1 || true
+    pct exec "$vmid" -- rmdir "$guest_dir" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT HUP INT TERM
+
+install -d -m 0700 "$runtime_dir"
+cat > "$input"
+chmod 0400 "$input"
+test "$(stat -c '%u:%g:%a' "$input")" = '0:0:400'
+
+exec 3< "$input"
+IFS= read -r service <&3 || exit 64
+IFS= read -r hostname <&3 || exit 64
+IFS= read -r tailnet <&3 || exit 64
+IFS= read -r auth_key <&3 || exit 64
+IFS= read -r secret_one <&3 || exit 64
+IFS= read -r secret_two <&3 || exit 64
+IFS= read -r secret_three <&3 || exit 64
+IFS= read -r secret_four <&3 || exit 64
+if IFS= read -r extra <&3; then
+  exit 64
+fi
+exec 3<&-
+
+is_hex() {
+  value=$1
+  length=$2
+  [ "${#value}" -eq "$length" ] || return 1
+  case "$value" in *[!0-9a-f]*) return 1 ;; esac
+}
+
+case "$service" in
+  garage)
+    vmid=200
+    is_hex "$secret_one" 64
+    is_hex "$secret_two" 64
+    if [ -n "$secret_three" ] || [ -n "$secret_four" ]; then
+      case "$secret_three" in GK*) ;; *) exit 64 ;; esac
+      is_hex "${secret_three#GK}" 24
+      is_hex "$secret_four" 64
+    fi
+    ;;
+  forgejo)
+    vmid=201
+    is_hex "$secret_one" 64
+    is_hex "$secret_two" 64
+    is_hex "$secret_three" 48
+    [ -z "$secret_four" ]
+    ;;
+  *) exit 64 ;;
+esac
+
+case "$hostname" in
+  "gnx-$service-"* ) ;;
+  *) exit 64 ;;
+esac
+case "$hostname" in ''|*[!a-z0-9-]*|-*|*-) exit 64 ;; esac
+[ "${#hostname}" -le 63 ]
+case "$tailnet" in *.ts.net) ;; *) exit 64 ;; esac
+case "$tailnet" in ''|*[!a-z0-9.-]*|.*|*.|*..*|-*|*-.*|*.-*) exit 64 ;; esac
+[ "${#hostname}" -le $((253 - 1 - ${#tailnet})) ]
+case "$auth_key" in tskey-auth-*) ;; *) exit 64 ;; esac
+[ "${#auth_key}" -ge 20 ] && [ "${#auth_key}" -le 512 ]
+case "$auth_key" in *[![:graph:]]*) exit 64 ;; esac
+
+config="/etc/pve/lxc/$vmid.conf"
+test -s "$config"
+pct config "$vmid" | grep -Eq "^hostname: gnx-$service$"
+pct status "$vmid" | grep -q 'status: running'
+test -x /usr/libexec/quetzalcoatl/gnx-lxc-service-bootstrap
+test -x /usr/libexec/quetzalcoatl/gnx-tailscale-enroll
+test -s "/usr/share/quetzalcoatl/services/$service/compose.yaml"
+test -s "/usr/share/quetzalcoatl/services/$service/serve/serve.json"
+
+pct exec "$vmid" -- install -d -m 0700 "$guest_dir"
+pct push "$vmid" "$input" "$guest_input" --perms 0400 >/dev/null
+pct exec "$vmid" -- sh -eu -c "test \"\$(stat -c '%u:%g:%a' '$guest_input')\" = '0:0:400'"
+pct push "$vmid" /usr/libexec/quetzalcoatl/gnx-lxc-service-bootstrap "$guest_bootstrap" --perms 0755 >/dev/null
+pct push "$vmid" /usr/libexec/quetzalcoatl/gnx-tailscale-enroll "$guest_enroll" --perms 0755 >/dev/null
+pct push "$vmid" "/usr/share/quetzalcoatl/services/$service/compose.yaml" "$guest_dir/compose.yaml" --perms 0644 >/dev/null
+pct push "$vmid" "/usr/share/quetzalcoatl/services/$service/serve/serve.json" "$guest_dir/serve.json" --perms 0644 >/dev/null
+if [ "$service" = garage ]; then
+  test -s /usr/share/quetzalcoatl/services/garage/garage.toml.template
+  pct push "$vmid" /usr/share/quetzalcoatl/services/garage/garage.toml.template "$guest_dir/garage.toml.template" --perms 0644 >/dev/null
+fi
+
+output=$(pct exec "$vmid" -- "$guest_bootstrap")
+
+rm -f "$input"
+pct exec "$vmid" -- rm -f \
+  "$guest_input" \
+  "$guest_bootstrap" \
+  "$guest_enroll" \
+  "$guest_dir/compose.yaml" \
+  "$guest_dir/serve.json" \
+  "$guest_dir/garage.toml.template" >/dev/null
+pct exec "$vmid" -- rmdir "$guest_dir" >/dev/null
+test ! -e "$input"
+pct exec "$vmid" -- sh -eu -c '
+  test ! -e /run/gnx/service-bootstrap/input
+  test ! -e /run/gnx/ts-authkey
+  test ! -e /run/gnx/forgejo-install.form
+  test ! -e /run/gnx/forgejo-install.response
+  test ! -e /run/gnx/forgejo-curl.conf
+  test ! -e /run/gnx/forgejo-user.json
+  test ! -e /run/gnx/service-tailscale-status.json
+  test ! -e /run/gnx/service-serve-status.json
+'
+trap - EXIT HUP INT TERM
+rmdir "$runtime_dir"
+printf '%s\n' "$output"

@@ -23,6 +23,7 @@ const MACHINE_MEMORY_MIB: u64 = 8192;
 const MACHINE_DISK_GIB: u64 = 100;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const LXC_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-lxc-prepare";
+const LXC_SERVICE_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-lxc-service-prepare";
 const OPENTOFU_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-opentofu-prepare";
 const PVE_CLUSTER_CREATE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-cluster-create";
 const PVE_CONFIGURE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-configure";
@@ -39,7 +40,7 @@ const MACHINE_IMAGE_ARTIFACT: &str = "podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_URL: &str = "https://github.com/podman-container-tools/podman-machine-os/releases/download/v6.0.1/podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_SIZE: u64 = 249_510_008;
 
-const PAYLOAD_FILES: [PayloadSpec; 26] = [
+const PAYLOAD_FILES: [PayloadSpec; 28] = [
     PayloadSpec::new(
         "bin/gnx-proxmox-entrypoint",
         "/usr/libexec/quetzalcoatl/gnx-proxmox-entrypoint",
@@ -53,6 +54,16 @@ const PAYLOAD_FILES: [PayloadSpec; 26] = [
     PayloadSpec::new(
         "bin/gnx-lxc-prepare",
         "/usr/libexec/quetzalcoatl/gnx-lxc-prepare",
+        "0755",
+    ),
+    PayloadSpec::new(
+        "bin/gnx-lxc-service-bootstrap",
+        "/usr/libexec/quetzalcoatl/gnx-lxc-service-bootstrap",
+        "0755",
+    ),
+    PayloadSpec::new(
+        "bin/gnx-lxc-service-prepare",
+        "/usr/libexec/quetzalcoatl/gnx-lxc-service-prepare",
         "0755",
     ),
     PayloadSpec::new(

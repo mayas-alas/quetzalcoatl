@@ -33,6 +33,7 @@ services:
     depends_on:
       tailscale:
         condition: service_healthy
+    command: ["/garage", "server", "--single-node"]
     volumes:
       - /var/lib/quetzalcoatl/secrets/garage.toml:/etc/garage.toml:ro
       - /var/lib/quetzalcoatl/garage/data:/var/lib/garage/data
