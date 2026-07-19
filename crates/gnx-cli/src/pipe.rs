@@ -15,6 +15,7 @@ pub fn status() -> Result<StatusResponse, String> {
     let pipe = connect()?;
     let request = serde_json::to_vec(&Request {
         command: Command::Status,
+        configuration: None,
     })
     .map_err(|e| format!("cannot encode request: {e}"))?;
     write_message(pipe.0, &request)?;

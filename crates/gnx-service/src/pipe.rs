@@ -3,7 +3,9 @@ use std::mem::size_of;
 use std::ptr::null_mut;
 use std::sync::{Arc, RwLock};
 
-use gnx_protocol::{Command, MAX_MESSAGE_BYTES, PIPE_NAME, Request, StatusResponse};
+use gnx_protocol::{
+    Command, MAX_MESSAGE_BYTES, OperationResponse, PIPE_NAME, Request, StatusResponse,
+};
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_PIPE_CONNECTED, GetLastError, HANDLE,
     INVALID_HANDLE_VALUE, LocalFree,
@@ -12,8 +14,9 @@ use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use windows_sys::Win32::Security::{
-    GetTokenInformation, PSECURITY_DESCRIPTOR, RevertToSelf, SECURITY_ATTRIBUTES, TOKEN_QUERY,
-    TokenUser,
+    CheckTokenMembership, CreateWellKnownSid, GetTokenInformation, PSECURITY_DESCRIPTOR,
+    RevertToSelf, SECURITY_ATTRIBUTES, SECURITY_MAX_SID_SIZE, TOKEN_ELEVATION, TOKEN_QUERY,
+    TokenElevation, TokenUser, WinBuiltinAdministratorsSid,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_FLAG_FIRST_PIPE_INSTANCE, FlushFileBuffers, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
@@ -23,6 +26,7 @@ use windows_sys::Win32::System::Pipes::{
     PIPE_READMODE_MESSAGE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_WAIT,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
+use zeroize::Zeroize;
 
 const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)";
 
@@ -42,17 +46,41 @@ pub fn serve(status: Arc<RwLock<StatusResponse>>) -> Result<(), String> {
 }
 
 fn serve_client(pipe: HANDLE, status: &Arc<RwLock<StatusResponse>>) -> Result<(), String> {
-    let message = read_message(pipe)?;
-    authorize_client(pipe)?;
-    let request: Request = serde_json::from_slice(&message)
-        .map_err(|_| "request is not valid protocol v1 JSON".to_string())?;
+    let mut message = read_message(pipe)?;
+    let parsed = serde_json::from_slice(&message);
+    message.zeroize();
+    let request: Request =
+        parsed.map_err(|_| "request is not valid protocol v1 JSON".to_string())?;
     let response = match request.command {
         Command::Status => {
+            authorize_client(pipe, false)?;
+            if request.configuration.is_some() {
+                return Err("status request cannot contain configuration".into());
+            }
             let snapshot = status
                 .read()
                 .map_err(|_| "runtime status lock is poisoned".to_string())?
                 .clone();
             serde_json::to_vec(&snapshot)
+        }
+        Command::Configure => {
+            let operation = match authorize_client(pipe, true) {
+                Err(_) => OperationResponse::rejected(
+                    "CONFIGURATION_UNAUTHORIZED",
+                    "configuration requires an elevated local administrator",
+                ),
+                Ok(()) => match request.configuration.as_ref() {
+                    None => OperationResponse::rejected(
+                        "CONFIGURATION_INVALID",
+                        "configure request is missing configuration",
+                    ),
+                    Some(configuration) => match crate::secrets::store(configuration) {
+                        Ok(()) => OperationResponse::accepted("CONFIGURATION_STORED"),
+                        Err(error) => OperationResponse::rejected(error.code(), error.message()),
+                    },
+                },
+            };
+            serde_json::to_vec(&operation)
         }
     }
     .map_err(|e| format!("cannot serialize response: {e}"))?;
@@ -115,12 +143,12 @@ fn connect(pipe: HANDLE) -> Result<(), String> {
     }
 }
 
-fn authorize_client(pipe: HANDLE) -> Result<(), String> {
+fn authorize_client(pipe: HANDLE, require_elevated_admin: bool) -> Result<(), String> {
     // Safety: pipe has a connected local client. Windows supplies the client token.
     if unsafe { ImpersonateNamedPipeClient(pipe) } == 0 {
         return Err(last_error("cannot impersonate named-pipe client"));
     }
-    let result = read_thread_token();
+    let result = read_thread_token(require_elevated_admin);
     // Safety: this thread is impersonating only within this function.
     let reverted = unsafe { RevertToSelf() };
     if reverted == 0 {
@@ -129,7 +157,7 @@ fn authorize_client(pipe: HANDLE) -> Result<(), String> {
     result
 }
 
-fn read_thread_token() -> Result<(), String> {
+fn read_thread_token(require_elevated_admin: bool) -> Result<(), String> {
     let mut token: HANDLE = null_mut();
     // Safety: token receives a query-only handle for the current impersonated thread.
     if unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 0, &mut token) } == 0 {
@@ -155,6 +183,51 @@ fn read_thread_token() -> Result<(), String> {
     } == 0
     {
         return Err(last_error("cannot read named-pipe client token"));
+    }
+    if !require_elevated_admin {
+        return Ok(());
+    }
+
+    let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+    let mut elevation_size = 0u32;
+    // Safety: elevation is a correctly sized TOKEN_ELEVATION output buffer.
+    if unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenElevation,
+            &mut elevation as *mut _ as *mut c_void,
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &mut elevation_size,
+        )
+    } == 0
+        || elevation.TokenIsElevated == 0
+    {
+        return Err("named-pipe client is not elevated".into());
+    }
+
+    let mut admin_sid = vec![0u8; SECURITY_MAX_SID_SIZE as usize];
+    let mut admin_sid_size = admin_sid.len() as u32;
+    // Safety: buffer is large enough for any well-known SID and receives its exact size.
+    if unsafe {
+        CreateWellKnownSid(
+            WinBuiltinAdministratorsSid,
+            null_mut(),
+            admin_sid.as_mut_ptr().cast(),
+            &mut admin_sid_size,
+        )
+    } == 0
+    {
+        return Err(last_error("cannot construct local Administrators SID"));
+    }
+    let mut is_admin = 0;
+    // Safety: token is the connected client impersonation token and SID is initialized above.
+    if unsafe { CheckTokenMembership(token.0, admin_sid.as_mut_ptr().cast(), &mut is_admin) } == 0 {
+        return Err(last_error(
+            "cannot check named-pipe client group membership",
+        ));
+    }
+    if is_admin == 0 {
+        return Err("named-pipe client is not a local administrator".into());
     }
     Ok(())
 }

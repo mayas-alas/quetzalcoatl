@@ -2,6 +2,8 @@
 mod pipe;
 #[cfg(windows)]
 mod runtime_gate;
+#[cfg(windows)]
+mod secrets;
 
 #[cfg(windows)]
 fn main() {
