@@ -14,6 +14,7 @@ pub enum Status {
     Pass,
     Fail,
     Error,
+    RebootRequired,
 }
 
 #[derive(Serialize)]

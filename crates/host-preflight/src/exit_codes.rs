@@ -8,3 +8,4 @@ pub const WSL_UNAVAILABLE: i32 = 15;
 pub const PODMAN_INCOMPATIBLE: i32 = 16;
 pub const OPERATIONAL_ERROR: i32 = 20;
 pub const USAGE: i32 = 64;
+pub const REBOOT_REQUIRED: i32 = 3010;

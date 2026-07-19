@@ -10,6 +10,7 @@ pub enum Verdict {
     Pass(String),
     Fail(String),
     Error(String),
+    Reboot(String),
 }
 
 const CBS_REBOOT: &str =
@@ -55,6 +56,35 @@ pub fn windows_features() -> Verdict {
             Err(e) => Verdict::Error(e),
         },
     }
+}
+
+pub fn prepare_windows_features() -> Verdict {
+    let mut missing = Vec::new();
+    for feature in [
+        "Microsoft-Windows-Subsystem-Linux",
+        "VirtualMachinePlatform",
+    ] {
+        match feature_enabled(feature) {
+            Ok(true) => {}
+            Ok(false) => missing.push(feature),
+            Err(e) => return Verdict::Error(e),
+        }
+    }
+
+    if missing.is_empty() {
+        return Verdict::Pass("WSL and VirtualMachinePlatform are already enabled".into());
+    }
+
+    for feature in &missing {
+        if let Err(message) = enable_feature(feature) {
+            return Verdict::Fail(message);
+        }
+    }
+
+    Verdict::Reboot(format!(
+        "enabled {}; Windows must restart before setup resumes",
+        missing.join(" and ")
+    ))
 }
 
 pub fn pending_reboot() -> Verdict {
@@ -132,6 +162,27 @@ fn feature_enabled(feature: &str) -> Result<bool, String> {
     // while avoiding locale-specific failures on otherwise compatible hosts.
     let text = String::from_utf8_lossy(&output.stdout);
     Ok(text.lines().any(|line| line.trim() == "State : Enabled"))
+}
+
+fn enable_feature(feature: &str) -> Result<(), String> {
+    let dism = windows::system32_file("dism.exe")?;
+    let feature_arg = format!("/FeatureName:{feature}");
+    let output = Command::new(dism)
+        .args([
+            "/Online",
+            "/English",
+            "/Enable-Feature",
+            &feature_arg,
+            "/All",
+            "/NoRestart",
+        ])
+        .output()
+        .map_err(|e| format!("cannot enable {feature} with DISM: {e}"))?;
+    match output.status.code() {
+        Some(0 | 3010) => Ok(()),
+        Some(code) => Err(format!("DISM could not enable {feature} (exit {code})")),
+        None => Err(format!("DISM was terminated while enabling {feature}")),
+    }
 }
 
 fn run_text(path: &std::path::Path, args: &[&str]) -> Result<std::process::Output, String> {
