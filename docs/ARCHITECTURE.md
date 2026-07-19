@@ -144,7 +144,7 @@ La cadena queda fijada a WiX Toolset 5.0.2, WinSW 2.12.0 x64 —SHA-256 `05B82D4
 
 La máquina usa exclusivamente el artefacto WSL x86_64 de Podman Machine OS 6.0.1: commit `137982aea62947e436bfb58408676e246414ea47`, índice OCI `sha256:6dec5eadc84f41e55c3b6fc67264ed6c985e5f61a1d4ba243056dc0efc234bec`, manifest de plataforma `sha256:c1b05f0f5f5cdbbfb2be4e23fccfbd0436f3aa6bfa6d4705daed00a251b03943` y layer/archivo `sha256:0d828beef16a031a50a7cee594fd79ade36c3d3972b590cb01c32a987bd88bc3` de 249,510,008 bytes. El build verifica el release oficial `podman-machine.x86_64.wsl.tar.zst`, el MSI lo instala en `machine-images` y RuntimeGate vuelve a verificarlo antes de `podman machine init`. La creación no depende de red ni del resolvedor OCI de Podman 6.0.1 y no admite tag, imagen o proveedor alternativo.
 
-Para Quetzalcoatl 0.1.0, el MSI fija ProductCode `{EAC9C6D4-3D6E-4A3E-BE7F-B6785B052030}` y UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`; Burn fija ProviderKey y UpgradeCode `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`. WiX 5 genera un identificador interno nuevo para cada compilación del bundle, por lo que la evidencia siempre identifica un EXE concreto por SHA-256; esto no altera los payloads bloqueados ni autoriza bundles concurrentes.
+Cada versión publicada obtiene un ProductCode MSI nuevo y conserva el UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`. `MajorUpgrade` ejecuta `RemoveExistingProducts` después de `InstallInitialize`, de modo que una falla restaura la versión anterior. Quetzalcoatl 0.1.1 usa ProductCode `{3704395F-B42C-409D-A342-EE03E81A6B4C}` y reemplazó transaccionalmente 0.1.0. Burn conserva ProviderKey y UpgradeCode `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`; cada evidencia identifica el EXE concreto por SHA-256.
 
 ## 5. `runtime payload v1` y Quadlets
 
@@ -282,9 +282,10 @@ sequenceDiagram
 
 Precondiciones Tailscale:
 
-- El operador entrega una `auth_key` reutilizable, preautorizada y no efímera, sin tags fijados en la propia key. La identidad que la creó figura en `tagOwners` para los dos tags del producto.
+- El operador entrega una `auth_key` reutilizable, preautorizada y no efímera, con únicamente `tag:quetzalcoatl-node`. `tagOwners` asigna ese tag a administradores y hace que `tag:quetzalcoatl-node` sea propietario directo de `tag:quetzalcoatl-service`.
 - El bootstrap host solicita explícitamente sólo `--advertise-tags=tag:quetzalcoatl-node` y verifica que `Self.Tags` contiene exactamente ese tag.
-- El bootstrap de Garage/Forgejo solicita sólo `--advertise-tags=tag:quetzalcoatl-service` y verifica el tag exacto antes de arrancar la aplicación.
+- El bootstrap de Garage/Forgejo reutiliza la misma key, solicita sólo `--advertise-tags=tag:quetzalcoatl-service` y verifica el tag exacto antes de arrancar la aplicación. La delegación directa reemplaza el tag original; no añade ambos tags al sidecar.
+- No existe `tag:quetzalcoatl-controller`: controller/member es estado automático y ambos hosts usan exclusivamente `tag:quetzalcoatl-node`.
 - La ACL permite visibilidad y tráfico únicamente entre identidades GNX autorizadas.
 - El descubrimiento de rol filtra exclusivamente `tag:quetzalcoatl-node`, excluye `Self` y peers expirados; los sidecars nunca cuentan como hosts.
 - La tailnet tiene HTTPS/Serve habilitado y `CertDomains` contiene el dominio esperado; no se permite un consentimiento web durante Setup.
@@ -318,6 +319,18 @@ La exposición completa se define mediante tres controles complementarios:
 3. El firewall dentro del runtime limita puertos y peers.
 
 `serve.json` no sustituye la conectividad directa que necesitan el join de PVE y Corosync.
+
+Política Tailscale mínima del producto:
+
+| Origen | Destino | Permiso |
+|---|---|---|
+| `tag:quetzalcoatl-node` | `tag:quetzalcoatl-node` | TCP 22 y 8006; UDP 5405-5412 |
+| `autogroup:admin` | `tag:quetzalcoatl-node` | TCP 22 y 443 |
+| `autogroup:admin` | `tag:quetzalcoatl-service` | TCP 443 y 2222 |
+| SSH `tag:quetzalcoatl-node` | `tag:quetzalcoatl-node` | `accept` como `root` |
+| SSH `autogroup:admin` | `tag:quetzalcoatl-node` | `check` como `root` |
+
+No hay wildcard de red ni `nodeAttrs` de Funnel. La regla preexistente `group:dev → tag:github-rdp` permanece limitada a TCP/UDP 3389 y no concede acceso a tags Quetzalcoatl.
 
 | Tráfico | Transporte | Ruta | Control | Publicación Windows |
 |---|---|---|---|---|

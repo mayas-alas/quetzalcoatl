@@ -3,7 +3,7 @@
 Última actualización: 2026-07-19
 Estado global: `VALIDACIÓN I1 EN CURSO`
 
-Siguiente trabajo: `A-05 · recibir secretos por el pipe, protegerlos con DPAPI y registrar Tailscale`
+Siguiente trabajo: `A-05 · aplicar ACL mínima, almacenar la auth_key por DPAPI y registrar Tailscale`
 
 ## 1. Objetivo de seguimiento
 
@@ -39,9 +39,9 @@ Estados de trabajo permitidos: `NO INICIADO`, `EN CURSO`, `BLOQUEADO`, `CERRADO`
 - Burn/MSI incorporan WinSW, WSL 2.7.10, Podman 6.0.1, la imagen WSL de Podman Machine OS 6.0.1 y el `runtime payload v1` fijado.
 - El primer bundle completó una instalación elevada y permitió descubrir un defecto real del resolvedor OCI de Podman 6.0.1. El camino quedó corregido con el artefacto oficial embebido, sin fallback ni resolución por red.
 - El `QuetzalcoatlSetup.exe` final completó la instalación elevada con exit 0 después de limpiarse la señal real de reboot. Tras el reinicio de Windows del 2026-07-19, el servicio volvió en modo `Auto` con la misma cuenta y SID, y la máquina persistida regresó a `KVM_READY`.
-- RuntimeGate verifica y aplica los 12 archivos fijados, levanta el Quadlet PVE y alcanza `PROXMOX_READY` sólo después de obtener KVM API 12, TUN y FUSE dentro de la máquina y del contenedor, más systemd, cgroup v2 y `pvesh` saludables.
-- El host conserva WSL 2.7.10 y Podman 6.0.1. El producto y el servicio están instalados; el binario runtime actual es una sustitución de desarrollo y todavía debe incorporarse a un nuevo EXE final al cerrar I1.
-- Tailscale, rol, clúster, OpenTofu, Garage y Forgejo continúan pendientes dentro de A-05; no se ha iniciado I2.
+- RuntimeGate verifica y aplica 30 archivos fijados, levanta el Quadlet PVE y alcanza `PROXMOX_READY` sólo después de obtener KVM API 12, TUN y FUSE dentro de la máquina y del contenedor, más systemd, cgroup v2 y `pvesh` saludables.
+- El host conserva WSL 2.7.10 y Podman 6.0.1. El bundle 0.1.1 y su MSI hicieron major upgrade transaccional de 0.1.0; el producto, servicio, CLI y payload instalados coinciden con el build release.
+- DPAPI, Tailscale, rol, clúster, OpenTofu, LXC Docker, Garage, Forgejo y sus probes funcionales están implementados. Su evidencia viva continúa pendiente dentro de A-05; no se ha iniciado I2.
 
 ## 4. Resultado de los dos incrementos
 
@@ -108,8 +108,8 @@ La evidencia de A-04 proviene de la ejecución bajo `NT SERVICE\Quetzalcoatl`; c
 | I1-01 | Burn HostPreflight, checkpoint de reboot y MSI base | `CERRADO` | A-03 |
 | I1-02 | Cuenta dedicada, WinSW, `gnx-service` y Named Pipe | `CERRADO` | I1-01 |
 | I1-03 | RuntimeGate, máquina `quetzalcoatl` y aplicación de payload v1 | `CERRADO` | I1-02, A-04 |
-| I1-04 | Quadlets de Tailscale/PVE y OpenTofu one-shot | `EN CURSO` | I1-03 |
-| I1-05 | DPAPI y `gnx-tailscale-enroll` one-shot sólo con `auth_key` | `NO INICIADO` | I1-02 |
+| I1-04 | Quadlet PVE vivo y payloads fijados de Tailscale/OpenTofu | `CERRADO` | I1-03 |
+| I1-05 | DPAPI y `gnx-tailscale-enroll` one-shot sólo con `auth_key` | `EN CURSO` | I1-02 |
 | I1-06 | Descubrimiento cero peers y persistencia controller | `NO INICIADO` | I1-04, I1-05 |
 | I1-07 | `pvecm create` y PVE privado saludable | `NO INICIADO` | I1-06 |
 | I1-08 | OpenTofu local state y LXC seleccionados | `NO INICIADO` | I1-07 |
@@ -148,6 +148,9 @@ I2 no comienza hasta que I1 está cerrado.
 | 2026-07-18 | A-03 | Windows 11 x64 · instalación final elevada | `QuetzalcoatlSetup.exe -quiet -norestart` | Burn terminó exit 0; servicio `Auto` bajo `NT SERVICE\Quetzalcoatl`, CLI, manifest e imagen WSL instalados con hashes exactos | EXE SHA-256 `1929C0CFFFB7A127D787FE3C98B2A5625281EA8424B25399270308FE6DF906D0` |
 | 2026-07-19 | A-03 | Windows 11 x64 · reinicio real a las 01:57:21 | SCM + `gnx status --json` | Producto sobrevivió el reboot; servicio volvió automáticamente con SID `S-1-5-80-1414281857-1943412974-186110390-2486725240-2230548587`; máquina persistida regresó a `KVM_READY` | A-03 cerrado; bundle SHA-256 `1929C0CFFFB7A127D787FE3C98B2A5625281EA8424B25399270308FE6DF906D0` |
 | 2026-07-19 | A-04/G0-01/B-01 | Windows 11 x64 · cuenta virtual instalada | `gnx status --json` después de hot-swap controlado | `PROXMOX_READY`: el binario sólo alcanza ese estado si ambos probes devuelven `KVM_API_VERSION=12;TUN=ready;FUSE=ready` y PVE confirma systemd, cgroup v2, `pve-cluster`, `pvedaemon`, `pveproxy` y `pvesh /version` | `gnx-service.exe` SHA-256 `664F4006A2CBC8E2ACB53FB2560A56E71D201733F687BAAE510577E7B53B4A16`; manifest SHA-256 `C71133A097770E0A5EBEA50BA46BA01DC252F041089A8613381DDEC4082049F8`; commit `5fe7a57` |
+| 2026-07-19 | A-05 | Validación estática del servicio y payload final | `cargo clippy -p gnx-service -- -D warnings`; `cargo test -p gnx-service`; sintaxis Dash/Python; hashes | Clippy limpio, 18/18 pruebas y 30/30 payloads. `READY` queda condicionado en código a S3 PUT/GET y Forgejo push/clone, todavía sin atribuirles evidencia viva | manifest SHA-256 `27A44812A1822B7544801965086284B8222711CDC3EA118D33B9D671EA4E60A2` · commit `e5f346a` |
+| 2026-07-19 | A-03/I1-01 | Windows 11 x64 · major upgrade elevado | `QuetzalcoatlSetup.exe /install /quiet /norestart`; `wix msi validate`; comparación del payload instalado | Burn detectó 0.1.0, ejecutó PrepareWsl y ValidateHost, instaló MSI 0.1.1, retiró 0.1.0 y terminó `0x0` sin reboot. Binarios y 30 payloads instalados coinciden con el build | EXE SHA-256 `37D7744BFB3D2D2D88D949B0A2A1594A37FB7459B6A8357610243596BE57350B`; MSI `C603D33C35FCE8F89AA138AA72C92E6FEA2C0C2DC81C0C7F09FF41E404E6DE45`; commit `6957709` |
+| 2026-07-19 | A-05/B-07 | Windows 11 x64 · entrada elevada negativa | `gnx configure` con password PVE menor al contrato | Rechazo `CONFIGURATION_INVALID` antes de crear `%ProgramData%\Quetzalcoatl.Runtime`; ninguna entrada fue persistida | `gnx.exe` SHA-256 `2817C678654413FB3A3106326EA463B2A9685A6AEEE50A9BF611D73E2C84CFAB`; `gnx-service.exe` `367F3878ECFB20C00B49F9ABA810018AA873AF8B3D79004FE475BCFB378CF63C` |
 
 Reglas de evidencia:
 
@@ -164,7 +167,7 @@ Reglas de evidencia:
 |---|---|---|
 | D-01 | Rol automático por `tailscale status --json` | Es el comportamiento solicitado; no existe invitación |
 | D-02 | Cero peers host = controller; exactamente uno = member | Cierra la topología de aceptación a dos nodos y evita elección |
-| D-03 | Una `auth_key` sin tags propios; `tagOwners` y `--advertise-tags` explícito | Permite identidades host/service distintas sin OAuth ni dos keys |
+| D-03 | Una `auth_key` con sólo `tag:quetzalcoatl-node`; ese tag posee directamente `tag:quetzalcoatl-service` | Permite identidades host/service exactas sin OAuth ni dos keys; no existe tag controller |
 | D-04 | Tags separados para host y sidecars | Garage/Forgejo no alteran el conteo de rol |
 | D-05 | Tailscale, PVE y OpenTofu son obligatorios | Forman el núcleo funcional |
 | D-06 | Garage y Forgejo son opcionales y controller-only | Mantiene los dos flags originales sin recreación desde members |
@@ -183,6 +186,7 @@ Reglas de evidencia:
 | D-19 | `NT SERVICE\Quetzalcoatl` es la única identidad runtime | Cuenta virtual sin contraseña, SID ligado al nombre del servicio y perfil cargado por SCM; evita crear otra gestión de credenciales |
 | D-20 | WiX 5.0.2, WSL 2.7.10.0 y WinSW 2.12.0 quedan fijados | Una sola cadena verificable; no se incorporan canales alternos ni resolución dinámica de versiones |
 | D-21 | Podman Machine OS 6.0.1 se embebe como el layer oficial WSL x86_64 y se verifica antes de crear la máquina | Evita la resolución tag+digest defectuosa y la dependencia de red sin introducir otra imagen, cache mutable o proveedor |
+| D-22 | Cada versión MSI usa ProductCode nuevo y conserva UpgradeCode; `MajorUpgrade` corre después de `InstallInitialize` | Permite servicing transaccional y rollback en vez de sustituciones manuales |
 
 ## 12. Registro de avance
 
@@ -198,6 +202,7 @@ Reglas de evidencia:
 | 2026-07-18 | El bundle anterior se desinstaló y el EXE final alcanzó el gate de reinicio real | WSL 2.7.10 y Podman 6.0.1 permanecen; producto/servicio están ausentes hasta reiniciar y reanudar A-03 |
 | 2026-07-19 | A-03 cerró después de instalación final y reboot real | Servicio/SID, perfil, máquina y CLI persistieron; A-04 pasó a ser el único trabajo activo |
 | 2026-07-19 | A-04 cerró G0-01 y B-01 con `PROXMOX_READY` bajo la cuenta virtual | A-05 inicia por DPAPI/Tailscale; G0-02 permanece abierto hasta probar PVE después de reboot |
+| 2026-07-19 | El bundle 0.1.1 actualizó 0.1.0 mediante major upgrade real | Producto, servicio y 30 payloads instalados coinciden con el build; A-05 continúa por la ACL y entrada DPAPI |
 
 Al actualizar este archivo:
 
