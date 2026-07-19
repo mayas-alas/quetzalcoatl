@@ -116,6 +116,13 @@
   ],
   "files": [
     {
+      "path": "bin/gnx-proxmox-entrypoint",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0755",
+      "sha256": "1e0775a3b12dcd86a5ae0ea6bc99d359e6f561ddf88ad257a93f861df76a921e"
+    },
+    {
       "path": "bin/gnx-tailscale-enroll",
       "source": "quetzalcoatl",
       "version": 1,
@@ -148,7 +155,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "3d31d8216b75c49b07229ca54f29e172b65558fc9ca744a00c29e2d9ae97f876"
+      "sha256": "9a04a102684899b2054d1c48b52d114551c26009d34eb5226493e4b40c35c266"
     },
     {
       "path": "quadlet/tailscaled.container",

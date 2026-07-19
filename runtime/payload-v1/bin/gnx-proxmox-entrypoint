@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+umask 077
+
+bootstrap_password="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+test "${#bootstrap_password}" -eq 64
+export PASSWORD="$bootstrap_password"
+exec /usr/local/bin/entrypoint.sh "$@"

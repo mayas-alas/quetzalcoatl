@@ -10,6 +10,7 @@ Image=ghcr.io/mayas-alas/tailnet-proxmox@sha256:9b3f516d7b645148c35396b5655ed9f9
 Pod=gnx-node.pod
 StartWithPod=true
 PodmanArgs=--privileged
+Entrypoint=/usr/local/sbin/gnx-proxmox-entrypoint
 AddDevice=/dev/kvm
 AddDevice=/dev/net/tun
 AddDevice=/dev/fuse
@@ -23,6 +24,7 @@ SecurityLabelDisable=true
 ShmSize=1g
 Volume=/var/lib/quetzalcoatl/proxmox/vz:/var/lib/vz
 Volume=/var/lib/quetzalcoatl/proxmox/cluster:/var/lib/pve-cluster
+Volume=/usr/libexec/quetzalcoatl/gnx-proxmox-entrypoint:/usr/local/sbin/gnx-proxmox-entrypoint:ro
 
 [Service]
 Restart=on-failure

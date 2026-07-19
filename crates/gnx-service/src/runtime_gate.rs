@@ -30,7 +30,12 @@ const MACHINE_IMAGE_ARTIFACT: &str = "podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_URL: &str = "https://github.com/podman-container-tools/podman-machine-os/releases/download/v6.0.1/podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_SIZE: u64 = 249_510_008;
 
-const PAYLOAD_FILES: [PayloadSpec; 12] = [
+const PAYLOAD_FILES: [PayloadSpec; 13] = [
+    PayloadSpec::new(
+        "bin/gnx-proxmox-entrypoint",
+        "/usr/libexec/quetzalcoatl/gnx-proxmox-entrypoint",
+        "0755",
+    ),
     PayloadSpec::new(
         "bin/gnx-tailscale-enroll",
         "/usr/libexec/quetzalcoatl/gnx-tailscale-enroll",
@@ -142,7 +147,7 @@ install -d -m 0755 /run/gnx
 date --iso-8601=seconds > /run/gnx/proxmox-started-at
 systemctl daemon-reload
 systemctl reset-failed gnx-node-pod.service proxmox.service >/dev/null 2>&1 || true
-if ! systemctl start proxmox.service >/dev/null 2>&1; then
+if ! systemctl restart proxmox.service >/dev/null 2>&1; then
   journalctl --no-pager -o cat -r -n 30 -u proxmox.service >&2 || true
   exit 1
 fi
