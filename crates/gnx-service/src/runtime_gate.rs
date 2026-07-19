@@ -22,6 +22,7 @@ const MACHINE_CPUS: u64 = 6;
 const MACHINE_MEMORY_MIB: u64 = 8192;
 const MACHINE_DISK_GIB: u64 = 100;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const LXC_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-lxc-prepare";
 const OPENTOFU_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-opentofu-prepare";
 const PVE_CLUSTER_CREATE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-cluster-create";
 const PVE_CONFIGURE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-configure";
@@ -383,26 +384,24 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
     set_component(status, Component::TailscaleServe, "ready");
     set_stage(status, "TAILSCALE_READY");
 
-    match controller.stage.as_str() {
-        "ROLE_RESOLVED" => {
-            set_stage(status, "CONTROLLER_CLUSTER_PRECHECK");
-            confirm_empty_controller_inventory(&podman, &controller)?;
-        }
-        "CONTROLLER_CLUSTER_READY" | "OPENTOFU_READY" => {}
-        _ => {
-            return Err(GateError::new(
-                "STATE_STAGE_UNSUPPORTED",
-                Component::None,
-                "persisted controller state has an unsupported I1 stage",
-            ));
-        }
+    let mut stage_rank = controller_stage_rank(&controller.stage).ok_or_else(|| {
+        GateError::new(
+            "STATE_STAGE_UNSUPPORTED",
+            Component::None,
+            "persisted controller state has an unsupported I1 stage",
+        )
+    })?;
+    if stage_rank == 0 {
+        set_stage(status, "CONTROLLER_CLUSTER_PRECHECK");
+        confirm_empty_controller_inventory(&podman, &controller)?;
     }
 
     set_stage(status, "CONTROLLER_CLUSTER_CREATING");
     create_controller_cluster(&podman, controller.self_ip, &controller.controller.hostname)?;
-    if controller.stage == "ROLE_RESOLVED" {
+    if stage_rank < 1 {
         controller.stage = "CONTROLLER_CLUSTER_READY".into();
         store_persisted_state(&controller)?;
+        stage_rank = 1;
     }
     set_cluster_ready(status);
     set_stage(status, "CONTROLLER_CLUSTER_READY");
@@ -421,9 +420,26 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
     infrastructure_configuration.pve_root_password.zeroize();
     opentofu_result?;
     set_component(status, Component::OpenTofu, "ready");
-    controller.stage = "OPENTOFU_READY".into();
-    store_persisted_state(&controller)?;
+    if stage_rank < 2 {
+        controller.stage = "OPENTOFU_READY".into();
+        store_persisted_state(&controller)?;
+        stage_rank = 2;
+    }
     set_stage(status, "OPENTOFU_READY");
+
+    if controller.install_garage {
+        set_stage(status, "GARAGE_LXC_DOCKER_PREPARING");
+        prepare_lxc_docker(&podman, ServiceKind::Garage)?;
+    }
+    if controller.install_forgejo {
+        set_stage(status, "FORGEJO_LXC_DOCKER_PREPARING");
+        prepare_lxc_docker(&podman, ServiceKind::Forgejo)?;
+    }
+    if stage_rank < 3 {
+        controller.stage = "LXC_DOCKER_READY".into();
+        store_persisted_state(&controller)?;
+    }
+    set_stage(status, "LXC_DOCKER_READY");
     Ok(())
 }
 
@@ -858,6 +874,16 @@ fn store_persisted_state(state: &crate::state::PersistedState) -> Result<(), Gat
         .map_err(|error| GateError::new("STATE_STORAGE_FAILED", Component::None, error.message()))
 }
 
+fn controller_stage_rank(stage: &str) -> Option<u8> {
+    match stage {
+        "ROLE_RESOLVED" => Some(0),
+        "CONTROLLER_CLUSTER_READY" => Some(1),
+        "OPENTOFU_READY" => Some(2),
+        "LXC_DOCKER_READY" => Some(3),
+        _ => None,
+    }
+}
+
 fn validate_state_configuration(
     state: &crate::state::PersistedState,
     configuration: &InstallerConfiguration,
@@ -1049,6 +1075,29 @@ fn verify_opentofu_secret_cleanup(podman: &Path) -> Result<(), GateError> {
             "OPENTOFU_SECRET_CLEANUP_FAILED",
             Component::OpenTofu,
             "OpenTofu did not confirm transient credential cleanup",
+        ));
+    }
+    Ok(())
+}
+
+fn prepare_lxc_docker(podman: &Path, service: ServiceKind) -> Result<(), GateError> {
+    let input = format!("{}\n", service.name());
+    let output = machine_stdin(
+        podman,
+        ["podman", "exec", "-i", "gnx-proxmox", LXC_PREPARE_BIN],
+        input.as_bytes(),
+    )
+    .map_err(|error| error.with_code("LXC_DOCKER_FAILED", service.component()))?;
+    let expected = format!(
+        "LXC_DOCKER=ready;SERVICE={};VMID={}",
+        service.name(),
+        service.vmid()
+    );
+    if String::from_utf8_lossy(&output.stdout).trim() != expected {
+        return Err(GateError::new(
+            "LXC_DOCKER_FAILED",
+            service.component(),
+            "LXC did not confirm the fixed Docker runtime contract",
         ));
     }
     Ok(())
@@ -1694,6 +1743,35 @@ fn fail(status: &Arc<RwLock<StatusResponse>>, error: GateError) {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ServiceKind {
+    Garage,
+    Forgejo,
+}
+
+impl ServiceKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Garage => "garage",
+            Self::Forgejo => "forgejo",
+        }
+    }
+
+    fn vmid(self) -> u16 {
+        match self {
+            Self::Garage => 200,
+            Self::Forgejo => 201,
+        }
+    }
+
+    fn component(self) -> Component {
+        match self {
+            Self::Garage => Component::Garage,
+            Self::Forgejo => Component::Forgejo,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Component {
     None,
@@ -1704,6 +1782,8 @@ enum Component {
     Tailscale,
     TailscaleServe,
     OpenTofu,
+    Garage,
+    Forgejo,
 }
 
 impl Component {
@@ -1717,6 +1797,8 @@ impl Component {
             Self::Tailscale => status.components.tailscale = value.into(),
             Self::TailscaleServe => status.components.tailscale_serve = value.into(),
             Self::OpenTofu => status.components.opentofu = value.into(),
+            Self::Garage => status.services.garage = value.into(),
+            Self::Forgejo => status.services.forgejo = value.into(),
         }
     }
 }
