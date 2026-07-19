@@ -122,11 +122,11 @@ La única topología de aceptación contiene exactamente un controller y un memb
 
 | Área | Decisión normativa | Límite del PoC |
 |---|---|---|
-| Instalador | WiX 5 Burn encadena prerrequisitos y MSI | Se fija una versión exacta; no se implementa abstracción de instaladores |
+| Instalador | WiX Toolset 5.0.2 Burn encadena prerrequisitos y MSI | No se implementa abstracción de instaladores |
 | Windows | Un baseline Windows 11 x64 físico con virtualización habilitada | No hay matriz multi-versión |
 | Runtime Linux | Una Podman Machine Fedora nombrada `quetzalcoatl` | No se adoptan máquinas del usuario |
-| Identidad | La máquina pertenece a una cuenta Windows dedicada | La CLI no ejecuta privilegios directamente |
-| SID de servicio | WinSW ejecuta `gnx-service` bajo esa misma cuenta y carga su perfil | El SID no se recrea en reboot/reanudación; DPAPI es user-scope |
+| Identidad | La máquina pertenece a la cuenta virtual `NT SERVICE\Quetzalcoatl` | Es administrada por Windows, no tiene contraseña y la CLI no ejecuta privilegios directamente |
+| SID de servicio | WinSW y su hijo `gnx-service` se ejecutan con el token de esa cuenta; SCM carga su perfil | El nombre de servicio fija el SID que debe poseer Podman y DPAPI user-scope después de reiniciar |
 | Autoridad | `gnx-service` contiene toda la lógica privilegiada | WinSW sólo supervisa el proceso; no contiene lógica de dominio |
 | Runtime local | systemd y Quadlets mantienen Podman | Quadlet no administra Windows, WSL ni infraestructura PVE |
 | Red | Tailscale SaaS conecta los nodos host | Headscale queda fuera |
@@ -138,7 +138,11 @@ La única topología de aceptación contiene exactamente un controller y un memb
 | Puertos Windows | Ningún puerto PVE se publica en Windows | Todo acceso ocurre por tailnet |
 | Errores | Fallo explícito con etapa y código, seguido de reanudación manual | Sin rollback general ni caminos alternativos |
 
-Podman CLI para Windows queda fijado a 6.0.1 x64 MSI; ProductCode `{661EDED1-C5BC-430C-8802-015B34A382FA}`; UpgradeCode `{A6A9DD9C-0732-44BA-9279-FFE22EA50671}`; SHA-256 `3B65848F2D9AE652A15C35F2496A9ECE2E07F28746FA651415D519AE7C5902AD`. HostPreflight verifica producto instalado por ProductCode/nombre/versión; el futuro Burn verificará el SHA-256 del MSI antes de instalar.
+El MSI registra WinSW como el servicio `Quetzalcoatl` bajo la cuenta virtual `NT SERVICE\Quetzalcoatl`; no crea un usuario local ni persiste una contraseña. El nombre del servicio es inmutable dentro de la línea 0.1.x porque determina su SID. La aceptación exige comprobar que el wrapper, `gnx-service`, Podman Machine y DPAPI usan ese mismo SID antes y después de reiniciar.
+
+La cadena queda fijada a WiX Toolset 5.0.2, WinSW 2.12.0 x64 —SHA-256 `05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA`— y WSL 2.7.10.0 x64 MSI —SHA-256 `1A62F90A43C03CC5BDA47DFD0B6FAF496AC70FD4389190518120A4F84FC895CF`—. Podman CLI para Windows queda fijado a 6.0.1 x64 MSI; ProductCode `{661EDED1-C5BC-430C-8802-015B34A382FA}`; UpgradeCode `{A6A9DD9C-0732-44BA-9279-FFE22EA50671}`; SHA-256 `3B65848F2D9AE652A15C35F2496A9ECE2E07F28746FA651415D519AE7C5902AD`. Burn valida tamaño y SHA-256 de cada artefacto descargado antes de compilar la cadena; HostPreflight valida el producto instalado por ProductCode, nombre y versión.
+
+Para Quetzalcoatl 0.1.0, el MSI fija ProductCode `{EAC9C6D4-3D6E-4A3E-BE7F-B6785B052030}` y UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`; Burn fija ProviderKey y UpgradeCode `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`. WiX 5 genera un identificador interno nuevo para cada compilación del bundle, por lo que la evidencia siempre identifica un EXE concreto por SHA-256; esto no altera los payloads bloqueados ni autoriza bundles concurrentes.
 
 ## 5. `runtime payload v1` y Quadlets
 
@@ -372,7 +376,7 @@ flowchart LR
 Reglas:
 
 - Burn no pasa secretos como propiedades MSI, argumentos o variables registradas en logs.
-- El instalador crea una sola cuenta runtime local; WinSW, DPAPI y Podman Machine usan el mismo SID estable. El SCM conserva su credencial de logon y `gnx-service` carga el perfil antes de descifrar o invocar Podman.
+- El instalador registra una sola cuenta virtual runtime, `NT SERVICE\Quetzalcoatl`; WinSW, DPAPI y Podman Machine deben usar su mismo SID estable. No existe contraseña de cuenta; SCM crea el token y carga el perfil antes de que `gnx-service` descifre o invoque Podman.
 - El servicio recibe y cifra el secreto con DPAPI user-scope bajo esa identidad.
 - Los blobs viven en `%ProgramData%\Quetzalcoatl\secrets` con ACL para SYSTEM y la identidad del servicio.
 - El plaintext sólo cruza a Fedora/LXC por stdin o un canal temporal y vive en `/run` con modo `0600`.
@@ -550,6 +554,11 @@ El código informa etapa, código y evidencia acotada. No inventa un segundo cam
 
 - [PoC original](../PoC.md)
 - [WiX Toolset y Burn](https://docs.firegiant.com/wix/tools/burn/)
+- [WiX Toolset v5.0.2](https://github.com/wixtoolset/wix/releases/tag/v5.0.2)
+- [WinSW v2.12.0](https://github.com/winsw/winsw/releases/tag/v2.12.0)
+- [WSL v2.7.10](https://github.com/microsoft/WSL/releases/tag/2.7.10)
+- [Cuentas de servicio y perfil cargado por SCM](https://learn.microsoft.com/en-us/windows/win32/services/service-user-accounts)
+- [Cuentas virtuales `NT SERVICE`](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-service-accounts)
 - [Podman Machine](https://docs.podman.io/en/latest/markdown/podman-machine.1.html)
 - [Podman v6.0.1](https://github.com/podman-container-tools/podman/releases/tag/v6.0.1)
 - [Podman Machine rootful](https://docs.podman.io/en/stable/markdown/podman-machine-set.1.html)
