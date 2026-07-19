@@ -186,7 +186,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "0ce2278095e403395d8049314100fa592ee28fb2ad4bcf645fe9df95e8051f4d"
+      "sha256": "740c4ccead94c56fed1d1e10610a90d64dc423e223d65bcaa90efaa98b179376"
     },
     {
       "path": "bin/gnx-opentofu-entrypoint",

@@ -88,7 +88,7 @@ esac
 
 config=/etc/pve/corosync.conf
 if [ ! -s "$config" ]; then
-  pvecm create quetzalcoatl --link0 "$pve_ip"
+  pvecm create quetzalcoatl --link0 "$pve_ip" 1>&2
 elif ! systemctl is-active --quiet corosync.service; then
   systemctl restart corosync.service
 fi
