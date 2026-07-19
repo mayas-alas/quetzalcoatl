@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
@@ -24,6 +24,7 @@ const MACHINE_DISK_GIB: u64 = 100;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const PVE_CONFIGURE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-configure";
 const TAILSCALE_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-tailscale-prepare";
+const TAILSCALE_RENAME_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-tailscale-rename";
 const MACHINE_IMAGE_INDEX: &str =
     "sha256:6dec5eadc84f41e55c3b6fc67264ed6c985e5f61a1d4ba243056dc0efc234bec";
 const MACHINE_IMAGE_MANIFEST: &str =
@@ -281,23 +282,45 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
 
     set_stage(status, "CONFIGURATION_WAITING");
     let mut configuration = wait_for_configuration()?;
+    let persisted_state = load_persisted_state()?;
+    if let Some(state) = persisted_state.as_ref() {
+        validate_state_configuration(state, &configuration)?;
+    }
 
     set_stage(status, "PVE_CREDENTIAL_APPLYING");
     configure_pve_password(&podman, &configuration.pve_root_password)?;
     configuration.pve_root_password.zeroize();
 
-    let hostname = candidate_hostname()?;
+    let hostname = match persisted_state.as_ref() {
+        Some(state) => state.controller.hostname.clone(),
+        None => candidate_hostname()?,
+    };
     set_stage(status, "TAILSCALE_ENROLLING");
     prepare_tailscale(&podman, &hostname, &configuration.auth_key)?;
     configuration.auth_key.zeroize();
     start_tailscale(&podman)?;
 
     set_stage(status, "TAILSCALE_CHECKING");
-    wait_for_tailscale(&podman, &hostname, &configuration.tailnet)?;
+    let identity = wait_for_tailscale(&podman, &hostname, &configuration.tailnet)?;
+    set_stage(status, "ROLE_DISCOVERING");
+    let controller = resolve_controller(
+        &podman,
+        persisted_state,
+        identity,
+        &configuration.tailnet,
+        configuration.install_garage,
+        configuration.install_forgejo,
+    )?;
+    set_controller(status, &controller.controller.hostname);
     set_component(status, Component::Tailscale, "ready");
+    set_stage(status, "ROLE_RESOLVED");
 
     set_stage(status, "TAILSCALE_SERVE_CHECKING");
-    wait_for_tailscale_serve(&podman, &hostname, &configuration.tailnet)?;
+    wait_for_tailscale_serve(
+        &podman,
+        &controller.controller.hostname,
+        &configuration.tailnet,
+    )?;
     set_component(status, Component::TailscaleServe, "ready");
     set_stage(status, "TAILSCALE_READY");
     Ok(())
@@ -708,6 +731,119 @@ fn wait_for_configuration() -> Result<InstallerConfiguration, GateError> {
     }
 }
 
+fn load_persisted_state() -> Result<Option<crate::state::PersistedState>, GateError> {
+    crate::state::load_optional()
+        .map_err(|error| GateError::new("STATE_STORAGE_FAILED", Component::None, error.message()))
+}
+
+fn validate_state_configuration(
+    state: &crate::state::PersistedState,
+    configuration: &InstallerConfiguration,
+) -> Result<(), GateError> {
+    if state.tailnet != configuration.tailnet
+        || state.install_garage != configuration.install_garage
+        || state.install_forgejo != configuration.install_forgejo
+    {
+        return Err(GateError::new(
+            "STATE_CONFIGURATION_MISMATCH",
+            Component::None,
+            "persisted controller state does not match the protected installer inputs",
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_controller(
+    podman: &Path,
+    persisted: Option<crate::state::PersistedState>,
+    identity: TailscaleIdentity,
+    tailnet: &str,
+    install_garage: bool,
+    install_forgejo: bool,
+) -> Result<crate::state::PersistedState, GateError> {
+    if let Some(state) = persisted {
+        validate_state_identity(&state, &identity)?;
+        return Ok(state);
+    }
+
+    let identity = stabilize_host_inventory(podman, identity, tailnet)?;
+    if !identity.host_peer_ids.is_empty() {
+        return Err(GateError::new(
+            "MEMBER_INCREMENT_DEFERRED",
+            Component::Tailscale,
+            format!(
+                "I1 requires zero other tagged host nodes; observed {} and made no role decision",
+                identity.host_peer_ids.len()
+            ),
+        ));
+    }
+
+    let hostname = controller_hostname(&identity.self_id)?;
+    let state = crate::state::PersistedState::controller(
+        identity.self_id,
+        identity.self_ip,
+        hostname.clone(),
+        tailnet.to_owned(),
+        install_garage,
+        install_forgejo,
+    );
+    crate::state::store(&state).map_err(|error| {
+        GateError::new("STATE_STORAGE_FAILED", Component::None, error.message())
+    })?;
+
+    rename_tailscale(podman, &hostname)?;
+    let renamed = wait_for_tailscale(podman, &hostname, tailnet)?;
+    validate_state_identity(&state, &renamed)?;
+    Ok(state)
+}
+
+fn validate_state_identity(
+    state: &crate::state::PersistedState,
+    identity: &TailscaleIdentity,
+) -> Result<(), GateError> {
+    if state.self_id != identity.self_id || state.self_ip != identity.self_ip {
+        return Err(GateError::new(
+            "TAILSCALE_IDENTITY_CHANGED",
+            Component::Tailscale,
+            "current Tailscale identity does not match persisted controller state",
+        ));
+    }
+    Ok(())
+}
+
+fn controller_hostname(self_id: &str) -> Result<String, GateError> {
+    let suffix = self_id.to_ascii_lowercase();
+    if suffix.is_empty()
+        || suffix.len() > 47
+        || suffix.starts_with('-')
+        || suffix.ends_with('-')
+        || !suffix
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(GateError::new(
+            "TAILSCALE_IDENTITY_INVALID",
+            Component::Tailscale,
+            "Tailscale Self.ID cannot form the fixed controller hostname",
+        ));
+    }
+    Ok(format!("gnx-controller-{suffix}"))
+}
+
+fn rename_tailscale(podman: &Path, hostname: &str) -> Result<(), GateError> {
+    let input = format!("{hostname}\n");
+    let output = machine_stdin(podman, [TAILSCALE_RENAME_BIN], input.as_bytes())
+        .map_err(|error| error.with_code("TAILSCALE_RENAME_FAILED", Component::Tailscale))?;
+    if String::from_utf8_lossy(&output.stdout).trim() != "TAILSCALE_HOSTNAME=updated" {
+        return Err(GateError::new(
+            "TAILSCALE_RENAME_FAILED",
+            Component::Tailscale,
+            "Tailscale sidecar did not confirm the persistent hostname transition",
+        ));
+    }
+    Ok(())
+}
+
 fn configure_pve_password(podman: &Path, password: &str) -> Result<(), GateError> {
     let mut input = password.as_bytes().to_vec();
     let result = machine_stdin(podman, [PVE_CONFIGURE_BIN], &input);
@@ -801,26 +937,16 @@ fn verify_tailscale_secret_cleanup(podman: &Path) -> Result<(), GateError> {
     Ok(())
 }
 
-fn wait_for_tailscale(podman: &Path, hostname: &str, tailnet: &str) -> Result<(), GateError> {
+fn wait_for_tailscale(
+    podman: &Path,
+    hostname: &str,
+    tailnet: &str,
+) -> Result<TailscaleIdentity, GateError> {
     let mut last_error = String::from("Tailscale sidecar is not ready");
     for attempt in 0..90 {
-        match machine_stdin(
-            podman,
-            [
-                "podman",
-                "exec",
-                "gnx-tailscaled",
-                "tailscale",
-                "status",
-                "--json",
-            ],
-            &[],
-        ) {
-            Ok(output) => match parse_tailscale_status(&output.stdout, hostname, tailnet) {
-                Ok(()) => return Ok(()),
-                Err(error) => last_error = error,
-            },
-            Err(error) => last_error = error.message,
+        match read_tailscale_status(podman, hostname, tailnet) {
+            Ok(identity) => return Ok(identity),
+            Err(error) => last_error = error,
         }
         if attempt + 1 < 90 {
             thread::sleep(Duration::from_secs(2));
@@ -836,7 +962,77 @@ fn wait_for_tailscale(podman: &Path, hostname: &str, tailnet: &str) -> Result<()
     ))
 }
 
-fn parse_tailscale_status(bytes: &[u8], hostname: &str, tailnet: &str) -> Result<(), String> {
+fn stabilize_host_inventory(
+    podman: &Path,
+    initial: TailscaleIdentity,
+    tailnet: &str,
+) -> Result<TailscaleIdentity, GateError> {
+    let hostname = initial.hostname.clone();
+    let expected_self_id = initial.self_id.clone();
+    let mut previous = Some(initial);
+    let mut last_error = String::from("Tailscale host inventory has not stabilized");
+    for attempt in 0..30 {
+        thread::sleep(Duration::from_secs(2));
+        match read_tailscale_status(podman, &hostname, tailnet) {
+            Ok(current) => {
+                if current.self_id != expected_self_id {
+                    return Err(GateError::new(
+                        "TAILSCALE_IDENTITY_CHANGED",
+                        Component::Tailscale,
+                        "Tailscale Self.ID changed during role discovery",
+                    ));
+                }
+                if previous
+                    .as_ref()
+                    .is_some_and(|value| value.host_peer_ids == current.host_peer_ids)
+                {
+                    return Ok(current);
+                }
+                last_error = "consecutive tagged host inventories differ".into();
+                previous = Some(current);
+            }
+            Err(error) => {
+                last_error = error;
+                previous = None;
+            }
+        }
+        if attempt + 1 == 30 {
+            break;
+        }
+    }
+    Err(GateError::new(
+        "TAILSCALE_DISCOVERY_UNSTABLE",
+        Component::Tailscale,
+        format!("Tailscale host inventory did not stabilize within 60 seconds: {last_error}"),
+    ))
+}
+
+fn read_tailscale_status(
+    podman: &Path,
+    hostname: &str,
+    tailnet: &str,
+) -> Result<TailscaleIdentity, String> {
+    let output = machine_stdin(
+        podman,
+        [
+            "podman",
+            "exec",
+            "gnx-tailscaled",
+            "tailscale",
+            "status",
+            "--json",
+        ],
+        &[],
+    )
+    .map_err(|error| error.message)?;
+    parse_tailscale_status(&output.stdout, hostname, tailnet)
+}
+
+fn parse_tailscale_status(
+    bytes: &[u8],
+    hostname: &str,
+    tailnet: &str,
+) -> Result<TailscaleIdentity, String> {
     let status: TailscaleStatus = serde_json::from_slice(bytes)
         .map_err(|_| "tailscale status returned invalid JSON".to_string())?;
     let current_tailnet = status
@@ -847,15 +1043,18 @@ fn parse_tailscale_status(bytes: &[u8], hostname: &str, tailnet: &str) -> Result
         .ok_or_else(|| "tailscale status has no self node".to_string())?;
     let domain = format!("{hostname}.{tailnet}");
     let expected_dns_name = format!("{domain}.");
-    let has_ipv4 = status.tailscale_ips.iter().any(|value| {
-        value.parse::<IpAddr>().is_ok_and(|address| match address {
+    let cgnat_ipv4 = status
+        .tailscale_ips
+        .iter()
+        .filter_map(|value| value.parse::<IpAddr>().ok())
+        .filter(|address| match address {
             IpAddr::V4(address) => {
                 let octets = address.octets();
                 octets[0] == 100 && (64..=127).contains(&octets[1])
             }
             IpAddr::V6(_) => false,
         })
-    });
+        .collect::<Vec<_>>();
     if status.backend_state != "Running"
         || !status.tun
         || current_tailnet.magic_dns_suffix != tailnet
@@ -864,11 +1063,33 @@ fn parse_tailscale_status(bytes: &[u8], hostname: &str, tailnet: &str) -> Result
         || self_node.dns_name != expected_dns_name
         || self_node.tags.as_slice() != ["tag:quetzalcoatl-node"]
         || !status.cert_domains.iter().any(|value| value == &domain)
-        || !has_ipv4
+        || cgnat_ipv4.len() != 1
+        || self_node.id.is_empty()
+        || !self_node.id.bytes().all(|byte| byte.is_ascii_graphic())
     {
-        return Err("tailscale status does not match tailnet, hostname, tag, TUN, IP and HTTPS requirements".into());
+        return Err("tailscale status does not match tailnet, hostname, stable ID, tag, TUN, IP and HTTPS requirements".into());
     }
-    Ok(())
+
+    let mut host_peer_ids = BTreeSet::new();
+    for peer in status.peers.values() {
+        if peer.expired
+            || peer.id == self_node.id
+            || !peer.tags.iter().any(|tag| tag == "tag:quetzalcoatl-node")
+        {
+            continue;
+        }
+        if peer.id.is_empty() || !peer.id.bytes().all(|byte| byte.is_ascii_graphic()) {
+            return Err("tagged Tailscale host peer has no stable ID".into());
+        }
+        host_peer_ids.insert(peer.id.clone());
+    }
+
+    Ok(TailscaleIdentity {
+        self_id: self_node.id,
+        self_ip: cgnat_ipv4[0],
+        hostname: self_node.host_name,
+        host_peer_ids,
+    })
 }
 
 fn wait_for_tailscale_serve(podman: &Path, hostname: &str, tailnet: &str) -> Result<(), GateError> {
@@ -1240,6 +1461,13 @@ fn set_component(status: &Arc<RwLock<StatusResponse>>, component: Component, val
     }
 }
 
+fn set_controller(status: &Arc<RwLock<StatusResponse>>, hostname: &str) {
+    if let Ok(mut status) = status.write() {
+        status.role = Some("controller".into());
+        status.controller = Some(hostname.into());
+    }
+}
+
 fn fail(status: &Arc<RwLock<StatusResponse>>, error: GateError) {
     if let Ok(mut status) = status.write() {
         status.overall = "failed".into();
@@ -1424,6 +1652,8 @@ struct TailscaleStatus {
     current_tailnet: Option<TailscaleTailnet>,
     #[serde(rename = "CertDomains")]
     cert_domains: Vec<String>,
+    #[serde(rename = "Peer", default)]
+    peers: HashMap<String, TailscalePeer>,
 }
 
 #[derive(Deserialize)]
@@ -1436,12 +1666,23 @@ struct TailscaleTailnet {
 
 #[derive(Deserialize)]
 struct TailscalePeer {
+    #[serde(rename = "ID", default)]
+    id: String,
     #[serde(rename = "HostName")]
     host_name: String,
     #[serde(rename = "DNSName")]
     dns_name: String,
     #[serde(rename = "Tags", default)]
     tags: Vec<String>,
+    #[serde(rename = "Expired", default)]
+    expired: bool,
+}
+
+struct TailscaleIdentity {
+    self_id: String,
+    self_ip: IpAddr,
+    hostname: String,
+    host_peer_ids: BTreeSet<String>,
 }
 
 #[derive(Deserialize)]
@@ -1525,6 +1766,7 @@ mod tests {
           "TUN":true,
           "TailscaleIPs":["100.100.10.20","fd7a:115c:a1e0::1"],
           "Self":{
+            "ID":"node-id-123",
             "HostName":"gnx-candidate-nitro",
             "DNSName":"gnx-candidate-nitro.tetra-balance.ts.net.",
             "Tags":["tag:quetzalcoatl-node"]
@@ -1533,11 +1775,78 @@ mod tests {
             "MagicDNSSuffix":"tetra-balance.ts.net",
             "MagicDNSEnabled":true
           },
-          "CertDomains":["gnx-candidate-nitro.tetra-balance.ts.net"]
+          "CertDomains":["gnx-candidate-nitro.tetra-balance.ts.net"],
+          "Peer":{}
         }"#;
-        assert!(
-            parse_tailscale_status(json, "gnx-candidate-nitro", "tetra-balance.ts.net").is_ok()
+        let identity = parse_tailscale_status(json, "gnx-candidate-nitro", "tetra-balance.ts.net")
+            .expect("valid identity");
+        assert_eq!(identity.self_id, "node-id-123");
+        assert_eq!(
+            identity.self_ip,
+            "100.100.10.20".parse::<IpAddr>().expect("IP")
         );
+        assert!(identity.host_peer_ids.is_empty());
+    }
+
+    #[test]
+    fn discovery_counts_offline_hosts_and_excludes_expired_peers_and_sidecars() {
+        let json = br#"{
+          "BackendState":"Running",
+          "TUN":true,
+          "TailscaleIPs":["100.100.10.20"],
+          "Self":{
+            "ID":"node-id-self",
+            "HostName":"gnx-candidate-nitro",
+            "DNSName":"gnx-candidate-nitro.tetra-balance.ts.net.",
+            "Tags":["tag:quetzalcoatl-node"]
+          },
+          "CurrentTailnet":{
+            "MagicDNSSuffix":"tetra-balance.ts.net",
+            "MagicDNSEnabled":true
+          },
+          "CertDomains":["gnx-candidate-nitro.tetra-balance.ts.net"],
+          "Peer":{
+            "peer-key-host":{
+              "ID":"node-id-host",
+              "HostName":"gnx-controller-existing",
+              "DNSName":"gnx-controller-existing.tetra-balance.ts.net.",
+              "Tags":["tag:quetzalcoatl-node"],
+              "Online":false,
+              "Expired":false
+            },
+            "peer-key-service":{
+              "ID":"node-id-service",
+              "HostName":"gnx-garage-existing",
+              "DNSName":"gnx-garage-existing.tetra-balance.ts.net.",
+              "Tags":["tag:quetzalcoatl-service"],
+              "Online":true,
+              "Expired":false
+            },
+            "peer-key-expired":{
+              "ID":"node-id-expired",
+              "HostName":"gnx-controller-expired",
+              "DNSName":"gnx-controller-expired.tetra-balance.ts.net.",
+              "Tags":["tag:quetzalcoatl-node"],
+              "Online":false,
+              "Expired":true
+            }
+          }
+        }"#;
+        let identity = parse_tailscale_status(json, "gnx-candidate-nitro", "tetra-balance.ts.net")
+            .expect("valid discovery status");
+        assert_eq!(
+            identity.host_peer_ids,
+            BTreeSet::from(["node-id-host".to_string()])
+        );
+    }
+
+    #[test]
+    fn controller_hostname_is_derived_from_the_stable_node_id() {
+        assert_eq!(
+            controller_hostname("nAbC123").expect("controller hostname"),
+            "gnx-controller-nabc123"
+        );
+        assert!(controller_hostname("invalid/id").is_err());
     }
 
     #[test]
