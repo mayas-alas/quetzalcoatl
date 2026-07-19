@@ -38,10 +38,20 @@ const MACHINE_IMAGE_ARTIFACT: &str = "podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_URL: &str = "https://github.com/podman-container-tools/podman-machine-os/releases/download/v6.0.1/podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_SIZE: u64 = 249_510_008;
 
-const PAYLOAD_FILES: [PayloadSpec; 24] = [
+const PAYLOAD_FILES: [PayloadSpec; 26] = [
     PayloadSpec::new(
         "bin/gnx-proxmox-entrypoint",
         "/usr/libexec/quetzalcoatl/gnx-proxmox-entrypoint",
+        "0755",
+    ),
+    PayloadSpec::new(
+        "bin/gnx-lxc-docker-bootstrap",
+        "/usr/libexec/quetzalcoatl/gnx-lxc-docker-bootstrap",
+        "0755",
+    ),
+    PayloadSpec::new(
+        "bin/gnx-lxc-prepare",
+        "/usr/libexec/quetzalcoatl/gnx-lxc-prepare",
         "0755",
     ),
     PayloadSpec::new(

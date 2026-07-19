@@ -87,6 +87,21 @@
       "sha512": "4c0c27ca6ceab5ef0b84db57825a00f26157ef1854bafe97297813e1cbe8ecb8cc9c453cab6b3b0efe1ba193a50c47ece1e41d950e411b8730b835b71e9e754b"
     },
     {
+      "id": "docker-lxc-runtime",
+      "kind": "apt_repository",
+      "source": "https://download.docker.com/linux/debian",
+      "distribution": "trixie",
+      "architecture": "amd64",
+      "key_sha256": "1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570",
+      "packages": {
+        "docker-ce": "5:29.6.2-1~debian.13~trixie",
+        "docker-ce-cli": "5:29.6.2-1~debian.13~trixie",
+        "containerd.io": "2.2.6-1~debian.13~trixie",
+        "docker-buildx-plugin": "0.35.0-1~debian.13~trixie",
+        "docker-compose-plugin": "5.3.1-1~debian.13~trixie"
+      }
+    },
+    {
       "id": "garage",
       "kind": "oci_image",
       "source": "https://git.deuxfleurs.fr/Deuxfleurs/garage",
@@ -124,6 +139,20 @@
     }
   ],
   "files": [
+    {
+      "path": "bin/gnx-lxc-docker-bootstrap",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0755",
+      "sha256": "411ae54d86a5971635dcb29c524b255143084368c5caa6d691d98f43262bc070"
+    },
+    {
+      "path": "bin/gnx-lxc-prepare",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0755",
+      "sha256": "65faaa58cbbd598f0f66790db8a95ae6f67501d3775d43456ef4128eb6850913"
+    },
     {
       "path": "bin/gnx-proxmox-entrypoint",
       "source": "quetzalcoatl",
@@ -213,7 +242,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "b3ec74b7d670407ce35718d1043be198c617e677c26d62597597d527b937e278"
+      "sha256": "85f090b9ee74f3e90d7784f2fc604f1ab1d1fd288a58453c872154fc9d023d2a"
     },
     {
       "path": "quadlet/tailscaled.container",

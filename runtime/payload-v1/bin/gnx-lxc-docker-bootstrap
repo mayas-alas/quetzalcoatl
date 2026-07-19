@@ -1,0 +1,68 @@
+#!/bin/sh
+set -eu
+umask 077
+
+docker_version='5:29.6.2-1~debian.13~trixie'
+containerd_version='2.2.6-1~debian.13~trixie'
+buildx_version='0.35.0-1~debian.13~trixie'
+compose_version='5.3.1-1~debian.13~trixie'
+key_sha256='1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570'
+
+verify_runtime() {
+  test "$(dpkg-query -W -f='${Version}' docker-ce)" = "$docker_version"
+  test "$(dpkg-query -W -f='${Version}' docker-ce-cli)" = "$docker_version"
+  test "$(dpkg-query -W -f='${Version}' containerd.io)" = "$containerd_version"
+  test "$(dpkg-query -W -f='${Version}' docker-buildx-plugin)" = "$buildx_version"
+  test "$(dpkg-query -W -f='${Version}' docker-compose-plugin)" = "$compose_version"
+  systemctl is-enabled --quiet docker.service
+  systemctl is-active --quiet docker.service
+  test "$(docker version --format '{{.Server.Version}}')" = '29.6.2'
+  test "$(docker info --format '{{.Driver}}')" = 'fuse-overlayfs'
+  docker compose version --short | grep -Eq '^5\.3\.1$'
+  docker buildx version | grep -Eq 'v?0\.35\.0([[:space:]]|$)'
+  test "$(stat -fc %T /sys/fs/cgroup)" = 'cgroup2fs'
+  test -w /sys/fs/cgroup
+  test -c /dev/net/tun
+  test -r /dev/net/tun
+  test -w /dev/net/tun
+  test -c /dev/fuse
+  test -r /dev/fuse
+  test -w /dev/fuse
+}
+
+if verify_runtime >/dev/null 2>&1; then
+  printf 'LXC_DOCKER=ready\n'
+  exit 0
+fi
+
+. /etc/os-release
+[ "${ID:-}" = 'debian' ]
+[ "${VERSION_CODENAME:-}" = 'trixie' ]
+[ "$(dpkg --print-architecture)" = 'amd64' ]
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq >/dev/null
+apt-get install -y -qq ca-certificates curl gpg jq fuse-overlayfs >/dev/null
+install -d -m 0755 /etc/apt/keyrings /run/gnx
+curl -fsSL https://download.docker.com/linux/debian/gpg -o /run/gnx/docker.asc
+printf '%s  %s\n' "$key_sha256" /run/gnx/docker.asc | sha256sum -c - >/dev/null
+install -m 0644 /run/gnx/docker.asc /etc/apt/keyrings/docker.asc
+rm -f /run/gnx/docker.asc
+printf '%s\n' \
+  'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian trixie stable' \
+  > /etc/apt/sources.list.d/docker.list
+apt-get update -qq >/dev/null
+apt-get install -y -qq \
+  "docker-ce=$docker_version" \
+  "docker-ce-cli=$docker_version" \
+  "containerd.io=$containerd_version" \
+  "docker-buildx-plugin=$buildx_version" \
+  "docker-compose-plugin=$compose_version" >/dev/null
+apt-mark hold docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
+
+install -d -m 0755 /etc/docker
+printf '%s\n' '{' '  "storage-driver": "fuse-overlayfs"' '}' > /etc/docker/daemon.json
+systemctl enable docker.service containerd.service >/dev/null
+systemctl restart containerd.service docker.service
+verify_runtime
+printf 'LXC_DOCKER=ready\n'

@@ -27,7 +27,10 @@ Volume=/var/lib/quetzalcoatl/proxmox/vz:/var/lib/vz
 Volume=/var/lib/quetzalcoatl/proxmox/cluster:/var/lib/pve-cluster
 Volume=/usr/libexec/quetzalcoatl/gnx-proxmox-entrypoint:/usr/local/sbin/gnx-proxmox-entrypoint:ro
 Volume=/usr/libexec/quetzalcoatl/gnx-pve-cluster-create:/usr/libexec/quetzalcoatl/gnx-pve-cluster-create:ro
+Volume=/usr/libexec/quetzalcoatl/gnx-lxc-docker-bootstrap:/usr/libexec/quetzalcoatl/gnx-lxc-docker-bootstrap:ro
+Volume=/usr/libexec/quetzalcoatl/gnx-lxc-prepare:/usr/libexec/quetzalcoatl/gnx-lxc-prepare:ro
 Volume=/etc/quetzalcoatl/node:/etc/quetzalcoatl/node:ro
+Volume=/usr/share/quetzalcoatl:/usr/share/quetzalcoatl:ro
 
 [Service]
 Restart=on-failure
