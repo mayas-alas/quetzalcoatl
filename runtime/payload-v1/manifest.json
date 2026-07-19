@@ -144,7 +144,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "62f4ac53f6fa5e026de06d6ce26c9399ce91294cf5e073fc40562280b6b50db6"
+      "sha256": "45978f459590ee74374ec9205b4a55dd9c9e9f3d9d29e2f7024543eef8a8b0b8"
     },
     {
       "path": "bin/gnx-lxc-prepare",
@@ -228,7 +228,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "fd6c8eca4d5acb2f9644b519eabd45fd5fc92b4400a052b586fe648f17e19aad"
+      "sha256": "323175c198427f0280645b0ff76dff53af2afbc0fc59c2512cf6d252442ae451"
     },
     {
       "path": "config/node/serve.json",

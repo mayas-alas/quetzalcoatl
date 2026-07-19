@@ -64,8 +64,12 @@ if ! command -v "$engine" >/dev/null 2>&1; then
     fi
     docker_packages=$(dpkg-query -W -f='${Package}=${Version};' docker-ce docker-ce-cli 2>/dev/null || printf 'missing')
     docker_service=$(systemctl is-active docker.service 2>/dev/null || printf 'unavailable')
-    printf 'docker diagnostic: cli=%s packages=%s service=%s\n' \
-      "$docker_cli" "$docker_packages" "$docker_service" >&2
+    docker_evidence='missing'
+    if [ -s /var/lib/quetzalcoatl/evidence/docker-runtime.env ]; then
+      docker_evidence=$(tr '\n' ';' < /var/lib/quetzalcoatl/evidence/docker-runtime.env | cut -c 1-512)
+    fi
+    printf 'docker diagnostic: hostname=%s cli=%s packages=%s service=%s evidence=%s\n' \
+      "$(hostname)" "$docker_cli" "$docker_packages" "$docker_service" "$docker_evidence" >&2
   fi
   echo "required container engine is unavailable: $engine" >&2
   exit 70

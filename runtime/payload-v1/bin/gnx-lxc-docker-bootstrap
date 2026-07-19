@@ -7,6 +7,20 @@ containerd_version='2.2.6-1~debian.13~trixie'
 buildx_version='0.35.0-1~debian.13~trixie'
 compose_version='5.3.1-1~debian.13~trixie'
 key_sha256='1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570'
+evidence_dir='/var/lib/quetzalcoatl/evidence'
+runtime_evidence="$evidence_dir/docker-runtime.env"
+
+write_runtime_evidence() {
+  temporary="$runtime_evidence.gnx-new"
+  install -d -m 0755 "$evidence_dir"
+  printf 'LXC_HOSTNAME=%s\nROOT_DEVICE=%s\nROOT_INODE=%s\nDOCKER_VERSION=%s\n' \
+    "$(hostname)" \
+    "$(stat -c %d /)" \
+    "$(stat -c %i /)" \
+    "$(docker version --format '{{.Server.Version}}')" > "$temporary"
+  chmod 0644 "$temporary"
+  mv -f "$temporary" "$runtime_evidence"
+}
 
 verify_runtime() {
   test "$(dpkg-query -W -f='${Version}' docker-ce)" = "$docker_version"
@@ -33,6 +47,7 @@ verify_runtime() {
 }
 
 if verify_runtime >/dev/null 2>&1; then
+  write_runtime_evidence
   printf 'LXC_DOCKER=ready\n'
   exit 0
 fi
@@ -67,4 +82,5 @@ printf '%s\n' '{' '  "storage-driver": "fuse-overlayfs"' '}' > /etc/docker/daemo
 systemctl enable docker.service containerd.service >/dev/null
 systemctl restart containerd.service docker.service
 verify_runtime
+write_runtime_evidence
 printf 'LXC_DOCKER=ready\n'
