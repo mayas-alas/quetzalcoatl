@@ -144,7 +144,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "0db6ef5ac2356939d5ca42a8d63f98608e5f258e29142875959a2341811531fa"
+      "sha256": "b6dbff2beabe2deb76e609be6dbe0dce91f1387cda07df6bcefb661252ce6c43"
     },
     {
       "path": "bin/gnx-lxc-prepare",
@@ -158,7 +158,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "a82771abea4d6a615e715d44d9e19cd2ba3a47d6aba6382e3ccb8d496a85c23a"
+      "sha256": "5d131f46b4e97abd8b751fd53b634dc42f3e48f15f37b478e73916962ab37d22"
     },
     {
       "path": "bin/gnx-lxc-service-prepare",
@@ -291,7 +291,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "20f77acf9c4d4fa2922df46bec59ff2c90942f05d13b59c8023edae2f70f7709"
+      "sha256": "caa5fd971b588eab86b736fb58a7e88688aa2bc4be4977769a4e7854cfc04d1c"
     },
     {
       "path": "services/forgejo/git_probe.sh",
@@ -312,7 +312,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "2bfc23fb6f31a21c3ee092e421bd73d0534471e669e22fef9779ef39895ec477"
+      "sha256": "6c37c79a40d3538f2aeb2a827c356659b34acc15c835cb0617c4501a3cd84368"
     },
     {
       "path": "services/garage/garage.toml.template",

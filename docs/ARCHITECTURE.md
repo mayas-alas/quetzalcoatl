@@ -348,6 +348,10 @@ No hay wildcard de red ni `nodeAttrs` de Funnel. La regla preexistente `group:de
 
 El proxy de la UI PVE usa como backend local `https+insecure://127.0.0.1:8006` porque PVE inicia con certificado propio; esto sólo desactiva la validación entre el sidecar y su backend local. El acceso del usuario sigue siendo HTTPS de Tailscale. El directorio `/config`, no el archivo suelto, se monta en el sidecar y `TS_SERVE_CONFIG=/config/serve.json`; la configuración se valida con `tailscale serve status --json`.
 
+MagicDNS y **HTTPS Certificates** deben estar habilitados una sola vez en la tailnet antes de instalar. El instalador no abre el consentimiento web ni ejecuta `tailscale cert`: exige que Serve pueda aprovisionar su certificado automáticamente y falla cerrado si el handshake HTTPS no queda operativo.
+
+Garage y Forgejo comparten el namespace de red de su sidecar. Compose recrea ambos contenedores como una unidad, el bootstrap exige que sus namespaces coincidan y ejecuta los probes locales mediante `nsenter`; no se publican puertos del servicio en el host LXC.
+
 Corosync queda fijado a la tailnet: el controller ejecuta `pvecm create quetzalcoatl --link0 <controller-ts-ip>` y el member `pvecm add <controller-ts-ip> --link0 <member-ts-ip>`. Los nombres PVE resuelven a esas IP y la postcondición verifica que `ring0_addr` en `corosync.conf` coincide; no se acepta la interfaz que Proxmox elija por defecto.
 
 Antes de `pvecm join`, el servicio debe comprobar en ambos sentidos:

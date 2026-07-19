@@ -4,6 +4,8 @@ umask 077
 export LC_ALL=C
 export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
+command -v nsenter >/dev/null
+
 bootstrap_dir='/run/gnx/service-bootstrap'
 input="$bootstrap_dir/input"
 install_form='/run/gnx/forgejo-install.form'
@@ -132,13 +134,27 @@ case "$service" in
 esac
 test "$(docker image inspect --format '{{.Id}}' "$app_image")" = "$app_config"
 if ! docker compose --project-name "$project" --env-file .env -f compose.yaml \
-  up --detach --pull never --wait --wait-timeout 300 > "$compose_log" 2>&1; then
+  up --detach --pull never --force-recreate --wait --wait-timeout 300 > "$compose_log" 2>&1; then
   tail -n 80 "$compose_log" >&2 || true
   docker compose --project-name "$project" --env-file .env -f compose.yaml ps --all >&2 || true
   rm -f "$compose_log"
   exit 73
 fi
 rm -f "$compose_log"
+
+sidecar_pid=$(docker inspect --format '{{.State.Pid}}' "gnx-$service-tailscale")
+application_pid=$(docker inspect --format '{{.State.Pid}}' "gnx-$service")
+case "$sidecar_pid:$application_pid" in
+  *[!0-9:]*|0:*|*:0) exit 74 ;;
+esac
+sidecar_netns=$(readlink "/proc/$sidecar_pid/ns/net")
+application_netns=$(readlink "/proc/$application_pid/ns/net")
+[ -n "$sidecar_netns" ]
+[ "$sidecar_netns" = "$application_netns" ]
+
+in_service_netns() {
+  nsenter --target "$application_pid" --net -- "$@"
+}
 
 wait_tailscale() {
   attempt=0
@@ -228,7 +244,7 @@ case "$service" in
     ' >/dev/null
     unset key_json
 
-    s3_evidence=$(printf '%s\n%s\n' "$access_key" "$secret_key" | python3 "$app_dir/s3_probe.py")
+    s3_evidence=$(printf '%s\n%s\n' "$access_key" "$secret_key" | in_service_netns python3 "$app_dir/s3_probe.py")
     printf '%s\n' "$s3_evidence" | grep -Eq '^S3_PUT_GET=ready;BYTES=64;BODY_SHA256=[0-9a-f]{64}$'
     evidence_dir='/var/lib/quetzalcoatl/evidence'
     install -d -m 0755 "$evidence_dir"
@@ -251,7 +267,7 @@ case "$service" in
         "db_type=sqlite3&db_path=/data/gitea/forgejo.db&app_name=Forgejo&repo_root_path=/data/git/repositories&lfs_root_path=/data/gitea/lfs&run_user=git&domain=$fqdn&ssh_port=22&http_port=3000&app_url=https://$fqdn/&log_root_path=/data/gitea/log&disable_registration=on&offline_mode=on&disable_gravatar=on&admin_name=gnx-admin&admin_passwd=$secret_three&admin_confirm_passwd=$secret_three&admin_email=gnx-admin@example.invalid" \
         > "$install_form"
       chmod 0400 "$install_form"
-      curl -sS -o "$install_response" \
+      in_service_netns curl -sS -o "$install_response" \
         -H 'Content-Type: application/x-www-form-urlencoded' \
         --data-binary "@$install_form" \
         http://127.0.0.1:3000/ >/dev/null 2>&1 || true
@@ -263,7 +279,7 @@ case "$service" in
     while [ "$attempt" -lt 90 ]; do
       attempt=$((attempt + 1))
       if grep -Eq '^INSTALL_LOCK[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$app_ini" &&
-        curl -fsS http://127.0.0.1:3000/api/healthz >/dev/null 2>&1; then
+        in_service_netns curl -fsS http://127.0.0.1:3000/api/healthz >/dev/null 2>&1; then
         installed=1
         break
       fi
@@ -281,17 +297,17 @@ case "$service" in
     printf 'silent\nshow-error\nfail\nuser = "gnx-admin:%s"\noutput = "%s"\nurl = "http://127.0.0.1:3000/api/v1/user"\n' \
       "$secret_three" "$curl_output" > "$curl_config"
     chmod 0400 "$curl_config"
-    curl --config "$curl_config"
+    in_service_netns curl --config "$curl_config"
     jq -e '.login == "gnx-admin" and .is_admin == true' "$curl_output" >/dev/null
 
     printf 'silent\nshow-error\nuser = "gnx-admin:%s"\n' "$secret_three" > "$curl_config"
     chmod 0400 "$curl_config"
     repository_api='http://127.0.0.1:3000/api/v1/repos/gnx-admin/i1-evidence'
-    http_status=$(curl --config "$curl_config" -o "$repository_output" -w '%{http_code}' "$repository_api")
+    http_status=$(in_service_netns curl --config "$curl_config" -o "$repository_output" -w '%{http_code}' "$repository_api")
     if [ "$http_status" = 404 ]; then
       printf '%s' '{"name":"i1-evidence","private":true,"auto_init":false,"default_branch":"main","object_format_name":"sha1"}' > "$repository_request"
       chmod 0600 "$repository_request"
-      http_status=$(curl --config "$curl_config" -o "$repository_output" -w '%{http_code}' \
+      http_status=$(in_service_netns curl --config "$curl_config" -o "$repository_output" -w '%{http_code}' \
         -H 'Content-Type: application/json' \
         --data-binary "@$repository_request" \
         http://127.0.0.1:3000/api/v1/user/repos)
