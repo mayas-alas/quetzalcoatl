@@ -312,7 +312,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "6c37c79a40d3538f2aeb2a827c356659b34acc15c835cb0617c4501a3cd84368"
+      "sha256": "2bfc23fb6f31a21c3ee092e421bd73d0534471e669e22fef9779ef39895ec477"
     },
     {
       "path": "services/garage/garage.toml.template",
