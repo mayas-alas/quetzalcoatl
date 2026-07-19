@@ -8,7 +8,7 @@
     Scope="perMachine">
 
     <MajorUpgrade DowngradeErrorMessage="A newer Quetzalcoatl version is already installed." />
-    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="none" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Quetzalcoatl">

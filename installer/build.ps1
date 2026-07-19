@@ -84,6 +84,7 @@ try {
     & dotnet tool run wix -- build `
         (Join-Path $PSScriptRoot "bundle.wxs") `
         -arch x64 `
+        -dcl none `
         -ext $balExtension `
         -d "HostPreflight=$hostPreflight" `
         -d "WslMsi=$($artifacts.wsl)" `
