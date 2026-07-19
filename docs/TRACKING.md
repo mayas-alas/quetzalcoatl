@@ -3,7 +3,7 @@
 Última actualización: 2026-07-19
 Estado global: `VALIDACIÓN I1 EN CURSO`
 
-Siguiente trabajo: `A-05 · empaquetar el runtime validado y cerrar persistencia tras reinicio`
+Siguiente trabajo: `A-05 · reiniciar Windows y cerrar persistencia/auditoría final I1`
 
 ## 1. Objetivo de seguimiento
 
@@ -40,8 +40,8 @@ Estados de trabajo permitidos: `NO INICIADO`, `EN CURSO`, `BLOQUEADO`, `CERRADO`
 - El primer bundle completó una instalación elevada y permitió descubrir un defecto real del resolvedor OCI de Podman 6.0.1. El camino quedó corregido con el artefacto oficial embebido, sin fallback ni resolución por red.
 - El `QuetzalcoatlSetup.exe` final completó la instalación elevada con exit 0 después de limpiarse la señal real de reboot. Tras el reinicio de Windows del 2026-07-19, el servicio volvió en modo `Auto` con la misma cuenta y SID, y la máquina persistida regresó a `KVM_READY`.
 - RuntimeGate verifica y aplica 30 archivos fijados, levanta el Quadlet PVE y alcanza `PROXMOX_READY` sólo después de obtener KVM API 12, TUN y FUSE dentro de la máquina y del contenedor, más systemd, cgroup v2 y `pvesh` saludables.
-- El host conserva WSL 2.7.10 y Podman 6.0.1. El bundle 0.1.1 y su MSI hicieron major upgrade transaccional de 0.1.0; el producto, servicio, CLI y payload instalados coinciden con el build release.
-- DPAPI, Tailscale, Serve, rol controller, clúster quorate, persistencia Corosync y OpenTofu están demostrados bajo el SID real del servicio. Garage supera S3 PUT/GET y Forgejo push/clone; ambos Compose y sidecars están `ready`. MTU 1500 elimina la pérdida de segmentos grandes y TCP 22 llega al OpenSSH de PVE, no al sidecar. Falta empaquetar esta revisión y repetir la aceptación después de reinicio. Dos hosts Dockur Windows están vivos y accesibles para repetir I2, cuyo código no se ha iniciado.
+- El host conserva WSL 2.7.10 y Podman 6.0.1. El bundle 0.1.2 y su MSI hicieron major upgrade transaccional del 0.1.1 instalado; el producto, servicio, CLI y los 30 payloads instalados coinciden con el build release.
+- DPAPI, Tailscale, Serve, rol controller, clúster quorate, persistencia Corosync y OpenTofu están demostrados bajo el SID real del servicio. Garage supera S3 PUT/GET y Forgejo push/clone; ambos Compose y sidecars están `ready`. MTU 1500 elimina la pérdida de segmentos grandes y TCP 22 llega al OpenSSH de PVE, no al sidecar. La revisión ya está instalada como 0.1.2; falta repetir la aceptación después de reinicio. Dos hosts Dockur Windows están vivos y accesibles para repetir I2, cuyo código no se ha iniciado.
 
 ## 4. Resultado de los dos incrementos
 
@@ -155,6 +155,7 @@ I2 no comienza hasta que I1 está cerrado.
 | 2026-07-19 | G0-03/B-05 · evidencia negativa | Windows controller → controller sidecar y dos edges Dockur | `tailscale ping --c 3 --timeout 5s` | Los tres destinos fueron alcanzables, pero ninguno estableció ruta directa: DERP `dfw`, `sfo` e `iad`, con RTT estable aproximado de 64–73 ms. Los Dockur alojados por GitHub no cierran el gate Corosync directo/<5 ms | B-05 permanece `ABIERTO`; no se relajó el gate ni se creó fallback |
 | 2026-07-19 | A-05/G0-05 · evidencia viva previa a reinicio | Windows 11 x64 · servicio instalado | despliegue transaccional + `gnx status --json` | Runtime completo en `READY`; PVE joined/quorate, OpenTofu ready, Garage supera S3 PUT/GET y Forgejo push/clone; ambos sidecars quedan saludables con nftables. Esta fila no atribuye aún persistencia tras reinicio | `gnx-service.exe` SHA-256 `3B10EE43FB90B92664FF9685C684485D6B7ABE9FAA401449EC98E2AD9C4780A9`; manifest `CAC7581621CF768CB8C92DAD90B3E94B2454BC991C5D086BED666A97CD1E7CE8`; commit `59607d8` |
 | 2026-07-19 | G0-07/B-08 | Windows controller → tailnet | ICMP 1200 bytes; HTTPS sin `-k`; banner TCP 22 | 4/4 paquetes y 0% pérdida; PVE HTTP 200 en 153 ms, Garage 403 esperado sin firma y Forgejo 200, los tres con `ssl_verify_result=0`; TCP 22 responde `SSH-2.0-OpenSSH_10.0p2 Debian-7+deb13u4` y no una shell Tailscale | G0-07 y B-08 cerrados · commit `59607d8` |
+| 2026-07-19 | A-05/I1-10 · candidato instalable | Windows 11 x64 · major upgrade elevado 0.1.1 → 0.1.2 | `wix msi validate`; extracción administrativa; `QuetzalcoatlSetup.exe /install /quiet /norestart`; `gnx status --json` | MSI válido y contenido exacto `30/30`; Burn, preflights, instalación y retiro del ProductCode anterior terminaron `0x0` sin reboot requerido. El servicio volvió `READY`, conservó controller/quorum/state y repitió S3 PUT/GET, push/clone y los tres endpoints HTTPS | EXE `B219880578A75EA13C4800F60E2F46CC43AF4BD51DDD8C5DACA2A00F5A6DADE6`; MSI `6D97299F43B9D1D1E79B118D7236CE2705B63ACE71935E57AFE7E98343906792`; ProductCode `{BDF28B1E-C968-4D1D-BEB1-AD110D43408F}`; servicio `B7EA7A4A9B89A514CD8364455F69090A499935F0F29E4B7F654B161B4185E2D8`; commit `b2428da` |
 
 Reglas de evidencia:
 
@@ -208,6 +209,7 @@ Reglas de evidencia:
 | 2026-07-19 | A-04 cerró G0-01 y B-01 con `PROXMOX_READY` bajo la cuenta virtual | A-05 inicia por DPAPI/Tailscale; G0-02 permanece abierto hasta probar PVE después de reboot |
 | 2026-07-19 | El bundle 0.1.1 actualizó 0.1.0 mediante major upgrade real | Producto, servicio y 30 payloads instalados coinciden con el build; A-05 continúa por la ACL y entrada DPAPI |
 | 2026-07-19 | El runtime corrigió MTU WSL/Podman, deshabilitó Tailscale SSH y cerró Serve HTTPS | G0-07/B-08 cerrados; A-05 continúa únicamente por empaquetado y persistencia post-reinicio de Garage/Forgejo |
+| 2026-07-19 | El bundle 0.1.2 sustituyó 0.1.1 y regresó a `READY` sin reconfigurar ni recrear identidad | El último trabajo I1 es reinicio real, repetición de probes y auditoría final de secretos/evidencia |
 
 Al actualizar este archivo:
 
