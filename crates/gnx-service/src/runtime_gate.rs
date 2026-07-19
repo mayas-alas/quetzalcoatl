@@ -21,6 +21,7 @@ const MACHINE_NAME: &str = "quetzalcoatl";
 const MACHINE_CPUS: u64 = 6;
 const MACHINE_MEMORY_MIB: u64 = 8192;
 const MACHINE_DISK_GIB: u64 = 100;
+const MACHINE_NETWORK_MTU: u32 = 1500;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const LXC_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-lxc-prepare";
 const LXC_SERVICE_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-lxc-service-prepare";
@@ -202,6 +203,31 @@ systemctl is-system-running --wait >/dev/null 2>&1 || test "$(systemctl is-syste
 printf 'SYSTEMD=ready;CGROUP=ready\n'
 "#;
 
+const MACHINE_OUTER_MTU: &str = r#"set -eu
+test -e /sys/class/net/eth0/mtu
+ip link set dev eth0 mtu 1500
+test "$(cat /sys/class/net/eth0/mtu)" = 1500
+printf 'MACHINE_OUTER_MTU=1500\n'
+"#;
+
+const POD_NETWORK_MTU: &str = r#"set -eu
+bridge=podman0
+test -d "/sys/class/net/$bridge/brif"
+ip link set dev "$bridge" mtu 1500
+members=0
+for member_path in "/sys/class/net/$bridge/brif/"*; do
+  test -e "$member_path"
+  member=${member_path##*/}
+  ip link set dev "$member" mtu 1500
+  test "$(cat "/sys/class/net/$member/mtu")" = 1500
+  members=$((members + 1))
+done
+test "$members" -ge 1
+test "$(cat "/sys/class/net/$bridge/mtu")" = 1500
+test "$(podman exec gnx-proxmox cat /sys/class/net/eth0/mtu)" = 1500
+printf 'POD_NETWORK_MTU=1500;MEMBERS=%s\n' "$members"
+"#;
+
 const DEVICE_PROBE: &str = r#"import array
 import fcntl
 import os
@@ -339,6 +365,8 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
     let image = load_machine_image()?;
     let podman = podman_binary()?;
     ensure_machine(&podman, &image)?;
+    set_stage(status, "MACHINE_NETWORK_PREPARING");
+    configure_machine_outer_mtu(&podman)?;
     set_component(status, Component::PodmanMachine, "ready");
     set_stage(status, "MACHINE_READY");
 
@@ -354,6 +382,8 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
 
     set_stage(status, "PROXMOX_STARTING");
     start_proxmox(&podman)?;
+    set_stage(status, "POD_NETWORK_PREPARING");
+    configure_pod_network_mtu(&podman)?;
     set_stage(status, "PROXMOX_CHECKING");
     validate_proxmox_devices(&podman)?;
     wait_for_proxmox(&podman)?;
@@ -383,6 +413,7 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
 
     set_stage(status, "TAILSCALE_CHECKING");
     let identity = wait_for_tailscale(&podman, &hostname, &configuration.tailnet)?;
+    disable_tailscale_ssh(&podman)?;
     set_stage(status, "ROLE_DISCOVERING");
     let mut controller = resolve_controller(
         &podman,
@@ -770,6 +801,37 @@ fn validate_fedora(podman: &Path) -> Result<(), GateError> {
             "FEDORA_RUNTIME_UNSUPPORTED",
             Component::PodmanMachine,
             "Fedora probe did not confirm systemd and cgroup v2",
+        ));
+    }
+    Ok(())
+}
+
+fn configure_machine_outer_mtu(podman: &Path) -> Result<(), GateError> {
+    let output = machine_stdin(podman, ["sh", "-s"], MACHINE_OUTER_MTU.as_bytes())
+        .map_err(|error| error.with_code("MACHINE_MTU_FAILED", Component::PodmanMachine))?;
+    let expected = format!("MACHINE_OUTER_MTU={MACHINE_NETWORK_MTU}");
+    if String::from_utf8_lossy(&output.stdout).trim() != expected {
+        return Err(GateError::new(
+            "MACHINE_MTU_FAILED",
+            Component::PodmanMachine,
+            "Podman Machine did not confirm the fixed outer MTU",
+        ));
+    }
+    Ok(())
+}
+
+fn configure_pod_network_mtu(podman: &Path) -> Result<(), GateError> {
+    let output = machine_stdin(podman, ["sh", "-s"], POD_NETWORK_MTU.as_bytes())
+        .map_err(|error| error.with_code("POD_NETWORK_MTU_FAILED", Component::PodmanMachine))?;
+    let confirmation = String::from_utf8_lossy(&output.stdout);
+    if !confirmation
+        .trim()
+        .starts_with(&format!("POD_NETWORK_MTU={MACHINE_NETWORK_MTU};MEMBERS="))
+    {
+        return Err(GateError::new(
+            "POD_NETWORK_MTU_FAILED",
+            Component::PodmanMachine,
+            "Podman bridge and pod veth did not confirm the fixed MTU",
         ));
     }
     Ok(())
@@ -1455,6 +1517,23 @@ fn start_tailscale(podman: &Path) -> Result<(), GateError> {
     Ok(())
 }
 
+fn disable_tailscale_ssh(podman: &Path) -> Result<(), GateError> {
+    machine_stdin(
+        podman,
+        [
+            "podman",
+            "exec",
+            "gnx-tailscaled",
+            "tailscale",
+            "set",
+            "--ssh=false",
+        ],
+        &[],
+    )
+    .map(|_| ())
+    .map_err(|error| error.with_code("TAILSCALE_SSH_DISABLE_FAILED", Component::Tailscale))
+}
+
 fn verify_tailscale_secret_cleanup(podman: &Path) -> Result<(), GateError> {
     let output = machine_stdin(
         podman,
@@ -1591,6 +1670,7 @@ fn parse_tailscale_status(
         })
         .collect::<Vec<_>>();
     if status.backend_state != "Running"
+        || !status.health.is_empty()
         || !status.tun
         || current_tailnet.magic_dns_suffix != tailnet
         || !current_tailnet.magic_dns_enabled
@@ -2240,6 +2320,8 @@ struct MachineResources {
 struct TailscaleStatus {
     #[serde(rename = "BackendState")]
     backend_state: String,
+    #[serde(rename = "Health", default)]
+    health: Vec<String>,
     #[serde(rename = "TUN")]
     tun: bool,
     #[serde(rename = "TailscaleIPs")]
@@ -2385,6 +2467,21 @@ mod tests {
             "100.100.10.20".parse::<IpAddr>().expect("IP")
         );
         assert!(identity.host_peer_ids.is_empty());
+
+        let unhealthy = String::from_utf8(json.to_vec())
+            .expect("status JSON")
+            .replace(
+                "\"BackendState\":\"Running\"",
+                "\"BackendState\":\"Running\",\"Health\":[\"warning\"]",
+            );
+        assert!(
+            parse_tailscale_status(
+                unhealthy.as_bytes(),
+                "gnx-candidate-nitro",
+                "tetra-balance.ts.net"
+            )
+            .is_err()
+        );
     }
 
     #[test]

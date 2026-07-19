@@ -11,6 +11,7 @@ services:
       TS_ACCEPT_DNS: "false"
       TS_ENABLE_HEALTH_CHECK: "true"
       TS_LOCAL_ADDR_PORT: 127.0.0.1:41234
+      TS_DEBUG_FIREWALL_MODE: nftables
       TS_EXTRA_ARGS: --advertise-tags=tag:quetzalcoatl-service
     volumes:
       - /var/lib/quetzalcoatl/tailscale/forgejo:/var/lib/tailscale
@@ -19,6 +20,7 @@ services:
       - /dev/net/tun:/dev/net/tun
     cap_add:
       - NET_ADMIN
+      - NET_RAW
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:41234/healthz"]
       interval: 30s

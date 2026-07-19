@@ -158,7 +158,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "5d131f46b4e97abd8b751fd53b634dc42f3e48f15f37b478e73916962ab37d22"
+      "sha256": "baa8a659fb821fb453ad3bd975c80a4bfdd95cc02806c6fa65a4374498d5a21b"
     },
     {
       "path": "bin/gnx-lxc-service-prepare",
@@ -228,7 +228,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "226c6aeec27094008faa60627d6bdb8ae513b0865da48699d3fbcc22be823af3"
+      "sha256": "51125d73a643777bc25511b53cf912b262c43e5b6aef993ea543ef64920b3822"
     },
     {
       "path": "config/node/serve.json",
@@ -263,7 +263,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "e2a9418e459c07a7ca2a0c2bd2f1b3266136f88154591d3c80a7290bbea9cafd"
+      "sha256": "eecb3d4a89fd960b783f19d0ac0cbd03d36b881838dc0afef6c4c0c945fd47c4"
     },
     {
       "path": "opentofu/controller/.terraform.lock.hcl",
@@ -291,7 +291,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "caa5fd971b588eab86b736fb58a7e88688aa2bc4be4977769a4e7854cfc04d1c"
+      "sha256": "ce9ff1cf351a891a0f792946c4d70b5de27de3106e81583253d9f83929835054"
     },
     {
       "path": "services/forgejo/git_probe.sh",
@@ -312,7 +312,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "6c37c79a40d3538f2aeb2a827c356659b34acc15c835cb0617c4501a3cd84368"
+      "sha256": "a946239171aada0cae96155191403f76b08cf876836f47668f9c0316a0f2609c"
     },
     {
       "path": "services/garage/garage.toml.template",

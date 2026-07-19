@@ -144,6 +144,8 @@ La cadena queda fijada a WiX Toolset 5.0.2, WinSW 2.12.0 x64 —SHA-256 `05B82D4
 
 La máquina usa exclusivamente el artefacto WSL x86_64 de Podman Machine OS 6.0.1: commit `137982aea62947e436bfb58408676e246414ea47`, índice OCI `sha256:6dec5eadc84f41e55c3b6fc67264ed6c985e5f61a1d4ba243056dc0efc234bec`, manifest de plataforma `sha256:c1b05f0f5f5cdbbfb2be4e23fccfbd0436f3aa6bfa6d4705daed00a251b03943` y layer/archivo `sha256:0d828beef16a031a50a7cee594fd79ade36c3d3972b590cb01c32a987bd88bc3` de 249,510,008 bytes. El build verifica el release oficial `podman-machine.x86_64.wsl.tar.zst`, el MSI lo instala en `machine-images` y RuntimeGate vuelve a verificarlo antes de `podman machine init`. La creación no depende de red ni del resolvedor OCI de Podman 6.0.1 y no admite tag, imagen o proveedor alternativo.
 
+WSL crea la interfaz exterior de esta máquina con MTU 1280, insuficiente para encapsular un paquete Tailscale de 1280 bytes. Antes de iniciar Tailscale, RuntimeGate fija y verifica MTU 1500 en `eth0`, `podman0` y cada veth del pod; se ejecuta de nuevo después de cada arranque de la máquina y recreación del pod. Esto evita el fallo silencioso donde pings pequeños funcionan pero TLS y SSH pierden sus segmentos grandes.
+
 Cada versión publicada obtiene un ProductCode MSI nuevo y conserva el UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`. `MajorUpgrade` ejecuta `RemoveExistingProducts` después de `InstallInitialize`, de modo que una falla restaura la versión anterior. Quetzalcoatl 0.1.1 usa ProductCode `{3704395F-B42C-409D-A342-EE03E81A6B4C}` y reemplazó transaccionalmente 0.1.0. Burn conserva ProviderKey y UpgradeCode `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`; cada evidencia identifica el EXE concreto por SHA-256.
 
 ## 5. `runtime payload v1` y Quadlets
@@ -330,10 +332,8 @@ Política Tailscale mínima del producto:
 | `tag:quetzalcoatl-node` | `tag:quetzalcoatl-node` | TCP 22 y 8006; UDP 5405-5412 |
 | `autogroup:admin` | `tag:quetzalcoatl-node` | TCP 22 y 443 |
 | `autogroup:admin` | `tag:quetzalcoatl-service` | TCP 443 y 2222 |
-| SSH `tag:quetzalcoatl-node` | `tag:quetzalcoatl-node` | `accept` como `root` |
-| SSH `autogroup:admin` | `tag:quetzalcoatl-node` | `check` como `root` |
 
-No hay wildcard de red ni `nodeAttrs` de Funnel. La regla preexistente `group:dev → tag:github-rdp` permanece limitada a TCP/UDP 3389 y no concede acceso a tags Quetzalcoatl.
+No hay wildcard de red ni `nodeAttrs` de Funnel. La política no contiene sección `ssh`: el sidecar fuerza `tailscale set --ssh=false` y TCP 22 llega al OpenSSH de PVE en el namespace compartido, no a una shell del contenedor Tailscale. La regla RDP preexistente conserva `tag:github-rdp`, queda limitada al operador explícito y a TCP/UDP 3389, y no concede acceso a tags Quetzalcoatl.
 
 | Tráfico | Transporte | Ruta | Control | Publicación Windows |
 |---|---|---|---|---|

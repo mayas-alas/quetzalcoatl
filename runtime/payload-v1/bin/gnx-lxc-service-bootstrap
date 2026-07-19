@@ -163,6 +163,7 @@ wait_tailscale() {
     if docker exec "gnx-$service-tailscale" tailscale status --json > "$tailscale_status" 2>/dev/null &&
       jq -e --arg host "$hostname" --arg tailnet "$tailnet" --arg fqdn "$fqdn" '
         .BackendState == "Running" and
+        ((.Health // []) | length == 0) and
         .TUN == true and
         .CurrentTailnet.MagicDNSSuffix == $tailnet and
         .CurrentTailnet.MagicDNSEnabled == true and

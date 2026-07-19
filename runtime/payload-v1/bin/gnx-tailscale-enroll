@@ -14,7 +14,7 @@ case "$engine:$scope" in
   podman:host)
     state_dir='/var/lib/quetzalcoatl/tailscale/host'
     tag='tag:quetzalcoatl-node'
-    extra_args="--ssh --advertise-tags=$tag"
+    extra_args="--advertise-tags=$tag"
     permanent_name='gnx-tailscaled'
     ;;
   docker:garage|docker:forgejo)
@@ -116,6 +116,7 @@ fi
   --hostname "$hostname" \
   --device /dev/net/tun \
   --cap-add NET_ADMIN \
+  --cap-add NET_RAW \
   $security_args \
   --volume "$state_dir:/var/lib/tailscale" \
   --volume "$auth_file:/run/secrets/authkey:ro" \
@@ -124,6 +125,7 @@ fi
   --env 'TS_USERSPACE=false' \
   --env 'TS_AUTH_ONCE=true' \
   --env 'TS_ACCEPT_DNS=false' \
+  --env 'TS_DEBUG_FIREWALL_MODE=nftables' \
   --env "TS_HOSTNAME=$hostname" \
   --env "TS_EXTRA_ARGS=$extra_args" \
   "$image" >/dev/null
