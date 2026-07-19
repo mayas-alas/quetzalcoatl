@@ -137,6 +137,13 @@
       "sha256": "6f84a6636a614dae8435946afbbef952267db11cc25cedcf1e147ac149c43e97"
     },
     {
+      "path": "bin/gnx-tailscale-rename",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0755",
+      "sha256": "cb619e2565c711b09b8b1afad340c8b3c3f9fd6e164dade2a343c67372e970c0"
+    },
+    {
       "path": "bin/gnx-tailscale-enroll",
       "source": "quetzalcoatl",
       "version": 1,
