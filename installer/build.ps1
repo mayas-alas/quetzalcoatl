@@ -76,6 +76,7 @@ try {
         -d "WinSW=$($artifacts.winsw)" `
         -d "ServiceConfig=$(Join-Path $PSScriptRoot 'Quetzalcoatl.Service.xml')" `
         -d "WinSWLicense=$(Join-Path $PSScriptRoot 'licenses\WinSW.txt')" `
+        -d "PodmanMachineImage=$($artifacts.podman_machine)" `
         -d "RuntimePayload=$(Join-Path $repoRoot 'runtime\payload-v1')" `
         -out $productMsi
     if ($LASTEXITCODE -ne 0) { throw "MSI build failed." }

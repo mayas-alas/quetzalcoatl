@@ -13,6 +13,7 @@
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Quetzalcoatl">
         <Directory Id="RuntimePayloadFolder" Name="runtime" />
+        <Directory Id="MachineImagesFolder" Name="machine-images" />
         <Directory Id="LicensesFolder" Name="licenses" />
       </Directory>
     </StandardDirectory>
@@ -20,6 +21,7 @@
     <Feature Id="ProductFeature" Title="Quetzalcoatl" Level="1">
       <ComponentRef Id="CliComponent" />
       <ComponentRef Id="ServiceComponent" />
+      <ComponentRef Id="MachineImageComponent" />
       <ComponentRef Id="LicensesComponent" />
       <Files Include="$(var.RuntimePayload)\**" Directory="RuntimePayloadFolder" />
     </Feature>
@@ -67,6 +69,16 @@
           Stop="both"
           Remove="uninstall"
           Wait="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="MachineImagesFolder">
+      <Component Id="MachineImageComponent" Guid="*">
+        <File
+          Id="PodmanMachineImage"
+          Source="$(var.PodmanMachineImage)"
+          Name="podman-machine.x86_64.wsl.tar.zst"
+          KeyPath="yes" />
       </Component>
     </DirectoryRef>
 

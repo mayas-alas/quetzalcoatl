@@ -1,7 +1,7 @@
 use std::env;
-use std::ffi::OsStr;
-use std::fs;
-use std::io::Write;
+use std::ffi::{OsStr, OsString};
+use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -9,6 +9,7 @@ use std::sync::{Arc, RwLock};
 
 use gnx_protocol::StatusResponse;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 const EXPECTED_SERVICE_SID: &str = "S-1-5-80-1414281857-1943412974-186110390-2486725240-2230548587";
 const MACHINE_NAME: &str = "quetzalcoatl";
@@ -23,6 +24,9 @@ const MACHINE_IMAGE_MANIFEST: &str =
 const MACHINE_IMAGE_LAYER: &str =
     "sha256:0d828beef16a031a50a7cee594fd79ade36c3d3972b590cb01c32a987bd88bc3";
 const MACHINE_IMAGE_COMMIT: &str = "137982aea62947e436bfb58408676e246414ea47";
+const MACHINE_IMAGE_ARTIFACT: &str = "podman-machine.x86_64.wsl.tar.zst";
+const MACHINE_IMAGE_URL: &str = "https://github.com/podman-container-tools/podman-machine-os/releases/download/v6.0.1/podman-machine.x86_64.wsl.tar.zst";
+const MACHINE_IMAGE_SIZE: u64 = 249_510_008;
 
 const WSL_CONFIG: &str = "[wsl2]\nprocessors=6\nmemory=8GB\nswap=2GB\nnestedVirtualization=true\n";
 
@@ -180,32 +184,31 @@ fn ensure_machine(podman: &Path, image: &MachineImage) -> Result<(), GateError> 
             }
         }
         None => {
-            let image_reference = format!("docker://{}@{}", image.image, image.index_digest);
+            let image_path = installed_machine_image(image)?;
             let cpus = MACHINE_CPUS.to_string();
             let memory = MACHINE_MEMORY_MIB.to_string();
             let disk = MACHINE_DISK_GIB.to_string();
-            run_command(
-                podman,
-                [
-                    "machine",
-                    "init",
-                    "--provider",
-                    "wsl",
-                    "--image",
-                    &image_reference,
-                    "--cpus",
-                    &cpus,
-                    "--memory",
-                    &memory,
-                    "--disk-size",
-                    &disk,
-                    "--rootful",
-                    "--update-connection",
-                    "--now",
-                    MACHINE_NAME,
-                ],
-            )
-            .map_err(|error| error.with_code("MACHINE_CREATE_FAILED", Component::PodmanMachine))?;
+            let args = vec![
+                OsString::from("machine"),
+                OsString::from("init"),
+                OsString::from("--provider"),
+                OsString::from("wsl"),
+                OsString::from("--image"),
+                image_path.into_os_string(),
+                OsString::from("--cpus"),
+                OsString::from(cpus),
+                OsString::from("--memory"),
+                OsString::from(memory),
+                OsString::from("--disk-size"),
+                OsString::from(disk),
+                OsString::from("--rootful"),
+                OsString::from("--update-connection"),
+                OsString::from("--now"),
+                OsString::from(MACHINE_NAME),
+            ];
+            run_command(podman, args).map_err(|error| {
+                error.with_code("MACHINE_CREATE_FAILED", Component::PodmanMachine)
+            })?;
         }
     }
 
@@ -227,6 +230,71 @@ fn ensure_machine(podman: &Path, image: &MachineImage) -> Result<(), GateError> 
             .map_err(|error| error.with_code("MACHINE_CREATE_FAILED", Component::PodmanMachine))?;
     }
     Ok(())
+}
+
+fn installed_machine_image(image: &MachineImage) -> Result<PathBuf, GateError> {
+    let executable = env::current_exe().map_err(|error| {
+        GateError::new(
+            "RUNTIME_PAYLOAD_INVALID",
+            Component::PodmanMachine,
+            format!("cannot locate gnx-service executable: {error}"),
+        )
+    })?;
+    let path = executable
+        .parent()
+        .ok_or_else(|| {
+            GateError::new(
+                "RUNTIME_PAYLOAD_INVALID",
+                Component::PodmanMachine,
+                "gnx-service executable has no parent directory",
+            )
+        })?
+        .join("machine-images")
+        .join(&image.artifact);
+    if !path.is_file() || !verify_artifact(&path, image)? {
+        return Err(GateError::new(
+            "RUNTIME_PAYLOAD_INVALID",
+            Component::PodmanMachine,
+            "installed Podman Machine image does not match its locked size and SHA-256",
+        ));
+    }
+    Ok(path)
+}
+
+fn verify_artifact(path: &Path, image: &MachineImage) -> Result<bool, GateError> {
+    let metadata = fs::metadata(path).map_err(|error| {
+        GateError::new(
+            "RUNTIME_PAYLOAD_INVALID",
+            Component::PodmanMachine,
+            format!("cannot inspect installed machine image: {error}"),
+        )
+    })?;
+    if metadata.len() != image.size {
+        return Ok(false);
+    }
+    let mut file = File::open(path).map_err(|error| {
+        GateError::new(
+            "RUNTIME_PAYLOAD_INVALID",
+            Component::PodmanMachine,
+            format!("cannot open installed machine image: {error}"),
+        )
+    })?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 1024 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|error| {
+            GateError::new(
+                "RUNTIME_PAYLOAD_INVALID",
+                Component::PodmanMachine,
+                format!("cannot hash installed machine image: {error}"),
+            )
+        })?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(format!("sha256:{:x}", digest.finalize()) == image.sha256)
 }
 
 fn inspect_machine(podman: &Path) -> Result<MachineInspect, GateError> {
@@ -369,6 +437,9 @@ fn parse_machine_image(bytes: &[u8]) -> Result<MachineImage, GateError> {
         || image.index_digest.as_deref() != Some(MACHINE_IMAGE_INDEX)
         || image.manifest_digest.as_deref() != Some(MACHINE_IMAGE_MANIFEST)
         || image.layer_digest.as_deref() != Some(MACHINE_IMAGE_LAYER)
+        || image.artifact.as_deref() != Some(MACHINE_IMAGE_ARTIFACT)
+        || image.artifact_url.as_deref() != Some(MACHINE_IMAGE_URL)
+        || image.artifact_size != Some(MACHINE_IMAGE_SIZE)
         || platform.map(|value| value.os.as_str()) != Some("linux")
         || platform.map(|value| value.architecture.as_str()) != Some("x86_64")
         || platform.map(|value| value.disk_type.as_str()) != Some("wsl")
@@ -380,8 +451,9 @@ fn parse_machine_image(bytes: &[u8]) -> Result<MachineImage, GateError> {
         ));
     }
     Ok(MachineImage {
-        image: image.image.expect("validated image"),
-        index_digest: image.index_digest.expect("validated index digest"),
+        artifact: image.artifact.expect("validated artifact"),
+        size: image.artifact_size.expect("validated artifact size"),
+        sha256: image.layer_digest.expect("validated layer digest"),
     })
 }
 
@@ -549,6 +621,9 @@ struct RuntimeComponent {
     index_digest: Option<String>,
     manifest_digest: Option<String>,
     layer_digest: Option<String>,
+    artifact: Option<String>,
+    artifact_url: Option<String>,
+    artifact_size: Option<u64>,
     platform: Option<RuntimePlatform>,
 }
 
@@ -560,8 +635,9 @@ struct RuntimePlatform {
 }
 
 struct MachineImage {
-    image: String,
-    index_digest: String,
+    artifact: String,
+    size: u64,
+    sha256: String,
 }
 
 #[derive(Deserialize)]
@@ -602,8 +678,9 @@ mod tests {
     fn parses_locked_wsl_machine_image() {
         let manifest = include_bytes!("../../../runtime/payload-v1/manifest.json");
         let image = parse_machine_image(manifest).expect("machine image pin");
-        assert_eq!(image.image, "quay.io/podman/machine-os");
-        assert_eq!(image.index_digest, MACHINE_IMAGE_INDEX);
+        assert_eq!(image.artifact, MACHINE_IMAGE_ARTIFACT);
+        assert_eq!(image.size, MACHINE_IMAGE_SIZE);
+        assert_eq!(image.sha256, MACHINE_IMAGE_LAYER);
     }
 
     #[test]
