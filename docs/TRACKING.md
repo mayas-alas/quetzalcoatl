@@ -2,7 +2,7 @@
 
 Última actualización: 2026-07-18  
 Estado global: `CÓDIGO EN CURSO`  
-Siguiente trabajo: `A-01 · validar ruta elevada completa de HostPreflight`
+Siguiente trabajo: `A-02 · construir runtime manifest v1 reproducible`
 
 ## 1. Objetivo de seguimiento
 
@@ -86,8 +86,8 @@ Un hallazgo que no bloquee alguno de los dos incrementos no pertenece aquí.
 
 | Orden | ID | Trabajo | Estado | Terminado cuando |
 |---:|---|---|---|---|
-| 1 | A-01 | Crear el workspace Rust único e implementar `HostPreflight` Windows/WSL2 | `EN CURSO` | Un binario reusable entrega códigos estables; no captura secretos |
-| 2 | A-02 | Fijar referencias externas y construir `runtime manifest v1` | `NO INICIADO` | Cierra B-02 sin copiar contenido no utilizado |
+| 1 | A-01 | Crear el workspace Rust único e implementar `HostPreflight` Windows/WSL2 | `CERRADO` | Un binario reusable entrega códigos estables; no captura secretos |
+| 2 | A-02 | Fijar referencias externas y construir `runtime manifest v1` | `EN CURSO` | Cierra B-02 sin copiar contenido no utilizado |
 | 3 | A-03 | Crear WiX 5 Burn/MSI + WinSW, identidad runtime y primer EXE | `NO INICIADO` | Setup reanuda reboot, instala servicio/CLI y mantiene el mismo SID |
 | 4 | A-04 | Implementar `RuntimeGate` dentro de `gnx-service` | `NO INICIADO` | La identidad dedicada crea la máquina y cierra G0-01 y B-01 |
 | 5 | A-05 | Integrar verticalmente I1, sin desarrollar I2 en paralelo | `NO INICIADO` | Cierra G0-02, G0-05, G0-07, B-03, B-04, B-07, B-08 y toda evidencia I1 |
@@ -133,6 +133,7 @@ I2 no comienza hasta que I1 está cerrado.
 | 2026-07-18 | A-01 | Windows 11 x64 · desarrollo sin elevación | `gnx-host-preflight --format json` | `windows_host` pass, elevación fail, salida JSON única y exit 11 | commit `62d43a4` |
 | 2026-07-18 | A-01 | Windows 11 x64 · desarrollo sin elevación | `gnx-host-preflight --format yaml` | Uso rechazado por stderr y exit 64 | commit `62d43a4` |
 | 2026-07-18 | A-01 | Windows 11 x64 · ejecución elevada | `gnx-host-preflight --format json` | Detectó y corrigió falsos negativos en hipervisor y salida OEM de DISM; Windows, elevación, virtualización, WSL y VMP pasan; fail-stop exit 14 por reinicio pendiente real | SHA-256 `154ADAF4928D3731FF8757DE90F4E4408C734AC0CFE361CC518C72545CBA81B7` · commit `acccf66` |
+| 2026-07-18 | A-01 | Windows 11 x64 · ejecución elevada después de reinicio | `gnx-host-preflight --format json` | Seis gates previos pasan; la ruta completa alcanza `podman_msi` y rechaza Podman 6.0.0 con exit 16 frente al pin 6.0.1 | SHA-256 `154ADAF4928D3731FF8757DE90F4E4408C734AC0CFE361CC518C72545CBA81B7` · commit `acccf66` |
 
 Reglas de evidencia:
 
@@ -173,6 +174,7 @@ Reglas de evidencia:
 | 2026-07-18 | Se cerró la arquitectura y el alcance de dos incrementos | Listo para iniciar A-01 |
 | 2026-07-18 | A-01 implementado y contrato fail-stop parcial ejecutado | Permanece `EN CURSO` hasta evidencia elevada completa |
 | 2026-07-18 | A-01 alcanzó el gate de reinicio en ejecución elevada real | Se requiere reiniciar el host y reanudar el mismo binario; no se omite ni limpia la señal de Windows |
+| 2026-07-18 | A-01 cerró la ruta elevada completa después del reinicio | El Podman 6.0.0 existente fue rechazado correctamente; A-02 queda como único trabajo en curso |
 
 Al actualizar este archivo:
 
