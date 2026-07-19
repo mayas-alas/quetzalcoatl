@@ -3,6 +3,7 @@
     Name="Quetzalcoatl"
     Manufacturer="Quetzalcoatl"
     Version="0.1.0"
+    ProductCode="{EAC9C6D4-3D6E-4A3E-BE7F-B6785B052030}"
     UpgradeCode="{47D5BD44-D061-407B-913B-47D17EC3BEA9}"
     Scope="perMachine">
 
