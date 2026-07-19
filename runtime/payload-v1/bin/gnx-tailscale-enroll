@@ -64,10 +64,14 @@ fi
 install -d -m 0700 "$state_dir" /run/gnx
 rm -f "$status_file" "$status_file.tmp"
 name="gnx-$scope-enroll"
+complete=0
 
 cleanup() {
   "$engine" rm -f "$name" >/dev/null 2>&1 || true
   rm -f "$auth_file"
+  if [ "$complete" -ne 1 ]; then
+    rm -f "$state_dir/tailscaled.state"
+  fi
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -101,6 +105,7 @@ while [ "$attempt" -lt 60 ]; do
      grep -Eq '"BackendState"[[:space:]]*:[[:space:]]*"Running"' "$status_file.tmp"; then
     mv "$status_file.tmp" "$status_file"
     chmod 0600 "$status_file"
+    complete=1
     exit 0
   fi
   sleep 1

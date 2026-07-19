@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::{Read, Write};
+use std::net::IpAddr;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -9,9 +11,10 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
-use gnx_protocol::StatusResponse;
+use gnx_protocol::{InstallerConfiguration, StatusResponse};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use zeroize::Zeroize;
 
 const EXPECTED_SERVICE_SID: &str = "S-1-5-80-1414281857-1943412974-186110390-2486725240-2230548587";
 const MACHINE_NAME: &str = "quetzalcoatl";
@@ -19,6 +22,8 @@ const MACHINE_CPUS: u64 = 6;
 const MACHINE_MEMORY_MIB: u64 = 8192;
 const MACHINE_DISK_GIB: u64 = 100;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const PVE_CONFIGURE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-configure";
+const TAILSCALE_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-tailscale-prepare";
 const MACHINE_IMAGE_INDEX: &str =
     "sha256:6dec5eadc84f41e55c3b6fc67264ed6c985e5f61a1d4ba243056dc0efc234bec";
 const MACHINE_IMAGE_MANIFEST: &str =
@@ -30,10 +35,20 @@ const MACHINE_IMAGE_ARTIFACT: &str = "podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_URL: &str = "https://github.com/podman-container-tools/podman-machine-os/releases/download/v6.0.1/podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_SIZE: u64 = 249_510_008;
 
-const PAYLOAD_FILES: [PayloadSpec; 13] = [
+const PAYLOAD_FILES: [PayloadSpec; 15] = [
     PayloadSpec::new(
         "bin/gnx-proxmox-entrypoint",
         "/usr/libexec/quetzalcoatl/gnx-proxmox-entrypoint",
+        "0755",
+    ),
+    PayloadSpec::new(
+        "bin/gnx-pve-configure",
+        "/usr/libexec/quetzalcoatl/gnx-pve-configure",
+        "0755",
+    ),
+    PayloadSpec::new(
+        "bin/gnx-tailscale-prepare",
+        "/usr/libexec/quetzalcoatl/gnx-tailscale-prepare",
         "0755",
     ),
     PayloadSpec::new(
@@ -146,8 +161,21 @@ install -d -m 0755 \
 install -d -m 0755 /run/gnx
 date --iso-8601=seconds > /run/gnx/proxmox-started-at
 systemctl daemon-reload
-systemctl reset-failed gnx-node-pod.service proxmox.service >/dev/null 2>&1 || true
-if ! systemctl restart proxmox.service >/dev/null 2>&1; then
+systemctl stop \
+  tailscaled.service \
+  gnx-tailscale-enroll.service \
+  proxmox.service \
+  gnx-node-pod.service >/dev/null 2>&1 || true
+systemctl reset-failed \
+  gnx-node-pod.service \
+  proxmox.service \
+  gnx-tailscale-enroll.service \
+  tailscaled.service >/dev/null 2>&1 || true
+if ! systemctl start gnx-node-pod.service >/dev/null 2>&1; then
+  journalctl --no-pager -o cat -r -n 30 -u gnx-node-pod.service >&2 || true
+  exit 1
+fi
+if ! systemctl start proxmox.service >/dev/null 2>&1; then
   journalctl --no-pager -o cat -r -n 30 -u proxmox.service >&2 || true
   exit 1
 fi
@@ -173,6 +201,37 @@ since="$(cat /run/gnx/proxmox-started-at)"
 journalctl --no-pager -o cat --since "$since" -u proxmox.service \
   | grep -avE 'image pull|container (create|init|start|died|remove|cleanup)|pod (create|start|stop)' \
   | head -n 60
+"#;
+
+const START_TAILSCALE: &str = r#"set -eu
+systemctl daemon-reload
+systemctl reset-failed gnx-tailscale-enroll.service tailscaled.service >/dev/null 2>&1 || true
+if [ ! -s /var/lib/quetzalcoatl/tailscale/host/tailscaled.state ]; then
+  systemctl stop gnx-tailscale-enroll.service >/dev/null 2>&1 || true
+fi
+if ! systemctl start gnx-tailscale-enroll.service >/dev/null 2>&1; then
+  journalctl --no-pager -o cat -r -n 40 -u gnx-tailscale-enroll.service >&2 || true
+  exit 1
+fi
+test ! -e /run/gnx/ts-authkey
+if ! systemctl restart tailscaled.service >/dev/null 2>&1; then
+  journalctl --no-pager -o cat -r -n 40 -u tailscaled.service >&2 || true
+  exit 1
+fi
+systemctl is-active --quiet tailscaled.service
+printf 'TAILSCALE_SERVICE=active\n'
+"#;
+
+const TAILSCALE_DIAGNOSTICS: &str = r#"set -eu
+journalctl --no-pager -o cat -r -n 30 \
+  -u gnx-tailscale-enroll.service -u tailscaled.service 2>/dev/null \
+  | head -n 60
+"#;
+
+const TAILSCALE_SECRET_CLEANUP_PROBE: &str = r#"set -eu
+test ! -e /run/gnx/ts-authkey
+test -z "$(podman ps -aq --filter name='^gnx-host-enroll$')"
+printf 'TAILSCALE_SECRET_CLEAN=ready\n'
 "#;
 
 pub fn run(status: Arc<RwLock<StatusResponse>>) {
@@ -213,6 +272,29 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
     wait_for_proxmox(&podman)?;
     set_component(status, Component::Proxmox, "ready");
     set_stage(status, "PROXMOX_READY");
+    verify_tailscale_secret_cleanup(&podman)?;
+
+    set_stage(status, "CONFIGURATION_WAITING");
+    let mut configuration = wait_for_configuration()?;
+
+    set_stage(status, "PVE_CREDENTIAL_APPLYING");
+    configure_pve_password(&podman, &configuration.pve_root_password)?;
+    configuration.pve_root_password.zeroize();
+
+    let hostname = candidate_hostname()?;
+    set_stage(status, "TAILSCALE_ENROLLING");
+    prepare_tailscale(&podman, &hostname, &configuration.auth_key)?;
+    configuration.auth_key.zeroize();
+    start_tailscale(&podman)?;
+
+    set_stage(status, "TAILSCALE_CHECKING");
+    wait_for_tailscale(&podman, &hostname, &configuration.tailnet)?;
+    set_component(status, Component::Tailscale, "ready");
+
+    set_stage(status, "TAILSCALE_SERVE_CHECKING");
+    wait_for_tailscale_serve(&podman, &hostname, &configuration.tailnet)?;
+    set_component(status, Component::TailscaleServe, "ready");
+    set_stage(status, "TAILSCALE_READY");
     Ok(())
 }
 
@@ -605,6 +687,246 @@ fn proxmox_diagnostics(podman: &Path) -> String {
     }
 }
 
+fn wait_for_configuration() -> Result<InstallerConfiguration, GateError> {
+    loop {
+        match crate::secrets::load_optional() {
+            Ok(Some(configuration)) => return Ok(configuration),
+            Ok(None) => thread::sleep(Duration::from_millis(500)),
+            Err(error) => {
+                return Err(GateError::new(
+                    error.code(),
+                    Component::None,
+                    error.message(),
+                ));
+            }
+        }
+    }
+}
+
+fn configure_pve_password(podman: &Path, password: &str) -> Result<(), GateError> {
+    let mut input = password.as_bytes().to_vec();
+    let result = machine_stdin(podman, [PVE_CONFIGURE_BIN], &input);
+    input.zeroize();
+    let output =
+        result.map_err(|error| error.with_code("PVE_CREDENTIAL_FAILED", Component::Proxmox))?;
+    if String::from_utf8_lossy(&output.stdout).trim() != "PVE_PASSWORD=ready" {
+        return Err(GateError::new(
+            "PVE_CREDENTIAL_FAILED",
+            Component::Proxmox,
+            format!(
+                "PVE did not confirm credential replacement; output: {}",
+                bounded_text(&output.stdout)
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn candidate_hostname() -> Result<String, GateError> {
+    let computer_name = env::var("COMPUTERNAME").map_err(|_| {
+        GateError::new(
+            "TAILSCALE_ENROLL_FAILED",
+            Component::Tailscale,
+            "COMPUTERNAME is unavailable in the service environment",
+        )
+    })?;
+    let computer_name = computer_name.to_ascii_lowercase();
+    if computer_name.is_empty()
+        || computer_name.len() > 32
+        || computer_name.starts_with('-')
+        || computer_name.ends_with('-')
+        || !computer_name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(GateError::new(
+            "TAILSCALE_ENROLL_FAILED",
+            Component::Tailscale,
+            "Windows computer name cannot form a Tailscale hostname",
+        ));
+    }
+    Ok(format!("gnx-candidate-{computer_name}"))
+}
+
+fn prepare_tailscale(podman: &Path, hostname: &str, auth_key: &str) -> Result<(), GateError> {
+    let mut input = Vec::with_capacity(auth_key.len() + hostname.len() + 2);
+    input.extend_from_slice(auth_key.as_bytes());
+    input.push(b'\n');
+    input.extend_from_slice(hostname.as_bytes());
+    input.push(b'\n');
+    let result = machine_stdin(podman, [TAILSCALE_PREPARE_BIN], &input);
+    input.zeroize();
+    result
+        .map(|_| ())
+        .map_err(|error| error.with_code("TAILSCALE_ENROLL_FAILED", Component::Tailscale))
+}
+
+fn start_tailscale(podman: &Path) -> Result<(), GateError> {
+    let output = match machine_stdin(podman, ["sh", "-s"], START_TAILSCALE.as_bytes()) {
+        Ok(output) => output,
+        Err(error) => {
+            verify_tailscale_secret_cleanup(podman)?;
+            return Err(error.with_code("TAILSCALE_ENROLL_FAILED", Component::Tailscale));
+        }
+    };
+    if String::from_utf8_lossy(&output.stdout).trim() != "TAILSCALE_SERVICE=active" {
+        return Err(GateError::new(
+            "TAILSCALE_ENROLL_FAILED",
+            Component::Tailscale,
+            "systemd did not confirm the permanent Tailscale sidecar",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_tailscale_secret_cleanup(podman: &Path) -> Result<(), GateError> {
+    let output = machine_stdin(
+        podman,
+        ["sh", "-s"],
+        TAILSCALE_SECRET_CLEANUP_PROBE.as_bytes(),
+    )
+    .map_err(|error| error.with_code("TAILSCALE_SECRET_CLEANUP_FAILED", Component::Tailscale))?;
+    if String::from_utf8_lossy(&output.stdout).trim() != "TAILSCALE_SECRET_CLEAN=ready" {
+        return Err(GateError::new(
+            "TAILSCALE_SECRET_CLEANUP_FAILED",
+            Component::Tailscale,
+            "Tailscale enrollment did not confirm secret cleanup",
+        ));
+    }
+    Ok(())
+}
+
+fn wait_for_tailscale(podman: &Path, hostname: &str, tailnet: &str) -> Result<(), GateError> {
+    let mut last_error = String::from("Tailscale sidecar is not ready");
+    for attempt in 0..90 {
+        match machine_stdin(
+            podman,
+            [
+                "podman",
+                "exec",
+                "gnx-tailscaled",
+                "tailscale",
+                "status",
+                "--json",
+            ],
+            &[],
+        ) {
+            Ok(output) => match parse_tailscale_status(&output.stdout, hostname, tailnet) {
+                Ok(()) => return Ok(()),
+                Err(error) => last_error = error,
+            },
+            Err(error) => last_error = error.message,
+        }
+        if attempt + 1 < 90 {
+            thread::sleep(Duration::from_secs(2));
+        }
+    }
+    Err(GateError::new(
+        "TAILSCALE_ENROLL_FAILED",
+        Component::Tailscale,
+        format!(
+            "Tailscale did not satisfy the pinned identity contract: {last_error}; {}",
+            tailscale_diagnostics(podman)
+        ),
+    ))
+}
+
+fn parse_tailscale_status(bytes: &[u8], hostname: &str, tailnet: &str) -> Result<(), String> {
+    let status: TailscaleStatus = serde_json::from_slice(bytes)
+        .map_err(|_| "tailscale status returned invalid JSON".to_string())?;
+    let current_tailnet = status
+        .current_tailnet
+        .ok_or_else(|| "tailscale status has no current tailnet".to_string())?;
+    let self_node = status
+        .self_node
+        .ok_or_else(|| "tailscale status has no self node".to_string())?;
+    let domain = format!("{hostname}.{tailnet}");
+    let expected_dns_name = format!("{domain}.");
+    let has_ipv4 = status.tailscale_ips.iter().any(|value| {
+        value.parse::<IpAddr>().is_ok_and(|address| match address {
+            IpAddr::V4(address) => {
+                let octets = address.octets();
+                octets[0] == 100 && (64..=127).contains(&octets[1])
+            }
+            IpAddr::V6(_) => false,
+        })
+    });
+    if status.backend_state != "Running"
+        || !status.tun
+        || current_tailnet.magic_dns_suffix != tailnet
+        || !current_tailnet.magic_dns_enabled
+        || self_node.host_name != hostname
+        || self_node.dns_name != expected_dns_name
+        || self_node.tags.as_slice() != ["tag:quetzalcoatl-node"]
+        || !status.cert_domains.iter().any(|value| value == &domain)
+        || !has_ipv4
+    {
+        return Err("tailscale status does not match tailnet, hostname, tag, TUN, IP and HTTPS requirements".into());
+    }
+    Ok(())
+}
+
+fn wait_for_tailscale_serve(podman: &Path, hostname: &str, tailnet: &str) -> Result<(), GateError> {
+    let domain = format!("{hostname}.{tailnet}");
+    let host_port = format!("{domain}:443");
+    let mut last_error = String::from("Tailscale Serve config is not ready");
+    for attempt in 0..60 {
+        match machine_stdin(
+            podman,
+            [
+                "podman",
+                "exec",
+                "gnx-tailscaled",
+                "tailscale",
+                "serve",
+                "status",
+                "--json",
+            ],
+            &[],
+        ) {
+            Ok(output) => match parse_serve_status(&output.stdout, &host_port) {
+                Ok(()) => return Ok(()),
+                Err(error) => last_error = error,
+            },
+            Err(error) => last_error = error.message,
+        }
+        if attempt + 1 < 60 {
+            thread::sleep(Duration::from_secs(2));
+        }
+    }
+    Err(GateError::new(
+        "TAILSCALE_SERVE_FAILED",
+        Component::TailscaleServe,
+        format!(
+            "Tailscale Serve did not expose only the approved PVE UI: {last_error}; {}",
+            tailscale_diagnostics(podman)
+        ),
+    ))
+}
+
+fn parse_serve_status(bytes: &[u8], host_port: &str) -> Result<(), String> {
+    let status: TailscaleServeStatus = serde_json::from_slice(bytes)
+        .map_err(|_| "tailscale serve status returned invalid JSON".to_string())?;
+    let https = status.tcp.get("443").is_some_and(|entry| entry.https);
+    let proxy = status
+        .web
+        .get(host_port)
+        .and_then(|entry| entry.handlers.get("/"))
+        .map(|handler| handler.proxy.as_str());
+    let funnel_disabled = !status.allow_funnel.get(host_port).copied().unwrap_or(false);
+    if !https || proxy != Some("https+insecure://127.0.0.1:8006") || !funnel_disabled {
+        return Err("serve status is missing the fixed HTTPS PVE proxy or enables Funnel".into());
+    }
+    Ok(())
+}
+
+fn tailscale_diagnostics(podman: &Path) -> String {
+    match machine_stdin(podman, ["sh", "-s"], TAILSCALE_DIAGNOSTICS.as_bytes()) {
+        Ok(output) => bounded_text(&output.stdout),
+        Err(error) => format!("diagnostics unavailable: {}", error.message),
+    }
+}
+
 fn machine_stdin<I, S>(podman: &Path, args: I, input: &[u8]) -> Result<Output, GateError>
 where
     I: IntoIterator<Item = S>,
@@ -929,6 +1251,8 @@ enum Component {
     PodmanMachine,
     Kvm,
     Proxmox,
+    Tailscale,
+    TailscaleServe,
 }
 
 impl Component {
@@ -939,6 +1263,8 @@ impl Component {
             Self::PodmanMachine => status.components.podman_machine = value.into(),
             Self::Kvm => status.components.kvm = value.into(),
             Self::Proxmox => status.components.proxmox = value.into(),
+            Self::Tailscale => status.components.tailscale = value.into(),
+            Self::TailscaleServe => status.components.tailscale_serve = value.into(),
         }
     }
 }
@@ -1079,6 +1405,68 @@ struct MachineResources {
     disk_size: u64,
 }
 
+#[derive(Deserialize)]
+struct TailscaleStatus {
+    #[serde(rename = "BackendState")]
+    backend_state: String,
+    #[serde(rename = "TUN")]
+    tun: bool,
+    #[serde(rename = "TailscaleIPs")]
+    tailscale_ips: Vec<String>,
+    #[serde(rename = "Self")]
+    self_node: Option<TailscalePeer>,
+    #[serde(rename = "CurrentTailnet")]
+    current_tailnet: Option<TailscaleTailnet>,
+    #[serde(rename = "CertDomains")]
+    cert_domains: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct TailscaleTailnet {
+    #[serde(rename = "MagicDNSSuffix")]
+    magic_dns_suffix: String,
+    #[serde(rename = "MagicDNSEnabled")]
+    magic_dns_enabled: bool,
+}
+
+#[derive(Deserialize)]
+struct TailscalePeer {
+    #[serde(rename = "HostName")]
+    host_name: String,
+    #[serde(rename = "DNSName")]
+    dns_name: String,
+    #[serde(rename = "Tags", default)]
+    tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct TailscaleServeStatus {
+    #[serde(rename = "TCP", default)]
+    tcp: HashMap<String, TailscaleTcpHandler>,
+    #[serde(rename = "Web", default)]
+    web: HashMap<String, TailscaleWebHandler>,
+    #[serde(rename = "AllowFunnel", default)]
+    allow_funnel: HashMap<String, bool>,
+}
+
+#[derive(Deserialize)]
+struct TailscaleTcpHandler {
+    #[serde(rename = "HTTPS", default)]
+    https: bool,
+}
+
+#[derive(Deserialize)]
+struct TailscaleWebHandler {
+    #[serde(rename = "Handlers", default)]
+    handlers: HashMap<String, TailscalePathHandler>,
+}
+
+#[derive(Deserialize)]
+struct TailscalePathHandler {
+    #[serde(rename = "Proxy", default)]
+    proxy: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1123,5 +1511,41 @@ mod tests {
         assert_eq!(inspect[0].name, MACHINE_NAME);
         assert!(inspect[0].rootful);
         assert_eq!(inspect[0].resources.memory, MACHINE_MEMORY_MIB);
+    }
+
+    #[test]
+    fn accepts_pinned_tailscale_identity_contract() {
+        let json = br#"{
+          "BackendState":"Running",
+          "TUN":true,
+          "TailscaleIPs":["100.100.10.20","fd7a:115c:a1e0::1"],
+          "Self":{
+            "HostName":"gnx-candidate-nitro",
+            "DNSName":"gnx-candidate-nitro.tetra-balance.ts.net.",
+            "Tags":["tag:quetzalcoatl-node"]
+          },
+          "CurrentTailnet":{
+            "MagicDNSSuffix":"tetra-balance.ts.net",
+            "MagicDNSEnabled":true
+          },
+          "CertDomains":["gnx-candidate-nitro.tetra-balance.ts.net"]
+        }"#;
+        assert!(
+            parse_tailscale_status(json, "gnx-candidate-nitro", "tetra-balance.ts.net").is_ok()
+        );
+    }
+
+    #[test]
+    fn accepts_only_the_fixed_pve_serve_route() {
+        let json = br#"{
+          "TCP":{"443":{"HTTPS":true}},
+          "Web":{
+            "gnx-candidate-nitro.tetra-balance.ts.net:443":{
+              "Handlers":{"/":{"Proxy":"https+insecure://127.0.0.1:8006"}}
+            }
+          },
+          "AllowFunnel":{"gnx-candidate-nitro.tetra-balance.ts.net:443":false}
+        }"#;
+        assert!(parse_serve_status(json, "gnx-candidate-nitro.tetra-balance.ts.net:443").is_ok());
     }
 }

@@ -11,6 +11,7 @@ Pod=gnx-node.pod
 StartWithPod=true
 PodmanArgs=--privileged
 Entrypoint=/usr/local/sbin/gnx-proxmox-entrypoint
+Exec=/sbin/init --log-target=console --log-level=notice
 AddDevice=/dev/kvm
 AddDevice=/dev/net/tun
 AddDevice=/dev/fuse
