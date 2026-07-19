@@ -172,7 +172,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "6b4230e8c6aa936788c4f1c13cbc173c568a5125d8f4f6b84b45dc782be2d5e1"
+      "sha256": "c9c705c02e2735e7c99a952849aac8aa594d08e54755bc70dd5e0b41accc4c8a"
     },
     {
       "path": "bin/gnx-pve-configure",
@@ -186,7 +186,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "740c4ccead94c56fed1d1e10610a90d64dc423e223d65bcaa90efaa98b179376"
+      "sha256": "0b5a55a3edb94bee84b739c0fc6f142be7eb076fcabf18d1aacca0b914f5d0d9"
     },
     {
       "path": "bin/gnx-opentofu-entrypoint",

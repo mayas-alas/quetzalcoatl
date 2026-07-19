@@ -4,6 +4,8 @@ umask 077
 
 script='/usr/libexec/quetzalcoatl/gnx-pve-cluster-create'
 pve_env='/etc/quetzalcoatl/node/pve.env'
+persistent_key='/var/lib/pve-cluster/quetzalcoatl-corosync.authkey'
+runtime_key='/etc/corosync/authkey'
 
 validate_input() {
   case "$pve_hostname" in
@@ -54,6 +56,21 @@ verify_network() {
     awk -v expected="$pve_ip" '{ split($4, address, "/"); if (address[1] == expected) found=1 } END { exit !found }'
 }
 
+persist_corosync_key() {
+  temporary="${persistent_key}.gnx-new"
+  [ -f "$runtime_key" ] && [ ! -L "$runtime_key" ] && [ -s "$runtime_key" ] || exit 71
+  rm -f "$temporary"
+  install -o 0 -g 0 -m 0400 "$runtime_key" "$temporary"
+  mv -f "$temporary" "$persistent_key"
+}
+
+verify_corosync_key() {
+  [ -f "$persistent_key" ] && [ ! -L "$persistent_key" ] && [ -s "$persistent_key" ] || exit 71
+  [ "$(stat -c '%u:%g:%a' "$persistent_key")" = '0:0:400' ] || exit 71
+  [ -f "$runtime_key" ] && [ ! -L "$runtime_key" ] && [ -s "$runtime_key" ] || exit 71
+  cmp -s "$persistent_key" "$runtime_key" || exit 71
+}
+
 mode=${1:-host}
 case "$mode" in
   prepare-hostname)
@@ -89,8 +106,15 @@ esac
 config=/etc/pve/corosync.conf
 if [ ! -s "$config" ]; then
   pvecm create quetzalcoatl --link0 "$pve_ip" 1>&2
-elif ! systemctl is-active --quiet corosync.service; then
-  systemctl restart corosync.service
+  persist_corosync_key
+fi
+verify_corosync_key
+if ! systemctl is-active --quiet corosync.service; then
+  if ! systemctl restart corosync.service; then
+    systemctl --no-pager --full status corosync.service >&2 || true
+    journalctl --no-pager --unit corosync.service --lines 40 >&2 || true
+    exit 70
+  fi
 fi
 
 attempt=0
