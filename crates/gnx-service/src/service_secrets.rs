@@ -80,6 +80,47 @@ pub fn load_or_create(
     }
 }
 
+pub fn load_required(
+    install_garage: bool,
+    install_forgejo: bool,
+) -> Result<ServiceSecrets, ServiceSecretsError> {
+    let secrets = load_optional()?
+        .ok_or_else(|| ServiceSecretsError::new("persisted service secret blob is missing"))?;
+    validate_selection(&secrets, install_garage, install_forgejo)?;
+    Ok(secrets)
+}
+
+pub fn record_garage_s3(
+    secrets: &mut ServiceSecrets,
+    access_key: &str,
+    secret_key: &str,
+) -> Result<(), ServiceSecretsError> {
+    if !valid_garage_access_key(access_key) || !valid_hex(secret_key, 64) {
+        return Err(ServiceSecretsError::new(
+            "Garage returned an invalid S3 credential",
+        ));
+    }
+    let garage = secrets
+        .garage
+        .as_mut()
+        .ok_or_else(|| ServiceSecretsError::new("Garage is not selected"))?;
+    match (&garage.s3_access_key, &garage.s3_secret_key) {
+        (None, None) => {
+            garage.s3_access_key = Some(access_key.to_owned());
+            garage.s3_secret_key = Some(secret_key.to_owned());
+            store(secrets)
+        }
+        (Some(current_access), Some(current_secret))
+            if current_access == access_key && current_secret == secret_key =>
+        {
+            Ok(())
+        }
+        _ => Err(ServiceSecretsError::new(
+            "Garage S3 credential does not match the protected value",
+        )),
+    }
+}
+
 pub fn store(secrets: &ServiceSecrets) -> Result<(), ServiceSecretsError> {
     validate(secrets)?;
     let mut plaintext = serde_json::to_vec(secrets)

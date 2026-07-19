@@ -446,18 +446,88 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
         set_stage(status, "FORGEJO_LXC_DOCKER_PREPARING");
         prepare_lxc_docker(&podman, ServiceKind::Forgejo)?;
     }
-    set_stage(status, "SERVICE_SECRETS_PREPARING");
-    let service_secrets = crate::service_secrets::load_or_create(
-        controller.install_garage,
-        controller.install_forgejo,
-    )
-    .map_err(|error| GateError::new("SERVICE_SECRETS_FAILED", Component::None, error.message()))?;
-    drop(service_secrets);
     if stage_rank < 3 {
         controller.stage = "LXC_DOCKER_READY".into();
         store_persisted_state(&controller)?;
+        stage_rank = 3;
     }
     set_stage(status, "LXC_DOCKER_READY");
+
+    set_stage(status, "SERVICE_SECRETS_PREPARING");
+    let load_service_secrets = if stage_rank >= 4 {
+        crate::service_secrets::load_required
+    } else {
+        crate::service_secrets::load_or_create
+    };
+    let mut service_secrets =
+        load_service_secrets(controller.install_garage, controller.install_forgejo).map_err(
+            |error| GateError::new("SERVICE_SECRETS_FAILED", Component::None, error.message()),
+        )?;
+    let mut service_configuration = load_protected_configuration()?;
+    service_configuration.pve_root_password.zeroize();
+    validate_state_configuration(&controller, &service_configuration)?;
+
+    if controller.install_garage {
+        set_stage(status, "GARAGE_PREPARING");
+        let hostname = service_hostname(ServiceKind::Garage, &controller.self_id)?;
+        let credential = prepare_lxc_service(
+            &podman,
+            ServiceKind::Garage,
+            &hostname,
+            &controller.tailnet,
+            &service_configuration.auth_key,
+            &service_secrets,
+        )?
+        .ok_or_else(|| {
+            GateError::new(
+                "GARAGE_BOOTSTRAP_FAILED",
+                Component::Garage,
+                "Garage bootstrap did not return its S3 credential",
+            )
+        })?;
+        crate::service_secrets::record_garage_s3(
+            &mut service_secrets,
+            &credential.access_key,
+            &credential.secret_key,
+        )
+        .map_err(|error| {
+            GateError::new("GARAGE_SECRET_FAILED", Component::Garage, error.message())
+        })?;
+        set_component(status, Component::Garage, "ready");
+    } else {
+        set_component(status, Component::Garage, "not_selected");
+    }
+
+    if controller.install_forgejo {
+        set_stage(status, "FORGEJO_PREPARING");
+        let hostname = service_hostname(ServiceKind::Forgejo, &controller.self_id)?;
+        let credential = prepare_lxc_service(
+            &podman,
+            ServiceKind::Forgejo,
+            &hostname,
+            &controller.tailnet,
+            &service_configuration.auth_key,
+            &service_secrets,
+        )?;
+        if credential.is_some() {
+            return Err(GateError::new(
+                "FORGEJO_BOOTSTRAP_FAILED",
+                Component::Forgejo,
+                "Forgejo bootstrap returned an unexpected credential",
+            ));
+        }
+        set_component(status, Component::Forgejo, "ready");
+    } else {
+        set_component(status, Component::Forgejo, "not_selected");
+    }
+    service_configuration.auth_key.zeroize();
+
+    set_stage(status, "SERVICES_READY");
+    if stage_rank < 4 {
+        controller.stage = "READY".into();
+        store_persisted_state(&controller)?;
+    }
+    complete(status);
     Ok(())
 }
 
@@ -898,6 +968,7 @@ fn controller_stage_rank(stage: &str) -> Option<u8> {
         "CONTROLLER_CLUSTER_READY" => Some(1),
         "OPENTOFU_READY" => Some(2),
         "LXC_DOCKER_READY" => Some(3),
+        "READY" => Some(4),
         _ => None,
     }
 }
@@ -1119,6 +1190,151 @@ fn prepare_lxc_docker(podman: &Path, service: ServiceKind) -> Result<(), GateErr
         ));
     }
     Ok(())
+}
+
+fn service_hostname(service: ServiceKind, self_id: &str) -> Result<String, GateError> {
+    let controller = controller_hostname(self_id)?;
+    let suffix = controller.strip_prefix("gnx-controller-").ok_or_else(|| {
+        GateError::new(
+            service.bootstrap_error_code(),
+            service.component(),
+            "controller identity cannot form a service hostname",
+        )
+    })?;
+    let hostname = format!("gnx-{}-{suffix}", service.name());
+    if hostname.len() > 63 {
+        return Err(GateError::new(
+            service.bootstrap_error_code(),
+            service.component(),
+            "service hostname exceeds the DNS label limit",
+        ));
+    }
+    Ok(hostname)
+}
+
+fn prepare_lxc_service(
+    podman: &Path,
+    service: ServiceKind,
+    hostname: &str,
+    tailnet: &str,
+    auth_key: &str,
+    secrets: &crate::service_secrets::ServiceSecrets,
+) -> Result<Option<GarageCredential>, GateError> {
+    let mut input = Vec::with_capacity(1024);
+    for value in [service.name(), hostname, tailnet, auth_key] {
+        input.extend_from_slice(value.as_bytes());
+        input.push(b'\n');
+    }
+    match service {
+        ServiceKind::Garage => {
+            let garage = secrets.garage.as_ref().ok_or_else(|| {
+                GateError::new(
+                    service.bootstrap_error_code(),
+                    service.component(),
+                    "protected Garage secrets are missing",
+                )
+            })?;
+            for value in [
+                garage.rpc_secret.as_str(),
+                garage.admin_token.as_str(),
+                garage.s3_access_key.as_deref().unwrap_or_default(),
+                garage.s3_secret_key.as_deref().unwrap_or_default(),
+            ] {
+                input.extend_from_slice(value.as_bytes());
+                input.push(b'\n');
+            }
+        }
+        ServiceKind::Forgejo => {
+            let forgejo = secrets.forgejo.as_ref().ok_or_else(|| {
+                GateError::new(
+                    service.bootstrap_error_code(),
+                    service.component(),
+                    "protected Forgejo secrets are missing",
+                )
+            })?;
+            for value in [
+                forgejo.secret_key.as_str(),
+                forgejo.internal_token.as_str(),
+                forgejo.admin_password.as_str(),
+                "",
+            ] {
+                input.extend_from_slice(value.as_bytes());
+                input.push(b'\n');
+            }
+        }
+    }
+
+    let result = machine_stdin(
+        podman,
+        [
+            "podman",
+            "exec",
+            "-i",
+            "gnx-proxmox",
+            LXC_SERVICE_PREPARE_BIN,
+        ],
+        &input,
+    );
+    input.zeroize();
+    let mut output = result
+        .map_err(|error| error.with_code(service.bootstrap_error_code(), service.component()))?;
+    let parsed = parse_service_bootstrap_output(&output.stdout, service);
+    output.stdout.zeroize();
+    output.stderr.zeroize();
+    parsed
+}
+
+fn parse_service_bootstrap_output(
+    bytes: &[u8],
+    service: ServiceKind,
+) -> Result<Option<GarageCredential>, GateError> {
+    let text = std::str::from_utf8(bytes).map_err(|_| {
+        GateError::new(
+            service.bootstrap_error_code(),
+            service.component(),
+            "LXC service bootstrap returned non-UTF-8 output",
+        )
+    })?;
+    let lines = text.lines().collect::<Vec<_>>();
+    let status = format!(
+        "LXC_SERVICE=ready;SERVICE={};VMID={}",
+        service.name(),
+        service.vmid()
+    );
+    match service {
+        ServiceKind::Garage if lines.len() == 3 && lines[2] == status => {
+            let access_key = lines[0]
+                .strip_prefix("GARAGE_ACCESS_KEY=")
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    GateError::new(
+                        service.bootstrap_error_code(),
+                        service.component(),
+                        "Garage bootstrap omitted the S3 access key",
+                    )
+                })?;
+            let secret_key = lines[1]
+                .strip_prefix("GARAGE_SECRET_KEY=")
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    GateError::new(
+                        service.bootstrap_error_code(),
+                        service.component(),
+                        "Garage bootstrap omitted the S3 secret key",
+                    )
+                })?;
+            Ok(Some(GarageCredential {
+                access_key: access_key.to_owned(),
+                secret_key: secret_key.to_owned(),
+            }))
+        }
+        ServiceKind::Forgejo if lines.as_slice() == [status.as_str()] => Ok(None),
+        _ => Err(GateError::new(
+            service.bootstrap_error_code(),
+            service.component(),
+            "LXC service bootstrap did not confirm the fixed output contract",
+        )),
+    }
 }
 
 fn configure_pve_password(podman: &Path, password: &str) -> Result<(), GateError> {
@@ -1752,6 +1968,14 @@ fn set_cluster_ready(status: &Arc<RwLock<StatusResponse>>) {
     }
 }
 
+fn complete(status: &Arc<RwLock<StatusResponse>>) {
+    if let Ok(mut status) = status.write() {
+        status.overall = "ready".into();
+        status.stage = "READY".into();
+        status.last_error = None;
+    }
+}
+
 fn fail(status: &Arc<RwLock<StatusResponse>>, error: GateError) {
     if let Ok(mut status) = status.write() {
         status.overall = "failed".into();
@@ -1788,6 +2012,19 @@ impl ServiceKind {
             Self::Forgejo => Component::Forgejo,
         }
     }
+
+    fn bootstrap_error_code(self) -> &'static str {
+        match self {
+            Self::Garage => "GARAGE_BOOTSTRAP_FAILED",
+            Self::Forgejo => "FORGEJO_BOOTSTRAP_FAILED",
+        }
+    }
+}
+
+#[derive(zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
+struct GarageCredential {
+    access_key: String,
+    secret_key: String,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2166,6 +2403,42 @@ mod tests {
             "gnx-controller-nabc123"
         );
         assert!(controller_hostname("invalid/id").is_err());
+    }
+
+    #[test]
+    fn service_hostnames_share_only_the_stable_node_suffix() {
+        assert_eq!(
+            service_hostname(ServiceKind::Garage, "nAbC123").expect("Garage hostname"),
+            "gnx-garage-nabc123"
+        );
+        assert_eq!(
+            service_hostname(ServiceKind::Forgejo, "nAbC123").expect("Forgejo hostname"),
+            "gnx-forgejo-nabc123"
+        );
+    }
+
+    #[test]
+    fn service_bootstrap_output_has_no_alternate_shape() {
+        let garage = b"GARAGE_ACCESS_KEY=GK0123456789abcdef01234567\nGARAGE_SECRET_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nLXC_SERVICE=ready;SERVICE=garage;VMID=200\n";
+        let credential = parse_service_bootstrap_output(garage, ServiceKind::Garage)
+            .expect("Garage output")
+            .expect("Garage credential");
+        assert_eq!(credential.access_key, "GK0123456789abcdef01234567");
+        assert_eq!(credential.secret_key.len(), 64);
+
+        let forgejo = b"LXC_SERVICE=ready;SERVICE=forgejo;VMID=201\n";
+        assert!(
+            parse_service_bootstrap_output(forgejo, ServiceKind::Forgejo)
+                .expect("Forgejo output")
+                .is_none()
+        );
+        assert!(
+            parse_service_bootstrap_output(
+                b"diagnostic\nLXC_SERVICE=ready;SERVICE=forgejo;VMID=201\n",
+                ServiceKind::Forgejo,
+            )
+            .is_err()
+        );
     }
 
     #[test]
