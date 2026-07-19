@@ -22,6 +22,7 @@ const MACHINE_CPUS: u64 = 6;
 const MACHINE_MEMORY_MIB: u64 = 8192;
 const MACHINE_DISK_GIB: u64 = 100;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const PVE_CLUSTER_CREATE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-cluster-create";
 const PVE_CONFIGURE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-configure";
 const TAILSCALE_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-tailscale-prepare";
 const TAILSCALE_RENAME_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-tailscale-rename";
@@ -308,7 +309,7 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
     set_stage(status, "TAILSCALE_CHECKING");
     let identity = wait_for_tailscale(&podman, &hostname, &configuration.tailnet)?;
     set_stage(status, "ROLE_DISCOVERING");
-    let controller = resolve_controller(
+    let mut controller = resolve_controller(
         &podman,
         persisted_state,
         identity,
@@ -328,6 +329,24 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
     )?;
     set_component(status, Component::TailscaleServe, "ready");
     set_stage(status, "TAILSCALE_READY");
+
+    if controller.stage == "ROLE_RESOLVED" {
+        set_stage(status, "CONTROLLER_CLUSTER_PRECHECK");
+        confirm_empty_controller_inventory(&podman, &controller)?;
+    } else if controller.stage != "CONTROLLER_CLUSTER_READY" {
+        return Err(GateError::new(
+            "STATE_STAGE_UNSUPPORTED",
+            Component::None,
+            "persisted controller state has an unsupported I1 stage",
+        ));
+    }
+
+    set_stage(status, "CONTROLLER_CLUSTER_CREATING");
+    create_controller_cluster(&podman, controller.self_ip, &controller.controller.hostname)?;
+    controller.stage = "CONTROLLER_CLUSTER_READY".into();
+    store_persisted_state(&controller)?;
+    set_cluster_ready(status);
+    set_stage(status, "CONTROLLER_CLUSTER_READY");
     Ok(())
 }
 
@@ -741,6 +760,11 @@ fn load_persisted_state() -> Result<Option<crate::state::PersistedState>, GateEr
         .map_err(|error| GateError::new("STATE_STORAGE_FAILED", Component::None, error.message()))
 }
 
+fn store_persisted_state(state: &crate::state::PersistedState) -> Result<(), GateError> {
+    crate::state::store(state)
+        .map_err(|error| GateError::new("STATE_STORAGE_FAILED", Component::None, error.message()))
+}
+
 fn validate_state_configuration(
     state: &crate::state::PersistedState,
     configuration: &InstallerConfiguration,
@@ -792,9 +816,7 @@ fn resolve_controller(
         install_garage,
         install_forgejo,
     );
-    crate::state::store(&state).map_err(|error| {
-        GateError::new("STATE_STORAGE_FAILED", Component::None, error.message())
-    })?;
+    store_persisted_state(&state)?;
 
     rename_tailscale(podman, &hostname)?;
     let renamed = wait_for_tailscale(podman, &hostname, tailnet)?;
@@ -844,6 +866,44 @@ fn rename_tailscale(podman: &Path, hostname: &str) -> Result<(), GateError> {
             "TAILSCALE_RENAME_FAILED",
             Component::Tailscale,
             "Tailscale sidecar did not confirm the persistent hostname transition",
+        ));
+    }
+    Ok(())
+}
+
+fn confirm_empty_controller_inventory(
+    podman: &Path,
+    state: &crate::state::PersistedState,
+) -> Result<(), GateError> {
+    let identity = wait_for_tailscale(podman, &state.controller.hostname, &state.tailnet)?;
+    validate_state_identity(state, &identity)?;
+    let identity = stabilize_host_inventory(podman, identity, &state.tailnet)?;
+    if !identity.host_peer_ids.is_empty() {
+        return Err(GateError::new(
+            "TOPOLOGY_CHANGED",
+            Component::Tailscale,
+            format!(
+                "tagged host inventory changed before cluster creation; observed {} other nodes",
+                identity.host_peer_ids.len()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn create_controller_cluster(
+    podman: &Path,
+    self_ip: IpAddr,
+    hostname: &str,
+) -> Result<(), GateError> {
+    let input = format!("{self_ip}\n{hostname}\n");
+    let output = machine_stdin(podman, [PVE_CLUSTER_CREATE_BIN], input.as_bytes())
+        .map_err(|error| error.with_code("PVE_CLUSTER_CREATE_FAILED", Component::Proxmox))?;
+    if String::from_utf8_lossy(&output.stdout).trim() != "PVE_CLUSTER=ready" {
+        return Err(GateError::new(
+            "PVE_CLUSTER_CREATE_FAILED",
+            Component::Proxmox,
+            "PVE did not confirm the controller cluster contract",
         ));
     }
     Ok(())
@@ -1470,6 +1530,13 @@ fn set_controller(status: &Arc<RwLock<StatusResponse>>, hostname: &str) {
     if let Ok(mut status) = status.write() {
         status.role = Some("controller".into());
         status.controller = Some(hostname.into());
+    }
+}
+
+fn set_cluster_ready(status: &Arc<RwLock<StatusResponse>>) {
+    if let Ok(mut status) = status.write() {
+        status.cluster.joined = true;
+        status.cluster.quorate = true;
     }
 }
 
