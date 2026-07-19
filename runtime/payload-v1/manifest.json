@@ -146,6 +146,27 @@
       "sha256": "0ce2278095e403395d8049314100fa592ee28fb2ad4bcf645fe9df95e8051f4d"
     },
     {
+      "path": "bin/gnx-opentofu-entrypoint",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0755",
+      "sha256": "edcdf9ba5d8d4432649e5a0695c28e52316f05d85af486e9582889fc393b0324"
+    },
+    {
+      "path": "bin/gnx-opentofu-prepare",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0755",
+      "sha256": "f210d6c927c75b3a771d0bb4ae764b15a8dd2f273e5746635f132decad2f16e9"
+    },
+    {
+      "path": "bin/gnx-opentofu-runner",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0755",
+      "sha256": "0013e6df3e8e24efee2678fbfdc4d6e97f75647a3920f2ff82cb67e4b856e22c"
+    },
+    {
       "path": "bin/gnx-tailscale-prepare",
       "source": "quetzalcoatl",
       "version": 1,
@@ -256,6 +277,13 @@
       "version": 1,
       "mode": "0644",
       "sha256": "6f38548c26add2afa47be2d03ee6d0da0a374247d17350a73f0e8fd535cbb742"
+    },
+    {
+      "path": "systemd/gnx-opentofu.service",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0644",
+      "sha256": "e3ce981891c0732184c767f9fa3f7c8646c96dc28c2857d1126a7eba39221e76"
     },
     {
       "path": "systemd/gnx-tailscale-enroll.service",

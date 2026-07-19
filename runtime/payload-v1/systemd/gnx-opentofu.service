@@ -1,0 +1,14 @@
+[Unit]
+Description=Apply Quetzalcoatl controller infrastructure with pinned OpenTofu
+Requires=gnx-node-pod.service proxmox.service tailscaled.service opentofu-image.service
+After=gnx-node-pod.service proxmox.service tailscaled.service opentofu-image.service
+ConditionPathIsReadWrite=/var/lib/quetzalcoatl
+ConditionPathExists=/run/gnx/opentofu-password
+ConditionPathExists=/run/gnx/opentofu.env
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/libexec/quetzalcoatl/gnx-opentofu-runner
+RemainAfterExit=yes
+TimeoutStartSec=3600

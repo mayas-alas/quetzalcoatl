@@ -1,0 +1,54 @@
+#!/bin/sh
+set -eu
+umask 077
+
+secret='/run/secrets/pve-password'
+configuration='/run/config/opentofu.env'
+test -s "$secret"
+test -s "$configuration"
+
+node_name=$(sed -n 's/^GNX_NODE_NAME=//p' "$configuration")
+install_garage=$(sed -n 's/^GNX_INSTALL_GARAGE=//p' "$configuration")
+install_forgejo=$(sed -n 's/^GNX_INSTALL_FORGEJO=//p' "$configuration")
+case "$node_name" in
+  ''|*[!a-z0-9-]*|-*|*-) exit 64 ;;
+esac
+case "$node_name" in
+  gnx-controller-*) ;;
+  *) exit 64 ;;
+esac
+case "$install_garage:$install_forgejo" in
+  0:0|0:1|1:0|1:1) ;;
+  *) exit 65 ;;
+esac
+
+pve_password=$(cat "$secret")
+[ "${#pve_password}" -ge 12 ] || exit 66
+export PROXMOX_VE_USERNAME='root@pam'
+export PROXMOX_VE_PASSWORD="$pve_password"
+export TF_VAR_node_name="$node_name"
+if [ "$install_garage" -eq 1 ]; then
+  export TF_VAR_install_garage=true
+else
+  export TF_VAR_install_garage=false
+fi
+if [ "$install_forgejo" -eq 1 ]; then
+  export TF_VAR_install_forgejo=true
+else
+  export TF_VAR_install_forgejo=false
+fi
+export TF_IN_AUTOMATION=1
+
+tofu init -input=false -lockfile=readonly -no-color
+tofu validate -no-color
+tofu apply -auto-approve -input=false -no-color
+
+[ "$(tofu output -json garage_vmid)" = "$([ "$install_garage" -eq 1 ] && printf '200' || printf 'null')" ]
+[ "$(tofu output -json forgejo_vmid)" = "$([ "$install_forgejo" -eq 1 ] && printf '201' || printf 'null')" ]
+if grep -Fq -- "$pve_password" /workspace/terraform.tfstate; then
+  printf 'PVE credential was written to OpenTofu state\n' >&2
+  exit 67
+fi
+
+unset PROXMOX_VE_PASSWORD pve_password
+printf 'OPENTOFU_APPLY=ready\n'

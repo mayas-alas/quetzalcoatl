@@ -37,7 +37,7 @@ const MACHINE_IMAGE_ARTIFACT: &str = "podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_URL: &str = "https://github.com/podman-container-tools/podman-machine-os/releases/download/v6.0.1/podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_SIZE: u64 = 249_510_008;
 
-const PAYLOAD_FILES: [PayloadSpec; 20] = [
+const PAYLOAD_FILES: [PayloadSpec; 24] = [
     PayloadSpec::new(
         "bin/gnx-proxmox-entrypoint",
         "/usr/libexec/quetzalcoatl/gnx-proxmox-entrypoint",
@@ -51,6 +51,21 @@ const PAYLOAD_FILES: [PayloadSpec; 20] = [
     PayloadSpec::new(
         "bin/gnx-pve-cluster-create",
         "/usr/libexec/quetzalcoatl/gnx-pve-cluster-create",
+        "0755",
+    ),
+    PayloadSpec::new(
+        "bin/gnx-opentofu-entrypoint",
+        "/usr/libexec/quetzalcoatl/gnx-opentofu-entrypoint",
+        "0755",
+    ),
+    PayloadSpec::new(
+        "bin/gnx-opentofu-prepare",
+        "/usr/libexec/quetzalcoatl/gnx-opentofu-prepare",
+        "0755",
+    ),
+    PayloadSpec::new(
+        "bin/gnx-opentofu-runner",
+        "/usr/libexec/quetzalcoatl/gnx-opentofu-runner",
         "0755",
     ),
     PayloadSpec::new(
@@ -131,6 +146,11 @@ const PAYLOAD_FILES: [PayloadSpec; 20] = [
     PayloadSpec::new(
         "services/garage/serve/serve.json",
         "/usr/share/quetzalcoatl/services/garage/serve/serve.json",
+        "0644",
+    ),
+    PayloadSpec::new(
+        "systemd/gnx-opentofu.service",
+        "/etc/systemd/system/gnx-opentofu.service",
         "0644",
     ),
     PayloadSpec::new(
