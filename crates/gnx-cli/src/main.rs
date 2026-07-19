@@ -44,8 +44,12 @@ fn print_human(status: &StatusResponse) {
     println!("stage: {}", status.stage);
     println!("role: {}", status.role.as_deref().unwrap_or("not_resolved"));
     println!("service: {}", status.components.service);
+    println!("wsl: {}", status.components.wsl);
     println!("podman_machine: {}", status.components.podman_machine);
     println!("kvm: {}", status.components.kvm);
+    if let Some(error) = &status.last_error {
+        println!("last_error: {error}");
+    }
 }
 
 fn main() {

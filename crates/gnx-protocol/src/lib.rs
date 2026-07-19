@@ -14,7 +14,7 @@ pub enum Command {
     Status,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct StatusResponse {
     pub schema_version: u8,
     pub overall: String,
@@ -27,7 +27,7 @@ pub struct StatusResponse {
     pub last_error: Option<String>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Components {
     pub service: String,
     pub wsl: String,
@@ -39,13 +39,13 @@ pub struct Components {
     pub opentofu: String,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Cluster {
     pub joined: bool,
     pub quorate: bool,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Services {
     pub garage: String,
     pub forgejo: String,

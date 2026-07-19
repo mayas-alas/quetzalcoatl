@@ -39,6 +39,7 @@ name = "gnx-service"
 version = "0.1.0"
 dependencies = [
  "gnx-protocol",
+ "serde",
  "serde_json",
  "windows-sys 0.61.2",
 ]

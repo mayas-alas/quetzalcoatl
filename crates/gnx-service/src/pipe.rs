@@ -1,6 +1,7 @@
 use std::ffi::c_void;
 use std::mem::size_of;
 use std::ptr::null_mut;
+use std::sync::{Arc, RwLock};
 
 use gnx_protocol::{Command, MAX_MESSAGE_BYTES, PIPE_NAME, Request, StatusResponse};
 use windows_sys::Win32::Foundation::{
@@ -25,11 +26,11 @@ use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
 
 const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)";
 
-pub fn serve() -> Result<(), String> {
+pub fn serve(status: Arc<RwLock<StatusResponse>>) -> Result<(), String> {
     let pipe = create_pipe()?;
     loop {
         connect(pipe.0)?;
-        if let Err(error) = serve_client(pipe.0) {
+        if let Err(error) = serve_client(pipe.0, &status) {
             eprintln!("gnx-service: rejected pipe request: {error}");
         }
         // Safety: the handle is a connected named-pipe server instance.
@@ -40,13 +41,19 @@ pub fn serve() -> Result<(), String> {
     }
 }
 
-fn serve_client(pipe: HANDLE) -> Result<(), String> {
+fn serve_client(pipe: HANDLE, status: &Arc<RwLock<StatusResponse>>) -> Result<(), String> {
     let message = read_message(pipe)?;
     authorize_client(pipe)?;
     let request: Request = serde_json::from_slice(&message)
         .map_err(|_| "request is not valid protocol v1 JSON".to_string())?;
     let response = match request.command {
-        Command::Status => serde_json::to_vec(&StatusResponse::service_ready()),
+        Command::Status => {
+            let snapshot = status
+                .read()
+                .map_err(|_| "runtime status lock is poisoned".to_string())?
+                .clone();
+            serde_json::to_vec(&snapshot)
+        }
     }
     .map_err(|e| format!("cannot serialize response: {e}"))?;
     write_message(pipe, &response)

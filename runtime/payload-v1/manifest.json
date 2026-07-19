@@ -12,6 +12,23 @@
   },
   "components": [
     {
+      "id": "podman-machine-os",
+      "kind": "oci_machine_image",
+      "source": "https://github.com/podman-container-tools/podman-machine-os",
+      "version": "6.0.1",
+      "source_ref": "v6.0.1",
+      "source_commit": "137982aea62947e436bfb58408676e246414ea47",
+      "image": "quay.io/podman/machine-os",
+      "index_digest": "sha256:6dec5eadc84f41e55c3b6fc67264ed6c985e5f61a1d4ba243056dc0efc234bec",
+      "manifest_digest": "sha256:c1b05f0f5f5cdbbfb2be4e23fccfbd0436f3aa6bfa6d4705daed00a251b03943",
+      "layer_digest": "sha256:0d828beef16a031a50a7cee594fd79ade36c3d3972b590cb01c32a987bd88bc3",
+      "platform": {
+        "os": "linux",
+        "architecture": "x86_64",
+        "disk_type": "wsl"
+      }
+    },
+    {
       "id": "proxmox",
       "kind": "oci_image",
       "source": "https://github.com/mayas-alas/tailnet-proxmox",
