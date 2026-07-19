@@ -9,6 +9,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
+name = "gnx-cli"
+version = "0.1.0"
+dependencies = [
+ "gnx-protocol",
+ "serde_json",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "gnx-host-preflight"
 version = "0.1.0"
 dependencies = [
@@ -16,6 +25,22 @@ dependencies = [
  "serde_json",
  "windows-sys 0.61.2",
  "winreg",
+]
+
+[[package]]
+name = "gnx-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "gnx-service"
+version = "0.1.0"
+dependencies = [
+ "gnx-protocol",
+ "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

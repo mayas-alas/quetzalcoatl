@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/host-preflight"]
+members = [
+    "crates/gnx-cli",
+    "crates/gnx-protocol",
+    "crates/gnx-service",
+    "crates/host-preflight",
+]
 resolver = "2"
 
 [workspace.package]
