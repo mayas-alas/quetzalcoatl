@@ -46,6 +46,7 @@ if pct status "$vmid" | grep -q 'status: stopped'; then
   rm -f "$start_log"
   rm -f "$failure_log"
   if ! pct start "$vmid" --debug > "$start_log" 2>&1; then
+    pct config "$vmid" | grep -E '^(dev[0-9]+|features|lxc\.)[: ]' >&2 || true
     grep -Ei 'produced output|could not|file exists|permission denied|failed to|error' \
       "$start_log" > "$failure_log" || true
     if [ -s "$failure_log" ]; then
