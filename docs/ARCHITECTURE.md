@@ -6,12 +6,12 @@ Prioridad: obtener `QuetzalcoatlSetup.exe` funcionando en un host real cuanto an
 
 ## 1. Objetivo
 
-El PoC debe producir un único instalador Windows que deje operativo el sistema completo en dos pasos acumulativos:
+El PoC debe producir un único instalador Windows que deje operativo el sistema completo en dos incrementos acumulativos:
 
 1. La primera instalación autorizada no encuentra otros nodos Quetzalcoatl en Tailscale, se designa automáticamente `controller` y converge el runtime local y la infraestructura seleccionada.
-2. La siguiente instalación encuentra al controller en Tailscale, se designa automáticamente `member`, levanta el mismo runtime local y une su Proxmox al clúster existente.
+2. Las dos instalaciones siguientes, ejecutadas secuencialmente, encuentran al mismo controller en Tailscale, se designan automáticamente `member`, levantan el mismo runtime local y unen su Proxmox al clúster existente.
 
-El PoC termina cuando ambos recorridos funcionan en hosts Windows objetivo y `gnx status --json` lo demuestra. No termina cuando el código solamente compila.
+El PoC termina cuando el recorrido controller y el mismo recorrido member repetido en dos hosts Windows objetivo funcionan y `gnx status --json` lo demuestra. No termina cuando el código solamente compila.
 
 ## 2. Regla de alcance
 
@@ -77,13 +77,13 @@ flowchart LR
         ForgejoTS["Tailscale sidecar"]
     end
 
-    subgraph WindowsMember["Windows · member"]
+    subgraph WindowsMember["Windows · members ×2"]
         SetupM["Mismo Setup.exe"]
         ServiceM["gnx-service"]
         CLIM["gnx CLI"]
     end
 
-    subgraph FedoraMember["Podman Machine Fedora · administrada"]
+    subgraph FedoraMember["Podman Machine Fedora · administrada ×2"]
         SystemdM["systemd + Quadlets"]
         TailscaleM["tailscaled.container"]
         ProxmoxM["proxmox.container"]
@@ -116,7 +116,7 @@ flowchart LR
     ProxmoxM -->|"pvecm join por tailnet"| ProxmoxC
 ```
 
-La única topología de aceptación contiene exactamente un controller y un member. Un tercer host GNX produce `TOPOLOGY_UNSUPPORTED`; no se implementan HA, promoción ni elecciones.
+La única topología de aceptación contiene exactamente un controller y dos members. Ambos members ejecutan el mismo Incremento 2; no existe un tercer incremento. Un cuarto host GNX produce `TOPOLOGY_UNSUPPORTED`; no se implementan HA, promoción ni elecciones.
 
 ## 4. Decisiones e invariantes
 
@@ -130,7 +130,7 @@ La única topología de aceptación contiene exactamente un controller y un memb
 | Autoridad | `gnx-service` contiene toda la lógica privilegiada | WinSW sólo supervisa el proceso; no contiene lógica de dominio |
 | Runtime local | systemd y Quadlets mantienen Podman | Quadlet no administra Windows, WSL ni infraestructura PVE |
 | Red | Tailscale SaaS conecta los nodos host | Headscale queda fuera |
-| Rol | Cero hosts GNX implica controller; cualquier host GNX implica member | El PoC sólo acepta 0 o 1 peer; el rol se decide una vez y se persiste |
+| Rol | Cero hosts GNX implica controller; uno o dos hosts GNX implican member | El PoC exige exactamente un controller identificable, admite hasta dos peers y persiste el rol una sola vez |
 | Infraestructura | OpenTofu está presente en todos los nodos | Sólo el controller puede ejecutar `init/plan/apply` |
 | Estado OpenTofu | Backend local persistente y `0600` en el controller | Garage no es backend en estos incrementos |
 | Apps remotas | Garage y Forgejo viven en LXC con Docker Compose | Ninguna app remota es Quadlet local |
@@ -300,15 +300,16 @@ Matriz:
 |---|---:|---:|---|
 | Existe | Cualquiera | Cualquiera | Reusar el rol persistido; no redetectar ni cambiar |
 | No existe | 0 | 0 | Persistir `controller`, fijar hostname y crear clúster |
-| No existe | 1 | Es `gnx-controller-*` y está online | Persistir `member` y unirse a ese controller |
-| No existe | 1 | No identificable u offline | Persistir `member`; `CONTROLLER_UNAVAILABLE`; no mutar PVE y permitir reanudación |
-| No existe | Más de 1 | Cualquiera | Clasificar como member, detener con `TOPOLOGY_UNSUPPORTED` y no mutar PVE |
+| No existe | 1 | Existe exactamente un `gnx-controller-*` | Persistir `member`; unirse si está online o quedar `CONTROLLER_UNAVAILABLE` reanudable |
+| No existe | 2 | Existe exactamente un `gnx-controller-*`; el otro es `gnx-member-*` | Persistir el segundo `member`; unirse al mismo controller |
+| No existe | 1 o 2 | Cero o más de un controller identificable | `TOPOLOGY_UNSUPPORTED`; no persistir rol ni mutar PVE |
+| No existe | Más de 2 | Cualquiera | `TOPOLOGY_UNSUPPORTED`; no persistir rol ni mutar PVE |
 
-La regla de negocio es automática: si existe cualquier otra máquina host autorizada, el nuevo nodo es member. El hostname sólo identifica al controller para `pvecm`; no cambia la decisión. El límite de exactamente dos hosts evita escribir selección de controller o soporte para un tercer nodo. Antes de `pvecm create`, el futuro controller vuelve a confirmar que el inventario continúa vacío.
+La regla de negocio es automática: si existe cualquier otra máquina host autorizada, el nuevo nodo es member. Entre uno o dos peers debe existir exactamente un hostname `gnx-controller-*`; sólo se usa para localizar la autoridad de `pvecm`, no para elegirla. El límite de tres hosts evita HA, elección o selección manual. Antes de `pvecm create`, el futuro controller vuelve a confirmar que el inventario continúa vacío.
 
 En una reanudación, “no redetectar el rol” significa no volver a decidir controller/member. Un member sí vuelve a consultar el peer guardado para comprobar su identidad, disponibilidad e IP actual antes del join. El `Self.ID` de Tailscale y el ID del controller se persisten; un cambio de identidad es fail-stop.
 
-Las instalaciones se ejecutan secuencialmente. No se escribe código de elección para dos primeras instalaciones simultáneas.
+Las tres instalaciones se ejecutan secuencialmente. No se escribe código de elección para instalaciones iniciales simultáneas.
 
 ## 8. Red y exposición
 
@@ -543,15 +544,15 @@ Criterio de cierre: el EXE realiza el recorrido completo en un host objetivo y e
 
 Camino canónico:
 
-1. Ejecutar el mismo Setup en un segundo Windows.
+1. Ejecutar el mismo Setup, primero en un segundo Windows y después sin cambios en un tercero.
 2. Repetir la preparación local y registrar Tailscale.
-3. Encontrar exactamente un host GNX, clasificar y persistir `member`.
-4. Confirmar que ese único host es el controller y está online.
+3. Encontrar uno o dos hosts GNX, clasificar y persistir `member`.
+4. Confirmar que existe exactamente un controller y que ambos members conservan su ID/IP.
 5. Levantar PVE local, comprobar SSH/Corosync/API y ejecutar `pvecm join`.
 6. Denegar OpenTofu y no crear servicios remotos.
-7. Terminar con `gnx status --json` en `READY` y clúster visible desde ambos nodos.
+7. Terminar con `gnx status --json` en `READY` en ambos members y clúster de tres nodos visible desde todos.
 
-Criterio de cierre: el mismo EXE agrega el member y existe una sola autoridad OpenTofu y una sola instancia de cada servicio remoto seleccionado.
+Criterio de cierre: el mismo EXE agrega dos members mediante el mismo camino, el clúster queda quorate con tres nodos y existe una sola autoridad OpenTofu y una sola instancia de cada servicio remoto seleccionado.
 
 ## 13. Condiciones fail-stop
 
@@ -562,7 +563,7 @@ No se agrega lógica alterna. La instalación se detiene cuando:
 - la `auth_key` es inválida o no produce los tags requeridos;
 - HTTPS/Serve no está habilitado o `CertDomains` no contiene el dominio esperado;
 - la credencial bootstrap PVE continúa activa después de la convergencia local;
-- el descubrimiento encuentra más de un peer host en esta topología de dos nodos;
+- el descubrimiento encuentra más de dos peers host, o entre uno y dos peers no existe exactamente un controller;
 - cambia la identidad Tailscale propia o desaparece la identidad controller persistida;
 - PVE API, SSH o Corosync no son viables antes del join;
 - un member intenta ejecutar OpenTofu;

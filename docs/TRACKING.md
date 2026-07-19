@@ -3,7 +3,7 @@
 Última actualización: 2026-07-19
 Estado global: `VALIDACIÓN I1 EN CURSO`
 
-Siguiente trabajo: `A-05 · aplicar ACL mínima, almacenar la auth_key por DPAPI y registrar Tailscale`
+Siguiente trabajo: `A-05 · cerrar Compose de Garage/Forgejo y sus probes vivos`
 
 ## 1. Objetivo de seguimiento
 
@@ -41,16 +41,16 @@ Estados de trabajo permitidos: `NO INICIADO`, `EN CURSO`, `BLOQUEADO`, `CERRADO`
 - El `QuetzalcoatlSetup.exe` final completó la instalación elevada con exit 0 después de limpiarse la señal real de reboot. Tras el reinicio de Windows del 2026-07-19, el servicio volvió en modo `Auto` con la misma cuenta y SID, y la máquina persistida regresó a `KVM_READY`.
 - RuntimeGate verifica y aplica 30 archivos fijados, levanta el Quadlet PVE y alcanza `PROXMOX_READY` sólo después de obtener KVM API 12, TUN y FUSE dentro de la máquina y del contenedor, más systemd, cgroup v2 y `pvesh` saludables.
 - El host conserva WSL 2.7.10 y Podman 6.0.1. El bundle 0.1.1 y su MSI hicieron major upgrade transaccional de 0.1.0; el producto, servicio, CLI y payload instalados coinciden con el build release.
-- DPAPI, Tailscale, rol, clúster, OpenTofu, LXC Docker, Garage, Forgejo y sus probes funcionales están implementados. Su evidencia viva continúa pendiente dentro de A-05; no se ha iniciado I2.
+- DPAPI, Tailscale, Serve PVE, rol controller, clúster quorate, persistencia Corosync y OpenTofu están demostrados bajo el SID real del servicio. Docker 29.6.2 quedó instalado y verificado dentro de ambos LXC; Garage alcanzó `docker compose up` y espera el diagnóstico final de salud. Forgejo aún no inicia. Dos hosts Dockur Windows están vivos y accesibles para repetir I2, cuyo código no se ha iniciado.
 
 ## 4. Resultado de los dos incrementos
 
 | ID | Resultado observable | Estado | Evidencia de cierre | Bloqueos de cierre |
 |---|---|---|---|---|
 | I1 | En Windows limpio, el EXE instala o reanuda WSL2, valida KVM, instala Podman, crea la máquina administrada, registra Tailscale, detecta cero hosts GNX, queda controller, levanta PVE y ejecuta OpenTofu. La aceptación canónica selecciona Garage y Forgejo; ambos quedan operativos. `gnx status --json` termina `READY`. | `EN CURSO` | Hash del EXE; API KVM; inventario estable que excluye self/sidecars; `Self.ID` y rol persistidos; `pvecm status`; state OpenTofu; S3 PUT/GET; push/clone Forgejo; bootstrap PVE reemplazado; ausencia de secretos persistidos; `gnx status --json` | G0-01, G0-02, G0-05, G0-07 y B-02 cerrados |
-| I2 | En un segundo Windows, el mismo EXE encuentra exactamente el controller autorizado, queda member, levanta PVE, ejecuta `pvecm join`, no ejecuta OpenTofu y no recrea singletons. | `NO INICIADO` | `gnx status --json`; `pvecm nodes/status` en ambos nodos; Tailscale directo; SSH/Corosync; rol/controller ID persistidos; intento OpenTofu denegado antes de ejecutar; member sin workspace/state/credenciales; una sola instancia de cada servicio remoto | I1, G0-03, G0-04 y G0-06 cerrados |
+| I2 | En un segundo y un tercer Windows, el mismo EXE encuentra exactamente el controller autorizado entre uno o dos peers, queda member, levanta PVE, ejecuta `pvecm join`, no ejecuta OpenTofu y no recrea singletons. | `NO INICIADO` | `gnx status --json` en ambos members; `pvecm nodes/status` con tres nodos; Tailscale directo entre todos; SSH/Corosync; rol/controller ID persistidos; intento OpenTofu denegado antes de ejecutar; members sin workspace/state/credenciales; una sola instancia de cada servicio remoto | I1, G0-03, G0-04 y G0-06 cerrados |
 
-I1 no puede cerrarse mientras B-07 siga abierto. I2 no puede cerrarse mientras B-06 siga abierto.
+I1 no puede cerrarse mientras B-04 y B-08 sigan abiertos. I2 no puede cerrarse mientras B-06 siga abierto.
 
 ## 5. Gate 0 — factibilidad por incremento
 
@@ -59,11 +59,11 @@ Gate 0 no es un tercer incremento. Cada gate debe cerrarse antes del camino de c
 | ID | Resultado requerido | Estado | Evidencia |
 |---|---|---|---|
 | G0-01 | WSL2 y Podman Machine exponen KVM utilizable | `CERRADO` | `KVM_GET_API_VERSION=12` dentro de la máquina |
-| G0-02 | El contenedor PVE privilegiado arranca con KVM, TUN, FUSE, cgroup v2 y persistencia | `EN CURSO` | Arranque y probes pasan; faltan `pvecm status` y persistencia PVE después de reinicio |
-| G0-03 | Dos nodos Tailscale con tag de producto obtienen camino directo y RTT menor a 5 ms | `NO INICIADO` | `tailscale ping`, pérdida y RTT |
+| G0-02 | El contenedor PVE privilegiado arranca con KVM, TUN, FUSE, cgroup v2 y persistencia | `CERRADO` | Arranque/probes pasan; clúster permanece joined/quorate y conserva su authkey Corosync tras reinicios del servicio/contenedor |
+| G0-03 | Los tres nodos Tailscale con tag de producto obtienen camino directo por pares y RTT menor a 5 ms | `NO INICIADO` | `tailscale ping`, pérdida y RTT de controller↔member y member↔member |
 | G0-04 | PVE API/SSH/Corosync funcionan por la tailnet sin puertos Windows | `NO INICIADO` | Relojes sincronizados; probes TCP 22/8006; tráfico UDP 5405-5412 capturado sobre tailnet; ACL/firewall efectivos; cero listeners PVE en Windows |
 | G0-05 | Los LXC PVE ejecutan los Compose canónicos de Garage y Forgejo con TUN y `fuse-overlayfs` después de reiniciar | `NO INICIADO` | `docker info`; ambos sidecars saludables; S3 PUT/GET y push/clone Forgejo después de reinicio |
-| G0-06 | El segundo PVE se une de forma no interactiva y controlada al primero | `NO INICIADO` | `pvecm nodes/status` con dos nodos y quorum; join reanudable; password ausente de argv, archivos y logs |
+| G0-06 | Los dos PVE member se unen de forma no interactiva y controlada al controller | `NO INICIADO` | `pvecm nodes/status` con tres nodos y quorum; ambos joins reanudables; password ausente de argv, archivos y logs |
 | G0-07 | Tailscale Serve HTTPS funciona sin consentimiento interactivo | `NO INICIADO` | `CertDomains` esperado; PVE, S3 y Forgejo accesibles por HTTPS; `AllowFunnel=false` |
 
 El registro Gate 0 completo queda `CERRADO` cuando G0-01 a G0-07 tienen evidencia. La columna “Bloqueos de cierre” indica el subconjunto que cada incremento debe resolver, incluso si se cierra durante su integración vertical.
@@ -76,11 +76,11 @@ Sólo se registran brechas de factibilidad o seguridad que bloquean I1 o I2. No 
 |---|---|---|---|---|
 | B-01 | WSL2 → Podman Machine → KVM aún no está demostrado | Impide PVE | Gate obtiene `KVM_GET_API_VERSION=12` desde la máquina y el contenedor privilegiado | `CERRADO` |
 | B-02 | Imagen de máquina, PVE, Tailscale, OpenTofu, Quadlets y Compose no están fijados por digest/commit | Runtime no reproducible | Manifest v1 contiene fuente, versión, digest y hash de cada entrada | `CERRADO` |
-| B-03 | Arranque y persistencia de PVE OCI privilegiado no demostrados | Impide controller y member | PVE vuelve saludable después de reiniciar máquina/contenedor sin perder estado | `ABIERTO` |
+| B-03 | Arranque y persistencia de PVE OCI privilegiado no demostrados | Impide controller y member | PVE vuelve saludable después de reiniciar máquina/contenedor sin perder estado | `CERRADO` |
 | B-04 | Docker dentro de LXC con TUN/FUSE/cgroup no demostrado | Impide Garage y Forgejo | Los Compose canónicos sobreviven reinicio y ambos sidecars quedan saludables | `ABIERTO` |
-| B-05 | No existe evidencia de camino tailnet directo dentro del límite de Corosync | Impide clúster estable | Ambos hosts muestran camino directo, pérdida cero y RTT menor a 5 ms | `ABIERTO` |
+| B-05 | No existe evidencia de camino tailnet directo dentro del límite de Corosync | Impide clúster estable | Los tres hosts muestran camino directo por pares, pérdida cero y RTT menor a 5 ms | `ABIERTO` |
 | B-06 | Canal no interactivo de `pvecm join` y credencial protegida no demostrado | Impide I2 | Join repetible, sin password en argv/logs/archivos planos | `ABIERTO` |
-| B-07 | Handoff Burn → servicio → DPAPI → Linux no demostrado | Impide cerrar I1 con manejo seguro de secretos | Integración sin secreto en log, MSI property, argv, Compose, contenedor permanente ni state; `/run` eliminado | `ABIERTO` |
+| B-07 | Handoff Burn → servicio → DPAPI → Linux no demostrado | Impide cerrar I1 con manejo seguro de secretos | Integración sin secreto en log, MSI property, argv, Compose, contenedor permanente ni state; `/run` eliminado | `CERRADO` |
 | B-08 | HTTPS de Tailscale Serve no está demostrado como prehabilitado | Impide UI PVE y endpoints de Garage/Forgejo desatendidos | `CertDomains` válido y los tres endpoints funcionan sin URL de consentimiento | `ABIERTO` |
 
 Un hallazgo que no bloquee alguno de los dos incrementos no pertenece aquí.
@@ -94,8 +94,8 @@ Un hallazgo que no bloquee alguno de los dos incrementos no pertenece aquí.
 | 3 | A-03 | Crear WiX 5 Burn/MSI + WinSW, identidad runtime y primer EXE | `CERRADO` | Setup reanuda reboot, instala servicio/CLI y mantiene el mismo SID |
 | 4 | A-04 | Implementar `RuntimeGate` dentro de `gnx-service` | `CERRADO` | La identidad dedicada crea la máquina y cierra G0-01 y B-01 |
 | 5 | A-05 | Integrar verticalmente I1, sin desarrollar I2 en paralelo | `EN CURSO` | Cierra G0-02, G0-05, G0-07, B-03, B-04, B-07, B-08 y toda evidencia I1 |
-| 6 | A-06 | Probar red directa de dos hosts, `pvecm create/add` y canal protegido de join | `NO INICIADO` | Cierra G0-03, G0-04, G0-06, B-05 y B-06 |
-| 7 | A-07 | Implementar únicamente descubrimiento y join de I2 | `NO INICIADO` | Toda la evidencia I2 está registrada |
+| 6 | A-06 | Probar red directa de tres hosts, `pvecm create/add` y canal protegido de join | `NO INICIADO` | Cierra G0-03, G0-04, G0-06, B-05 y B-06 |
+| 7 | A-07 | Implementar un único descubrimiento/join de I2 y repetirlo en dos members | `NO INICIADO` | Toda la evidencia I2 está registrada sin crear I3 |
 
 La siguiente acción siempre es la primera fila no cerrada. No se inicia una fila posterior “para avanzar en paralelo” si la anterior define su contrato.
 
@@ -109,11 +109,11 @@ La evidencia de A-04 proviene de la ejecución bajo `NT SERVICE\Quetzalcoatl`; c
 | I1-02 | Cuenta dedicada, WinSW, `gnx-service` y Named Pipe | `CERRADO` | I1-01 |
 | I1-03 | RuntimeGate, máquina `quetzalcoatl` y aplicación de payload v1 | `CERRADO` | I1-02, A-04 |
 | I1-04 | Quadlet PVE vivo y payloads fijados de Tailscale/OpenTofu | `CERRADO` | I1-03 |
-| I1-05 | DPAPI y `gnx-tailscale-enroll` one-shot sólo con `auth_key` | `EN CURSO` | I1-02 |
-| I1-06 | Descubrimiento cero peers y persistencia controller | `NO INICIADO` | I1-04, I1-05 |
-| I1-07 | `pvecm create` y PVE privado saludable | `NO INICIADO` | I1-06 |
-| I1-08 | OpenTofu local state y LXC seleccionados | `NO INICIADO` | I1-07 |
-| I1-09 | Garage/Forgejo mediante Docker Compose y secretos DPAPI | `NO INICIADO` | I1-08 |
+| I1-05 | DPAPI y `gnx-tailscale-enroll` one-shot sólo con `auth_key` | `CERRADO` | I1-02 |
+| I1-06 | Descubrimiento cero peers y persistencia controller | `CERRADO` | I1-04, I1-05 |
+| I1-07 | `pvecm create` y PVE privado saludable | `CERRADO` | I1-06 |
+| I1-08 | OpenTofu local state y LXC seleccionados | `CERRADO` | I1-07 |
+| I1-09 | Garage/Forgejo mediante Docker Compose y secretos DPAPI | `EN CURSO` | I1-08 |
 | I1-10 | `gnx status --json`, EXE y aceptación real | `NO INICIADO` | I1-01 a I1-09 |
 
 ## 9. Desglose de Incremento 2
@@ -122,12 +122,12 @@ I2 no comienza hasta que I1 está cerrado.
 
 | ID | Entregable | Estado | Dependencia |
 |---|---|---|---|
-| I2-01 | Descubrimiento de exactamente un peer host controller | `NO INICIADO` | I1 cerrado, G0-03 |
+| I2-01 | Descubrimiento de exactamente un controller entre uno o dos peers host | `NO INICIADO` | I1 cerrado, G0-03 |
 | I2-02 | Persistencia member y controller ID/IP | `NO INICIADO` | I2-01 |
 | I2-03 | PVE member limpio y preflight de red cluster | `NO INICIADO` | I2-02, G0-04 |
 | I2-04 | `pvecm join` protegido | `NO INICIADO` | I2-03, G0-06 |
 | I2-05 | Bloqueo verificable de OpenTofu y servicios singleton | `NO INICIADO` | I2-02 |
-| I2-06 | Estado del clúster, mismo EXE y aceptación real | `NO INICIADO` | I2-01 a I2-05 |
+| I2-06 | Estado quorate de tres nodos, mismo EXE en ambos members y aceptación real | `NO INICIADO` | I2-01 a I2-05 |
 
 ## 10. Evidencia
 
@@ -151,6 +151,7 @@ I2 no comienza hasta que I1 está cerrado.
 | 2026-07-19 | A-05 | Validación estática del servicio y payload final | `cargo clippy -p gnx-service -- -D warnings`; `cargo test -p gnx-service`; sintaxis Dash/Python; hashes | Clippy limpio, 18/18 pruebas y 30/30 payloads. `READY` queda condicionado en código a S3 PUT/GET y Forgejo push/clone, todavía sin atribuirles evidencia viva | manifest SHA-256 `27A44812A1822B7544801965086284B8222711CDC3EA118D33B9D671EA4E60A2` · commit `e5f346a` |
 | 2026-07-19 | A-03/I1-01 | Windows 11 x64 · major upgrade elevado | `QuetzalcoatlSetup.exe /install /quiet /norestart`; `wix msi validate`; comparación del payload instalado | Burn detectó 0.1.0, ejecutó PrepareWsl y ValidateHost, instaló MSI 0.1.1, retiró 0.1.0 y terminó `0x0` sin reboot. Binarios y 30 payloads instalados coinciden con el build | EXE SHA-256 `37D7744BFB3D2D2D88D949B0A2A1594A37FB7459B6A8357610243596BE57350B`; MSI `C603D33C35FCE8F89AA138AA72C92E6FEA2C0C2DC81C0C7F09FF41E404E6DE45`; commit `6957709` |
 | 2026-07-19 | A-05/B-07 | Windows 11 x64 · entrada elevada negativa | `gnx configure` con password PVE menor al contrato | Rechazo `CONFIGURATION_INVALID` antes de crear `%ProgramData%\Quetzalcoatl.Runtime`; ninguna entrada fue persistida | `gnx.exe` SHA-256 `2817C678654413FB3A3106326EA463B2A9685A6AEEE50A9BF611D73E2C84CFAB`; `gnx-service.exe` `367F3878ECFB20C00B49F9ABA810018AA873AF8B3D79004FE475BCFB378CF63C` |
+| 2026-07-19 | A-06 · hosts member | GitHub Actions · dos Dockur Windows 11 simultáneos | Runs `29688898744` y `29689552343`; probe RDP X.224 desde el controller Windows | Ambos runners pasaron KVM API 12, VMX/SVM anidado, TUN, 12 GiB guest y arranque real de Windows; MagicDNS resolvió simultáneamente y ambos endpoints devolvieron X.224 Connection Confirm por la tailnet | `node-2` `100.99.26.47:3389`; `node-3` `100.88.174.82:3389`; Dockur digest `sha256:8cc6f8bc4a60c078141fd3bcf7d2df69ae063a11d98be31a57429afe0dca66da`; workflow commit `3f0379c` |
 
 Reglas de evidencia:
 
@@ -166,7 +167,7 @@ Reglas de evidencia:
 | ID | Decisión | Razón de congruencia |
 |---|---|---|
 | D-01 | Rol automático por `tailscale status --json` | Es el comportamiento solicitado; no existe invitación |
-| D-02 | Cero peers host = controller; exactamente uno = member | Cierra la topología de aceptación a dos nodos y evita elección |
+| D-02 | Cero peers host = controller; uno o dos peers con exactamente un controller = member | Cierra la topología a tres nodos con un solo camino member; un cuarto host, cero controllers o múltiples controllers fallan sin elección |
 | D-03 | Una `auth_key` con sólo `tag:quetzalcoatl-node`; ese tag posee directamente `tag:quetzalcoatl-service` | Permite identidades host/service exactas sin OAuth ni dos keys; no existe tag controller |
 | D-04 | Tags separados para host y sidecars | Garage/Forgejo no alteran el conteo de rol |
 | D-05 | Tailscale, PVE y OpenTofu son obligatorios | Forman el núcleo funcional |
