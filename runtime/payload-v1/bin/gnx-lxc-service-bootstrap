@@ -2,6 +2,7 @@
 set -eu
 umask 077
 export LC_ALL=C
+export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
 bootstrap_dir='/run/gnx/service-bootstrap'
 input="$bootstrap_dir/input"
