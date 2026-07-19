@@ -26,7 +26,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 use zeroize::Zeroize;
 
 const SERVICE_SID: &str = "S-1-5-80-1414281857-1943412974-186110390-2486725240-2230548587";
-const MANAGED_DIRECTORY: &str = "managed";
+const PRODUCT_DATA_DIRECTORY: &str = "Quetzalcoatl.Runtime";
 const BLOB_NAME: &str = "installer-inputs.bin";
 const DPAPI_ENTROPY: &[u8] = b"Quetzalcoatl/installer-inputs/v1";
 
@@ -53,10 +53,23 @@ pub fn store(configuration: &InstallerConfiguration) -> Result<(), Configuration
     Ok(())
 }
 
+pub fn load_optional() -> Result<Option<InstallerConfiguration>, ConfigurationError> {
+    let path = configuration_path()?;
+    match fs::read(&path) {
+        Ok(encrypted) => load_encrypted(&encrypted).map(Some),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(ConfigurationError::io("cannot read DPAPI blob", &error)),
+    }
+}
+
 fn load_from(path: &Path) -> Result<InstallerConfiguration, ConfigurationError> {
     let encrypted =
         fs::read(path).map_err(|error| ConfigurationError::io("cannot read DPAPI blob", &error))?;
-    let mut plaintext = unprotect(&encrypted)?;
+    load_encrypted(&encrypted)
+}
+
+fn load_encrypted(encrypted: &[u8]) -> Result<InstallerConfiguration, ConfigurationError> {
+    let mut plaintext = unprotect(encrypted)?;
     let parsed = serde_json::from_slice(&plaintext)
         .map_err(|_| ConfigurationError::storage("DPAPI blob has invalid configuration data"));
     plaintext.zeroize();
@@ -117,48 +130,21 @@ fn validate_password(value: &str) -> Result<(), ConfigurationError> {
 }
 
 fn secrets_directory() -> Result<PathBuf, ConfigurationError> {
+    let root = product_root()?;
+    secure_directory(&root)?;
+    Ok(root.join("secrets"))
+}
+
+fn configuration_path() -> Result<PathBuf, ConfigurationError> {
+    Ok(product_root()?.join("secrets").join(BLOB_NAME))
+}
+
+fn product_root() -> Result<PathBuf, ConfigurationError> {
     let program_data = env::var_os("ProgramData")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .ok_or_else(|| ConfigurationError::storage("ProgramData is unavailable"))?;
-    let root = program_data.join("Quetzalcoatl");
-    ensure_product_root(&root)?;
-    let managed = root.join(MANAGED_DIRECTORY);
-    secure_directory(&managed)?;
-    Ok(managed.join("secrets"))
-}
-
-fn ensure_product_root(path: &Path) -> Result<(), ConfigurationError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) => verify_real_directory(&metadata),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let descriptor = SecurityDescriptor::new()?;
-            let wide_path = wide_path(path)?;
-            let attributes = SECURITY_ATTRIBUTES {
-                nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
-                lpSecurityDescriptor: descriptor.0,
-                bInheritHandle: 0,
-            };
-            // Safety: path and descriptor remain valid for the duration of this call.
-            if unsafe { CreateDirectoryW(wide_path.as_ptr(), &attributes) } == 0 {
-                let error = unsafe { GetLastError() };
-                if error != ERROR_ALREADY_EXISTS {
-                    return Err(ConfigurationError::win32(
-                        "cannot create product data directory",
-                        error,
-                    ));
-                }
-            }
-            let metadata = fs::symlink_metadata(path).map_err(|error| {
-                ConfigurationError::io("cannot inspect product data directory", &error)
-            })?;
-            verify_real_directory(&metadata)
-        }
-        Err(error) => Err(ConfigurationError::io(
-            "cannot inspect product data directory",
-            &error,
-        )),
-    }
+    Ok(program_data.join(PRODUCT_DATA_DIRECTORY))
 }
 
 fn secure_directory(path: &Path) -> Result<(), ConfigurationError> {
