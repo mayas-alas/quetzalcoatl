@@ -14,8 +14,6 @@ use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, IsProcessorFeaturePresent, OpenProcessToken, PF_VIRT_FIRMWARE_ENABLED,
 };
 
-const PF_HYPERVISOR_PRESENT: u32 = 34;
-
 pub fn windows_11_x64() -> Result<bool, String> {
     // Safety: the initialized structures and pointers have the exact Win32 API sizes.
     unsafe {
@@ -59,10 +57,11 @@ pub fn is_elevated() -> Result<bool, String> {
 }
 
 pub fn virtualization_available() -> Result<bool, String> {
-    // Safety: IsProcessorFeaturePresent takes only documented constant feature identifiers.
+    // Safety: IsProcessorFeaturePresent takes a documented feature identifier and CPUID leaf 1
+    // is available on every x86_64 processor supported by this Windows-only binary.
     unsafe {
         Ok(IsProcessorFeaturePresent(PF_VIRT_FIRMWARE_ENABLED) != 0
-            && IsProcessorFeaturePresent(PF_HYPERVISOR_PRESENT) != 0)
+            && std::arch::x86_64::__cpuid(1).ecx & (1 << 31) != 0)
     }
 }
 

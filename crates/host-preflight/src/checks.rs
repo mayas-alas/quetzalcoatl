@@ -127,8 +127,10 @@ fn feature_enabled(feature: &str) -> Result<bool, String> {
     if !output.status.success() {
         return Err(format!("DISM could not query {feature}"));
     }
-    let text = String::from_utf8(output.stdout)
-        .map_err(|_| format!("DISM returned non-UTF-8 output for {feature}"))?;
+    // DISM writes human-readable text using the active Windows OEM code page. The
+    // `/English` state marker is ASCII, so lossy decoding preserves the contract
+    // while avoiding locale-specific failures on otherwise compatible hosts.
+    let text = String::from_utf8_lossy(&output.stdout);
     Ok(text.lines().any(|line| line.trim() == "State : Enabled"))
 }
 
