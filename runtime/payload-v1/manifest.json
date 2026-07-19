@@ -78,6 +78,15 @@
       "sha256": "6ed47bc00d0913a1d0880618fa1376115e9edab6b4a658c081061a7f0e4ca360"
     },
     {
+      "id": "debian-lxc-template",
+      "kind": "lxc_template",
+      "source": "http://download.proxmox.com/images/system/debian-13-standard_13.6-1_amd64.tar.zst",
+      "version": "13.6-1",
+      "artifact": "debian-13-standard_13.6-1_amd64.tar.zst",
+      "artifact_size": 129954319,
+      "sha512": "4c0c27ca6ceab5ef0b84db57825a00f26157ef1854bafe97297813e1cbe8ecb8cc9c453cab6b3b0efe1ba193a50c47ece1e41d950e411b8730b835b71e9e754b"
+    },
+    {
       "id": "garage",
       "kind": "oci_image",
       "source": "https://git.deuxfleurs.fr/Deuxfleurs/garage",
@@ -191,6 +200,27 @@
       "version": 1,
       "mode": "0644",
       "sha256": "e2a9418e459c07a7ca2a0c2bd2f1b3266136f88154591d3c80a7290bbea9cafd"
+    },
+    {
+      "path": "opentofu/controller/.terraform.lock.hcl",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0600",
+      "sha256": "4f90534942016b26a1a7500132cf453f449ff44893d070c263024ed9fe2ba1a9"
+    },
+    {
+      "path": "opentofu/controller/main.tf",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0600",
+      "sha256": "aa630dca47cf47cff7e629df5d148975ca0c2fad5d0a3b9ba36e63c42add78c7"
+    },
+    {
+      "path": "opentofu/controller/versions.tf",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0600",
+      "sha256": "eb956f102e30f3f15189d95761c996300c958008a30204cb62e2a6df210a1e92"
     },
     {
       "path": "services/forgejo/compose.yaml",

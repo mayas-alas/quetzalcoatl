@@ -37,7 +37,7 @@ const MACHINE_IMAGE_ARTIFACT: &str = "podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_URL: &str = "https://github.com/podman-container-tools/podman-machine-os/releases/download/v6.0.1/podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_SIZE: u64 = 249_510_008;
 
-const PAYLOAD_FILES: [PayloadSpec; 17] = [
+const PAYLOAD_FILES: [PayloadSpec; 20] = [
     PayloadSpec::new(
         "bin/gnx-proxmox-entrypoint",
         "/usr/libexec/quetzalcoatl/gnx-proxmox-entrypoint",
@@ -92,6 +92,21 @@ const PAYLOAD_FILES: [PayloadSpec; 17] = [
         "quadlet/tailscaled.container",
         "/etc/containers/systemd/tailscaled.container",
         "0644",
+    ),
+    PayloadSpec::new(
+        "opentofu/controller/.terraform.lock.hcl",
+        "/usr/share/quetzalcoatl/opentofu/controller/.terraform.lock.hcl",
+        "0600",
+    ),
+    PayloadSpec::new(
+        "opentofu/controller/main.tf",
+        "/usr/share/quetzalcoatl/opentofu/controller/main.tf",
+        "0600",
+    ),
+    PayloadSpec::new(
+        "opentofu/controller/versions.tf",
+        "/usr/share/quetzalcoatl/opentofu/controller/versions.tf",
+        "0600",
     ),
     PayloadSpec::new(
         "services/forgejo/compose.yaml",
