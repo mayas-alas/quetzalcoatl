@@ -142,6 +142,8 @@ El MSI registra WinSW como el servicio `Quetzalcoatl` bajo la cuenta virtual `NT
 
 La cadena queda fijada a WiX Toolset 5.0.2, WinSW 2.12.0 x64 —SHA-256 `05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA`— y WSL 2.7.10.0 x64 MSI —SHA-256 `1A62F90A43C03CC5BDA47DFD0B6FAF496AC70FD4389190518120A4F84FC895CF`—. Podman CLI para Windows queda fijado a 6.0.1 x64 MSI; ProductCode `{661EDED1-C5BC-430C-8802-015B34A382FA}`; UpgradeCode `{A6A9DD9C-0732-44BA-9279-FFE22EA50671}`; SHA-256 `3B65848F2D9AE652A15C35F2496A9ECE2E07F28746FA651415D519AE7C5902AD`. Burn valida tamaño y SHA-256 de cada artefacto descargado antes de compilar la cadena; HostPreflight valida el producto instalado por ProductCode, nombre y versión.
 
+La máquina usa exclusivamente el artefacto WSL x86_64 de Podman Machine OS 6.0.1: commit `137982aea62947e436bfb58408676e246414ea47`, índice OCI `sha256:6dec5eadc84f41e55c3b6fc67264ed6c985e5f61a1d4ba243056dc0efc234bec`, manifest de plataforma `sha256:c1b05f0f5f5cdbbfb2be4e23fccfbd0436f3aa6bfa6d4705daed00a251b03943` y layer/archivo `sha256:0d828beef16a031a50a7cee594fd79ade36c3d3972b590cb01c32a987bd88bc3` de 249,510,008 bytes. El build verifica el release oficial `podman-machine.x86_64.wsl.tar.zst`, el MSI lo instala en `machine-images` y RuntimeGate vuelve a verificarlo antes de `podman machine init`. La creación no depende de red ni del resolvedor OCI de Podman 6.0.1 y no admite tag, imagen o proveedor alternativo.
+
 Para Quetzalcoatl 0.1.0, el MSI fija ProductCode `{EAC9C6D4-3D6E-4A3E-BE7F-B6785B052030}` y UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`; Burn fija ProviderKey y UpgradeCode `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`. WiX 5 genera un identificador interno nuevo para cada compilación del bundle, por lo que la evidencia siempre identifica un EXE concreto por SHA-256; esto no altera los payloads bloqueados ni autoriza bundles concurrentes.
 
 ## 5. `runtime payload v1` y Quadlets
@@ -151,6 +153,7 @@ El antiguo término “versioned runtime profile” se reemplaza por **`runtime 
 `runtime/payload-v1/manifest.json` es la fuente normativa del payload: fija plataforma `linux/amd64`, commits de origen, digests OCI de plataforma y SHA-256 de cada archivo. No admite tags mutables ni secretos embebidos.
 
 - manifiesto con versión, hashes y digests;
+- imagen WSL x86_64 fijada para la única Podman Machine;
 - `gnx-node.pod`;
 - `tailscaled.container`;
 - `proxmox.container`;
@@ -167,6 +170,7 @@ El flujo de ownership es único:
 ```mermaid
 flowchart LR
     MSI["MSI instala payload inmutable"]
+    Image["Imagen WSL fijada"]
     Service["gnx-service verifica hashes"]
     Fedora["Fedora administrada"]
     Quadlet["Archivos Quadlet"]
@@ -176,13 +180,16 @@ flowchart LR
     Core["Tailscale + Proxmox"]
     Tofu["OpenTofu one-shot · controller"]
 
-    MSI --> Service --> Fedora --> Quadlet --> Generator --> Units --> Podman --> Core
+    MSI --> Service
+    MSI --> Image --> Service
+    Service --> Fedora --> Quadlet --> Generator --> Units --> Podman --> Core
     Fedora --> Tofu
 ```
 
 Responsabilidades:
 
 - MSI posee los archivos inmutables en `%ProgramFiles%\Quetzalcoatl`.
+- MSI instala la imagen WSL fijada; `gnx-service` verifica su tamaño y SHA-256 antes de crear la máquina.
 - `%ProgramData%\Quetzalcoatl` posee estado mutable, checkpoints y blobs DPAPI.
 - `gnx-service` verifica y aplica el payload dentro de la máquina administrada.
 - systemd genera y supervisa unidades a partir de Quadlets.
@@ -212,7 +219,7 @@ Hay dos gates con ownership distinto. Burn no administra la Podman Machine y `gn
 |---|---|---|---|
 | 1 | SID y perfil de la identidad runtime | Cuenta estable, perfil cargado | `RUNTIME_IDENTITY_INVALID` |
 | 2 | `.wslconfig` de esa identidad con nested virtualization | Configuración efectiva después de `wsl --shutdown` | `WSL_NESTED_VIRT_FAILED` |
-| 3 | Máquina `quetzalcoatl` propiedad de esa identidad | Crear o reutilizar únicamente la propia | `MACHINE_CREATE_FAILED` |
+| 3 | Imagen WSL fijada y máquina `quetzalcoatl` propiedad de esa identidad | Verificar el archivo local; crear o reutilizar únicamente la máquina propia | `RUNTIME_PAYLOAD_INVALID` / `MACHINE_CREATE_FAILED` |
 | 4 | systemd y cgroup v2 dentro de Fedora | Saludables | `FEDORA_RUNTIME_UNSUPPORTED` |
 | 5 | `/dev/kvm`, `/dev/net/tun` y `/dev/fuse` | `KVM_GET_API_VERSION=12`; TUN y FUSE utilizables | `REQUIRED_DEVICE_MISSING` |
 | 6 | Contenedor PVE privilegiado con esos devices | Arranca y abre KVM correctamente | `NESTED_RUNTIME_FAILED` |
