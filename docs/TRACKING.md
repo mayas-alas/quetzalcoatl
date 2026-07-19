@@ -129,6 +129,7 @@ I2 no comienza hasta que I1 está cerrado.
 | Fecha | ID | Host | Artefacto o comando | Resultado | Ruta/hash |
 |---|---|---|---|---|---|
 | 2026-07-18 | A-01 | Windows 11 x64 · desarrollo sin elevación | `cargo fmt --all -- --check` + `cargo check --workspace` | Formato y compilación correctos | commit `62d43a4` |
+| 2026-07-18 | A-01 | Windows 11 x64 - desarrollo sin admin | `cargo build --release -p gnx-host-preflight` | EXE release generado; JSON fail-stop reproduce exit 11 | SHA-256 `FAB9A0CBA8769A2C413592ADE9E5A733B3FB015B856482FEDF400A9552E0EB56` - commit `62d43a4` |
 | 2026-07-18 | A-01 | Windows 11 x64 · desarrollo sin elevación | `gnx-host-preflight --format json` | `windows_host` pass, elevación fail, salida JSON única y exit 11 | commit `62d43a4` |
 | 2026-07-18 | A-01 | Windows 11 x64 · desarrollo sin elevación | `gnx-host-preflight --format yaml` | Uso rechazado por stderr y exit 64 | commit `62d43a4` |
 
