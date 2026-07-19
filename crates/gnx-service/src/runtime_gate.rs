@@ -40,7 +40,7 @@ const MACHINE_IMAGE_ARTIFACT: &str = "podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_URL: &str = "https://github.com/podman-container-tools/podman-machine-os/releases/download/v6.0.1/podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_SIZE: u64 = 249_510_008;
 
-const PAYLOAD_FILES: [PayloadSpec; 28] = [
+const PAYLOAD_FILES: [PayloadSpec; 30] = [
     PayloadSpec::new(
         "bin/gnx-proxmox-entrypoint",
         "/usr/libexec/quetzalcoatl/gnx-proxmox-entrypoint",
@@ -157,6 +157,11 @@ const PAYLOAD_FILES: [PayloadSpec; 28] = [
         "0644",
     ),
     PayloadSpec::new(
+        "services/forgejo/git_probe.sh",
+        "/usr/share/quetzalcoatl/services/forgejo/git_probe.sh",
+        "0755",
+    ),
+    PayloadSpec::new(
         "services/garage/compose.yaml",
         "/usr/share/quetzalcoatl/services/garage/compose.yaml",
         "0644",
@@ -165,6 +170,11 @@ const PAYLOAD_FILES: [PayloadSpec; 28] = [
         "services/garage/garage.toml.template",
         "/usr/share/quetzalcoatl/services/garage/garage.toml.template",
         "0644",
+    ),
+    PayloadSpec::new(
+        "services/garage/s3_probe.py",
+        "/usr/share/quetzalcoatl/services/garage/s3_probe.py",
+        "0755",
     ),
     PayloadSpec::new(
         "services/garage/serve/serve.json",

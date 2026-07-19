@@ -9,6 +9,8 @@ install_form='/run/gnx/forgejo-install.form'
 install_response='/run/gnx/forgejo-install.response'
 curl_config='/run/gnx/forgejo-curl.conf'
 curl_output='/run/gnx/forgejo-user.json'
+repository_output='/run/gnx/forgejo-repository.json'
+repository_request='/run/gnx/forgejo-repository-request.json'
 tailscale_status='/run/gnx/service-tailscale-status.json'
 serve_status='/run/gnx/service-serve-status.json'
 
@@ -22,8 +24,13 @@ cleanup() {
     "$install_response" \
     "$curl_config" \
     "$curl_output" \
+    "$repository_output" \
+    "$repository_request" \
     "$tailscale_status" \
     "$serve_status"
+  rm -f \
+    /var/lib/quetzalcoatl/secrets/forgejo/admin_password \
+    /var/lib/quetzalcoatl/forgejo/data/gnx-git-probe
   if [ -n "${garage_temporary:-}" ]; then
     rm -f "$garage_temporary"
   fi
@@ -84,6 +91,7 @@ case "$service" in
     mv -f "$garage_temporary" "$garage_config"
     test "$(stat -c '%u:%g:%a' "$garage_config")" = '0:0:600'
     ! grep -q '__GNX_' "$garage_config"
+    install -m 0755 "$bootstrap_dir/s3_probe.py" "$app_dir/s3_probe.py"
     ;;
   forgejo)
     forgejo_secret_dir='/var/lib/quetzalcoatl/secrets/forgejo'
@@ -93,6 +101,7 @@ case "$service" in
     chown 1000:1000 "$forgejo_secret_dir/secret_key" "$forgejo_secret_dir/internal_token"
     chmod 0400 "$forgejo_secret_dir/secret_key" "$forgejo_secret_dir/internal_token"
     install -d -m 0755 /var/lib/quetzalcoatl/forgejo/data
+    install -o 1000 -g 1000 -m 0755 "$bootstrap_dir/git_probe.sh" /var/lib/quetzalcoatl/forgejo/data/gnx-git-probe
     ;;
 esac
 
@@ -167,16 +176,17 @@ wait_tailscale
 case "$service" in
   garage)
     key_request='{"id":null,"search":"gnx-i1","showSecretKey":true}'
-    if ! key_json=$(printf '%s' "$key_request" | docker exec -i gnx-garage /garage json-api GetKeyInfo - 2>/dev/null); then
+    if ! printf '%s' "$key_request" | docker exec -i gnx-garage /garage json-api GetKeyInfo - >/dev/null 2>&1; then
       if [ -n "$secret_three" ]; then
         import_key=$(printf '{"accessKeyId":"%s","secretAccessKey":"%s","name":"gnx-i1"}' "$secret_three" "$secret_four")
-        key_json=$(printf '%s' "$import_key" | docker exec -i gnx-garage /garage json-api ImportKey -)
+        printf '%s' "$import_key" | docker exec -i gnx-garage /garage json-api ImportKey - >/dev/null
         unset import_key
       else
         create_key='{"name":"gnx-i1","expiration":null,"neverExpires":true,"allow":null,"deny":null}'
-        key_json=$(printf '%s' "$create_key" | docker exec -i gnx-garage /garage json-api CreateKey -)
+        printf '%s' "$create_key" | docker exec -i gnx-garage /garage json-api CreateKey - >/dev/null
       fi
     fi
+    key_json=$(printf '%s' "$key_request" | docker exec -i gnx-garage /garage json-api GetKeyInfo -)
     access_key=$(printf '%s' "$key_json" | jq -er '.accessKeyId | select(test("^GK[0-9a-f]{24}$"))')
     secret_key=$(printf '%s' "$key_json" | jq -er '.secretAccessKey | select(test("^[0-9a-f]{64}$"))')
     unset key_json
@@ -200,6 +210,15 @@ case "$service" in
       any(.buckets[]?; .id == $bucket and .permissions.read == true and .permissions.write == true and .permissions.owner == true)
     ' >/dev/null
     unset key_json
+
+    s3_evidence=$(printf '%s\n%s\n' "$access_key" "$secret_key" | python3 "$app_dir/s3_probe.py")
+    printf '%s\n' "$s3_evidence" | grep -Eq '^S3_PUT_GET=ready;BYTES=64;BODY_SHA256=[0-9a-f]{64}$'
+    evidence_dir='/var/lib/quetzalcoatl/evidence'
+    install -d -m 0755 "$evidence_dir"
+    printf '%s\n' "$s3_evidence" > "$evidence_dir/s3.env.gnx-new"
+    chmod 0644 "$evidence_dir/s3.env.gnx-new"
+    mv -f "$evidence_dir/s3.env.gnx-new" "$evidence_dir/s3.env"
+    unset s3_evidence
 
     inspect=$(docker inspect gnx-garage gnx-garage-tailscale)
     case "$inspect" in *tskey-auth-*|*"$secret_one"*|*"$secret_two"*|*"$secret_key"*) exit 70 ;; esac
@@ -247,7 +266,42 @@ case "$service" in
     chmod 0400 "$curl_config"
     curl --config "$curl_config"
     jq -e '.login == "gnx-admin" and .is_admin == true' "$curl_output" >/dev/null
-    rm -f "$curl_config" "$curl_output"
+
+    printf 'silent\nshow-error\nuser = "gnx-admin:%s"\n' "$secret_three" > "$curl_config"
+    chmod 0400 "$curl_config"
+    repository_api='http://127.0.0.1:3000/api/v1/repos/gnx-admin/i1-evidence'
+    http_status=$(curl --config "$curl_config" -o "$repository_output" -w '%{http_code}' "$repository_api")
+    if [ "$http_status" = 404 ]; then
+      printf '%s' '{"name":"i1-evidence","private":true,"auto_init":false,"default_branch":"main","object_format_name":"sha1"}' > "$repository_request"
+      chmod 0600 "$repository_request"
+      http_status=$(curl --config "$curl_config" -o "$repository_output" -w '%{http_code}' \
+        -H 'Content-Type: application/json' \
+        --data-binary "@$repository_request" \
+        http://127.0.0.1:3000/api/v1/user/repos)
+      [ "$http_status" = 201 ]
+    else
+      [ "$http_status" = 200 ]
+    fi
+    jq -e '
+      .name == "i1-evidence" and
+      .owner.login == "gnx-admin" and
+      .private == true and
+      .object_format_name == "sha1"
+    ' "$repository_output" >/dev/null
+    rm -f "$curl_config" "$curl_output" "$repository_output" "$repository_request"
+
+    printf '%s' "$secret_three" > "$forgejo_secret_dir/admin_password"
+    chown 1000:1000 "$forgejo_secret_dir/admin_password"
+    chmod 0400 "$forgejo_secret_dir/admin_password"
+    forgejo_evidence=$(docker exec --user git gnx-forgejo /data/gnx-git-probe)
+    printf '%s\n' "$forgejo_evidence" | grep -Eq '^FORGEJO_PUSH_CLONE=ready;COMMIT=[0-9a-f]{40}$'
+    evidence_dir='/var/lib/quetzalcoatl/evidence'
+    install -d -m 0755 "$evidence_dir"
+    printf '%s\n' "$forgejo_evidence" > "$evidence_dir/forgejo.env.gnx-new"
+    chmod 0644 "$evidence_dir/forgejo.env.gnx-new"
+    mv -f "$evidence_dir/forgejo.env.gnx-new" "$evidence_dir/forgejo.env"
+    rm -f "$forgejo_secret_dir/admin_password" /var/lib/quetzalcoatl/forgejo/data/gnx-git-probe
+    unset forgejo_evidence
 
     inspect=$(docker inspect gnx-forgejo gnx-forgejo-tailscale)
     case "$inspect" in *tskey-auth-*|*"$secret_one"*|*"$secret_two"*|*"$secret_three"*) exit 72 ;; esac

@@ -144,7 +144,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "411ae54d86a5971635dcb29c524b255143084368c5caa6d691d98f43262bc070"
+      "sha256": "62f4ac53f6fa5e026de06d6ce26c9399ce91294cf5e073fc40562280b6b50db6"
     },
     {
       "path": "bin/gnx-lxc-prepare",
@@ -158,14 +158,14 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "b6d1432327195a56012e0aaade8fb17e0a9b43beb2928181194d61087f74b4c1"
+      "sha256": "f470814ad3650166cdb307728efed8aa3a4e8ff4961965df5d3078dd1023d353"
     },
     {
       "path": "bin/gnx-lxc-service-prepare",
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "4da6e3a59bacda243f60850f94e76200dcfd7b126e4f42965f7530ae273a0e41"
+      "sha256": "f560c3500ebb6b532215c5c64baa70bfb02e8a24fb711b44a069aa9c33dd8959"
     },
     {
       "path": "bin/gnx-proxmox-entrypoint",
@@ -294,6 +294,13 @@
       "sha256": "caa5fd971b588eab86b736fb58a7e88688aa2bc4be4977769a4e7854cfc04d1c"
     },
     {
+      "path": "services/forgejo/git_probe.sh",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0755",
+      "sha256": "b551b922c9eb56fb50e06061dd486f81090ebf2ed9783dc38cd52fffd2c96ad4"
+    },
+    {
       "path": "services/forgejo/serve/serve.json",
       "source": "quetzalcoatl",
       "version": 1,
@@ -313,6 +320,13 @@
       "version": 1,
       "mode": "0644",
       "sha256": "8e71fbdc5aa731581fbbc00e2449bd7d914add6a4889e0ef95ee667e95d0c9d0"
+    },
+    {
+      "path": "services/garage/s3_probe.py",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0755",
+      "sha256": "b31aaf19280ac2c54b913d9af907f667239e6ccaa50ccc3bb0b77032ffe44e1f"
     },
     {
       "path": "services/garage/serve/serve.json",

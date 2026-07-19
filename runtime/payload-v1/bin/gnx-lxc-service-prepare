@@ -21,7 +21,9 @@ cleanup() {
       "$guest_enroll" \
       "$guest_dir/compose.yaml" \
       "$guest_dir/serve.json" \
-      "$guest_dir/garage.toml.template" >/dev/null 2>&1 || true
+      "$guest_dir/garage.toml.template" \
+      "$guest_dir/s3_probe.py" \
+      "$guest_dir/git_probe.sh" >/dev/null 2>&1 || true
     pct exec "$vmid" -- rmdir "$guest_dir" >/dev/null 2>&1 || true
   fi
 }
@@ -105,7 +107,12 @@ pct push "$vmid" "/usr/share/quetzalcoatl/services/$service/compose.yaml" "$gues
 pct push "$vmid" "/usr/share/quetzalcoatl/services/$service/serve/serve.json" "$guest_dir/serve.json" --perms 0644 >/dev/null
 if [ "$service" = garage ]; then
   test -s /usr/share/quetzalcoatl/services/garage/garage.toml.template
+  test -s /usr/share/quetzalcoatl/services/garage/s3_probe.py
   pct push "$vmid" /usr/share/quetzalcoatl/services/garage/garage.toml.template "$guest_dir/garage.toml.template" --perms 0644 >/dev/null
+  pct push "$vmid" /usr/share/quetzalcoatl/services/garage/s3_probe.py "$guest_dir/s3_probe.py" --perms 0755 >/dev/null
+else
+  test -s /usr/share/quetzalcoatl/services/forgejo/git_probe.sh
+  pct push "$vmid" /usr/share/quetzalcoatl/services/forgejo/git_probe.sh "$guest_dir/git_probe.sh" --perms 0755 >/dev/null
 fi
 
 output=$(pct exec "$vmid" -- "$guest_bootstrap")
@@ -117,7 +124,9 @@ pct exec "$vmid" -- rm -f \
   "$guest_enroll" \
   "$guest_dir/compose.yaml" \
   "$guest_dir/serve.json" \
-  "$guest_dir/garage.toml.template" >/dev/null
+  "$guest_dir/garage.toml.template" \
+  "$guest_dir/s3_probe.py" \
+  "$guest_dir/git_probe.sh" >/dev/null
 pct exec "$vmid" -- rmdir "$guest_dir" >/dev/null
 test ! -e "$input"
 pct exec "$vmid" -- sh -eu -c '
@@ -127,9 +136,12 @@ pct exec "$vmid" -- sh -eu -c '
   test ! -e /run/gnx/forgejo-install.response
   test ! -e /run/gnx/forgejo-curl.conf
   test ! -e /run/gnx/forgejo-user.json
+  test ! -e /run/gnx/forgejo-repository.json
+  test ! -e /run/gnx/forgejo-repository-request.json
   test ! -e /run/gnx/service-tailscale-status.json
   test ! -e /run/gnx/service-serve-status.json
 '
+pct exec "$vmid" -- test ! -e /var/lib/quetzalcoatl/secrets/forgejo/admin_password
 trap - EXIT HUP INT TERM
 rmdir "$runtime_dir"
 printf '%s\n' "$output"
