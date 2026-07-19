@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "payload_version": 1,
+  "target": {
+    "os": "linux",
+    "architecture": "amd64"
+  },
+  "policy": {
+    "mutable_image_tags_allowed": false,
+    "oci_digest_scope": "linux/amd64 image manifest",
+    "embedded_secrets_allowed": false
+  },
+  "components": [
+    {
+      "id": "proxmox",
+      "kind": "oci_image",
+      "source": "https://github.com/mayas-alas/tailnet-proxmox",
+      "version": "0.0.1",
+      "source_ref": "v0.0.1",
+      "source_commit": "e71615e8e63cbc4a49a32fcd86d0424ac885f850",
+      "image": "ghcr.io/mayas-alas/tailnet-proxmox",
+      "index_digest": "sha256:904ed4d92d9d74b11c0b9e3278c1e91023dcbcfa27b5d496629dde2efa5633c6",
+      "manifest_digest": "sha256:9b3f516d7b645148c35396b5655ed9f9249e4d4e1c33366164a469e957e4ae53",
+      "config_digest": "sha256:d972a1ede38974ca556b87800789b9a4980cd61acdd9db10f13d9ecf71874a8a"
+    },
+    {
+      "id": "tailscale",
+      "kind": "oci_image",
+      "source": "https://github.com/tailscale/tailscale",
+      "version": "1.98.8",
+      "source_ref": "v1.98.8",
+      "source_commit": "05a91829316e055517a1e84f7b00016846ef4107",
+      "image": "docker.io/tailscale/tailscale",
+      "index_digest": "sha256:d54b2e6a9c09f0e5ec52e82b9ad4af3d446b54a7c08075e92f11c39dd410105f",
+      "manifest_digest": "sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e",
+      "config_digest": "sha256:1e26d7400ae5dd99fb62f0d7706908d5a9dd8ee9fed3a5100611521cfccbd645"
+    },
+    {
+      "id": "opentofu",
+      "kind": "oci_image",
+      "source": "https://github.com/opentofu/opentofu",
+      "version": "1.12.4",
+      "source_ref": "v1.12.4",
+      "source_commit": "d5291190380d16aa5ef4590facbe0719d7fa165f",
+      "image": "ghcr.io/opentofu/opentofu",
+      "index_digest": "sha256:44d4416f82075a06c5257a2a17e4acfcb0ce2c7cd6534128344cff942d40f033",
+      "manifest_digest": "sha256:6b66d996afc7f043154e33a0420285d0d58c165305ac8f36d32df213a3c4bbd4",
+      "config_digest": "sha256:19c9f351217009304b189978eafa9ca5a93749219ef4801aea1c3ad2d8295217"
+    },
+    {
+      "id": "proxmox-provider",
+      "kind": "opentofu_provider_archive",
+      "source": "https://github.com/bpg/terraform-provider-proxmox",
+      "version": "0.111.1",
+      "source_ref": "v0.111.1",
+      "source_commit": "b22fe919fc34476b232191b69c8907f0c1aa5bea",
+      "artifact": "terraform-provider-proxmox_0.111.1_linux_amd64.zip",
+      "sha256": "6ed47bc00d0913a1d0880618fa1376115e9edab6b4a658c081061a7f0e4ca360"
+    },
+    {
+      "id": "garage",
+      "kind": "oci_image",
+      "source": "https://git.deuxfleurs.fr/Deuxfleurs/garage",
+      "version": "2.3.0",
+      "source_ref": "v2.3.0",
+      "source_commit": "7b119c0b4fa58ab3cb6d5db435fe52d990f6a7aa",
+      "image": "docker.io/dxflrs/garage",
+      "index_digest": "sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690",
+      "manifest_digest": "sha256:dac0c92add4f1a0b41035e94b41036a270ffbe88a37c7ac9c3f19e6dc5bdccf2",
+      "config_digest": "sha256:5eda3acb72a0b6c3432233d19b07dffabd9ee7eb93be90031bae75e4b81e6324"
+    },
+    {
+      "id": "forgejo",
+      "kind": "oci_image",
+      "source": "https://codeberg.org/forgejo/forgejo",
+      "version": "16.0.0",
+      "source_ref": "v16.0.0",
+      "source_commit": "07ba27a02b8db81be78e336f8597a355c04adb18",
+      "image": "codeberg.org/forgejo/forgejo",
+      "index_digest": "sha256:9b8f02e896b1151ea60da05cf3e11fc7bd1c432dc6becee75ceb420f3d162b97",
+      "manifest_digest": "sha256:49b5cdd63e2eaab3e3484ffb21a3317e0b782633a2f29672ca295e2c001e6edf",
+      "config_digest": "sha256:e0e4e92c0e67e528308905ca028f38354608247f2a8c1de371df4e8555001b01"
+    },
+    {
+      "id": "tailscale-service-snippets",
+      "kind": "reference_only",
+      "source": "https://github.com/tailscale-dev/video-code-snippets",
+      "version": "ba499312d243e882f7577017065f5d7f2e7982ca",
+      "source_commit": "ba499312d243e882f7577017065f5d7f2e7982ca",
+      "paths": [
+        "2026/2026-03-s3-garage/docker/garage",
+        "2026/2026-03-s3-garage/docker/forgejo"
+      ],
+      "usage": "topology only; mutable tags, embedded auth keys and example secrets are not copied"
+    }
+  ],
+  "files": [
+    {
+      "path": "bin/gnx-tailscale-enroll",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0755",
+      "sha256": "0af0b3a017c401ac1c53483455c745b82b99de5434100d9004de7cd55043e27d"
+    },
+    {
+      "path": "config/node/serve.json",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0644",
+      "sha256": "b7b877a89f855d59d16b4a4bcd9cabb4493da24a04ce593d633f5e17491d709d"
+    },
+    {
+      "path": "quadlet/gnx-node.pod",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0644",
+      "sha256": "734ef0e3e92f9ca35d9a56dbe69d54256ac94745f952ea226a1e5f979c53b979"
+    },
+    {
+      "path": "quadlet/opentofu.image",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0644",
+      "sha256": "87a66828907bd4aa05feb0e43531cf3891c6c50bfd4f75fd1352adee79b751f1"
+    },
+    {
+      "path": "quadlet/proxmox.container",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0644",
+      "sha256": "3ba53df1dcf0673547ca4a25d4643fdc488c3f59b61597c49702518650bc0ecb"
+    },
+    {
+      "path": "quadlet/tailscaled.container",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0644",
+      "sha256": "e2a9418e459c07a7ca2a0c2bd2f1b3266136f88154591d3c80a7290bbea9cafd"
+    },
+    {
+      "path": "services/forgejo/compose.yaml",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0644",
+      "sha256": "cb326aed2ab6faf9b8b2dd201c955e5847da78f76d8a0a9514199eb4989c10ad"
+    },
+    {
+      "path": "services/forgejo/serve/serve.json",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0644",
+      "sha256": "1d2995497f7af4a342108e7511a6866bf85be95496fe38f4dc4c67c9ce7ef16f"
+    },
+    {
+      "path": "services/garage/compose.yaml",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0644",
+      "sha256": "6c6c5a6d0059abdf1418f3249b1146ca56f71af8ecdfce753fb910b53db0839d"
+    },
+    {
+      "path": "services/garage/garage.toml.template",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0644",
+      "sha256": "8e71fbdc5aa731581fbbc00e2449bd7d914add6a4889e0ef95ee667e95d0c9d0"
+    },
+    {
+      "path": "services/garage/serve/serve.json",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0644",
+      "sha256": "6f38548c26add2afa47be2d03ee6d0da0a374247d17350a73f0e8fd535cbb742"
+    },
+    {
+      "path": "systemd/gnx-tailscale-enroll.service",
+      "source": "quetzalcoatl",
+      "version": 1,
+      "mode": "0644",
+      "sha256": "6bf2c6be77a1d1e66097f1b79973a69c0e0ce780b7017e0be00dd0a631e3380d"
+    }
+  ]
+}

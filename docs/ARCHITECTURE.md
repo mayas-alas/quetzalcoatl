@@ -144,6 +144,8 @@ Podman CLI para Windows queda fijado a 6.0.1 x64 MSI; ProductCode `{661EDED1-C5B
 
 El antiguo término “versioned runtime profile” se reemplaza por **`runtime payload v1`**. No es un proceso, un servicio ni un framework de migraciones. Es el conjunto inmutable de archivos que corresponde exactamente a la versión del MSI:
 
+`runtime/payload-v1/manifest.json` es la fuente normativa del payload: fija plataforma `linux/amd64`, commits de origen, digests OCI de plataforma y SHA-256 de cada archivo. No admite tags mutables ni secretos embebidos.
+
 - manifiesto con versión, hashes y digests;
 - `gnx-node.pod`;
 - `tailscaled.container`;
@@ -564,7 +566,12 @@ El código informa etapa, código y evidencia acotada. No inventa un segundo cam
 - [Proxmox VE Administration Guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf)
 - [Garage Quick Start](https://garagehq.deuxfleurs.fr/documentation/)
 - [Forgejo con Docker](https://forgejo.org/docs/latest/admin/installation/docker/)
-- [Imagen de referencia tailnet-proxmox](https://github.com/mayas-alas/tailnet-proxmox/tree/c277d63f76fd2d1f95594221c2ef913ba8f4f5ca)
+- [Imagen tailnet-proxmox v0.0.1](https://github.com/mayas-alas/tailnet-proxmox/tree/e71615e8e63cbc4a49a32fcd86d0424ac885f850)
+- [Tailscale v1.98.8](https://github.com/tailscale/tailscale/releases/tag/v1.98.8)
+- [OpenTofu v1.12.4](https://github.com/opentofu/opentofu/releases/tag/v1.12.4)
+- [Provider Proxmox v0.111.1](https://github.com/bpg/terraform-provider-proxmox/releases/tag/v0.111.1)
+- [Garage v2.3.0](https://git.deuxfleurs.fr/Deuxfleurs/garage/releases/tag/v2.3.0)
+- [Forgejo v16.0.0](https://codeberg.org/forgejo/forgejo/releases/tag/v16.0.0)
 - [Snippet base de Tailscale/Garage](https://github.com/tailscale-dev/video-code-snippets/tree/ba499312d243e882f7577017065f5d7f2e7982ca/2026/2026-03-s3-garage/docker)
 
 Las referencias demuestran piezas. Los gates de este documento demuestran la integración específica del producto.

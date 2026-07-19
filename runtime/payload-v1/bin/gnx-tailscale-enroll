@@ -1,0 +1,111 @@
+#!/bin/sh
+set -eu
+umask 077
+
+image='docker.io/tailscale/tailscale@sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e'
+auth_file='/run/gnx/ts-authkey'
+status_file='/run/gnx/tailscale-status.json'
+
+engine=${1:-}
+scope=${2:-}
+hostname=${3:-}
+
+case "$engine:$scope" in
+  podman:host)
+    state_dir='/var/lib/quetzalcoatl/tailscale/host'
+    tag='tag:quetzalcoatl-node'
+    extra_args="--ssh --advertise-tags=$tag"
+    ;;
+  docker:garage|docker:forgejo)
+    state_dir="/var/lib/quetzalcoatl/tailscale/$scope"
+    tag='tag:quetzalcoatl-service'
+    extra_args="--advertise-tags=$tag"
+    ;;
+  *)
+    echo 'usage: gnx-tailscale-enroll podman host <hostname> | docker garage|forgejo <hostname>' >&2
+    exit 64
+    ;;
+esac
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo 'gnx-tailscale-enroll must run as root' >&2
+  exit 65
+fi
+
+if [ -s "$state_dir/tailscaled.state" ]; then
+  rm -f "$auth_file"
+  exit 0
+fi
+
+case "$hostname" in
+  ''|*[!a-z0-9-]*|-*|*-) echo 'invalid or missing Tailscale hostname' >&2; exit 66 ;;
+esac
+
+if [ ! -s "$auth_file" ]; then
+  echo 'Tailscale auth key file is missing or empty' >&2
+  exit 67
+fi
+
+if [ "$(stat -c '%u' "$auth_file")" -ne 0 ]; then
+  echo 'Tailscale auth key file must be owned by root' >&2
+  exit 68
+fi
+
+case "$(stat -c '%a' "$auth_file")" in
+  400|600) ;;
+  *) echo 'Tailscale auth key file mode must be 0400 or 0600' >&2; exit 69 ;;
+esac
+
+if ! command -v "$engine" >/dev/null 2>&1; then
+  echo "required container engine is unavailable: $engine" >&2
+  exit 70
+fi
+
+install -d -m 0700 "$state_dir" /run/gnx
+rm -f "$status_file" "$status_file.tmp"
+name="gnx-$scope-enroll"
+
+cleanup() {
+  "$engine" rm -f "$name" >/dev/null 2>&1 || true
+  rm -f "$auth_file"
+}
+trap cleanup EXIT HUP INT TERM
+
+security_args=''
+if [ "$engine" = podman ]; then
+  security_args='--security-opt=label=disable'
+fi
+
+# shellcheck disable=SC2086
+"$engine" run --detach --rm \
+  --name "$name" \
+  --hostname "$hostname" \
+  --device /dev/net/tun \
+  --cap-add NET_ADMIN \
+  $security_args \
+  --volume "$state_dir:/var/lib/tailscale" \
+  --volume "$auth_file:/run/secrets/authkey:ro" \
+  --env 'TS_AUTHKEY=file:/run/secrets/authkey' \
+  --env 'TS_STATE_DIR=/var/lib/tailscale' \
+  --env 'TS_USERSPACE=false' \
+  --env 'TS_AUTH_ONCE=true' \
+  --env 'TS_ACCEPT_DNS=false' \
+  --env "TS_HOSTNAME=$hostname" \
+  --env "TS_EXTRA_ARGS=$extra_args" \
+  "$image" >/dev/null
+
+attempt=0
+while [ "$attempt" -lt 60 ]; do
+  attempt=$((attempt + 1))
+  if "$engine" exec "$name" tailscale status --json >"$status_file.tmp" 2>/dev/null &&
+     grep -Eq '"BackendState"[[:space:]]*:[[:space:]]*"Running"' "$status_file.tmp"; then
+    mv "$status_file.tmp" "$status_file"
+    chmod 0600 "$status_file"
+    exit 0
+  fi
+  sleep 1
+done
+
+rm -f "$status_file.tmp"
+echo 'Tailscale enrollment did not reach BackendState=Running' >&2
+exit 71

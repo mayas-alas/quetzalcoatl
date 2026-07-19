@@ -1,0 +1,35 @@
+[Unit]
+Description=Quetzalcoatl Proxmox VE node
+Requires=gnx-node-pod.service
+After=gnx-node-pod.service
+Before=gnx-tailscale-enroll.service tailscaled.service
+
+[Container]
+ContainerName=gnx-proxmox
+Image=ghcr.io/mayas-alas/tailnet-proxmox@sha256:9b3f516d7b645148c35396b5655ed9f9249e4d4e1c33366164a469e957e4ae53
+Pod=gnx-node.pod
+StartWithPod=true
+PodmanArgs=--privileged
+AddDevice=/dev/kvm
+AddDevice=/dev/net/tun
+AddDevice=/dev/fuse
+Environment=REQUIRE_KVM=Y
+Environment=REQUIRE_FUSE=Y
+Environment=DEVS=eth0
+Environment=BRIDGES=vmbr0
+Environment=GATEWAYS=172.30.10.1
+Environment=TZ=UTC
+SecurityLabelDisable=true
+ShmSize=1g
+Volume=/var/lib/quetzalcoatl/proxmox/vz:/var/lib/vz
+Volume=/var/lib/quetzalcoatl/proxmox/cluster:/var/lib/pve-cluster
+Volume=/sys/fs/cgroup:/sys/fs/cgroup:rw
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=1800
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

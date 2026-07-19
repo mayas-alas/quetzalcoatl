@@ -1,0 +1,8 @@
+[Unit]
+Description=Quetzalcoatl pinned OpenTofu runner image
+
+[Image]
+Image=ghcr.io/opentofu/opentofu@sha256:6b66d996afc7f043154e33a0420285d0d58c165305ac8f36d32df213a3c4bbd4
+
+[Install]
+WantedBy=multi-user.target
