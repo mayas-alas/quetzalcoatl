@@ -93,11 +93,6 @@ resource "proxmox_virtual_environment_container" "garage" {
     path = "/dev/net/tun"
     mode = "0666"
   }
-
-  device_passthrough {
-    path = "/dev/fuse"
-    mode = "0666"
-  }
 }
 
 resource "proxmox_virtual_environment_container" "forgejo" {
@@ -158,11 +153,6 @@ resource "proxmox_virtual_environment_container" "forgejo" {
 
   device_passthrough {
     path = "/dev/net/tun"
-    mode = "0666"
-  }
-
-  device_passthrough {
-    path = "/dev/fuse"
     mode = "0666"
   }
 }

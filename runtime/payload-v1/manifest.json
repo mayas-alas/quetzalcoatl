@@ -277,7 +277,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0600",
-      "sha256": "aa630dca47cf47cff7e629df5d148975ca0c2fad5d0a3b9ba36e63c42add78c7"
+      "sha256": "f6128913a6e8bfad6a5a89ce5907be5d24d982789404e7e27c2aa6fa7701a2bd"
     },
     {
       "path": "opentofu/controller/versions.tf",
