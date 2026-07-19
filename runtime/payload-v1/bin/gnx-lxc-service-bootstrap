@@ -14,6 +14,7 @@ repository_output='/run/gnx/forgejo-repository.json'
 repository_request='/run/gnx/forgejo-repository-request.json'
 tailscale_status='/run/gnx/service-tailscale-status.json'
 serve_status='/run/gnx/service-serve-status.json'
+compose_log='/run/gnx/service-compose.log'
 
 cleanup() {
   rm -f \
@@ -28,7 +29,8 @@ cleanup() {
     "$repository_output" \
     "$repository_request" \
     "$tailscale_status" \
-    "$serve_status"
+    "$serve_status" \
+    "$compose_log"
   rm -f \
     /var/lib/quetzalcoatl/secrets/forgejo/admin_password \
     /var/lib/quetzalcoatl/forgejo/data/gnx-git-probe
@@ -122,7 +124,15 @@ case "$service" in
     ;;
 esac
 test "$(docker image inspect --format '{{.Id}}' "$app_image")" = "$app_config"
-docker compose --project-name "$project" --env-file .env -f compose.yaml up --detach --pull never --wait --wait-timeout 300 >/dev/null
+rm -f "$compose_log"
+if ! docker compose --project-name "$project" --env-file .env -f compose.yaml \
+  up --detach --pull never --wait --wait-timeout 300 > "$compose_log" 2>&1; then
+  tail -n 80 "$compose_log" >&2 || true
+  docker compose --project-name "$project" --env-file .env -f compose.yaml ps --all >&2 || true
+  rm -f "$compose_log"
+  exit 73
+fi
+rm -f "$compose_log"
 
 wait_tailscale() {
   attempt=0
