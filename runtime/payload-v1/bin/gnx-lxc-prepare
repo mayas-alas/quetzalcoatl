@@ -42,13 +42,21 @@ fi
 
 if pct status "$vmid" | grep -q 'status: stopped'; then
   start_log="/run/gnx/lxc-$vmid-start.log"
+  failure_log="$start_log.failures"
   rm -f "$start_log"
+  rm -f "$failure_log"
   if ! pct start "$vmid" --debug > "$start_log" 2>&1; then
-    tail -n 80 "$start_log" >&2 || true
-    rm -f "$start_log"
+    grep -Ei 'produced output|could not|file exists|permission denied|failed to|error' \
+      "$start_log" > "$failure_log" || true
+    if [ -s "$failure_log" ]; then
+      tail -n 40 "$failure_log" >&2
+    else
+      tail -n 40 "$start_log" >&2 || true
+    fi
+    rm -f "$start_log" "$failure_log"
     exit 70
   fi
-  rm -f "$start_log"
+  rm -f "$start_log" "$failure_log"
 fi
 
 attempt=0
