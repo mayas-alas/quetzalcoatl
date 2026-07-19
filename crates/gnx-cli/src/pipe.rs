@@ -1,6 +1,9 @@
 use std::ptr::{null, null_mut};
 
-use gnx_protocol::{Command, MAX_MESSAGE_BYTES, PIPE_NAME, Request, StatusResponse};
+use gnx_protocol::{
+    Command, InstallerConfiguration, MAX_MESSAGE_BYTES, OperationResponse, PIPE_NAME, Request,
+    StatusResponse,
+};
 use windows_sys::Win32::Foundation::{
     CloseHandle, GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
 };
@@ -10,6 +13,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 use windows_sys::Win32::System::Pipes::{
     PIPE_READMODE_MESSAGE, SetNamedPipeHandleState, WaitNamedPipeW,
 };
+use zeroize::Zeroize;
 
 pub fn status() -> Result<StatusResponse, String> {
     let pipe = connect()?;
@@ -19,6 +23,22 @@ pub fn status() -> Result<StatusResponse, String> {
     })
     .map_err(|e| format!("cannot encode request: {e}"))?;
     write_message(pipe.0, &request)?;
+    serde_json::from_slice(&read_message(pipe.0)?)
+        .map_err(|e| format!("service returned invalid protocol v1 JSON: {e}"))
+}
+
+pub fn configure(configuration: InstallerConfiguration) -> Result<OperationResponse, String> {
+    let pipe = connect()?;
+    let request = Request {
+        command: Command::Configure,
+        configuration: Some(configuration),
+    };
+    let mut bytes = serde_json::to_vec(&request)
+        .map_err(|e| format!("cannot encode configure request: {e}"))?;
+    drop(request);
+    let write_result = write_message(pipe.0, &bytes);
+    bytes.zeroize();
+    write_result?;
     serde_json::from_slice(&read_message(pipe.0)?)
         .map_err(|e| format!("service returned invalid protocol v1 JSON: {e}"))
 }
@@ -54,6 +74,9 @@ fn connect() -> Result<OwnedHandle, String> {
 }
 
 fn write_message(pipe: HANDLE, bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() > MAX_MESSAGE_BYTES {
+        return Err("request exceeds protocol v1 message limit".into());
+    }
     let mut written = 0u32;
     // Safety: bytes is readable and pipe is a connected synchronous handle.
     if unsafe {
