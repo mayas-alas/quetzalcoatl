@@ -479,7 +479,7 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
 
     if controller.install_garage {
         set_stage(status, "GARAGE_PREPARING");
-        let hostname = service_hostname(ServiceKind::Garage, &controller.self_id)?;
+        let hostname = service_hostname(ServiceKind::Garage, &controller.controller.hostname)?;
         let credential = prepare_lxc_service(
             &podman,
             ServiceKind::Garage,
@@ -510,7 +510,7 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
 
     if controller.install_forgejo {
         set_stage(status, "FORGEJO_PREPARING");
-        let hostname = service_hostname(ServiceKind::Forgejo, &controller.self_id)?;
+        let hostname = service_hostname(ServiceKind::Forgejo, &controller.controller.hostname)?;
         let credential = prepare_lxc_service(
             &podman,
             ServiceKind::Forgejo,
@@ -1009,7 +1009,10 @@ fn resolve_controller(
     install_forgejo: bool,
 ) -> Result<crate::state::PersistedState, GateError> {
     if let Some(state) = persisted {
-        validate_state_identity(&state, &identity)?;
+        let (state, node_id_rotated) = reconcile_persisted_identity(state, &identity)?;
+        if node_id_rotated {
+            store_persisted_state(&state)?;
+        }
         return Ok(state);
     }
 
@@ -1040,6 +1043,26 @@ fn resolve_controller(
     let renamed = wait_for_tailscale(podman, &hostname, tailnet)?;
     validate_state_identity(&state, &renamed)?;
     Ok(state)
+}
+
+fn reconcile_persisted_identity(
+    mut state: crate::state::PersistedState,
+    identity: &TailscaleIdentity,
+) -> Result<(crate::state::PersistedState, bool), GateError> {
+    if state.self_ip != identity.self_ip || state.controller.hostname != identity.hostname {
+        return Err(GateError::new(
+            "TAILSCALE_IDENTITY_CHANGED",
+            Component::Tailscale,
+            "current Tailscale IP or hostname does not match persisted controller state",
+        ));
+    }
+
+    let node_id_rotated = state.self_id != identity.self_id;
+    if node_id_rotated {
+        state.self_id.clone_from(&identity.self_id);
+        state.controller.id.clone_from(&identity.self_id);
+    }
+    Ok((state, node_id_rotated))
 }
 
 fn validate_state_identity(
@@ -1202,15 +1225,24 @@ fn prepare_lxc_docker(podman: &Path, service: ServiceKind) -> Result<(), GateErr
     Ok(())
 }
 
-fn service_hostname(service: ServiceKind, self_id: &str) -> Result<String, GateError> {
-    let controller = controller_hostname(self_id)?;
-    let suffix = controller.strip_prefix("gnx-controller-").ok_or_else(|| {
-        GateError::new(
-            service.bootstrap_error_code(),
-            service.component(),
-            "controller identity cannot form a service hostname",
-        )
-    })?;
+fn service_hostname(service: ServiceKind, controller_hostname: &str) -> Result<String, GateError> {
+    let suffix = controller_hostname
+        .strip_prefix("gnx-controller-")
+        .filter(|suffix| {
+            !suffix.is_empty()
+                && !suffix.starts_with('-')
+                && !suffix.ends_with('-')
+                && suffix
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        })
+        .ok_or_else(|| {
+            GateError::new(
+                service.bootstrap_error_code(),
+                service.component(),
+                "controller identity cannot form a service hostname",
+            )
+        })?;
     let hostname = format!("gnx-{}-{suffix}", service.name());
     if hostname.len() > 63 {
         return Err(GateError::new(
@@ -2244,6 +2276,7 @@ struct TailscalePeer {
     expired: bool,
 }
 
+#[derive(Clone)]
 struct TailscaleIdentity {
     self_id: String,
     self_ip: IpAddr,
@@ -2416,15 +2449,56 @@ mod tests {
     }
 
     #[test]
-    fn service_hostnames_share_only_the_stable_node_suffix() {
+    fn service_hostnames_share_only_the_stable_logical_suffix() {
         assert_eq!(
-            service_hostname(ServiceKind::Garage, "nAbC123").expect("Garage hostname"),
+            service_hostname(ServiceKind::Garage, "gnx-controller-nabc123")
+                .expect("Garage hostname"),
             "gnx-garage-nabc123"
         );
         assert_eq!(
-            service_hostname(ServiceKind::Forgejo, "nAbC123").expect("Forgejo hostname"),
+            service_hostname(ServiceKind::Forgejo, "gnx-controller-nabc123")
+                .expect("Forgejo hostname"),
             "gnx-forgejo-nabc123"
         );
+        assert!(service_hostname(ServiceKind::Garage, "gnx-controller-").is_err());
+    }
+
+    #[test]
+    fn reconciles_reauthenticated_node_id_only_with_logical_identity_continuity() {
+        let state = crate::state::PersistedState::controller(
+            "node-id-before".into(),
+            "100.100.10.20".parse().expect("IP"),
+            "gnx-controller-node-id-before".into(),
+            "tetra-balance.ts.net".into(),
+            true,
+            true,
+        );
+        let identity = TailscaleIdentity {
+            self_id: "node-id-after".into(),
+            self_ip: "100.100.10.20".parse().expect("IP"),
+            hostname: "gnx-controller-node-id-before".into(),
+            host_peer_ids: BTreeSet::new(),
+        };
+
+        let (rotated, changed) =
+            reconcile_persisted_identity(state.clone(), &identity).expect("node ID rotation");
+        assert!(changed);
+        assert_eq!(rotated.self_id, "node-id-after");
+        assert_eq!(rotated.controller.id, "node-id-after");
+        assert_eq!(rotated.controller.hostname, state.controller.hostname);
+        assert_eq!(rotated.self_ip, state.self_ip);
+
+        let mut changed_ip = identity.clone();
+        changed_ip.self_ip = "100.100.10.21".parse().expect("IP");
+        let error = reconcile_persisted_identity(state.clone(), &changed_ip)
+            .expect_err("IP drift must fail");
+        assert_eq!(error.code, "TAILSCALE_IDENTITY_CHANGED");
+
+        let mut changed_hostname = identity;
+        changed_hostname.hostname = "gnx-controller-other".into();
+        let error = reconcile_persisted_identity(state, &changed_hostname)
+            .expect_err("hostname drift must fail");
+        assert_eq!(error.code, "TAILSCALE_IDENTITY_CHANGED");
     }
 
     #[test]

@@ -307,7 +307,9 @@ Matriz:
 
 La regla de negocio es automática: si existe cualquier otra máquina host autorizada, el nuevo nodo es member. Entre uno o dos peers debe existir exactamente un hostname `gnx-controller-*`; sólo se usa para localizar la autoridad de `pvecm`, no para elegirla. El límite de tres hosts evita HA, elección o selección manual. Antes de `pvecm create`, el futuro controller vuelve a confirmar que el inventario continúa vacío.
 
-En una reanudación, “no redetectar el rol” significa no volver a decidir controller/member. Un member sí vuelve a consultar el peer guardado para comprobar su identidad, disponibilidad e IP actual antes del join. El `Self.ID` de Tailscale y el ID del controller se persisten; un cambio de identidad es fail-stop.
+En una reanudación, “no redetectar el rol” significa no volver a decidir controller/member. Un member sí vuelve a consultar el peer guardado para comprobar su identidad, disponibilidad e IP actual antes del join. El `Self.ID` de Tailscale y el ID del controller se persisten. Tailscale [genera un nuevo par de claves de nodo al reautenticar](https://tailscale.com/docs/concepts/tailscale-identity), por lo que una rotación de `Self.ID` es válida únicamente durante la reconciliación protegida cuando permanecen idénticos la IPv4 Tailscale, el hostname lógico, la tailnet, el tag, TUN y el contrato HTTPS. En ese caso se actualizan sólo `self_id` y `controller.id`; rol, etapa, IP y hostnames no cambian. Cualquier otra deriva es fail-stop.
+
+Los hostnames de Garage y Forgejo se derivan del hostname lógico persistido del controller, no del `Self.ID` vivo. Así una reautenticación no renombra servicios ni crea una segunda identidad lógica.
 
 Las tres instalaciones se ejecutan secuencialmente. No se escribe código de elección para instalaciones iniciales simultáneas.
 
@@ -564,7 +566,7 @@ No se agrega lógica alterna. La instalación se detiene cuando:
 - HTTPS/Serve no está habilitado o `CertDomains` no contiene el dominio esperado;
 - la credencial bootstrap PVE continúa activa después de la convergencia local;
 - el descubrimiento encuentra más de dos peers host, o entre uno y dos peers no existe exactamente un controller;
-- cambia la identidad Tailscale propia o desaparece la identidad controller persistida;
+- cambia la IP, hostname, tailnet, tag, TUN o contrato HTTPS de la identidad Tailscale propia, o desaparece la identidad controller persistida; una rotación aislada de `Self.ID` sigue la reconciliación acotada de la sección 7;
 - PVE API, SSH o Corosync no son viables antes del join;
 - un member intenta ejecutar OpenTofu;
 - Docker dentro del LXC no pasa su gate;
