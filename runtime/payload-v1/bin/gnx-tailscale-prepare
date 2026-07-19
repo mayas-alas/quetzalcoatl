@@ -19,10 +19,8 @@ chmod 0600 /run/gnx/tailscale-enroll.env
 printf 'TS_HOSTNAME=%s\n' "$hostname" > /etc/quetzalcoatl/node/node.env
 chmod 0600 /etc/quetzalcoatl/node/node.env
 
-if [ -s /var/lib/quetzalcoatl/tailscale/host/tailscaled.state ]; then
-  rm -f /run/gnx/ts-authkey
-else
-  printf '%s' "$auth_key" > /run/gnx/ts-authkey
-  chmod 0400 /run/gnx/ts-authkey
-fi
+systemctl stop tailscaled.service >/dev/null 2>&1 || true
+systemctl stop gnx-tailscale-enroll.service >/dev/null 2>&1 || true
+printf '%s' "$auth_key" > /run/gnx/ts-authkey
+chmod 0400 /run/gnx/ts-authkey
 unset auth_key

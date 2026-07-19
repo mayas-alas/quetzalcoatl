@@ -1,5 +1,5 @@
 [Unit]
-Description=Enroll the Quetzalcoatl host in Tailscale exactly once
+Description=Reconcile the Quetzalcoatl host Tailscale enrollment
 Requires=proxmox.service
 After=proxmox.service
 Before=tailscaled.service

@@ -15,11 +15,13 @@ case "$engine:$scope" in
     state_dir='/var/lib/quetzalcoatl/tailscale/host'
     tag='tag:quetzalcoatl-node'
     extra_args="--ssh --advertise-tags=$tag"
+    permanent_name='gnx-tailscaled'
     ;;
   docker:garage|docker:forgejo)
     state_dir="/var/lib/quetzalcoatl/tailscale/$scope"
     tag='tag:quetzalcoatl-service'
     extra_args="--advertise-tags=$tag"
+    permanent_name="gnx-$scope-tailscale"
     ;;
   *)
     echo 'usage: gnx-tailscale-enroll podman host <hostname> | docker garage|forgejo <hostname>' >&2
@@ -30,11 +32,6 @@ esac
 if [ "$(id -u)" -ne 0 ]; then
   echo 'gnx-tailscale-enroll must run as root' >&2
   exit 65
-fi
-
-if [ -s "$state_dir/tailscaled.state" ]; then
-  rm -f "$auth_file"
-  exit 0
 fi
 
 case "$hostname" in
@@ -79,15 +76,34 @@ install -d -m 0700 "$state_dir" /run/gnx
 rm -f "$status_file" "$status_file.tmp"
 name="gnx-$scope-enroll"
 complete=0
+state_existed=0
+backup_ready=0
+state_backup="/run/gnx/$scope-tailscaled.state.backup"
+if [ -s "$state_dir/tailscaled.state" ]; then
+  state_existed=1
+fi
 
 cleanup() {
   "$engine" rm -f "$name" >/dev/null 2>&1 || true
   rm -f "$auth_file"
   if [ "$complete" -ne 1 ]; then
-    rm -f "$state_dir/tailscaled.state"
+    if [ "$backup_ready" -eq 1 ]; then
+      install -m 0600 "$state_backup" "$state_dir/tailscaled.state"
+    elif [ "$state_existed" -eq 0 ]; then
+      rm -f "$state_dir/tailscaled.state"
+    fi
   fi
+  rm -f "$state_backup"
 }
 trap cleanup EXIT HUP INT TERM
+
+if "$engine" inspect "$permanent_name" >/dev/null 2>&1; then
+  "$engine" stop "$permanent_name" >/dev/null
+fi
+if [ "$state_existed" -eq 1 ]; then
+  install -m 0600 "$state_dir/tailscaled.state" "$state_backup"
+  backup_ready=1
+fi
 
 security_args=''
 if [ "$engine" = podman ]; then

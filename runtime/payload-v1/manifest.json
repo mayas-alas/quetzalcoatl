@@ -214,7 +214,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "6f84a6636a614dae8435946afbbef952267db11cc25cedcf1e147ac149c43e97"
+      "sha256": "0bf898bdb34d8e2332b803a036b1b552c37afc2b157bfcf1b17464b106ff34b8"
     },
     {
       "path": "bin/gnx-tailscale-rename",
@@ -228,7 +228,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "323175c198427f0280645b0ff76dff53af2afbc0fc59c2512cf6d252442ae451"
+      "sha256": "226c6aeec27094008faa60627d6bdb8ae513b0865da48699d3fbcc22be823af3"
     },
     {
       "path": "config/node/serve.json",
@@ -347,7 +347,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0644",
-      "sha256": "6bf2c6be77a1d1e66097f1b79973a69c0e0ce780b7017e0be00dd0a631e3380d"
+      "sha256": "3ac03c4737689fa0fc08f4aef06f32937e66f7e61f97e78e5cd919b24c7464f9"
     }
   ]
 }
