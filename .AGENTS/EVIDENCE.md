@@ -109,7 +109,7 @@ Legacy evidence is useful regression context but awards no current-cycle points 
 ### E-PVE-01
 
 - Gate: G4 code-level payload evidence; physical execution remains part of G5.
-- Baseline revision: `4c4cfd5bf5757480bdd19020bae10db6b2169c21`; integrated code patch SHA-1 `c3b05f3d23a25baedce59a81445af3a5b2897309` before commit anchoring.
+- Source revision: `06cbec0250bc574d5187c63a602d75a93b0ee1ea`; integrated code patch SHA-1 `c3b05f3d23a25baedce59a81445af3a5b2897309`.
 - Environment: primary Windows checkout plus Git Bash POSIX shell.
 - Change: fixed five-line stdin contract, direct Tailscale gate, API/SSH/Corosync/MTU/time/DNS preflights, certificate fingerprint pinning, transient `0600` password file under `/run`, idempotent joined-state verification, and no controller fallthrough.
 - Review corrections: routed verbose `pvecm add` output away from the exact success `stdout`, rejected all trailing stdin, mapped absent pinned controller consistently, and updated the locked manifest hash.
@@ -121,7 +121,7 @@ Legacy evidence is useful regression context but awards no current-cycle points 
 ### E-INT-01
 
 - Gates: G3 and G4.
-- Baseline revision: `4c4cfd5bf5757480bdd19020bae10db6b2169c21`; integrated code patch SHA-1 `c3b05f3d23a25baedce59a81445af3a5b2897309` before commit anchoring.
+- Source revision: `06cbec0250bc574d5187c63a602d75a93b0ee1ea`; integrated code patch SHA-1 `c3b05f3d23a25baedce59a81445af3a5b2897309`.
 - Environment: primary Windows development checkout, Rust 1.96.1.
 - Change: persisted `NotStarted -> Joining -> Joined`, pinned-controller reboot verification, final member `READY` status, stable operational errors, and production `MEMBER_OPENTOFU_DENIED` guard before process launch.
 - Verification: `cargo fmt --all -- --check`; `cargo clippy -p gnx-service -- -D warnings`; `cargo test --workspace` (40 tests: 3 protocol and 37 service); `git diff --check`.
@@ -132,7 +132,7 @@ Legacy evidence is useful regression context but awards no current-cycle points 
 ### E-PKG-01
 
 - Gate: packaging prerequisite for G2/G5/G6; it does not award G6 by itself.
-- Source: integrated working tree represented by code patch SHA-1 `c3b05f3d23a25baedce59a81445af3a5b2897309`; exact commit anchor will be added before release upload.
+- Source revision: `06cbec0250bc574d5187c63a602d75a93b0ee1ea`; integrated code patch SHA-1 `c3b05f3d23a25baedce59a81445af3a5b2897309`.
 - Environment: Windows build host; Rust 1.96.1; WiX 5.0.2; locked installer dependencies.
 - Command: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File installer/build.ps1`.
 - Actual: release Rust build, MSI and Burn bundle succeeded.
