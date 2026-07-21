@@ -36,6 +36,50 @@ function Get-LockedArtifact {
     return $destination
 }
 
+function Get-PeImportedDllNames {
+    param([Parameter(Mandatory)][string] $Path)
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+    if ([BitConverter]::ToUInt32($bytes, $peOffset) -ne 0x00004550) {
+        throw "Not a PE file: $Path"
+    }
+
+    $sectionCount = [BitConverter]::ToUInt16($bytes, $peOffset + 6)
+    $optionalOffset = $peOffset + 24
+    $magic = [BitConverter]::ToUInt16($bytes, $optionalOffset)
+    if ($magic -ne 0x20b) {
+        throw "Expected a PE32+ executable: $Path"
+    }
+
+    $importRva = [BitConverter]::ToUInt32($bytes, $optionalOffset + 112 + 8)
+    if ($importRva -eq 0) { return @() }
+    $optionalSize = [BitConverter]::ToUInt16($bytes, $peOffset + 20)
+    $sectionOffset = $optionalOffset + $optionalSize
+
+    function Convert-RvaToOffset([uint32] $Rva) {
+        for ($index = 0; $index -lt $sectionCount; $index++) {
+            $offset = $sectionOffset + (40 * $index)
+            $virtualSize = [BitConverter]::ToUInt32($bytes, $offset + 8)
+            $virtualAddress = [BitConverter]::ToUInt32($bytes, $offset + 12)
+            $rawSize = [BitConverter]::ToUInt32($bytes, $offset + 16)
+            if ($Rva -ge $virtualAddress -and $Rva -lt ($virtualAddress + [Math]::Max($virtualSize, $rawSize))) {
+                return [int] ($Rva - $virtualAddress + [BitConverter]::ToUInt32($bytes, $offset + 20))
+            }
+        }
+        throw "PE RVA 0x{0:X8} is outside all sections: $Path" -f $Rva
+    }
+
+    $imports = [System.Collections.Generic.List[string]]::new()
+    for ($offset = Convert-RvaToOffset $importRva; [BitConverter]::ToUInt32($bytes, $offset + 12) -ne 0; $offset += 20) {
+        $nameOffset = Convert-RvaToOffset ([BitConverter]::ToUInt32($bytes, $offset + 12))
+        $end = $nameOffset
+        while ($bytes[$end] -ne 0) { $end++ }
+        $imports.Add([System.Text.Encoding]::ASCII.GetString($bytes, $nameOffset, $end - $nameOffset))
+    }
+    return $imports | Sort-Object -Unique
+}
+
 $artifacts = @{}
 foreach ($artifact in $dependencyLock.artifacts) {
     $artifacts[$artifact.id] = Get-LockedArtifact -Artifact $artifact
@@ -59,7 +103,10 @@ try {
         throw "Pinned WiX Bal extension DLL is absent: $balExtension"
     }
 
-    & cargo build --release -p gnx-host-preflight -p gnx-service -p gnx-cli
+    & cargo rustc --release -p gnx-host-preflight -- -C target-feature=+crt-static
+    if ($LASTEXITCODE -ne 0) { throw "Static-CRT host preflight build failed." }
+
+    & cargo build --release -p gnx-service -p gnx-cli
     if ($LASTEXITCODE -ne 0) { throw "Rust release build failed." }
 
     $hostPreflight = Join-Path $repoRoot "target\release\gnx-host-preflight.exe"
@@ -67,6 +114,12 @@ try {
     $gnxCli = Join-Path $repoRoot "target\release\gnx.exe"
     $productMsi = Join-Path $outputRoot "Quetzalcoatl.msi"
     $setupExe = Join-Path $outputRoot "QuetzalcoatlSetup.exe"
+
+    $prohibitedCrtImports = Get-PeImportedDllNames -Path $hostPreflight |
+        Where-Object { $_ -match '(?i)^(?:api-ms-win-crt-.+|vcruntime[0-9].*|msvcp[0-9].*|msvcr[0-9].*|concrt[0-9].*|vcomp[0-9].*|ucrtbase)\.dll$' }
+    if ($prohibitedCrtImports) {
+        throw "gnx-host-preflight must not dynamically import a Visual C++ runtime DLL: $($prohibitedCrtImports -join ', ')"
+    }
 
     & dotnet tool run wix -- build `
         (Join-Path $PSScriptRoot "package.wxs") `
