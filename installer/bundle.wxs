@@ -26,6 +26,7 @@
         Permanent="yes"
         Vital="yes">
         <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="14" Behavior="scheduleReboot" />
         <ExitCode Value="3010" Behavior="scheduleReboot" />
         <ExitCode Behavior="error" />
       </ExePackage>
@@ -56,6 +57,7 @@
         Permanent="yes"
         Vital="yes">
         <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="14" Behavior="scheduleReboot" />
         <ExitCode Behavior="error" />
       </ExePackage>
 

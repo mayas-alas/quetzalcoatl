@@ -27,6 +27,8 @@ Get-FileHash -Algorithm SHA256 target/installer/Quetzalcoatl.msi,target/installe
 
 Also run `sh -n` and `static-check` for `runtime/payload-v1/bin/gnx-pve-cluster-create`, then confirm its SHA-256 equals the entry in `runtime/payload-v1/manifest.json`.
 
+`PrepareWsl` y `ValidateHost` aceptan exclusivamente el exit code Rust `REBOOT_PENDING=14` como `scheduleReboot`; `PrepareWsl` conserva ademÃ¡s el cÃ³digo MSI 3010. El reinicio programado reanuda el preflight; una ejecuciÃ³n Dockur que lo demuestre sÃ³lo aporta evidencia de compatibilidad del instalador y no cierra G5.
+
 ## GitHub Actions Dockur compatibility
 
 Use the `codex/ci-dockur` branch of `mayas-alas/windows-rdp-tailscale`. Create a draft release containing the frozen setup asset named `Quetzalcoatl-0.3.0-preview-setup-x64.exe`, then dispatch the workflow with its exact release tag and SHA-256.

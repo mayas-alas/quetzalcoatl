@@ -1,5 +1,9 @@
 [CmdletBinding()]
-param()
+param(
+    [string] $RebootContractBundlePath,
+    [string] $RebootContractBundleXml,
+    [switch] $TestRebootContractOnly
+)
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -79,6 +83,100 @@ function Get-PeImportedDllNames {
     }
     return $imports | Sort-Object -Unique
 }
+
+function Test-RebootContract {
+    param(
+        [string] $BundlePath = (Join-Path $PSScriptRoot "bundle.wxs"),
+        [string] $BundleXml
+    )
+
+    $exitCodesPath = Join-Path $repoRoot "crates\host-preflight\src\exit_codes.rs"
+    $exitCodes = Get-Content -LiteralPath $exitCodesPath -Raw -Encoding utf8
+    $rebootValues = @{}
+    foreach ($constantName in @('REBOOT_PENDING', 'REBOOT_REQUIRED')) {
+        $constantMatch = [regex]::Match(
+            $exitCodes,
+            "(?m)^\s*pub\s+const\s+$constantName\s*:\s*i32\s*=\s*(?<value>\d+)\s*;"
+        )
+        if (-not $constantMatch.Success) {
+            throw "Installer reboot contract: $constantName was not found in $exitCodesPath."
+        }
+        $rebootValues[$constantName] = $constantMatch.Groups['value'].Value
+    }
+    $rebootPending = $rebootValues['REBOOT_PENDING']
+    $rebootRequired = $rebootValues['REBOOT_REQUIRED']
+
+    $hasBundleXml = -not [string]::IsNullOrEmpty($BundleXml)
+    $bundleSource = if ($hasBundleXml) { '<provided XML>' } else { $BundlePath }
+    $bundleText = if ($hasBundleXml) { $BundleXml } else { Get-Content -LiteralPath $BundlePath -Raw -Encoding utf8 }
+    $bundle = [xml] $bundleText
+    $exePackages = @($bundle.SelectNodes('//*[local-name()="ExePackage"]'))
+    $expectedMappings = @{
+        PrepareWsl = @{
+            '0' = 'success'
+            $rebootPending = 'scheduleReboot'
+            $rebootRequired = 'scheduleReboot'
+        }
+        ValidateHost = @{
+            '0' = 'success'
+            $rebootPending = 'scheduleReboot'
+        }
+    }
+
+    foreach ($authorizedId in $expectedMappings.Keys) {
+        $matches = @($exePackages | Where-Object { $_.GetAttribute('Id') -eq $authorizedId })
+        if ($matches.Count -ne 1) {
+            throw "Installer reboot contract: expected exactly one ExePackage Id=$authorizedId in $bundleSource; found $($matches.Count)."
+        }
+
+        $packageExitCodes = @($matches[0].SelectNodes('./*[local-name()="ExitCode"]'))
+        $valuedExitCodes = @($packageExitCodes | Where-Object { $_.HasAttribute('Value') })
+        $catchAll = @($packageExitCodes | Where-Object {
+            -not $_.HasAttribute('Value') -and $_.GetAttribute('Behavior') -eq 'error'
+        })
+        if ($catchAll.Count -ne 1 -or $packageExitCodes.Count -ne ($expectedMappings[$authorizedId].Count + 1)) {
+            throw "Installer reboot contract: $authorizedId must contain exactly its valued mappings and one catch-all ExitCode Behavior=error."
+        }
+        if ($packageExitCodes[$packageExitCodes.Count - 1] -ne $catchAll[0]) {
+            throw "Installer reboot contract: $authorizedId catch-all ExitCode Behavior=error must be the last ExitCode child, after all valued mappings."
+        }
+
+        $actualValues = @($valuedExitCodes | ForEach-Object { $_.GetAttribute('Value') })
+        if ($actualValues.Count -ne ($actualValues | Select-Object -Unique).Count) {
+            throw "Installer reboot contract: $authorizedId must not contain duplicate valued ExitCode mappings."
+        }
+        foreach ($value in $actualValues) {
+            if (-not $expectedMappings[$authorizedId].ContainsKey($value)) {
+                throw "Installer reboot contract: $authorizedId must not contain ExitCode Value=$value."
+            }
+        }
+        foreach ($value in $expectedMappings[$authorizedId].Keys) {
+            $mapping = @($valuedExitCodes | Where-Object { $_.GetAttribute('Value') -eq $value })
+            if ($mapping.Count -ne 1 -or $mapping[0].GetAttribute('Behavior') -ne $expectedMappings[$authorizedId][$value]) {
+                throw "Installer reboot contract: $authorizedId must map ExitCode Value=$value to Behavior=$($expectedMappings[$authorizedId][$value]) exactly once."
+            }
+        }
+    }
+
+    foreach ($exePackage in $exePackages) {
+        if ($expectedMappings.ContainsKey($exePackage.GetAttribute('Id'))) { continue }
+        $hasUnauthorizedMapping = @($exePackage.SelectNodes('./*[local-name()="ExitCode"]') | Where-Object {
+            $_.GetAttribute('Value') -eq $rebootPending -and $_.GetAttribute('Behavior') -eq 'scheduleReboot'
+        }).Count -gt 0
+        if ($hasUnauthorizedMapping) {
+            throw "Installer reboot contract: ExePackage Id=$($exePackage.GetAttribute('Id')) must not map Rust REBOOT_PENDING=$rebootPending to Behavior=scheduleReboot."
+        }
+    }
+}
+
+if (-not $TestRebootContractOnly -and ($RebootContractBundlePath -or $RebootContractBundleXml)) {
+    throw "RebootContractBundlePath and RebootContractBundleXml are only permitted with -TestRebootContractOnly."
+}
+
+$contractBundlePath = if ($TestRebootContractOnly -and $RebootContractBundlePath) { $RebootContractBundlePath } else { Join-Path $PSScriptRoot "bundle.wxs" }
+$contractBundleXml = if ($TestRebootContractOnly) { $RebootContractBundleXml } else { $null }
+Test-RebootContract -BundlePath $contractBundlePath -BundleXml $contractBundleXml
+if ($TestRebootContractOnly) { return }
 
 $artifacts = @{}
 foreach ($artifact in $dependencyLock.artifacts) {
