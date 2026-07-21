@@ -366,6 +366,10 @@ Antes de `pvecm join`, el servicio debe comprobar en ambos sentidos:
 
 Si cualquiera falla, el member queda `failed-resumable` y no intenta otra red ni otro puerto.
 
+El canal de join es único y cerrado. `gnx-service` descifra temporalmente el password PVE protegido por DPAPI y entrega por `stdin` exactamente cinco líneas LF: IP y hostname del controller, IP y hostname local del member y password. El payload rechaza líneas faltantes o excedentes. El password no entra en `argv`; el buffer Rust se destruye con zeroización y, dentro de PVE, sólo existe temporalmente en `/run/gnx/pve-join-password` con modo `0600` y limpieza por trap.
+
+El único `stdout` válido del payload es `PVE_JOIN=ready`. La salida operativa de `pvecm add` se mantiene separada en `stderr`, que el servicio captura y zeroiza. Fallos de preflight de red se exponen como `CLUSTER_NETWORK_PREFLIGHT_FAILED`; controller ausente u offline como `CONTROLLER_UNAVAILABLE`; ruta relayed/no directa como `TAILSCALE_DIRECT_PATH_REQUIRED`; y los demás fallos como `PVE_JOIN_FAILED`.
+
 ## 9. Secretos y DPAPI
 
 ### Entradas del instalador
@@ -467,10 +471,10 @@ stateDiagram-v2
     KVM_READY --> TAILSCALE_READY
     TAILSCALE_READY --> ROLE_RESOLVED
     ROLE_RESOLVED --> CONTROLLER_CLUSTER_READY: controller
-    ROLE_RESOLVED --> MEMBER_JOINED: member
+    ROLE_RESOLVED --> MEMBER_JOINING: member / persistir Joining
     CONTROLLER_CLUSTER_READY --> INFRA_READY
     INFRA_READY --> READY
-    MEMBER_JOINED --> READY
+    MEMBER_JOINING --> READY: PVE_JOIN=ready / persistir Joined
     READY --> [*]
 
     PREFLIGHT_WINDOWS --> FAILED
@@ -479,12 +483,22 @@ stateDiagram-v2
     TAILSCALE_READY --> FAILED
     ROLE_RESOLVED --> FAILED
     CONTROLLER_CLUSTER_READY --> FAILED
-    MEMBER_JOINED --> FAILED
+    MEMBER_JOINING --> FAILED
     INFRA_READY --> FAILED
     FAILED --> PREFLIGHT_WINDOWS: reanudar explícitamente
 ```
 
 Cada transición escribe checkpoint sólo después de verificar su postcondición. Reanudar repite la operación actual de forma idempotente; no ejecuta rollback del trabajo ya convergido.
+
+El estado persistido de un member admite únicamente estas parejas:
+
+| `stage` | `cluster_join` | Significado |
+|---|---|---|
+| `ROLE_RESOLVED` | `not_started` | Controller fijado; el join todavía no se invoca |
+| `MEMBER_JOINING` | `joining` | Checkpoint escrito antes de invocar el payload |
+| `READY` | `joined` | El payload confirmó exactamente `PVE_JOIN=ready` |
+
+Un reinicio en `joining` o `joined` vuelve a ejecutar la verificación idempotente contra el mismo controller persistido. No redescubre rol ni cambia controller. Si la verificación falla, el estado de operación pasa a `FAILED`, pero el checkpoint reanudable y la identidad fijada no se reemplazan.
 
 CLI mínima:
 
@@ -558,6 +572,12 @@ Camino canónico:
 7. Terminar con `gnx status --json` en `READY` en ambos members y clúster de tres nodos visible desde todos.
 
 Criterio de cierre: el mismo EXE agrega dos members mediante el mismo camino, el clúster queda quorate con tres nodos y existe una sola autoridad OpenTofu y una sola instancia de cada servicio remoto seleccionado.
+
+### Compatibilidad CI con Dockur
+
+La lane requerida de GitHub Actions corre exclusivamente sobre Linux con la imagen oficial [`dockurr/windows`](https://github.com/dockur/windows) fijada por digest. Descarga un `QuetzalcoatlSetup.exe` congelado, verifica su SHA-256 antes de arrancar Windows y publica noVNC sólo mediante HTTPS autenticado dentro de la tailnet. El operador usa el instalador, UAC, reinicios reales, `gnx configure` y `gnx status --json` como un usuario final; no existe un camino especial para el runner.
+
+Esta lane demuestra compatibilidad del instalador y del runtime dentro de una sesión Windows virtualizada. Slots lógicos separados (`controller`, `member-1`, `member-2`) no forman una red Corosync y nunca demuestran quorum, RTT, ausencia de DERP ni aceptación de tres nodos. GitHub Actions Windows nativo queda como cobertura histórica manual y no es un gate del MVP.
 
 ## 13. Condiciones fail-stop
 

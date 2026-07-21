@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
@@ -14,7 +14,7 @@ use std::time::Duration;
 use gnx_protocol::{InstallerConfiguration, StatusResponse};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 const EXPECTED_SERVICE_SID: &str = "S-1-5-80-1414281857-1943412974-186110390-2486725240-2230548587";
 const MACHINE_NAME: &str = "quetzalcoatl";
@@ -403,7 +403,7 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
     configuration.pve_root_password.zeroize();
 
     let hostname = match persisted_state.as_ref() {
-        Some(state) => state.controller.hostname.clone(),
+        Some(state) => persisted_local_hostname(state)?.to_owned(),
         None => candidate_hostname()?,
     };
     set_stage(status, "TAILSCALE_ENROLLING");
@@ -423,18 +423,25 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
         configuration.install_garage,
         configuration.install_forgejo,
     )?;
-    set_controller(status, &controller.controller.hostname);
+    if controller.role.is_controller() {
+        set_controller(status, &controller.controller.hostname);
+    }
     set_component(status, Component::Tailscale, "ready");
     set_stage(status, "ROLE_RESOLVED");
 
     set_stage(status, "TAILSCALE_SERVE_CHECKING");
     wait_for_tailscale_serve(
         &podman,
-        &controller.controller.hostname,
+        persisted_local_hostname(&controller)?,
         &configuration.tailnet,
     )?;
     set_component(status, Component::TailscaleServe, "ready");
     set_stage(status, "TAILSCALE_READY");
+
+    if controller.role.is_member() {
+        join_member_cluster(status, &podman, &mut controller)?;
+        return Ok(());
+    }
 
     let mut stage_rank = controller_stage_rank(&controller.stage).ok_or_else(|| {
         GateError::new(
@@ -464,6 +471,7 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
     validate_state_configuration(&controller, &infrastructure_configuration)?;
     let opentofu_result = apply_opentofu(
         &podman,
+        &controller.role,
         &infrastructure_configuration.pve_root_password,
         &controller.controller.hostname,
         controller.install_garage,
@@ -1049,17 +1057,170 @@ fn validate_state_configuration(
     state: &crate::state::PersistedState,
     configuration: &InstallerConfiguration,
 ) -> Result<(), GateError> {
-    if state.tailnet != configuration.tailnet
-        || state.install_garage != configuration.install_garage
-        || state.install_forgejo != configuration.install_forgejo
-    {
+    let matches = state.tailnet == configuration.tailnet
+        && (state.role.is_member()
+            || (state.install_garage == configuration.install_garage
+                && state.install_forgejo == configuration.install_forgejo));
+    if !matches {
         return Err(GateError::new(
             "STATE_CONFIGURATION_MISMATCH",
             Component::None,
-            "persisted controller state does not match the protected installer inputs",
+            "persisted state does not match the protected installer inputs",
         ));
     }
     Ok(())
+}
+
+fn join_member_cluster(
+    status: &Arc<RwLock<StatusResponse>>,
+    podman: &Path,
+    member: &mut crate::state::PersistedState,
+) -> Result<(), GateError> {
+    if !member.role.is_member() {
+        return Err(GateError::new(
+            "STATE_IDENTITY_INVALID",
+            Component::None,
+            "member join was requested for a controller state",
+        ));
+    }
+    if begin_member_join(member)? {
+        store_persisted_state(member)?;
+    }
+    set_member_joining_status(status, &member.controller.hostname);
+
+    let mut configuration = load_protected_configuration()?;
+    configuration.auth_key.zeroize();
+    let configuration_matches = validate_state_configuration(member, &configuration);
+    if configuration_matches.is_err() {
+        configuration.pve_root_password.zeroize();
+        return configuration_matches;
+    }
+    let join_result = join_member(podman, member, &configuration.pve_root_password);
+    configuration.pve_root_password.zeroize();
+    join_result?;
+
+    member.cluster_join = crate::state::ClusterJoinState::Joined;
+    member.stage = "READY".into();
+    store_persisted_state(member)?;
+    set_member_ready_status(status, &member.controller.hostname);
+    Ok(())
+}
+
+fn begin_member_join(member: &mut crate::state::PersistedState) -> Result<bool, GateError> {
+    match member.cluster_join {
+        crate::state::ClusterJoinState::NotStarted => {
+            member.cluster_join = crate::state::ClusterJoinState::Joining;
+            member.stage = "MEMBER_JOINING".into();
+            Ok(true)
+        }
+        crate::state::ClusterJoinState::Joining | crate::state::ClusterJoinState::Joined => {
+            Ok(false)
+        }
+        crate::state::ClusterJoinState::NotApplicable => Err(GateError::new(
+            "STATE_IDENTITY_INVALID",
+            Component::None,
+            "member state has no join checkpoint",
+        )),
+    }
+}
+
+fn join_member(
+    podman: &Path,
+    member: &crate::state::PersistedState,
+    password: &str,
+) -> Result<(), GateError> {
+    let hostname = persisted_local_hostname(member)?;
+    let input = member_join_input(member, hostname, password);
+    let result = machine_stdin_output(podman, [PVE_CLUSTER_CREATE_BIN, "join"], &input);
+    drop(input);
+    let mut output = match result {
+        Ok(output) => output,
+        Err(_) => {
+            return Err(GateError::new(
+                "PVE_JOIN_FAILED",
+                Component::Proxmox,
+                "PVE member join did not complete",
+            ));
+        }
+    };
+    if !output.status.success() {
+        let error = map_member_join_error(&output.stderr);
+        output.stdout.zeroize();
+        output.stderr.zeroize();
+        return Err(error);
+    }
+    let ready = output.stdout.as_slice() == b"PVE_JOIN=ready\n";
+    output.stdout.zeroize();
+    output.stderr.zeroize();
+    if ready {
+        Ok(())
+    } else {
+        Err(GateError::new(
+            "PVE_JOIN_FAILED",
+            Component::Proxmox,
+            "PVE join did not confirm the fixed output contract",
+        ))
+    }
+}
+
+fn member_join_input(
+    member: &crate::state::PersistedState,
+    member_hostname: &str,
+    password: &str,
+) -> Zeroizing<Vec<u8>> {
+    let controller_ip = member.controller.ip.to_string();
+    let member_ip = member.self_ip.to_string();
+    let mut input = Zeroizing::new(Vec::with_capacity(
+        controller_ip.len()
+            + member.controller.hostname.len()
+            + member_ip.len()
+            + member_hostname.len()
+            + password.len()
+            + 5,
+    ));
+    for value in [
+        controller_ip.as_str(),
+        member.controller.hostname.as_str(),
+        member_ip.as_str(),
+        member_hostname,
+        password,
+    ] {
+        input.extend_from_slice(value.as_bytes());
+        input.push(b'\n');
+    }
+    input
+}
+
+fn map_member_join_error(output: &[u8]) -> GateError {
+    let network_preflight = [
+        "PVE_JOIN_CLOCK_UNSYNCED",
+        "PVE_JOIN_CONTROLLER_DNS",
+        "PVE_JOIN_API_UNREACHABLE",
+        "PVE_JOIN_SSH_UNREACHABLE",
+        "PVE_JOIN_COROSYNC_UNREACHABLE",
+        "PVE_JOIN_MTU_UNUSABLE",
+        "PVE_JOIN_MEMBER_NETWORK",
+    ];
+    let contains = |code: &&str| {
+        output
+            .windows(code.len())
+            .any(|candidate| candidate == code.as_bytes())
+    };
+    let code = if network_preflight.iter().any(contains) {
+        "CLUSTER_NETWORK_PREFLIGHT_FAILED"
+    } else if [
+        "PVE_JOIN_TAILSCALE_UNREACHABLE",
+        "PVE_JOIN_TAILSCALE_RELAYED",
+        "PVE_JOIN_TAILSCALE_LATENCY",
+    ]
+    .iter()
+    .any(contains)
+    {
+        "TAILSCALE_DIRECT_PATH_REQUIRED"
+    } else {
+        "PVE_JOIN_FAILED"
+    };
+    GateError::new(code, Component::Proxmox, "PVE member join did not complete")
 }
 
 fn resolve_controller(
@@ -1072,6 +1233,12 @@ fn resolve_controller(
 ) -> Result<crate::state::PersistedState, GateError> {
     if let Some(state) = persisted {
         let (state, node_id_rotated) = reconcile_persisted_identity(state, &identity)?;
+        if state.role.is_member() {
+            validate_persisted_member_controller(
+                &state,
+                &stabilize_host_inventory(podman, identity, tailnet)?,
+            )?;
+        }
         if node_id_rotated {
             store_persisted_state(&state)?;
         }
@@ -1079,50 +1246,158 @@ fn resolve_controller(
     }
 
     let identity = stabilize_host_inventory(podman, identity, tailnet)?;
-    if !identity.host_peer_ids.is_empty() {
-        return Err(GateError::new(
-            "MEMBER_INCREMENT_DEFERRED",
-            Component::Tailscale,
-            format!(
-                "I1 requires zero other tagged host nodes; observed {} and made no role decision",
-                identity.host_peer_ids.len()
-            ),
-        ));
-    }
-
-    let hostname = controller_hostname(&identity.self_id)?;
-    let state = crate::state::PersistedState::controller(
-        identity.self_id,
-        identity.self_ip,
-        hostname.clone(),
-        tailnet.to_owned(),
-        install_garage,
-        install_forgejo,
-    );
+    let decision = select_topology(&identity)?;
+    let (state, hostname) = match decision {
+        TopologyDecision::Controller => {
+            let hostname = controller_hostname(&identity.self_id)?;
+            (
+                crate::state::PersistedState::controller(
+                    identity.self_id.clone(),
+                    identity.self_ip,
+                    hostname.clone(),
+                    tailnet.to_owned(),
+                    install_garage,
+                    install_forgejo,
+                ),
+                hostname,
+            )
+        }
+        TopologyDecision::Member(controller) => {
+            let hostname = member_hostname(&identity.self_id)?;
+            (
+                crate::state::PersistedState::member(
+                    identity.self_id.clone(),
+                    identity.self_ip,
+                    hostname.clone(),
+                    crate::state::ControllerIdentity {
+                        id: controller.id,
+                        hostname: controller.hostname,
+                        ip: controller.ip,
+                    },
+                    tailnet.to_owned(),
+                ),
+                hostname,
+            )
+        }
+    };
     store_persisted_state(&state)?;
 
     rename_tailscale(podman, &hostname)?;
     let renamed = wait_for_tailscale(podman, &hostname, tailnet)?;
     validate_state_identity(&state, &renamed)?;
+    if state.role.is_member() {
+        validate_persisted_member_controller(&state, &renamed)?;
+    }
     Ok(state)
+}
+
+fn validate_persisted_member_controller(
+    state: &crate::state::PersistedState,
+    identity: &TailscaleIdentity,
+) -> Result<(), GateError> {
+    let peer = identity
+        .host_peers
+        .iter()
+        .find(|peer| peer.id == state.controller.id);
+    let Some(peer) = peer else {
+        return Err(GateError::new(
+            "CONTROLLER_UNAVAILABLE",
+            Component::Tailscale,
+            "the persisted controller is absent from GNX discovery",
+        ));
+    };
+    if peer.hostname != state.controller.hostname || peer.ip != state.controller.ip {
+        return Err(GateError::new(
+            "TAILSCALE_IDENTITY_CHANGED",
+            Component::Tailscale,
+            "the persisted controller identity changed",
+        ));
+    }
+    if !peer.online {
+        return Err(GateError::new(
+            "CONTROLLER_UNAVAILABLE",
+            Component::Tailscale,
+            "the persisted controller is offline",
+        ));
+    }
+    if !peer.direct {
+        return Err(GateError::new(
+            "TAILSCALE_DIRECT_PATH_REQUIRED",
+            Component::Tailscale,
+            "the persisted controller path is relayed or unavailable",
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum TopologyDecision {
+    Controller,
+    Member(HostPeer),
+}
+
+fn select_topology(identity: &TailscaleIdentity) -> Result<TopologyDecision, GateError> {
+    match identity.host_peers.len() {
+        0 => Ok(TopologyDecision::Controller),
+        1 | 2 => {
+            let controllers = identity
+                .host_peers
+                .iter()
+                .filter(|peer| peer.hostname.starts_with("gnx-controller-"))
+                .cloned()
+                .collect::<Vec<_>>();
+            match controllers.as_slice() {
+                [] => Err(GateError::new(
+                    "TOPOLOGY_UNSUPPORTED",
+                    Component::Tailscale,
+                    "bounded topology has no identifiable controller",
+                )),
+                [controller] => Ok(TopologyDecision::Member(controller.clone())),
+                _ => Err(GateError::new(
+                    "TOPOLOGY_UNSUPPORTED",
+                    Component::Tailscale,
+                    "bounded topology has multiple identifiable controllers",
+                )),
+            }
+        }
+        _ => Err(GateError::new(
+            "TOPOLOGY_UNSUPPORTED",
+            Component::Tailscale,
+            "bounded topology has more than two existing GNX hosts",
+        )),
+    }
 }
 
 fn reconcile_persisted_identity(
     mut state: crate::state::PersistedState,
     identity: &TailscaleIdentity,
 ) -> Result<(crate::state::PersistedState, bool), GateError> {
-    if state.self_ip != identity.self_ip || state.controller.hostname != identity.hostname {
+    if state.self_ip != identity.self_ip || persisted_local_hostname(&state)? != identity.hostname {
         return Err(GateError::new(
             "TAILSCALE_IDENTITY_CHANGED",
             Component::Tailscale,
-            "current Tailscale IP or hostname does not match persisted controller state",
+            "current Tailscale IP or hostname does not match persisted local state",
         ));
     }
 
     let node_id_rotated = state.self_id != identity.self_id;
     if node_id_rotated {
         state.self_id.clone_from(&identity.self_id);
-        state.controller.id.clone_from(&identity.self_id);
+        match &state.role {
+            crate::state::PersistedRole::Controller => {
+                state.controller.id.clone_from(&identity.self_id);
+            }
+            crate::state::PersistedRole::Member => {
+                let member = state.member.as_mut().ok_or_else(|| {
+                    GateError::new(
+                        "STATE_IDENTITY_INVALID",
+                        Component::Tailscale,
+                        "persisted member state has no local member identity",
+                    )
+                })?;
+                member.id.clone_from(&identity.self_id);
+            }
+        }
     }
     Ok((state, node_id_rotated))
 }
@@ -1131,14 +1406,34 @@ fn validate_state_identity(
     state: &crate::state::PersistedState,
     identity: &TailscaleIdentity,
 ) -> Result<(), GateError> {
-    if state.self_id != identity.self_id || state.self_ip != identity.self_ip {
+    if state.self_id != identity.self_id
+        || state.self_ip != identity.self_ip
+        || persisted_local_hostname(state)? != identity.hostname
+    {
         return Err(GateError::new(
             "TAILSCALE_IDENTITY_CHANGED",
             Component::Tailscale,
-            "current Tailscale identity does not match persisted controller state",
+            "current Tailscale identity does not match persisted local state",
         ));
     }
     Ok(())
+}
+
+fn persisted_local_hostname(state: &crate::state::PersistedState) -> Result<&str, GateError> {
+    match &state.role {
+        crate::state::PersistedRole::Controller => Ok(&state.controller.hostname),
+        crate::state::PersistedRole::Member => state
+            .member
+            .as_ref()
+            .map(|member| member.hostname.as_str())
+            .ok_or_else(|| {
+                GateError::new(
+                    "STATE_IDENTITY_INVALID",
+                    Component::Tailscale,
+                    "persisted member state has no local member identity",
+                )
+            }),
+    }
 }
 
 fn controller_hostname(self_id: &str) -> Result<String, GateError> {
@@ -1158,6 +1453,11 @@ fn controller_hostname(self_id: &str) -> Result<String, GateError> {
         ));
     }
     Ok(format!("gnx-controller-{suffix}"))
+}
+
+fn member_hostname(self_id: &str) -> Result<String, GateError> {
+    controller_hostname(self_id)
+        .map(|hostname| hostname.replacen("gnx-controller-", "gnx-member-", 1))
 }
 
 fn rename_tailscale(podman: &Path, hostname: &str) -> Result<(), GateError> {
@@ -1181,13 +1481,13 @@ fn confirm_empty_controller_inventory(
     let identity = wait_for_tailscale(podman, &state.controller.hostname, &state.tailnet)?;
     validate_state_identity(state, &identity)?;
     let identity = stabilize_host_inventory(podman, identity, &state.tailnet)?;
-    if !identity.host_peer_ids.is_empty() {
+    if !identity.host_peers.is_empty() {
         return Err(GateError::new(
             "TOPOLOGY_CHANGED",
             Component::Tailscale,
             format!(
                 "tagged host inventory changed before cluster creation; observed {} other nodes",
-                identity.host_peer_ids.len()
+                identity.host_peers.len()
             ),
         ));
     }
@@ -1214,11 +1514,19 @@ fn create_controller_cluster(
 
 fn apply_opentofu(
     podman: &Path,
+    role: &crate::state::PersistedRole,
     password: &str,
     hostname: &str,
     install_garage: bool,
     install_forgejo: bool,
 ) -> Result<(), GateError> {
+    if role.is_member() {
+        return Err(GateError::new(
+            "MEMBER_OPENTOFU_DENIED",
+            Component::OpenTofu,
+            "OpenTofu execution is denied for members",
+        ));
+    }
     let mut input = Vec::with_capacity(password.len() + hostname.len() + 8);
     input.extend_from_slice(password.as_bytes());
     input.push(b'\n');
@@ -1598,7 +1906,7 @@ fn stabilize_host_inventory(
                 }
                 if previous
                     .as_ref()
-                    .is_some_and(|value| value.host_peer_ids == current.host_peer_ids)
+                    .is_some_and(|value| value.host_peers == current.host_peers)
                 {
                     return Ok(current);
                 }
@@ -1685,25 +1993,47 @@ fn parse_tailscale_status(
         return Err("tailscale status does not match tailnet, hostname, stable ID, tag, TUN, IP and HTTPS requirements".into());
     }
 
-    let mut host_peer_ids = BTreeSet::new();
+    let mut host_peers = Vec::new();
     for peer in status.peers.values() {
         if peer.expired
             || peer.id == self_node.id
-            || !peer.tags.iter().any(|tag| tag == "tag:quetzalcoatl-node")
+            || peer.tags.as_slice() != ["tag:quetzalcoatl-node"]
         {
             continue;
         }
-        if peer.id.is_empty() || !peer.id.bytes().all(|byte| byte.is_ascii_graphic()) {
-            return Err("tagged Tailscale host peer has no stable ID".into());
+        let peer_ips = peer
+            .tailscale_ips
+            .iter()
+            .filter_map(|value| value.parse::<IpAddr>().ok())
+            .filter(|address| matches!(address, IpAddr::V4(address) if address.octets()[0] == 100 && (64..=127).contains(&address.octets()[1])))
+            .collect::<Vec<_>>();
+        if peer.id.is_empty()
+            || !peer.id.bytes().all(|byte| byte.is_ascii_graphic())
+            || peer_ips.len() != 1
+            || !valid_discovered_hostname(&peer.host_name)
+        {
+            return Err(
+                "tagged Tailscale host peer does not satisfy the GNX host identity contract".into(),
+            );
         }
-        host_peer_ids.insert(peer.id.clone());
+        host_peers.push(HostPeer {
+            id: peer.id.clone(),
+            hostname: peer.host_name.clone(),
+            ip: peer_ips[0],
+            online: peer.online,
+            // Tailscale reports the peer's DERP region even when CurAddr is the
+            // active direct endpoint. Its own status renderer treats a
+            // non-empty CurAddr as direct and consults Relay only otherwise.
+            direct: !peer.cur_addr.is_empty(),
+        });
     }
+    host_peers.sort_by(|left, right| left.id.cmp(&right.id));
 
     Ok(TailscaleIdentity {
         self_id: self_node.id,
         self_ip: cgnat_ipv4[0],
         hostname: self_node.host_name,
-        host_peer_ids,
+        host_peers,
     })
 }
 
@@ -1773,6 +2103,15 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    let output = machine_stdin_output(podman, args, input)?;
+    check_output(output, "podman machine probe")
+}
+
+fn machine_stdin_output<I, S>(podman: &Path, args: I, input: &[u8]) -> Result<Output, GateError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
     let mut command = Command::new(podman);
     command
         .args(["machine", "ssh", "--username", "root", MACHINE_NAME])
@@ -1793,7 +2132,7 @@ where
     let output = child
         .wait_with_output()
         .map_err(|error| GateError::command(format!("cannot wait for machine probe: {error}")))?;
-    check_output(output, "podman machine probe")
+    Ok(output)
 }
 
 fn load_machine_image() -> Result<MachineImage, GateError> {
@@ -2083,6 +2422,24 @@ fn set_controller(status: &Arc<RwLock<StatusResponse>>, hostname: &str) {
     }
 }
 
+fn set_member_joining_status(status: &Arc<RwLock<StatusResponse>>, controller: &str) {
+    if let Ok(mut status) = status.write() {
+        status.role = Some("member".into());
+        status.controller = Some(controller.into());
+        status.components.opentofu = "not_applicable".into();
+        status.services.garage = "not_applicable".into();
+        status.services.forgejo = "not_applicable".into();
+        status.stage = "MEMBER_JOINING".into();
+        status.overall = "pending".into();
+    }
+}
+
+fn set_member_ready_status(status: &Arc<RwLock<StatusResponse>>, controller: &str) {
+    if let Ok(mut value) = status.write() {
+        *value = StatusResponse::member_ready(controller.to_owned());
+    }
+}
+
 fn set_cluster_ready(status: &Arc<RwLock<StatusResponse>>) {
     if let Ok(mut status) = status.write() {
         status.cluster.joined = true;
@@ -2356,14 +2713,44 @@ struct TailscalePeer {
     tags: Vec<String>,
     #[serde(rename = "Expired", default)]
     expired: bool,
+    #[serde(rename = "Online", default)]
+    online: bool,
+    #[serde(rename = "TailscaleIPs", default)]
+    tailscale_ips: Vec<String>,
+    #[serde(rename = "CurAddr", default)]
+    cur_addr: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 struct TailscaleIdentity {
     self_id: String,
     self_ip: IpAddr,
     hostname: String,
-    host_peer_ids: BTreeSet<String>,
+    host_peers: Vec<HostPeer>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct HostPeer {
+    id: String,
+    hostname: String,
+    ip: IpAddr,
+    online: bool,
+    direct: bool,
+}
+
+fn valid_discovered_hostname(value: &str) -> bool {
+    let suffix = value
+        .strip_prefix("gnx-controller-")
+        .or_else(|| value.strip_prefix("gnx-member-"));
+    suffix.is_some_and(|suffix| {
+        !suffix.is_empty()
+            && !suffix.starts_with('-')
+            && !suffix.ends_with('-')
+            && value.len() <= 63
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    })
 }
 
 #[derive(Deserialize)]
@@ -2466,7 +2853,7 @@ mod tests {
             identity.self_ip,
             "100.100.10.20".parse::<IpAddr>().expect("IP")
         );
-        assert!(identity.host_peer_ids.is_empty());
+        assert!(identity.host_peers.is_empty());
 
         let unhealthy = String::from_utf8(json.to_vec())
             .expect("status JSON")
@@ -2501,23 +2888,44 @@ mod tests {
             "MagicDNSEnabled":true
           },
           "CertDomains":["gnx-candidate-nitro.tetra-balance.ts.net"],
-          "Peer":{
-            "peer-key-host":{
+            "Peer":{
+              "peer-key-self":{
+                "ID":"node-id-self",
+                "HostName":"gnx-member-self",
+                "DNSName":"gnx-member-self.tetra-balance.ts.net.",
+                "Tags":["tag:quetzalcoatl-node"],
+                "Online":true,
+                "TailscaleIPs":["100.100.10.20"],
+                "Expired":false
+              },
+              "peer-key-host":{
               "ID":"node-id-host",
               "HostName":"gnx-controller-existing",
               "DNSName":"gnx-controller-existing.tetra-balance.ts.net.",
               "Tags":["tag:quetzalcoatl-node"],
               "Online":false,
+              "TailscaleIPs":["100.100.10.21"],
+              "CurAddr":"100.100.10.21:41641",
+              "Relay":"dfw",
               "Expired":false
             },
-            "peer-key-service":{
+              "peer-key-service":{
               "ID":"node-id-service",
               "HostName":"gnx-garage-existing",
               "DNSName":"gnx-garage-existing.tetra-balance.ts.net.",
               "Tags":["tag:quetzalcoatl-service"],
               "Online":true,
-              "Expired":false
-            },
+                "Expired":false
+              },
+              "peer-key-extra-tag":{
+                "ID":"node-id-extra-tag",
+                "HostName":"gnx-member-extra-tag",
+                "DNSName":"gnx-member-extra-tag.tetra-balance.ts.net.",
+                "Tags":["tag:quetzalcoatl-node","tag:other"],
+                "Online":true,
+                "TailscaleIPs":["100.100.10.23"],
+                "Expired":false
+              },
             "peer-key-expired":{
               "ID":"node-id-expired",
               "HostName":"gnx-controller-expired",
@@ -2531,9 +2939,321 @@ mod tests {
         let identity = parse_tailscale_status(json, "gnx-candidate-nitro", "tetra-balance.ts.net")
             .expect("valid discovery status");
         assert_eq!(
-            identity.host_peer_ids,
-            BTreeSet::from(["node-id-host".to_string()])
+            identity
+                .host_peers
+                .iter()
+                .map(|peer| peer.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["node-id-host".to_string()]
         );
+        assert!(identity.host_peers[0].direct);
+    }
+
+    #[test]
+    fn topology_matrix_is_bounded_and_selects_exactly_one_controller() {
+        let host = |id: &str, hostname: &str| HostPeer {
+            id: id.into(),
+            hostname: hostname.into(),
+            ip: "100.100.10.21".parse().expect("IP"),
+            online: true,
+            direct: true,
+        };
+        let identity = |host_peers| TailscaleIdentity {
+            self_id: "self".into(),
+            self_ip: "100.100.10.20".parse().expect("IP"),
+            hostname: "gnx-candidate".into(),
+            host_peers,
+        };
+
+        assert_eq!(
+            select_topology(&identity(vec![])).expect("first host"),
+            TopologyDecision::Controller
+        );
+        assert_eq!(
+            select_topology(&identity(vec![host("controller", "gnx-controller-a")]))
+                .expect("second host"),
+            TopologyDecision::Member(host("controller", "gnx-controller-a"))
+        );
+        assert!(matches!(
+            select_topology(&identity(vec![host("member", "gnx-member-a")])),
+            Err(error) if error.code == "TOPOLOGY_UNSUPPORTED"
+        ));
+        assert!(matches!(
+            select_topology(&identity(vec![host("a", "gnx-controller-a"), host("b", "gnx-controller-b")])),
+            Err(error) if error.code == "TOPOLOGY_UNSUPPORTED"
+        ));
+        assert!(matches!(
+            select_topology(&identity(vec![host("a", "gnx-controller-a"), host("b", "gnx-member-b"), host("c", "gnx-member-c")])),
+            Err(error) if error.code == "TOPOLOGY_UNSUPPORTED"
+        ));
+    }
+
+    #[test]
+    fn member_hostname_is_stable_and_never_uses_an_ordinal() {
+        assert_eq!(
+            member_hostname("nAbC123").expect("member hostname"),
+            "gnx-member-nabc123"
+        );
+        assert!(member_hostname("invalid/id").is_err());
+    }
+
+    #[test]
+    fn discovered_hostnames_require_an_exact_controller_or_member_shape() {
+        assert!(valid_discovered_hostname("gnx-controller-node-123"));
+        assert!(valid_discovered_hostname("gnx-member-node-123"));
+        for hostname in [
+            "gnx-controller-",
+            "gnx-member-",
+            "gnx-controller--node",
+            "gnx-garage-node",
+            "controller-node",
+            "gnx-member-node_123",
+        ] {
+            assert!(
+                !valid_discovered_hostname(hostname),
+                "accepted invalid hostname {hostname:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn member_retry_requires_the_pinned_controller_to_remain_direct_and_available() {
+        let controller = crate::state::ControllerIdentity {
+            id: "controller".into(),
+            hostname: "gnx-controller-a".into(),
+            ip: "100.100.10.21".parse().expect("IP"),
+        };
+        let state = crate::state::PersistedState::member(
+            "member".into(),
+            "100.100.10.22".parse().expect("IP"),
+            "gnx-member-member".into(),
+            controller,
+            "tetra-balance.ts.net".into(),
+        );
+        let inventory = |online, direct| TailscaleIdentity {
+            self_id: "member".into(),
+            self_ip: "100.100.10.22".parse().expect("IP"),
+            hostname: "gnx-member-member".into(),
+            host_peers: vec![
+                HostPeer {
+                    id: "controller".into(),
+                    hostname: "gnx-controller-a".into(),
+                    ip: "100.100.10.21".parse().expect("IP"),
+                    online,
+                    direct,
+                },
+                HostPeer {
+                    id: "replacement".into(),
+                    hostname: "gnx-controller-replacement".into(),
+                    ip: "100.100.10.23".parse().expect("IP"),
+                    online: true,
+                    direct: true,
+                },
+            ],
+        };
+        assert!(validate_persisted_member_controller(&state, &inventory(true, true)).is_ok());
+        let mut missing = inventory(true, true);
+        missing
+            .host_peers
+            .retain(|peer| peer.id != state.controller.id);
+        assert!(
+            matches!(validate_persisted_member_controller(&state, &missing), Err(error) if error.code == "CONTROLLER_UNAVAILABLE")
+        );
+        assert!(
+            matches!(validate_persisted_member_controller(&state, &inventory(false, true)), Err(error) if error.code == "CONTROLLER_UNAVAILABLE")
+        );
+        assert!(
+            matches!(validate_persisted_member_controller(&state, &inventory(true, false)), Err(error) if error.code == "TAILSCALE_DIRECT_PATH_REQUIRED")
+        );
+    }
+
+    #[test]
+    fn initial_member_decision_pins_an_offline_controller_before_availability_fails() {
+        let controller = HostPeer {
+            id: "controller".into(),
+            hostname: "gnx-controller-controller".into(),
+            ip: "100.100.10.21".parse().expect("IP"),
+            online: false,
+            direct: false,
+        };
+        let identity = TailscaleIdentity {
+            self_id: "member".into(),
+            self_ip: "100.100.10.22".parse().expect("IP"),
+            hostname: "gnx-candidate".into(),
+            host_peers: vec![controller.clone()],
+        };
+        let TopologyDecision::Member(selected) = select_topology(&identity).expect("member role")
+        else {
+            panic!("expected member role");
+        };
+        let state = crate::state::PersistedState::member(
+            identity.self_id.clone(),
+            identity.self_ip,
+            member_hostname(&identity.self_id).expect("member hostname"),
+            crate::state::ControllerIdentity {
+                id: selected.id,
+                hostname: selected.hostname,
+                ip: selected.ip,
+            },
+            "tetra-balance.ts.net".into(),
+        );
+
+        assert!(state.role.is_member());
+        assert_eq!(state.controller.id, controller.id);
+        assert!(matches!(
+            validate_persisted_member_controller(&state, &identity),
+            Err(error) if error.code == "CONTROLLER_UNAVAILABLE"
+        ));
+    }
+
+    #[test]
+    fn member_configuration_uses_tailnet_without_controller_workload_selection() {
+        let state = crate::state::PersistedState::member(
+            "member".into(),
+            "100.100.10.22".parse().expect("IP"),
+            "gnx-member-member".into(),
+            crate::state::ControllerIdentity {
+                id: "controller".into(),
+                hostname: "gnx-controller-controller".into(),
+                ip: "100.100.10.21".parse().expect("IP"),
+            },
+            "tetra-balance.ts.net".into(),
+        );
+        let configuration = InstallerConfiguration {
+            tailnet: "tetra-balance.ts.net".into(),
+            auth_key: "unused".into(),
+            pve_root_password: "unused".into(),
+            install_garage: true,
+            install_forgejo: true,
+        };
+
+        assert!(validate_state_configuration(&state, &configuration).is_ok());
+        let mut wrong_tailnet = configuration;
+        wrong_tailnet.tailnet = "other-tailnet.ts.net".into();
+        assert!(matches!(
+            validate_state_configuration(&state, &wrong_tailnet),
+            Err(error) if error.code == "STATE_CONFIGURATION_MISMATCH"
+        ));
+    }
+
+    #[test]
+    fn member_joining_status_keeps_local_components_ready_and_disables_controller_workloads() {
+        let status = Arc::new(RwLock::new(StatusResponse::service_ready()));
+        {
+            let mut value = status.write().expect("status lock");
+            value.components.wsl = "ready".into();
+            value.components.podman_machine = "ready".into();
+            value.components.kvm = "ready".into();
+            value.components.tailscale = "ready".into();
+            value.components.tailscale_serve = "ready".into();
+            value.components.proxmox = "ready".into();
+        }
+
+        set_member_joining_status(&status, "gnx-controller-controller");
+
+        let value = status.read().expect("status lock");
+        assert_eq!(value.role.as_deref(), Some("member"));
+        assert_eq!(
+            value.controller.as_deref(),
+            Some("gnx-controller-controller")
+        );
+        assert_eq!(value.stage, "MEMBER_JOINING");
+        assert_eq!(value.components.proxmox, "ready");
+        assert_eq!(value.components.opentofu, "not_applicable");
+        assert_eq!(value.services.garage, "not_applicable");
+        assert_eq!(value.services.forgejo, "not_applicable");
+    }
+
+    #[test]
+    fn member_join_input_is_exactly_five_newline_delimited_values_and_zeroizable() {
+        let member = crate::state::PersistedState::member(
+            "member".into(),
+            "100.100.10.22".parse().expect("IP"),
+            "gnx-member-member".into(),
+            crate::state::ControllerIdentity {
+                id: "controller".into(),
+                hostname: "gnx-controller-controller".into(),
+                ip: "100.100.10.21".parse().expect("IP"),
+            },
+            "tetra-balance.ts.net".into(),
+        );
+        let mut input = member_join_input(&member, "gnx-member-member", "test-credential");
+        assert_eq!(
+            input.as_slice(),
+            b"100.100.10.21\ngnx-controller-controller\n100.100.10.22\ngnx-member-member\ntest-credential\n"
+        );
+        input.zeroize();
+        assert!(input.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn member_join_maps_payload_errors_without_retaining_payload_output() {
+        assert_eq!(
+            map_member_join_error(b"PVE_JOIN_MTU_UNUSABLE").code,
+            "CLUSTER_NETWORK_PREFLIGHT_FAILED"
+        );
+        assert_eq!(
+            map_member_join_error(b"PVE_JOIN_TAILSCALE_RELAYED").code,
+            "TAILSCALE_DIRECT_PATH_REQUIRED"
+        );
+        assert_eq!(
+            map_member_join_error(b"PVE_JOIN_TOOL_MISSING").code,
+            "PVE_JOIN_FAILED"
+        );
+        assert_eq!(map_member_join_error(b"unexpected").code, "PVE_JOIN_FAILED");
+    }
+
+    #[test]
+    fn member_join_checkpoint_resumes_without_rediscovery_or_controller_change() {
+        let controller = crate::state::ControllerIdentity {
+            id: "controller".into(),
+            hostname: "gnx-controller-controller".into(),
+            ip: "100.100.10.21".parse().expect("IP"),
+        };
+        let mut member = crate::state::PersistedState::member(
+            "member".into(),
+            "100.100.10.22".parse().expect("IP"),
+            "gnx-member-member".into(),
+            controller.clone(),
+            "tetra-balance.ts.net".into(),
+        );
+        assert!(begin_member_join(&mut member).expect("transition to joining"));
+        assert_eq!(member.cluster_join, crate::state::ClusterJoinState::Joining);
+        assert_eq!(member.stage, "MEMBER_JOINING");
+        assert!(!begin_member_join(&mut member).expect("resume joining"));
+        assert_eq!(member.controller, controller);
+
+        member.cluster_join = crate::state::ClusterJoinState::Joined;
+        member.stage = "READY".into();
+        assert!(!begin_member_join(&mut member).expect("resume joined verification"));
+        assert_eq!(member.controller, controller);
+    }
+
+    #[test]
+    fn member_opentofu_guard_returns_before_starting_a_process() {
+        let error = apply_opentofu(
+            Path::new("not-launched"),
+            &crate::state::PersistedRole::Member,
+            "test-credential",
+            "gnx-controller-controller",
+            false,
+            false,
+        )
+        .expect_err("members must not invoke OpenTofu");
+        assert_eq!(error.code, "MEMBER_OPENTOFU_DENIED");
+    }
+
+    #[test]
+    fn member_ready_status_uses_the_final_member_contract() {
+        let status = Arc::new(RwLock::new(StatusResponse::service_ready()));
+        set_member_ready_status(&status, "gnx-controller-controller");
+        let value = status.read().expect("status lock");
+        assert_eq!(value.stage, "READY");
+        assert_eq!(value.overall, "ready");
+        assert_eq!(value.role.as_deref(), Some("member"));
+        assert!(value.cluster.joined);
+        assert!(value.cluster.quorate);
+        assert_eq!(value.components.opentofu, "not_applicable");
     }
 
     #[test]
@@ -2574,7 +3294,7 @@ mod tests {
             self_id: "node-id-after".into(),
             self_ip: "100.100.10.20".parse().expect("IP"),
             hostname: "gnx-controller-node-id-before".into(),
-            host_peer_ids: BTreeSet::new(),
+            host_peers: Vec::new(),
         };
 
         let (rotated, changed) =
@@ -2596,6 +3316,45 @@ mod tests {
         let error = reconcile_persisted_identity(state, &changed_hostname)
             .expect_err("hostname drift must fail");
         assert_eq!(error.code, "TAILSCALE_IDENTITY_CHANGED");
+    }
+
+    #[test]
+    fn reconciles_reauthenticated_member_without_mutating_the_pinned_controller() {
+        let controller = crate::state::ControllerIdentity {
+            id: "controller-id".into(),
+            hostname: "gnx-controller-controller-id".into(),
+            ip: "100.100.10.20".parse().expect("IP"),
+        };
+        let state = crate::state::PersistedState::member(
+            "member-id-before".into(),
+            "100.100.10.21".parse().expect("IP"),
+            "gnx-member-member-id-before".into(),
+            controller.clone(),
+            "tetra-balance.ts.net".into(),
+        );
+        let identity = TailscaleIdentity {
+            self_id: "member-id-after".into(),
+            self_ip: "100.100.10.21".parse().expect("IP"),
+            hostname: "gnx-member-member-id-before".into(),
+            host_peers: Vec::new(),
+        };
+
+        let (reconciled, changed) = reconcile_persisted_identity(state.clone(), &identity)
+            .expect("member re-authentication");
+        assert!(changed);
+        assert!(reconciled.role.is_member());
+        assert_eq!(reconciled.stage, state.stage);
+        assert_eq!(reconciled.self_id, "member-id-after");
+        assert_eq!(
+            reconciled.member.as_ref().expect("member identity").id,
+            "member-id-after"
+        );
+        assert_eq!(reconciled.controller, controller);
+        assert_eq!(reconciled.self_ip, state.self_ip);
+        assert_eq!(
+            persisted_local_hostname(&reconciled).expect("local hostname"),
+            "gnx-member-member-id-before"
+        );
     }
 
     #[test]

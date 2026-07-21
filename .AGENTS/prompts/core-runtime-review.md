@@ -1,0 +1,13 @@
+You are correcting the existing uncommitted CORE-02 diff after architect review. Do not spawn subagents. Read C:\Users\mayas\Quetzalcoatl\AGENTS.md, C:\Users\mayas\Quetzalcoatl\.AGENTS\SCOPE.md, C:\Users\mayas\Quetzalcoatl\.AGENTS\DECISIONS.md, C:\Users\mayas\Quetzalcoatl\.AGENTS\tasks\CORE_RUNTIME.md, and the member identity model already present in state.rs. Do not edit state.rs or gnx-protocol; they are the reviewed CORE-01 baseline.
+
+Correct these concrete defects in crates/gnx-service/src/runtime_gate.rs without broadening scope:
+
+1. On a persisted member, the local Tailscale hostname is member.hostname, never controller.hostname. Use the local logical hostname for prepare_tailscale, wait_for_tailscale, local Serve verification, and self-identity reconciliation. The controller hostname remains only the pinned remote controller identity.
+2. Reconcile Tailscale Self.ID by role. A controller may update self_id plus controller.id. A member may update self_id plus member.id and must never overwrite controller.id. Preserve role, stage, logical hostnames, and IPs. Add tests for both roles and for member restart/re-authentication.
+3. Initial role selection must persist a valid member decision exactly once even when the chosen controller is offline or lacks a direct path; then return the stable resumable availability/path error. A retry must reuse the pinned role/controller and must not redetect or switch controllers.
+4. The topology matrix must use one stable TOPOLOGY_UNSUPPORTED code for zero/multiple identifiable controllers and more than two existing hosts, with bounded diagnostic messages. No invalid topology may be persisted or mutate PVE.
+5. Keep only exact tag:quetzalcoatl-node peers, exclude self/expired/service peers, count known offline hosts, and require exact valid gnx-controller-* or gnx-member-* hostnames. Add missing negative filtering tests.
+6. Member configuration reconciliation must require the same tailnet but must not turn controller-only Garage/Forgejo selections into a restart mismatch; members always keep those workloads disabled/not_applicable.
+7. Before the member join is wired by PVE-01, the runtime may stop at MEMBER_JOIN_PENDING, but it must already expose role=member, the pinned controller, local components ready, and controller-only workloads not_applicable. It must never enter controller cluster/OpenTofu paths.
+
+Inspect for closely related regressions caused by the current diff, but do not redesign the product. Run cargo fmt --all -- --check, cargo test --workspace, and git diff --check. Do not commit or push. Return a concise report including tests and remaining PVE-01 integration blocker.

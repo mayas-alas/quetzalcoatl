@@ -126,6 +126,26 @@ impl StatusResponse {
             last_error: None,
         }
     }
+
+    pub fn member_ready(controller: String) -> Self {
+        let mut status = Self::service_ready();
+        status.overall = "ready".into();
+        status.stage = "READY".into();
+        status.role = Some("member".into());
+        status.controller = Some(controller);
+        status.components.wsl = "ready".into();
+        status.components.podman_machine = "ready".into();
+        status.components.kvm = "ready".into();
+        status.components.tailscale = "ready".into();
+        status.components.tailscale_serve = "ready".into();
+        status.components.proxmox = "ready".into();
+        status.components.opentofu = "not_applicable".into();
+        status.cluster.joined = true;
+        status.cluster.quorate = true;
+        status.services.garage = "not_applicable".into();
+        status.services.forgejo = "not_applicable".into();
+        status
+    }
 }
 
 #[cfg(test)]
@@ -151,5 +171,26 @@ mod tests {
             serde_json::to_string(&request).expect("serialize status request"),
             r#"{"command":"status"}"#
         );
+    }
+
+    #[test]
+    fn member_ready_serializes_the_final_member_contract() {
+        let status = StatusResponse::member_ready("gnx-controller-a".into());
+        let json = serde_json::to_value(&status).expect("serialize status");
+        assert_eq!(json["overall"], "ready");
+        assert_eq!(json["stage"], "READY");
+        assert_eq!(json["role"], "member");
+        assert_eq!(json["cluster"]["joined"], true);
+        assert_eq!(json["cluster"]["quorate"], true);
+        assert_eq!(json["components"]["service"], "ready");
+        assert_eq!(json["components"]["wsl"], "ready");
+        assert_eq!(json["components"]["podman_machine"], "ready");
+        assert_eq!(json["components"]["kvm"], "ready");
+        assert_eq!(json["components"]["tailscale"], "ready");
+        assert_eq!(json["components"]["tailscale_serve"], "ready");
+        assert_eq!(json["components"]["proxmox"], "ready");
+        assert_eq!(json["components"]["opentofu"], "not_applicable");
+        assert_eq!(json["services"]["garage"], "not_applicable");
+        assert_eq!(json["services"]["forgejo"], "not_applicable");
     }
 }
