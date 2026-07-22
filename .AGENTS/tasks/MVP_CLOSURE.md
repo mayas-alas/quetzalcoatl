@@ -2,7 +2,7 @@
 
 ## Objective
 
-Produce one frozen Quetzalcoatl 0.1.3 candidate with reproducible release identity, simplify the repository to one documentation authority per topic, and retain one operational path to validate `controller + member-1` through the PVE join without expanding the three-node GNX MVP.
+Produce one byte-reproducible Quetzalcoatl 0.1.3 candidate with fixed release identity, simplify the repository to one documentation authority per topic, and retain one operational path to validate `controller + member-1` through the PVE join without expanding the three-node GNX MVP.
 
 ## Required work
 
@@ -13,6 +13,7 @@ Produce one frozen Quetzalcoatl 0.1.3 candidate with reproducible release identi
 - Retain architecture, scope, decisions, tracker, evidence, and validation as the only authorities for their respective topics.
 - Move any still-valid legacy statement into an authority before deleting its pointer document.
 - Build the complete installer and record exact MSI/EXE hashes, sizes, version, and ProductCode.
+- Under the explicitly authorized packaging-toolchain expansion, make the WiX bind deterministic by fixing PackageCode, summary/compound-file timestamps and the Burn registration ID; prove it with two byte-identical builds.
 - Keep live validation honest: Dockur proves installer/runtime compatibility; the physical three-host gate alone proves quorum and G5.
 
 ## Operational finish
@@ -39,6 +40,7 @@ Produce one frozen Quetzalcoatl 0.1.3 candidate with reproducible release identi
 - `installer/package.wxs`
 - `installer/bundle.wxs`
 - `installer/build.ps1`
+- `installer/wixext/Gnx.DeterministicBundle.wixext/*`
 - `AGENTS.md`
 - `.AGENTS/README.md`
 - `.AGENTS/SCOPE.md`
