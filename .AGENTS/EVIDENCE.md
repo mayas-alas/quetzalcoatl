@@ -145,11 +145,22 @@ Legacy evidence is useful regression context but awards no current-cycle points 
 
 - Gate: G2 partial evidence; zero points until a run and end-user smoke pass.
 - Repository: `mayas-alas/windows-rdp-tailscale`.
-- Branch/revision: `codex/ci-dockur` at `e0459a87d282ed5b8d4e4ac23f2bfa2ecfb0c130`.
+- Active branch/revision: `validation/gnx-dockur-lifecycle` at `4ed9075ca14e43c52037fe9e67b96c1775ed9c74`; the former branch name was retired after its commit history was preserved.
 - Change: Ubuntu-hosted interactive compatibility lane with official Dockur image pinned by digest, read-only contents permission, frozen installer hash check, tailnet-only HTTPS noVNC, bounded session, user-invoked install/configure/evidence helpers, and redacted one-day artifact.
-- Verification: actionlint 1.7.12, all embedded Bash and PowerShell syntax checks, forbidden-marker scan, `git diff --check`, explicit two-file commit scope, and successful branch push.
+- Verification: actionlint, embedded helper self-tests, forbidden-marker scan, `git diff --check`, explicit two-file 0.1.3 asset-contract update, and successful branch push.
 - Limitation: logical slots are independent ephemeral compatibility sessions and cannot demonstrate Corosync, quorum or G5 network acceptance.
 - Verdict: `INCONCLUSIVE` until the current candidate run completes.
+
+### E-CI-02
+
+- Gate: G2 execution in progress; zero points until guest evidence is exported and the run succeeds.
+- Product source: `6822bce5e2a795f3f39a8dd379ea20315f880ac7`; workflow source: `4ed9075ca14e43c52037fe9e67b96c1775ed9c74`.
+- Prerelease: `gnx-smoke-20260722095851`; setup asset SHA-256 `1D0F386C150E931EAF04634DB24999116281A9B19A33F5D0A1C1AD9A738BF53D`; MSI asset SHA-256 `191ED009FC8F50E2D8F77B4D6FAE9E399B93C8A237BB6BF98178C0DA275796E6`.
+- Release URL: `https://github.com/mayas-alas/windows-rdp-tailscale/releases/tag/gnx-smoke-20260722095851`.
+- Controller run URL: `https://github.com/mayas-alas/windows-rdp-tailscale/actions/runs/29936148126`.
+- Actual so far: input/secret-presence validation, runner cleanup, KVM/TUN/capacity gate, host-side download and SHA-256 verification, guest helper generation, Tailscale edge connection, pinned Dockur guest startup, web-viewer health and tailnet-only noVNC publication passed. The job is waiting for interactive guest installation/configuration and validated exported evidence.
+- Secret scan: no secret value was read or recorded; only required-secret presence was checked.
+- Verdict: `IN_PROGRESS`; no install, controller convergence, member join, quorum or G5 result is claimed.
 
 ### E-PKG-03
 

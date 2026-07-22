@@ -49,7 +49,7 @@ Los tres binarios Rust de Windows (`gnx-host-preflight.exe`, `gnx-service.exe` y
 
 ## GitHub Actions Dockur compatibility
 
-Use the `codex/ci-dockur` branch of `mayas-alas/windows-rdp-tailscale`. Create a temporary prerelease containing the frozen setup asset named `Quetzalcoatl-0.1.3-setup-x64.exe`, then dispatch the workflow with its exact release tag and SHA-256.
+Use the `validation/gnx-dockur-lifecycle` branch of `mayas-alas/windows-rdp-tailscale`. Create a temporary prerelease containing the frozen setup asset named `Quetzalcoatl-0.1.3-setup-x64.exe`, then dispatch the workflow with its exact release tag and SHA-256.
 
 The accepted end-user sequence is:
 
