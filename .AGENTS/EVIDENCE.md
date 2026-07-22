@@ -143,24 +143,31 @@ Legacy evidence is useful regression context but awards no current-cycle points 
 
 ### E-CI-01
 
-- Gate: G2 partial evidence; zero points until a run and end-user smoke pass.
+- Gate: G2 workflow evidence.
 - Repository: `mayas-alas/windows-rdp-tailscale`.
 - Active branch/revision: `validation/gnx-dockur-lifecycle` at `4ed9075ca14e43c52037fe9e67b96c1775ed9c74`; the former branch name was retired after its commit history was preserved.
 - Change: Ubuntu-hosted interactive compatibility lane with official Dockur image pinned by digest, read-only contents permission, frozen installer hash check, tailnet-only HTTPS noVNC, bounded session, user-invoked install/configure/evidence helpers, and redacted one-day artifact.
 - Verification: actionlint, embedded helper self-tests, forbidden-marker scan, `git diff --check`, explicit two-file 0.1.3 asset-contract update, and successful branch push.
 - Limitation: logical slots are independent ephemeral compatibility sessions and cannot demonstrate Corosync, quorum or G5 network acceptance.
-- Verdict: `INCONCLUSIVE` until the current candidate run completes.
+- Verdict: `PASS` for the published workflow definition and frozen-asset contract; guest behavior is recorded separately.
 
 ### E-CI-02
 
-- Gate: G2 execution in progress; zero points until guest evidence is exported and the run succeeds.
+- Gate: G2 hosted installer/noVNC execution; does not score runtime convergence or G5.
 - Product source: `6822bce5e2a795f3f39a8dd379ea20315f880ac7`; workflow source: `4ed9075ca14e43c52037fe9e67b96c1775ed9c74`.
 - Prerelease: `gnx-smoke-20260722095851`; setup asset SHA-256 `1D0F386C150E931EAF04634DB24999116281A9B19A33F5D0A1C1AD9A738BF53D`; MSI asset SHA-256 `191ED009FC8F50E2D8F77B4D6FAE9E399B93C8A237BB6BF98178C0DA275796E6`.
 - Release URL: `https://github.com/mayas-alas/windows-rdp-tailscale/releases/tag/gnx-smoke-20260722095851`.
 - Controller run URL: `https://github.com/mayas-alas/windows-rdp-tailscale/actions/runs/29936148126`.
-- Actual so far: input/secret-presence validation, runner cleanup, KVM/TUN/capacity gate, host-side download and SHA-256 verification, guest helper generation, Tailscale edge connection, pinned Dockur guest startup, web-viewer health and tailnet-only noVNC publication passed. The job is waiting for interactive guest installation/configuration and validated exported evidence.
+- Member-1 run URL: `https://github.com/mayas-alas/windows-rdp-tailscale/actions/runs/29939246876`.
+- Member-2 run URL: `https://github.com/mayas-alas/windows-rdp-tailscale/actions/runs/29942222291`.
+- Environment: three independent Ubuntu 24.04 GitHub-hosted jobs using `dockurr/windows@sha256:8cc6f8bc4a60c078141fd3bcf7d2df69ae063a11d98be31a57429afe0dca66da`, KVM API 12, nested KVM enabled, TUN available, and tailnet-authenticated noVNC.
+- End-user action: launch the frozen EXE through the guest helper, accept UAC, allow both installer reboots, recover the hosted guest after Windows automatic repair, finish the bundle, and run the allowlisted evidence collector as administrator.
+- Expected: each logical slot installs the exact candidate, resumes after reboot, starts the Windows service, and exports schema-valid redacted evidence; Dockur is not expected to prove a shared cluster.
+- Actual: all three workflow runs concluded `success`. Each guest installed the exact setup hash, resumed the bundle and reported `Installation Successfully Completed`. The installed service was `Running`, `Auto`, under `NT SERVICE\Quetzalcoatl`; `gnx.exe` SHA-256 was `675279BD0163F48ACCB4EE9566457200BC494A980A8216C863061A733E968CAB` in every slot.
+- Hosted limitation: after WSL and Virtual Machine Platform were enabled, starting the Windows hypervisor sent each Dockur guest to automatic repair. `bcdedit /set {default} hypervisorlaunchtype off` restored Windows and allowed the bundle and evidence collector to finish, but necessarily disabled the nested hypervisor required by WSL2/Podman. Every exported `gnx status --json` therefore reported `overall=failed`, `stage=FAILED`, `role=null`, `service=ready`, `wsl=ready`, `podman_machine=failed`, `kvm=pending`, and all cluster fields false/pending.
+- Retained artifacts: `target/evidence/run-29936148126-controller`, `target/evidence/run-29939246876-member-1`, and `target/evidence/run-29942222291-member-2`; each GitHub artifact was uploaded with one-day retention and a slot/run-specific name.
 - Secret scan: no secret value was read or recorded; only required-secret presence was checked.
-- Verdict: `IN_PROGRESS`; no install, controller convergence, member join, quorum or G5 result is claimed.
+- Verdict: `PASS` for frozen-hash download, tailnet-only noVNC, real reboot/resume, MSI payload installation, service registration and redacted evidence export in all three logical slots. `FAIL` for hosted WSL2/Podman runtime convergence. Controller role, member roles, `PVE_JOIN=ready`, quorum and G5 remain explicitly unclaimed.
 
 ### E-PKG-03
 

@@ -2,7 +2,7 @@
 
 ## Objective
 
-Produce one byte-reproducible Quetzalcoatl 0.1.3 candidate with fixed release identity, simplify the repository to one documentation authority per topic, and retain one operational path to validate `controller + member-1` through the PVE join without expanding the three-node GNX MVP.
+Produce one byte-reproducible Quetzalcoatl 0.1.3 candidate with fixed release identity, simplify the repository to one documentation authority per topic, and retain one operational path for the exact `controller + member-1 + member-2` GNX MVP without expanding beyond three nodes.
 
 ## Required work
 
@@ -19,10 +19,11 @@ Produce one byte-reproducible Quetzalcoatl 0.1.3 candidate with fixed release id
 ## Operational finish
 
 1. Publish the exact frozen 0.1.3 candidate to a temporary prerelease only after explicit remote authorization.
-2. Run a clean `controller` slot and a clean `member-1` slot with the same hash.
+2. Run clean `controller`, `member-1`, and `member-2` logical slots with the same hash.
 3. Enter secrets only through the interactive noVNC/CLI path.
-4. Prove reboot/resume, persisted roles, `PVE_JOIN=ready`, member `READY`, member OpenTofu denial, and no duplicate controller workloads.
-5. Record run URLs and redacted evidence without claiming the physical three-host gate.
+4. Use Dockur to prove only what its independent hosted slots actually demonstrate: frozen-hash install, reboot/resume, service/payload state, noVNC access, and redacted evidence export.
+5. Reserve persisted roles, `PVE_JOIN=ready`, member `READY`, member OpenTofu denial, no duplicate controller workloads, quorum, and the direct-path network gate for the physical three-host evidence bundle.
+6. Record run URLs and redacted evidence without claiming the physical three-host gate.
 
 ## Non-goals
 

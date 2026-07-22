@@ -64,6 +64,8 @@ For G2, retain the run URL, workflow revision, pinned Dockur digest, installer h
 
 Dockur slots never close the physical network or cluster gate.
 
+The 0.1.3 hosted executions also established a narrower platform limit: the GitHub-hosted Dockur guest entered Windows automatic repair when the nested Windows hypervisor started. Recovering with `hypervisorlaunchtype off` was sufficient to finish and verify the installer payload, but it disables the WSL2/Podman hypervisor path and cannot be used as runtime convergence evidence. A green workflow with schema-valid evidence is therefore not equivalent to `gnx status=READY`; the ledger must record both results independently.
+
 ## Three-host functional acceptance
 
 Use three clean, compatible consumer Windows 11 hosts on the same low-latency site. Install the identical frozen setup sequentially:
