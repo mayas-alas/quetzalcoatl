@@ -1,6 +1,6 @@
 # PoC/MVP closure tracker
 
-Updated: 2026-07-21
+Updated: 2026-07-22
 
 ## Score
 
@@ -24,19 +24,21 @@ Functional MVP is reached at 90/100 only when G1-G5 are all `VERIFIED`. Pilotabl
 | Work item | Owner | State | Dependency | Output |
 |---|---|---|---|---|
 | GOV-01 Establish agent contract and tracker | architect | VERIFIED | none | `AGENTS.md`, `.AGENTS/` |
-| GRAPH-01 Refresh repository graph | architect/Graphify | IN_PROGRESS | final repository state | `graphify-out/` |
-| CI-01 Dockur Actions lane | codex-cli-ci | IN_PROGRESS | GOV-01 | GitHub workflow and run evidence |
+| MVP-CLOSE 0.1.3 candidate and focused documentation | architect | LOCAL_VERIFIED | reviewed member implementation | frozen EXE/MSI and normalized sources |
+| CI-01 Dockur Actions lane | architect/operator | IN_PROGRESS | frozen 0.1.3 candidate | GitHub workflow and run evidence |
 | CORE-01 Persisted member and status contract | codex-cli-state | VERIFIED | GOV-01 | Rust changes and tests |
 | CORE-02 Deterministic member discovery/orchestration | codex-cli-runtime | VERIFIED | CORE-01 | Rust changes and tests |
 | PVE-01 Secure resumable Proxmox join | codex-cli-pve/architect | VERIFIED | CORE-01 | Payload changes and tests |
 | INT-01 Integrate controller/member paths | codex-cli-integration/architect | VERIFIED | CORE-02, PVE-01 | Workspace test evidence |
-| PKG-01 Build frozen integrated installer | architect | VERIFIED | INT-01 | MSI/Setup hashes |
+| PKG-01 Prior integrated installer baseline | architect | VERIFIED | INT-01 | historical MSI/Setup hashes |
+| PKG-03 Frozen 0.1.3 installer identity | architect | VERIFIED | MVP-CLOSE | fixed ProductCode, MSI/Setup hashes |
 | LAB-01 Three-host network and cluster acceptance | architect/operator | BLOCKED | CI-01, INT-01, three hosts | Physical evidence bundle |
-| DOC-01 Normalize current and legacy documents | architect | VERIFIED | validated behavior | Final docs and runbook |
+| DOC-01 Consolidate documentation authorities | architect | VERIFIED | MVP-CLOSE | ten maintained Markdown sources |
 
 ## Current blockers
 
-- The published Dockur workflow still needs a successful run and interactive noVNC smoke against the new frozen installer before G2 receives points.
+- WiX 5 changes PackageCode, bundle registration ID and timestamps on each bind; the frozen 0.1.3 hashes must be published and tested without rebuilding the candidate.
+- The published Dockur workflow still needs a successful run and interactive noVNC smoke against that exact hash before G2 receives points.
 - Three physical consumer Windows 11 hosts have not yet supplied the required network and quorum evidence for this cycle.
 - The current integrated bundle is unsigned and has not completed current-candidate repair/uninstall/recovery runs, so G6 receives no points yet.
 - Existing GitHub runner evidence used DERP with approximately 64-73 ms RTT and cannot close G5.

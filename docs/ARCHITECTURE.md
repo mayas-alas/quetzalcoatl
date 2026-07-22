@@ -2,7 +2,7 @@
 
 Estado: contrato normativo para implementación  
 Alcance: Incremento 1 (controller) e Incremento 2 (member)  
-Prioridad: obtener `QuetzalcoatlSetup.exe` funcionando en un host real cuanto antes
+Prioridad: validar el candidato 0.1.3 en controller y member antes de la aceptación física de tres nodos
 
 ## 1. Objetivo
 
@@ -146,7 +146,7 @@ La máquina usa exclusivamente el artefacto WSL x86_64 de Podman Machine OS 6.0.
 
 WSL crea la interfaz exterior de esta máquina con MTU 1280, insuficiente para encapsular un paquete Tailscale de 1280 bytes. Antes de iniciar Tailscale, RuntimeGate fija y verifica MTU 1500 en `eth0`, `podman0` y cada veth del pod; se ejecuta de nuevo después de cada arranque de la máquina y recreación del pod. Esto evita el fallo silencioso donde pings pequeños funcionan pero TLS y SSH pierden sus segmentos grandes.
 
-Cada versión publicada obtiene un ProductCode MSI nuevo y conserva el UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`. `MajorUpgrade` ejecuta `RemoveExistingProducts` después de `InstallInitialize`, de modo que una falla restaura la versión anterior. Quetzalcoatl 0.1.2 usa ProductCode `{BDF28B1E-C968-4D1D-BEB1-AD110D43408F}` y reemplazó transaccionalmente el 0.1.1 instalado con ProductCode `{045129E9-858F-4546-B3D8-0373EBF51D19}`. Burn conserva ProviderKey y UpgradeCode `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`; cada evidencia identifica el EXE concreto por SHA-256.
+Cada versión publicada obtiene un ProductCode MSI explícito y conserva el UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`. `MajorUpgrade` ejecuta `RemoveExistingProducts` después de `InstallInitialize`, de modo que una falla restaura la versión anterior. Quetzalcoatl 0.1.3 usa ProductCode `{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}`; el build comprueba que no se regenere ni derive. El 0.1.2 validado históricamente usó `{BDF28B1E-C968-4D1D-BEB1-AD110D43408F}` y el 0.1.1 `{045129E9-858F-4546-B3D8-0373EBF51D19}`. Burn conserva ProviderKey y UpgradeCode `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`; cada evidencia identifica el EXE concreto por SHA-256.
 
 ## 5. `runtime payload v1` y Quadlets
 
@@ -600,7 +600,6 @@ El código informa etapa, código y evidencia acotada. No inventa un segundo cam
 
 ## 14. Referencias normativas
 
-- [PoC original](../PoC.md)
 - [WiX Toolset y Burn](https://docs.firegiant.com/wix/tools/burn/)
 - [WiX Toolset v5.0.2](https://github.com/wixtoolset/wix/releases/tag/v5.0.2)
 - [WinSW v2.12.0](https://github.com/winsw/winsw/releases/tag/v2.12.0)

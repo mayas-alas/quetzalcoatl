@@ -21,7 +21,7 @@ Verdict: PASS | FAIL | INCONCLUSIVE
 
 ## Existing evidence retained from legacy tracking
 
-The complete pre-normalization documents remain recoverable at revision `4c4cfd5bf5757480bdd19020bae10db6b2169c21`. Their integrity anchors are:
+The complete pre-normalization documents remain recoverable at revision `4c4cfd5bf5757480bdd19020bae10db6b2169c21`; they are intentionally absent from the maintained tree. Their integrity anchors are:
 
 - `PoC.md`: SHA-256 `93C584A4FE5193CA1AD740C3D5DCA5D15A445F68659810758BCC1325BF56C9D7`.
 - `docs/TRACKING.md`: SHA-256 `98A68F2A32E85C49CDF30FE87E4B07D5FAAE2B998041D34D47ABC1612E4A896B`.
@@ -34,7 +34,7 @@ Legacy evidence is useful regression context but awards no current-cycle points 
 - Environment: GitHub-hosted Linux runner with Dockur Windows guests.
 - Actual: two guests became reachable through RDP, but Tailscale paths used DERP with approximately 64-73 ms RTT.
 - Verdict: `INCONCLUSIVE` for compatibility regression and `FAIL` for the G5 Corosync network gate.
-- Source: `docs/TRACKING.md`.
+- Source: `docs/TRACKING.md` at revision `4c4cfd5bf5757480bdd19020bae10db6b2169c21`.
 
 ### E-LEGACY-INSTALLER-01
 
@@ -150,3 +150,16 @@ Legacy evidence is useful regression context but awards no current-cycle points 
 - Verification: actionlint 1.7.12, all embedded Bash and PowerShell syntax checks, forbidden-marker scan, `git diff --check`, explicit two-file commit scope, and successful branch push.
 - Limitation: logical slots are independent ephemeral compatibility sessions and cannot demonstrate Corosync, quorum or G5 network acceptance.
 - Verdict: `INCONCLUSIVE` until the current candidate run completes.
+
+### E-PKG-03
+
+- Gate: packaging prerequisite for G2/G5/G6; does not prove live installation or G5.
+- Source: current working tree after the authorized 0.1.3 identity correction.
+- Environment: Windows build host; Rust toolchain from `rust-toolchain.toml`; WiX 5.0.2.
+- Contract: package, bundle, four Rust crates and helper CacheIds use 0.1.3; MSI ProductCode is explicitly `{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}`; UpgradeCode remains `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`.
+- Verification: `cargo fmt --all -- --check`, `cargo clippy -p gnx-service -- -D warnings`, `cargo test --workspace` (40 passed), PowerShell parse, complete `installer/build.ps1`, positive reboot contract plus 10/10 negative mutations, static CRT import guard, shell syntax/static check and manifest digest for `gnx-pve-cluster-create`, Markdown link/inventory checks, MSI property query and extracted-bundle payload comparison.
+- MSI: 269,582,336 bytes; SHA-256 `5BC825359AB9F4EE086808BCD5FEB8948FF6DF0F8D2E4F92AADFC5CB09828955`; ProductVersion `0.1.3`; ProductCode `{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}`; PackageCode `{4931BD41-7686-4846-96A6-DFB5F1BB0AD8}`; UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`.
+- Setup: 557,536,137 bytes; SHA-256 `4C9FD2FD21970115E1040BD10F9B1439DE0931BF3A7F9425D61994490968A258`; Burn registration ID `{6FC46C58-8F5B-44E8-90D4-9E5E90A3EC33}`.
+- Embedded payloads: both preflight entries equal release helper SHA-256 `F327D6F5F1B10689D221A17DF618D7EA9AFBA474A2A37EB837F989AA54564AC1`; embedded MSI equals the frozen MSI; WSL and Podman equal their dependency-lock hashes.
+- Rebuild audit: a second successful bind produced different MSI/EXE hashes because WiX generated a new PackageCode, bundle registration ID and timestamps. The pair above is the single frozen candidate; do not rebuild it for Dockur evidence.
+- Verdict: `PASS` for the unsigned local packaging gate and frozen identity. Dockur installation, controller/member runtime behavior, signing and physical G5 remain unclaimed.

@@ -13,6 +13,18 @@ Before any run, record:
 
 Do not combine evidence from different installers or an uncommitted source tree.
 
+For 0.1.3, the MSI identity is part of the frozen candidate:
+
+```text
+ProductVersion = 0.1.3
+ProductCode     = {2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}
+UpgradeCode     = {47D5BD44-D061-407B-913B-47D17EC3BEA9}
+```
+
+`installer/build.ps1` rejects drift across WiX sources, Rust manifests, helper CacheIds and the generated MSI.
+
+The current WiX binder generates a new PackageCode, bundle registration ID and timestamps on every build. For release evidence, use the frozen files and hashes recorded in `.AGENTS/EVIDENCE.md`; rebuilding is a new candidate even when ProductVersion, ProductCode and UpgradeCode remain unchanged.
+
 ## Local code and package gate
 
 Run from the repository root:
@@ -27,11 +39,13 @@ Get-FileHash -Algorithm SHA256 target/installer/Quetzalcoatl.msi,target/installe
 
 Also run `sh -n` and `static-check` for `runtime/payload-v1/bin/gnx-pve-cluster-create`, then confirm its SHA-256 equals the entry in `runtime/payload-v1/manifest.json`.
 
-`PrepareWsl` y `ValidateHost` aceptan exclusivamente el exit code Rust `REBOOT_PENDING=14` como `scheduleReboot`; `PrepareWsl` conserva ademÃ¡s el cÃ³digo MSI 3010. El reinicio programado reanuda el preflight; una ejecuciÃ³n Dockur que lo demuestre sÃ³lo aporta evidencia de compatibilidad del instalador y no cierra G5.
+`PrepareWsl` y `ValidateHost` aceptan exclusivamente el exit code Rust `REBOOT_PENDING=14` como `forceReboot`; `PrepareWsl` conserva además el código MSI 3010 con ese comportamiento. El reinicio inmediato detiene la cadena antes del siguiente preflight y Burn la reanuda tras Windows; una ejecución Dockur que lo demuestre sólo aporta evidencia de compatibilidad del instalador y no cierra G5.
+
+Los tres binarios Rust de Windows (`gnx-host-preflight.exe`, `gnx-service.exe` y `gnx.exe`) se compilan con CRT estático. El build inspecciona sus import tables y falla si cualquiera depende de `VCRUNTIME`, `MSVCP`, `MSVCR`, `CONCRT`, `VCOMP`, `UCRTBASE` o `api-ms-win-crt-*`.
 
 ## GitHub Actions Dockur compatibility
 
-Use the `codex/ci-dockur` branch of `mayas-alas/windows-rdp-tailscale`. Create a draft release containing the frozen setup asset named `Quetzalcoatl-0.3.0-preview-setup-x64.exe`, then dispatch the workflow with its exact release tag and SHA-256.
+Use the `codex/ci-dockur` branch of `mayas-alas/windows-rdp-tailscale`. Create a temporary prerelease containing the frozen setup asset named `Quetzalcoatl-0.1.3-setup-x64.exe`, then dispatch the workflow with its exact release tag and SHA-256.
 
 The accepted end-user sequence is:
 

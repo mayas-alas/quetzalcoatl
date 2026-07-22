@@ -14,7 +14,7 @@ Accepted 2026-07-21. Dockur on a Linux GitHub runner is the required CI compatib
 
 ## D-004 - Documentation authority
 
-Accepted 2026-07-21. `docs/ARCHITECTURE.md` is the normative technical contract. `quetzalcoatl-cierre-poc-mvp.md` supplies the closure checklist until its consistent content is migrated. `.AGENTS/TRACKER.md` is the execution tracker. `PoC.md` and `docs/TRACKING.md` become legacy summaries after their still-valid evidence is migrated.
+Accepted 2026-07-21; consolidated 2026-07-22. `docs/ARCHITECTURE.md` is the normative technical contract, `.AGENTS/SCOPE.md` fixes the product boundary, `docs/VALIDATION.md` is the acceptance runbook, `.AGENTS/TRACKER.md` is the only progress tracker and `.AGENTS/EVIDENCE.md` is the evidence ledger. Retired specifications, prompts and task fragments are historical Git objects, not active sources.
 
 ## D-005 - Score integrity
 
@@ -23,3 +23,9 @@ Accepted 2026-07-21. Points are awarded only for reproducible evidence. Missing 
 ## D-006 - CLI reasoning allocation
 
 Accepted 2026-07-21. Codex CLI agents use `medium` reasoning for runtime integration, CI, security, secrets, recovery, and Proxmox work. `low` is reserved for narrow mechanical edits with deterministic acceptance. Agent self-reports never replace architect review.
+
+## D-007 - Frozen release identity
+
+Accepted 2026-07-22. Quetzalcoatl 0.1.3 has explicit MSI ProductCode `{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}` and preserves UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`. Package, bundle, Rust crates and CacheIds use the same version. The build must reject identity drift and verify the generated MSI properties before producing the bundle.
+
+WiX 5 generates a fresh MSI PackageCode, bundle registration ID and database timestamps on each bind, so rebuilding the same sources is not byte-for-byte deterministic. Release evidence therefore freezes one EXE/MSI pair by exact SHA-256 and must never combine a rebuilt file with that evidence.

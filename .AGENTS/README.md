@@ -1,14 +1,13 @@
 # Execution control
 
-This directory is the operational source of truth for closing the Quetzalcoatl PoC/MVP.
+This directory is the operational source of truth for closing the Quetzalcoatl MVP.
 
-- `SCOPE.md`: fixed product boundary and acceptance contract.
-- `DECISIONS.md`: architecture and orchestration decisions.
-- `TRACKER.md`: weighted completion score and current work state.
-- `EVIDENCE.md`: accepted proof and evidence format.
-- `tasks/`: bounded assignments for Codex CLI agents.
-- `prompts/`: launch prompts that bind an agent to one task.
+- `SCOPE.md`: fixed product boundary and definition of done.
+- `DECISIONS.md`: accepted architecture and release decisions.
+- `TRACKER.md`: current gates, score, work and blockers.
+- `EVIDENCE.md`: reproducible proof and historical evidence anchors.
+- `tasks/MVP_CLOSURE.md`: the only active bounded assignment.
 
-Only the primary architect updates scores, closes gates, or changes scope. Agents may propose tracker updates in their final report but must not award their own points.
+Historical prompts and completed task fragments remain recoverable from Git history; they are not current instructions. Only the primary architect updates scores, closes gates or changes scope.
 
-Statuses are `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, or `VERIFIED`. `VERIFIED` requires reproducible evidence recorded in `EVIDENCE.md`.
+Statuses are `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED` or `VERIFIED`. `VERIFIED` requires reproducible evidence recorded in `EVIDENCE.md`.
