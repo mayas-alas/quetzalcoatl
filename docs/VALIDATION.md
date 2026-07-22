@@ -18,12 +18,14 @@ For 0.1.3, the MSI identity is part of the frozen candidate:
 ```text
 ProductVersion = 0.1.3
 ProductCode     = {2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}
+PackageCode     = {4931BD41-7686-4846-96A6-DFB5F1BB0AD8}
 UpgradeCode     = {47D5BD44-D061-407B-913B-47D17EC3BEA9}
+Burn ID         = {6FC46C58-8F5B-44E8-90D4-9E5E90A3EC33}
 ```
 
-`installer/build.ps1` rejects drift across WiX sources, Rust manifests, helper CacheIds and the generated MSI.
+`installer/build.ps1` rejects drift across WiX sources, the pinned deterministic extension, Rust manifests, helper CacheIds and the generated MSI/Burn identities.
 
-The current WiX binder generates a new PackageCode, bundle registration ID and timestamps on every build. For release evidence, use the frozen files and hashes recorded in `.AGENTS/EVIDENCE.md`; rebuilding is a new candidate even when ProductVersion, ProductCode and UpgradeCode remain unchanged.
+The accepted packaging gate requires two builds from the same source to be byte-identical. Compare both sizes, SHA-256 values and direct file contents; then use only the hashes recorded in `.AGENTS/EVIDENCE.md` for remote evidence.
 
 ## Local code and package gate
 
@@ -36,6 +38,8 @@ cargo test --workspace
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File installer/build.ps1
 Get-FileHash -Algorithm SHA256 target/installer/Quetzalcoatl.msi,target/installer/QuetzalcoatlSetup.exe
 ```
+
+Run the installer build twice without changing sources, retain the first pair outside `target/installer`, and compare it directly with the second pair. Both the MSI and EXE must match byte for byte. Each build also extracts Burn, verifies its registration ID and confirms that the embedded MSI equals the generated MSI.
 
 Also run `sh -n` and `static-check` for `runtime/payload-v1/bin/gnx-pve-cluster-create`, then confirm its SHA-256 equals the entry in `runtime/payload-v1/manifest.json`.
 

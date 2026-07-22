@@ -154,12 +154,13 @@ Legacy evidence is useful regression context but awards no current-cycle points 
 ### E-PKG-03
 
 - Gate: packaging prerequisite for G2/G5/G6; does not prove live installation or G5.
-- Source: current working tree after the authorized 0.1.3 identity correction.
+- Source revision: `a0b7a1a016c3545eda0ddcb76cb39477d7bbb82e`.
 - Environment: Windows build host; Rust toolchain from `rust-toolchain.toml`; WiX 5.0.2.
-- Contract: package, bundle, four Rust crates and helper CacheIds use 0.1.3; MSI ProductCode is explicitly `{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}`; UpgradeCode remains `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`.
-- Verification: `cargo fmt --all -- --check`, `cargo clippy -p gnx-service -- -D warnings`, `cargo test --workspace` (40 passed), PowerShell parse, complete `installer/build.ps1`, positive reboot contract plus 10/10 negative mutations, static CRT import guard, shell syntax/static check and manifest digest for `gnx-pve-cluster-create`, Markdown link/inventory checks, MSI property query and extracted-bundle payload comparison.
-- MSI: 269,582,336 bytes; SHA-256 `5BC825359AB9F4EE086808BCD5FEB8948FF6DF0F8D2E4F92AADFC5CB09828955`; ProductVersion `0.1.3`; ProductCode `{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}`; PackageCode `{4931BD41-7686-4846-96A6-DFB5F1BB0AD8}`; UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`.
-- Setup: 557,536,137 bytes; SHA-256 `4C9FD2FD21970115E1040BD10F9B1439DE0931BF3A7F9425D61994490968A258`; Burn registration ID `{6FC46C58-8F5B-44E8-90D4-9E5E90A3EC33}`.
+- Contract: package, bundle, four Rust crates and helper CacheIds use 0.1.3; MSI identity is ProductCode `{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}`, PackageCode `{4931BD41-7686-4846-96A6-DFB5F1BB0AD8}` and preserved UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`; Burn registration ID is `{6FC46C58-8F5B-44E8-90D4-9E5E90A3EC33}`.
+- Verification: `cargo fmt --all -- --check`, `cargo clippy -p gnx-service -- -D warnings`, `cargo test --workspace` (40 passed), PowerShell parse, two complete successful `installer/build.ps1` runs, direct byte comparison, positive reboot contract plus 10/10 negative mutations, static CRT import guard, shell syntax/static check and manifest digest for `gnx-pve-cluster-create`, MSI property query, Burn registration query and extracted-bundle payload comparison.
+- MSI: 269,582,336 bytes; SHA-256 `191ED009FC8F50E2D8F77B4D6FAE9E399B93C8A237BB6BF98178C0DA275796E6`; ProductVersion `0.1.3`; ProductCode `{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}`; PackageCode `{4931BD41-7686-4846-96A6-DFB5F1BB0AD8}`; UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`.
+- Setup: 557,536,137 bytes; SHA-256 `1D0F386C150E931EAF04634DB24999116281A9B19A33F5D0A1C1AD9A738BF53D`; Burn registration ID `{6FC46C58-8F5B-44E8-90D4-9E5E90A3EC33}`.
 - Embedded payloads: both preflight entries equal release helper SHA-256 `F327D6F5F1B10689D221A17DF618D7EA9AFBA474A2A37EB837F989AA54564AC1`; embedded MSI equals the frozen MSI; WSL and Podman equal their dependency-lock hashes.
-- Rebuild audit: a second successful bind produced different MSI/EXE hashes because WiX generated a new PackageCode, bundle registration ID and timestamps. The pair above is the single frozen candidate; do not rebuild it for Dockur evidence.
-- Verdict: `PASS` for the unsigned local packaging gate and frozen identity. Dockur installation, controller/member runtime behavior, signing and physical G5 remain unclaimed.
+- Rebuild audit: `PASS`; two builds from the same source produced byte-identical MSI and EXE files. The build fixes PackageCode and Burn registration identity, normalizes MSI/CFB/CAB timestamps, recalculates the attached-container SHA-512 and CAB checksums, then extracts the result before accepting it.
+- Secret scan: build and verification output contained no configured runtime secret.
+- Verdict: `PASS` for the unsigned local packaging and reproducibility gate. Dockur installation, controller/member runtime behavior, signing and physical G5 remain unclaimed.
