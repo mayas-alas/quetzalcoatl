@@ -10,6 +10,9 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $cacheRoot = Join-Path $repoRoot "target\installer-cache"
 $outputRoot = Join-Path $repoRoot "target\installer"
 $lockPath = Join-Path $PSScriptRoot "dependencies.lock.json"
+$releaseVersion = "0.1.3"
+$releaseProductCode = "{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}"
+$releaseUpgradeCode = "{47D5BD44-D061-407B-913B-47D17EC3BEA9}"
 $dependencyLock = Get-Content -LiteralPath $lockPath -Raw -Encoding utf8 | ConvertFrom-Json
 
 if ($dependencyLock.schema_version -ne 1) {
@@ -114,12 +117,12 @@ function Test-RebootContract {
     $expectedMappings = @{
         PrepareWsl = @{
             '0' = 'success'
-            $rebootPending = 'scheduleReboot'
-            $rebootRequired = 'scheduleReboot'
+            $rebootPending = 'forceReboot'
+            $rebootRequired = 'forceReboot'
         }
         ValidateHost = @{
             '0' = 'success'
-            $rebootPending = 'scheduleReboot'
+            $rebootPending = 'forceReboot'
         }
     }
 
@@ -161,12 +164,73 @@ function Test-RebootContract {
     foreach ($exePackage in $exePackages) {
         if ($expectedMappings.ContainsKey($exePackage.GetAttribute('Id'))) { continue }
         $hasUnauthorizedMapping = @($exePackage.SelectNodes('./*[local-name()="ExitCode"]') | Where-Object {
-            $_.GetAttribute('Value') -eq $rebootPending -and $_.GetAttribute('Behavior') -eq 'scheduleReboot'
+            $_.GetAttribute('Value') -eq $rebootPending -and $_.GetAttribute('Behavior') -eq 'forceReboot'
         }).Count -gt 0
         if ($hasUnauthorizedMapping) {
-            throw "Installer reboot contract: ExePackage Id=$($exePackage.GetAttribute('Id')) must not map Rust REBOOT_PENDING=$rebootPending to Behavior=scheduleReboot."
+            throw "Installer reboot contract: ExePackage Id=$($exePackage.GetAttribute('Id')) must not map Rust REBOOT_PENDING=$rebootPending to Behavior=forceReboot."
         }
     }
+}
+
+function Test-ReleaseIdentityContract {
+    $packagePath = Join-Path $PSScriptRoot "package.wxs"
+    $bundlePath = Join-Path $PSScriptRoot "bundle.wxs"
+    $package = [xml] (Get-Content -LiteralPath $packagePath -Raw -Encoding utf8)
+    $bundle = [xml] (Get-Content -LiteralPath $bundlePath -Raw -Encoding utf8)
+    $packageNode = $package.SelectSingleNode('/*[local-name()="Wix"]/*[local-name()="Package"]')
+    $bundleNode = $bundle.SelectSingleNode('/*[local-name()="Wix"]/*[local-name()="Bundle"]')
+
+    if (-not $packageNode -or -not $bundleNode) {
+        throw "Release identity contract: package or bundle root is missing."
+    }
+    if ($packageNode.GetAttribute('Version') -ne $releaseVersion -or $bundleNode.GetAttribute('Version') -ne $releaseVersion) {
+        throw "Release identity contract: package and bundle must both use version $releaseVersion."
+    }
+    if ($packageNode.GetAttribute('ProductCode') -ne $releaseProductCode) {
+        throw "Release identity contract: package ProductCode must be the explicit 0.1.3 identity $releaseProductCode."
+    }
+    if ($packageNode.GetAttribute('UpgradeCode') -ne $releaseUpgradeCode) {
+        throw "Release identity contract: package UpgradeCode must remain $releaseUpgradeCode."
+    }
+
+    foreach ($packageId in @('PrepareWsl', 'ValidateHost')) {
+        $exePackage = @($bundle.SelectNodes('//*[local-name()="ExePackage"]') | Where-Object {
+            $_.GetAttribute('Id') -eq $packageId
+        })
+        if ($exePackage.Count -ne 1 -or $exePackage[0].GetAttribute('CacheId') -notmatch "-$([regex]::Escape($releaseVersion))$") {
+            throw "Release identity contract: ExePackage Id=$packageId must have a CacheId ending in -$releaseVersion."
+        }
+    }
+
+    foreach ($manifestPath in @(
+        'crates\gnx-cli\Cargo.toml',
+        'crates\gnx-protocol\Cargo.toml',
+        'crates\gnx-service\Cargo.toml',
+        'crates\host-preflight\Cargo.toml'
+    )) {
+        $manifest = Get-Content -LiteralPath (Join-Path $repoRoot $manifestPath) -Raw -Encoding utf8
+        if ($manifest -notmatch "(?m)^version\s*=\s*`"$([regex]::Escape($releaseVersion))`"\s*$") {
+            throw "Release identity contract: $manifestPath must use version $releaseVersion."
+        }
+    }
+}
+
+function Get-MsiProperty {
+    param(
+        [Parameter(Mandatory)][string] $Path,
+        [Parameter(Mandatory)][string] $Name
+    )
+
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $database = $installer.OpenDatabase($Path, 0)
+    $query = [string]::Format("SELECT ``Value`` FROM ``Property`` WHERE ``Property``='{0}'", $Name)
+    $view = $database.OpenView($query)
+    $null = $view.Execute()
+    $record = $view.Fetch()
+    if (-not $record) { throw "MSI property is missing: $Name" }
+    $value = $record.StringData(1).Trim()
+    $null = $view.Close()
+    return $value
 }
 
 if (-not $TestRebootContractOnly -and ($RebootContractBundlePath -or $RebootContractBundleXml)) {
@@ -177,6 +241,7 @@ $contractBundlePath = if ($TestRebootContractOnly -and $RebootContractBundlePath
 $contractBundleXml = if ($TestRebootContractOnly) { $RebootContractBundleXml } else { $null }
 Test-RebootContract -BundlePath $contractBundlePath -BundleXml $contractBundleXml
 if ($TestRebootContractOnly) { return }
+Test-ReleaseIdentityContract
 
 $artifacts = @{}
 foreach ($artifact in $dependencyLock.artifacts) {
@@ -201,11 +266,10 @@ try {
         throw "Pinned WiX Bal extension DLL is absent: $balExtension"
     }
 
-    & cargo rustc --release -p gnx-host-preflight -- -C target-feature=+crt-static
-    if ($LASTEXITCODE -ne 0) { throw "Static-CRT host preflight build failed." }
-
-    & cargo build --release -p gnx-service -p gnx-cli
-    if ($LASTEXITCODE -ne 0) { throw "Rust release build failed." }
+    foreach ($rustPackage in @('gnx-host-preflight', 'gnx-service', 'gnx-cli')) {
+        & cargo rustc --release -p $rustPackage -- -C target-feature=+crt-static
+        if ($LASTEXITCODE -ne 0) { throw "Static-CRT Rust release build failed for $rustPackage." }
+    }
 
     $hostPreflight = Join-Path $repoRoot "target\release\gnx-host-preflight.exe"
     $gnxService = Join-Path $repoRoot "target\release\gnx-service.exe"
@@ -213,10 +277,16 @@ try {
     $productMsi = Join-Path $outputRoot "Quetzalcoatl.msi"
     $setupExe = Join-Path $outputRoot "QuetzalcoatlSetup.exe"
 
-    $prohibitedCrtImports = Get-PeImportedDllNames -Path $hostPreflight |
-        Where-Object { $_ -match '(?i)^(?:api-ms-win-crt-.+|vcruntime[0-9].*|msvcp[0-9].*|msvcr[0-9].*|concrt[0-9].*|vcomp[0-9].*|ucrtbase)\.dll$' }
-    if ($prohibitedCrtImports) {
-        throw "gnx-host-preflight must not dynamically import a Visual C++ runtime DLL: $($prohibitedCrtImports -join ', ')"
+    foreach ($rustBinary in @(
+        @{ Name = 'gnx-host-preflight'; Path = $hostPreflight },
+        @{ Name = 'gnx-service'; Path = $gnxService },
+        @{ Name = 'gnx'; Path = $gnxCli }
+    )) {
+        $prohibitedCrtImports = Get-PeImportedDllNames -Path $rustBinary.Path |
+            Where-Object { $_ -match '(?i)^(?:api-ms-win-crt-.+|vcruntime[0-9].*|msvcp[0-9].*|msvcr[0-9].*|concrt[0-9].*|vcomp[0-9].*|ucrtbase)\.dll$' }
+        if ($prohibitedCrtImports) {
+            throw "$($rustBinary.Name) must not dynamically import a Visual C++ runtime DLL: $($prohibitedCrtImports -join ', ')"
+        }
     }
 
     & dotnet tool run wix -- build `
@@ -231,6 +301,15 @@ try {
         -d "RuntimePayload=$(Join-Path $repoRoot 'runtime\payload-v1')" `
         -out $productMsi
     if ($LASTEXITCODE -ne 0) { throw "MSI build failed." }
+
+    $actualProductVersion = Get-MsiProperty -Path $productMsi -Name 'ProductVersion'
+    $actualProductCode = Get-MsiProperty -Path $productMsi -Name 'ProductCode'
+    $actualUpgradeCode = Get-MsiProperty -Path $productMsi -Name 'UpgradeCode'
+    if ($actualProductVersion -ne $releaseVersion -or
+        $actualProductCode -ne $releaseProductCode -or
+        $actualUpgradeCode -ne $releaseUpgradeCode) {
+        throw "Built MSI identity mismatch: version=$actualProductVersion ProductCode=$actualProductCode UpgradeCode=$actualUpgradeCode"
+    }
 
     & dotnet tool run wix -- build `
         (Join-Path $PSScriptRoot "bundle.wxs") `
