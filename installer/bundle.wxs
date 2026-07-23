@@ -4,7 +4,7 @@
   <Bundle
     Name="Quetzalcoatl"
     Manufacturer="Quetzalcoatl"
-    Version="0.1.6"
+    Version="0.1.7"
     ProviderKey="{10B764B2-36AE-4911-A8C8-2F1A2A963769}"
     UpgradeCode="{10B764B2-36AE-4911-A8C8-2F1A2A963769}">
 
@@ -19,7 +19,7 @@
         Id="PrepareWsl"
         SourceFile="$(var.HostPreflight)"
         Name="gnx-host-prepare.exe"
-        CacheId="gnx-host-prepare-0.1.6"
+        CacheId="gnx-host-prepare-0.1.7"
         DetectCondition="0"
         InstallArguments="prepare-wsl --format json"
         PerMachine="yes"
@@ -50,7 +50,7 @@
         Id="ValidateHost"
         SourceFile="$(var.HostPreflight)"
         Name="gnx-host-validate.exe"
-        CacheId="gnx-host-validate-0.1.6"
+        CacheId="gnx-host-validate-0.1.7"
         DetectCondition="0"
         InstallArguments="--format json"
         PerMachine="yes"

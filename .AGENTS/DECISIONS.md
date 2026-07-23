@@ -55,6 +55,11 @@ Accepted 2026-07-21. Codex CLI agents use `medium` reasoning for runtime integra
 ## D-007 - Reproducible release identity
 
 Accepted 2026-07-22; expanded by explicit authorization on 2026-07-23.
+Quetzalcoatl 0.1.7 has MSI ProductCode
+`{129BD77D-90DE-4992-86AE-F168C930D549}`, PackageCode
+`{2164425B-7D79-4186-BDED-EF644CCB8804}`, preserved UpgradeCode
+`{47D5BD44-D061-407B-913B-47D17EC3BEA9}` and Burn registration ID
+`{60314D27-47DF-4118-B937-6D1445BAC9D7}`.
 Quetzalcoatl 0.1.6 has MSI ProductCode
 `{7E791841-74B0-4663-8993-952D43CD5C63}`, PackageCode
 `{EC36F9AD-6477-4CA3-B40C-37CC8D4F1837}`, preserved UpgradeCode

@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "gnx-cli"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "gnx-protocol",
  "serde_json",
@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "gnx-host-preflight"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "gnx-protocol"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -87,7 +87,7 @@ dependencies = [
 
 [[package]]
 name = "gnx-service"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "gnx-protocol",
  "serde",

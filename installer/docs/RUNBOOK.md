@@ -1,7 +1,7 @@
 # Runbook de build del instalador Quetzalcoatl
 
 Este procedimiento prepara un host Windows, valida el workspace y genera el
-MSI y el bundle reproducible de Quetzalcoatl 0.1.6.
+MSI y el bundle reproducible de Quetzalcoatl 0.1.7.
 
 Debe ejecutarse desde una copia confiable del repositorio. No introduce
 secretos, no instala el producto y no publica artefactos.
@@ -529,7 +529,7 @@ congelada del candidato.
 - La aceptación del clúster exige tres hosts físicos Windows 11 y se rige por
   `docs\VALIDATION.md`; este documento no reemplaza ese gate.
 
-## 19. Controles operativos de 0.1.6
+## 19. Controles operativos de 0.1.7
 
 Después de actualizar un controller `READY` que tenga Forgejo seleccionado,
 abra PowerShell como administrador. Para establecer el usuario y password
@@ -545,6 +545,17 @@ interrumpe, repita el mismo comando con los mismos valores para reanudarla.
 Esto incluye la recuperación de una cuenta creada sin privilegios por el fallo
 conocido de 0.1.5: actualice sin desinstalar y repita exactamente el usuario y
 password pendientes.
+
+No ejecute la rotación durante la convergencia posterior al upgrade. Espere:
+
+```powershell
+gnx status
+```
+
+hasta obtener `overall: ready` y `stage: READY`. Si el runtime sigue ocupado,
+la CLI devuelve `FORGEJO_CONFIGURATION_NOT_READY` o
+`FORGEJO_CONFIGURATION_BUSY`. Los fallos posteriores incluyen únicamente una
+etapa estable `FORGEJO_HOST_STAGE=...`, nunca el contenido HTTP ni secretos.
 
 Para reiniciar el servicio de Windows sin construir un comando PowerShell:
 

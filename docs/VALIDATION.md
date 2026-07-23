@@ -13,14 +13,14 @@ Before any run, record:
 
 Do not combine evidence from different installers or an uncommitted source tree.
 
-For 0.1.6, the MSI identity is part of the candidate:
+For 0.1.7, the MSI identity is part of the candidate:
 
 ```text
-ProductVersion = 0.1.6
-ProductCode     = {7E791841-74B0-4663-8993-952D43CD5C63}
-PackageCode     = {EC36F9AD-6477-4CA3-B40C-37CC8D4F1837}
+ProductVersion = 0.1.7
+ProductCode     = {129BD77D-90DE-4992-86AE-F168C930D549}
+PackageCode     = {2164425B-7D79-4186-BDED-EF644CCB8804}
 UpgradeCode     = {47D5BD44-D061-407B-913B-47D17EC3BEA9}
-Burn ID         = {B7AE53BF-D3A9-4948-AEC9-9C6F3490C2E2}
+Burn ID         = {60314D27-47DF-4118-B937-6D1445BAC9D7}
 ```
 
 `installer/build.ps1` rejects drift across WiX sources, the pinned deterministic extension, Rust manifests, helper CacheIds and the generated MSI/Burn identities.
@@ -63,11 +63,11 @@ redacted OpenTofu failure stage if the run does not complete. Never retain the
 transient password file, environment, provider process environment or raw
 state.
 
-The physical 0.1.6 recovery run is an in-place upgrade from the installed
-0.1.5 controller. Do not uninstall or purge 0.1.5 first. Record that
+The physical 0.1.7 recovery run is an in-place upgrade from the installed
+0.1.6 controller. Do not uninstall or purge 0.1.6 first. Record that
 Windows Installer detects the preserved UpgradeCode, replaces ProductCode
-`{F2F585E5-0D41-4BA5-8940-0E3AD5A86DCE}` with
-`{7E791841-74B0-4663-8993-952D43CD5C63}`, retains the same service SID,
+`{7E791841-74B0-4663-8993-952D43CD5C63}` with
+`{129BD77D-90DE-4992-86AE-F168C930D549}`, retains the same service SID,
 role, controller identity and protected state, and resumes the failed
 Forgejo credential rotation idempotently.
 
@@ -86,10 +86,12 @@ when its username changed, the service returns to `READY`, and no credential
 appears in process arguments, logs, state, Compose, OpenTofu state, or leftover
 `/run` files.
 
-The 0.1.5 live failure may already have created the requested user without
-administrator status. After upgrading, repeat `gnx configure forgejo` with the
-same username and password so the persisted pending DPAPI rotation can promote
-that account and complete.
+The earlier live failures may already have created the requested user without
+administrator status. After upgrading, wait for `gnx status` to report
+`overall: ready`, `stage: READY`, then repeat `gnx configure forgejo` with the
+same username and password. Before `READY`, the expected result is now
+`FORGEJO_CONFIGURATION_NOT_READY` or `FORGEJO_CONFIGURATION_BUSY`, without
+starting a Podman operation.
 
 `PrepareWsl` y `ValidateHost` aceptan exclusivamente el exit code Rust `REBOOT_PENDING=14` como `forceReboot`; `PrepareWsl` conserva además el código MSI 3010 con ese comportamiento. El reinicio inmediato detiene la cadena antes del siguiente preflight y Burn la reanuda tras Windows; una ejecución Dockur que lo demuestre sólo aporta evidencia de compatibilidad del instalador y no cierra G5.
 
@@ -97,7 +99,7 @@ Los tres binarios Rust de Windows (`gnx-host-preflight.exe`, `gnx-service.exe` y
 
 ## GitHub Actions Dockur compatibility
 
-Use the `validation/gnx-dockur-lifecycle` branch of `mayas-alas/windows-rdp-tailscale`. Create a temporary prerelease containing the frozen setup asset named `Quetzalcoatl-0.1.6-setup-x64.exe`, then dispatch the workflow with its exact release tag and SHA-256.
+Use the `validation/gnx-dockur-lifecycle` branch of `mayas-alas/windows-rdp-tailscale`. Create a temporary prerelease containing the frozen setup asset named `Quetzalcoatl-0.1.7-setup-x64.exe`, then dispatch the workflow with its exact release tag and SHA-256.
 
 The accepted end-user sequence is:
 
