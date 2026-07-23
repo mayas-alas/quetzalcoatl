@@ -33,7 +33,18 @@ pub struct GarageSecrets {
 pub struct ForgejoSecrets {
     pub secret_key: String,
     pub internal_token: String,
+    #[serde(default = "default_forgejo_username")]
+    pub admin_username: String,
     pub admin_password: String,
+    #[serde(default)]
+    pub pending_admin: Option<ForgejoAdminCredential>,
+}
+
+#[derive(Deserialize, PartialEq, Serialize, Zeroize)]
+#[serde(deny_unknown_fields)]
+pub struct ForgejoAdminCredential {
+    pub username: String,
+    pub password: String,
 }
 
 impl ServiceSecrets {
@@ -55,12 +66,58 @@ impl ServiceSecrets {
                     Ok(ForgejoSecrets {
                         secret_key: random_hex(32)?,
                         internal_token: random_hex(32)?,
+                        admin_username: default_forgejo_username(),
                         admin_password: random_hex(24)?,
+                        pending_admin: None,
                     })
                 })
                 .transpose()?,
         })
     }
+}
+
+pub fn begin_forgejo_update(
+    secrets: &mut ServiceSecrets,
+    username: &str,
+    password: &str,
+) -> Result<(), ServiceSecretsError> {
+    if !valid_forgejo_username(username) || !valid_forgejo_password(password) {
+        return Err(ServiceSecretsError::new(
+            "Forgejo administrator credential does not satisfy the product policy",
+        ));
+    }
+    let forgejo = secrets
+        .forgejo
+        .as_mut()
+        .ok_or_else(|| ServiceSecretsError::new("Forgejo is not selected"))?;
+    let requested = ForgejoAdminCredential {
+        username: username.to_owned(),
+        password: password.to_owned(),
+    };
+    match forgejo.pending_admin.as_ref() {
+        None => forgejo.pending_admin = Some(requested),
+        Some(pending) if pending == &requested => {}
+        Some(_) => {
+            return Err(ServiceSecretsError::new(
+                "a different Forgejo credential rotation is already pending",
+            ));
+        }
+    }
+    store(secrets)
+}
+
+pub fn commit_forgejo_update(secrets: &mut ServiceSecrets) -> Result<(), ServiceSecretsError> {
+    let forgejo = secrets
+        .forgejo
+        .as_mut()
+        .ok_or_else(|| ServiceSecretsError::new("Forgejo is not selected"))?;
+    let mut pending = forgejo
+        .pending_admin
+        .take()
+        .ok_or_else(|| ServiceSecretsError::new("Forgejo credential rotation is not pending"))?;
+    forgejo.admin_username = std::mem::take(&mut pending.username);
+    forgejo.admin_password = std::mem::take(&mut pending.password);
+    store(secrets)
 }
 
 pub fn load_or_create(
@@ -206,11 +263,34 @@ fn validate(secrets: &ServiceSecrets) -> Result<(), ServiceSecretsError> {
     if let Some(forgejo) = secrets.forgejo.as_ref()
         && (!valid_hex(&forgejo.secret_key, 64)
             || !valid_hex(&forgejo.internal_token, 64)
-            || !valid_hex(&forgejo.admin_password, 48))
+            || !valid_forgejo_username(&forgejo.admin_username)
+            || !valid_forgejo_password(&forgejo.admin_password)
+            || forgejo.pending_admin.as_ref().is_some_and(|pending| {
+                !valid_forgejo_username(&pending.username)
+                    || !valid_forgejo_password(&pending.password)
+            }))
     {
         return Err(ServiceSecretsError::new("invalid Forgejo secret data"));
     }
     Ok(())
+}
+
+fn default_forgejo_username() -> String {
+    "gnx-admin".into()
+}
+
+fn valid_forgejo_username(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 40
+        && !value.starts_with(['-', '_', '.'])
+        && !value.ends_with(['-', '_', '.'])
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+fn valid_forgejo_password(value: &str) -> bool {
+    (12..=128).contains(&value.len()) && value.bytes().all(|byte| byte.is_ascii_graphic())
 }
 
 fn valid_garage_access_key(value: &str) -> bool {
@@ -303,6 +383,10 @@ mod tests {
             64
         );
         assert_eq!(
+            secrets.forgejo.as_ref().expect("Forgejo").admin_username,
+            "gnx-admin"
+        );
+        assert_eq!(
             secrets
                 .forgejo
                 .as_ref()
@@ -314,6 +398,30 @@ mod tests {
         let json = serde_json::to_string(&secrets).expect("serialize service secrets");
         assert!(!json.contains("auth_key"));
         assert!(!json.contains("pve_root_password"));
+    }
+
+    #[test]
+    fn legacy_forgejo_secret_defaults_to_managed_admin() {
+        let legacy = format!(
+            r#"{{"schema_version":1,"garage":null,"forgejo":{{"secret_key":"{}","internal_token":"{}","admin_password":"{}"}}}}"#,
+            "a".repeat(64),
+            "b".repeat(64),
+            "c".repeat(48)
+        );
+        let parsed: ServiceSecrets = serde_json::from_str(&legacy).expect("legacy secret");
+        assert_eq!(
+            parsed.forgejo.as_ref().expect("Forgejo").admin_username,
+            "gnx-admin"
+        );
+        assert!(
+            parsed
+                .forgejo
+                .as_ref()
+                .expect("Forgejo")
+                .pending_admin
+                .is_none()
+        );
+        assert!(validate(&parsed).is_ok());
     }
 
     #[test]

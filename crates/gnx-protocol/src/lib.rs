@@ -10,6 +10,8 @@ pub struct Request {
     pub command: Command,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub configuration: Option<InstallerConfiguration>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forgejo_configuration: Option<ForgejoConfiguration>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -17,6 +19,7 @@ pub struct Request {
 pub enum Command {
     Status,
     Configure,
+    ConfigureForgejo,
 }
 
 #[derive(Deserialize, PartialEq, Serialize, Zeroize, ZeroizeOnDrop)]
@@ -27,6 +30,13 @@ pub struct InstallerConfiguration {
     pub pve_root_password: String,
     pub install_garage: bool,
     pub install_forgejo: bool,
+}
+
+#[derive(Deserialize, PartialEq, Serialize, Zeroize, ZeroizeOnDrop)]
+#[serde(deny_unknown_fields)]
+pub struct ForgejoConfiguration {
+    pub username: String,
+    pub password: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -166,6 +176,7 @@ mod tests {
         let request = Request {
             command: Command::Status,
             configuration: None,
+            forgejo_configuration: None,
         };
         assert_eq!(
             serde_json::to_string(&request).expect("serialize status request"),

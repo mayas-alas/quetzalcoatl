@@ -54,7 +54,7 @@ fn serve_client(pipe: HANDLE, status: &Arc<RwLock<StatusResponse>>) -> Result<()
     let response = match request.command {
         Command::Status => {
             authorize_client(pipe, false)?;
-            if request.configuration.is_some() {
+            if request.configuration.is_some() || request.forgejo_configuration.is_some() {
                 return Err("status request cannot contain configuration".into());
             }
             let snapshot = status
@@ -69,6 +69,10 @@ fn serve_client(pipe: HANDLE, status: &Arc<RwLock<StatusResponse>>) -> Result<()
                     "CONFIGURATION_UNAUTHORIZED",
                     "configuration requires an elevated local administrator",
                 ),
+                Ok(()) if request.forgejo_configuration.is_some() => OperationResponse::rejected(
+                    "CONFIGURATION_INVALID",
+                    "configure request contains an unexpected Forgejo configuration",
+                ),
                 Ok(()) => match request.configuration.as_ref() {
                     None => OperationResponse::rejected(
                         "CONFIGURATION_INVALID",
@@ -78,6 +82,34 @@ fn serve_client(pipe: HANDLE, status: &Arc<RwLock<StatusResponse>>) -> Result<()
                         Ok(()) => OperationResponse::accepted("CONFIGURATION_STORED"),
                         Err(error) => OperationResponse::rejected(error.code(), error.message()),
                     },
+                },
+            };
+            serde_json::to_vec(&operation)
+        }
+        Command::ConfigureForgejo => {
+            let operation = match authorize_client(pipe, true) {
+                Err(_) => OperationResponse::rejected(
+                    "FORGEJO_CONFIGURATION_UNAUTHORIZED",
+                    "Forgejo configuration requires an elevated local administrator",
+                ),
+                Ok(()) if request.configuration.is_some() => OperationResponse::rejected(
+                    "FORGEJO_CONFIGURATION_INVALID",
+                    "Forgejo configure request contains an unexpected installer configuration",
+                ),
+                Ok(()) => match request.forgejo_configuration.as_ref() {
+                    None => OperationResponse::rejected(
+                        "FORGEJO_CONFIGURATION_INVALID",
+                        "Forgejo configure request is missing its configuration",
+                    ),
+                    Some(configuration) => {
+                        match crate::runtime_gate::configure_forgejo(
+                            &configuration.username,
+                            &configuration.password,
+                        ) {
+                            Ok(()) => OperationResponse::accepted("FORGEJO_CONFIGURATION_STORED"),
+                            Err((code, message)) => OperationResponse::rejected(&code, &message),
+                        }
+                    }
                 },
             };
             serde_json::to_vec(&operation)

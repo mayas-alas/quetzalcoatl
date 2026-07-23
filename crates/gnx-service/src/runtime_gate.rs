@@ -25,6 +25,7 @@ const MACHINE_NETWORK_MTU: u32 = 1500;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const LXC_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-lxc-prepare";
 const LXC_SERVICE_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-lxc-service-prepare";
+const FORGEJO_CONFIGURE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-forgejo-configure";
 const OPENTOFU_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-opentofu-prepare";
 const PVE_CLUSTER_CREATE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-cluster-create";
 const PVE_CONFIGURE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-configure";
@@ -41,7 +42,7 @@ const MACHINE_IMAGE_ARTIFACT: &str = "podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_URL: &str = "https://github.com/podman-container-tools/podman-machine-os/releases/download/v6.0.1/podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_SIZE: u64 = 249_510_008;
 
-const PAYLOAD_FILES: [PayloadSpec; 30] = [
+const PAYLOAD_FILES: [PayloadSpec; 32] = [
     PayloadSpec::new(
         "bin/gnx-proxmox-entrypoint",
         "/usr/libexec/quetzalcoatl/gnx-proxmox-entrypoint",
@@ -65,6 +66,16 @@ const PAYLOAD_FILES: [PayloadSpec; 30] = [
     PayloadSpec::new(
         "bin/gnx-lxc-service-prepare",
         "/usr/libexec/quetzalcoatl/gnx-lxc-service-prepare",
+        "0755",
+    ),
+    PayloadSpec::new(
+        "bin/gnx-forgejo-configure",
+        "/usr/libexec/quetzalcoatl/gnx-forgejo-configure",
+        "0755",
+    ),
+    PayloadSpec::new(
+        "bin/gnx-forgejo-configure-guest",
+        "/usr/libexec/quetzalcoatl/gnx-forgejo-configure-guest",
         "0755",
     ),
     PayloadSpec::new(
@@ -352,6 +363,75 @@ pub fn run(status: Arc<RwLock<StatusResponse>>) {
     if let Err(error) = run_inner(&status) {
         fail(&status, error);
     }
+}
+
+pub fn configure_forgejo(username: &str, password: &str) -> Result<(), (String, String)> {
+    configure_forgejo_inner(username, password)
+        .map_err(|error| (error.code.to_owned(), error.message))
+}
+
+fn configure_forgejo_inner(username: &str, password: &str) -> Result<(), GateError> {
+    let state = load_persisted_state()?.ok_or_else(|| {
+        GateError::new(
+            "FORGEJO_CONFIGURATION_UNAVAILABLE",
+            Component::Forgejo,
+            "the persisted role is not available",
+        )
+    })?;
+    if !state.role.is_controller() || state.stage != "READY" || !state.install_forgejo {
+        return Err(GateError::new(
+            "FORGEJO_CONFIGURATION_UNAVAILABLE",
+            Component::Forgejo,
+            "Forgejo configuration requires a ready controller with Forgejo selected",
+        ));
+    }
+    let podman = podman_binary()?;
+    let mut secrets =
+        crate::service_secrets::load_required(state.install_garage, state.install_forgejo)
+            .map_err(|error| {
+                GateError::new("FORGEJO_SECRET_FAILED", Component::Forgejo, error.message())
+            })?;
+    crate::service_secrets::begin_forgejo_update(&mut secrets, username, password).map_err(
+        |error| {
+            GateError::new(
+                "FORGEJO_CONFIGURATION_INVALID",
+                Component::Forgejo,
+                error.message(),
+            )
+        },
+    )?;
+    let forgejo = secrets.forgejo.as_ref().ok_or_else(|| {
+        GateError::new(
+            "FORGEJO_CONFIGURATION_UNAVAILABLE",
+            Component::Forgejo,
+            "Forgejo protected credentials are unavailable",
+        )
+    })?;
+    let pending = forgejo.pending_admin.as_ref().ok_or_else(|| {
+        GateError::new(
+            "FORGEJO_SECRET_FAILED",
+            Component::Forgejo,
+            "Forgejo pending credential was not persisted",
+        )
+    })?;
+    let mut input = Zeroizing::new(format!(
+        "{}\n{}\n{}\n{}\n",
+        forgejo.admin_username, forgejo.admin_password, pending.username, pending.password
+    ));
+    let output = machine_stdin(&podman, [FORGEJO_CONFIGURE_BIN], input.as_bytes())
+        .map_err(|error| error.with_code("FORGEJO_CONFIGURATION_FAILED", Component::Forgejo));
+    input.zeroize();
+    let output = output?;
+    if output.stdout != b"FORGEJO_CONFIGURATION=ready\n" {
+        return Err(GateError::new(
+            "FORGEJO_CONFIGURATION_FAILED",
+            Component::Forgejo,
+            "Forgejo credential rotation did not confirm the fixed output contract",
+        ));
+    }
+    crate::service_secrets::commit_forgejo_update(&mut secrets).map_err(|error| {
+        GateError::new("FORGEJO_SECRET_FAILED", Component::Forgejo, error.message())
+    })
 }
 
 fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {

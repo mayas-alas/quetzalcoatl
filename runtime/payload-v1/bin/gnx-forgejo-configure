@@ -1,0 +1,40 @@
+#!/bin/sh
+set -eu
+umask 077
+export LC_ALL=C
+
+runtime_dir='/run/gnx/forgejo-configure'
+input="$runtime_dir/input"
+guest_input='/run/gnx/forgejo-configure.input'
+guest_script='/run/gnx/forgejo-configure'
+vmid=201
+
+cleanup() {
+  rm -f "$input"
+  rmdir "$runtime_dir" >/dev/null 2>&1 || true
+  pct exec "$vmid" -- rm -f "$guest_input" "$guest_script" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT HUP INT TERM
+
+install -d -m 0700 "$runtime_dir"
+cat > "$input"
+chmod 0400 "$input"
+test "$(stat -c '%u:%g:%a' "$input")" = '0:0:400'
+
+line_count=$(wc -l < "$input")
+[ "$line_count" -eq 4 ]
+test -x /usr/libexec/quetzalcoatl/gnx-forgejo-configure-guest
+test -s "/etc/pve/lxc/$vmid.conf"
+pct status "$vmid" | grep -q 'status: running'
+
+pct push "$vmid" "$input" "$guest_input" --perms 0400 >/dev/null
+pct push "$vmid" /usr/libexec/quetzalcoatl/gnx-forgejo-configure-guest "$guest_script" --perms 0700 >/dev/null
+output=$(pct exec "$vmid" -- "$guest_script")
+
+rm -f "$input"
+pct exec "$vmid" -- rm -f "$guest_input" "$guest_script" >/dev/null
+test ! -e "$input"
+trap - EXIT HUP INT TERM
+rmdir "$runtime_dir"
+[ "$output" = 'FORGEJO_CONFIGURATION=ready' ]
+printf '%s\n' "$output"

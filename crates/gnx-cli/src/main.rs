@@ -4,13 +4,28 @@ mod pipe;
 use std::env;
 #[cfg(windows)]
 use std::io::{self, Write};
-
-use gnx_protocol::{InstallerConfiguration, StatusResponse};
 #[cfg(windows)]
-use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+use std::mem::size_of;
+#[cfg(windows)]
+use std::ptr::{null, null_mut};
+#[cfg(windows)]
+use std::thread;
+#[cfg(windows)]
+use std::time::{Duration, Instant};
+
+use gnx_protocol::{ForgejoConfiguration, InstallerConfiguration, StatusResponse};
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::{GetLastError, HANDLE, INVALID_HANDLE_VALUE};
 #[cfg(windows)]
 use windows_sys::Win32::System::Console::{
     ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode,
+};
+#[cfg(windows)]
+use windows_sys::Win32::System::Services::{
+    CloseServiceHandle, ControlService, OpenSCManagerW, OpenServiceW, QueryServiceStatusEx,
+    SC_MANAGER_CONNECT, SC_STATUS_PROCESS_INFO, SERVICE_CONTROL_STOP, SERVICE_QUERY_STATUS,
+    SERVICE_RUNNING, SERVICE_START, SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOP,
+    SERVICE_STOPPED, StartServiceW,
 };
 #[cfg(windows)]
 use zeroize::Zeroize;
@@ -18,10 +33,12 @@ use zeroize::Zeroize;
 enum Action {
     Status { json: bool },
     Configure,
+    ConfigureForgejo,
+    Restart,
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  gnx status [--json]\n  gnx configure"
+    "Usage:\n  gnx status [--json]\n  gnx configure\n  gnx configure forgejo\n  gnx restart"
 }
 
 fn parse_args() -> Result<Action, ()> {
@@ -32,6 +49,10 @@ fn parse_args() -> Result<Action, ()> {
             Ok(Action::Status { json: true })
         }
         (Some(command), None, None) if command == "configure" => Ok(Action::Configure),
+        (Some(command), Some(target), None) if command == "configure" && target == "forgejo" => {
+            Ok(Action::ConfigureForgejo)
+        }
+        (Some(command), None, None) if command == "restart" => Ok(Action::Restart),
         _ => Err(()),
     }
 }
@@ -69,8 +90,150 @@ fn run(action: Action) -> Result<(), String> {
             }
             println!("configuration accepted: {}", response.stage);
         }
+        Action::ConfigureForgejo => {
+            let configuration = collect_forgejo_configuration()?;
+            let response = pipe::configure_forgejo(configuration)?;
+            require_accepted(response, "FORGEJO_CONFIGURATION_REJECTED")?;
+            println!("Forgejo configuration accepted");
+        }
+        Action::Restart => {
+            restart_service()?;
+            println!("Quetzalcoatl service restarted");
+        }
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn require_accepted(
+    response: gnx_protocol::OperationResponse,
+    fallback_code: &str,
+) -> Result<(), String> {
+    if response.accepted {
+        Ok(())
+    } else {
+        Err(format!(
+            "{}: {}",
+            response.error_code.as_deref().unwrap_or(fallback_code),
+            response
+                .message
+                .as_deref()
+                .unwrap_or("operation was rejected")
+        ))
+    }
+}
+
+#[cfg(windows)]
+fn collect_forgejo_configuration() -> Result<ForgejoConfiguration, String> {
+    let username = read_public("Forgejo administrator username: ")?
+        .trim()
+        .to_owned();
+    let password = read_secret("Forgejo administrator password: ")?;
+    let confirmation = read_secret("Confirm Forgejo administrator password: ")?;
+    if password.as_str() != confirmation.as_str() {
+        return Err("Forgejo administrator password confirmation does not match".into());
+    }
+    Ok(ForgejoConfiguration {
+        username,
+        password: password.into_inner(),
+    })
+}
+
+#[cfg(windows)]
+fn restart_service() -> Result<(), String> {
+    let manager = unsafe { OpenSCManagerW(null(), null(), SC_MANAGER_CONNECT) };
+    if manager.is_null() {
+        return Err(last_win32("cannot open Windows Service Control Manager"));
+    }
+    let manager = OwnedServiceHandle(manager);
+    let name = wide("Quetzalcoatl");
+    let service = unsafe {
+        OpenServiceW(
+            manager.0,
+            name.as_ptr(),
+            SERVICE_STOP | SERVICE_START | SERVICE_QUERY_STATUS,
+        )
+    };
+    if service.is_null() {
+        return Err(last_win32(
+            "cannot open Quetzalcoatl service; run gnx from an elevated administrator console",
+        ));
+    }
+    let service = OwnedServiceHandle(service);
+    let current = query_service_status(service.0)?;
+    if current.dwCurrentState != SERVICE_STOPPED {
+        let mut status = SERVICE_STATUS::default();
+        if unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut status) } == 0 {
+            return Err(last_win32(
+                "cannot stop Quetzalcoatl service; run gnx from an elevated administrator console",
+            ));
+        }
+        wait_for_service_state(service.0, SERVICE_STOPPED)?;
+    }
+    if unsafe { StartServiceW(service.0, 0, null_mut()) } == 0 {
+        return Err(last_win32("cannot start Quetzalcoatl service"));
+    }
+    wait_for_service_state(service.0, SERVICE_RUNNING)
+}
+
+#[cfg(windows)]
+fn query_service_status(
+    service: windows_sys::Win32::System::Services::SC_HANDLE,
+) -> Result<SERVICE_STATUS_PROCESS, String> {
+    let mut status = SERVICE_STATUS_PROCESS::default();
+    let mut required = 0u32;
+    if unsafe {
+        QueryServiceStatusEx(
+            service,
+            SC_STATUS_PROCESS_INFO,
+            (&mut status as *mut SERVICE_STATUS_PROCESS).cast(),
+            size_of::<SERVICE_STATUS_PROCESS>() as u32,
+            &mut required,
+        )
+    } == 0
+    {
+        Err(last_win32("cannot query Quetzalcoatl service status"))
+    } else {
+        Ok(status)
+    }
+}
+
+#[cfg(windows)]
+fn wait_for_service_state(
+    service: windows_sys::Win32::System::Services::SC_HANDLE,
+    expected: u32,
+) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(45);
+    loop {
+        let status = query_service_status(service)?;
+        if status.dwCurrentState == expected {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err("timed out waiting for Quetzalcoatl service state transition".into());
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+}
+
+#[cfg(windows)]
+fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain([0]).collect()
+}
+
+#[cfg(windows)]
+fn last_win32(operation: &str) -> String {
+    unsafe { format!("{operation} (Win32 {})", GetLastError()) }
+}
+
+#[cfg(windows)]
+struct OwnedServiceHandle(windows_sys::Win32::System::Services::SC_HANDLE);
+
+#[cfg(windows)]
+impl Drop for OwnedServiceHandle {
+    fn drop(&mut self) {
+        unsafe { CloseServiceHandle(self.0) };
+    }
 }
 
 #[cfg(not(windows))]
