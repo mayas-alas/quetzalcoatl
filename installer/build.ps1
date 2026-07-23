@@ -10,14 +10,14 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $cacheRoot = Join-Path $repoRoot "target\installer-cache"
 $outputRoot = Join-Path $repoRoot "target\installer"
 $lockPath = Join-Path $PSScriptRoot "dependencies.lock.json"
-$releaseVersion = "0.1.4"
-$releaseProductCode = "{EF6AC7CC-92A4-40C3-B8DA-D62845176E09}"
+$releaseVersion = "0.1.5"
+$releaseProductCode = "{F2F585E5-0D41-4BA5-8940-0E3AD5A86DCE}"
 $releaseUpgradeCode = "{47D5BD44-D061-407B-913B-47D17EC3BEA9}"
-$releasePackageCode = "{0ED76FE6-9961-4D1A-8740-BAE336AFF777}"
-$releaseBundleId = "{A3A9B194-9B26-4C85-A240-AAA053B8D433}"
-$previousProductCode = "{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}"
-$previousPackageCode = "{4931BD41-7686-4846-96A6-DFB5F1BB0AD8}"
-$previousBundleId = "{6FC46C58-8F5B-44E8-90D4-9E5E90A3EC33}"
+$releasePackageCode = "{476FA6C8-C5FB-4606-B3C0-7771ECE831C3}"
+$releaseBundleId = "{0392B300-F7BF-4B02-8C3E-06B5D1AF5B57}"
+$previousProductCode = "{EF6AC7CC-92A4-40C3-B8DA-D62845176E09}"
+$previousPackageCode = "{0ED76FE6-9961-4D1A-8740-BAE336AFF777}"
+$previousBundleId = "{A3A9B194-9B26-4C85-A240-AAA053B8D433}"
 $bundleUpgradeCode = "{10B764B2-36AE-4911-A8C8-2F1A2A963769}"
 $releaseTimestamp = [DateTime]::SpecifyKind([DateTime] "2026-07-23T00:00:00", [DateTimeKind]::Utc)
 $releaseCabDate = [uint16] (((2026 - 1980) -shl 9) -bor (7 -shl 5) -bor 23)
@@ -196,7 +196,7 @@ function Test-ReleaseIdentityContract {
         throw "Release identity contract: package and bundle must both use version $releaseVersion."
     }
     if ($packageNode.GetAttribute('ProductCode') -ne $releaseProductCode) {
-        throw "Release identity contract: package ProductCode must be the explicit 0.1.4 identity $releaseProductCode."
+        throw "Release identity contract: package ProductCode must be the explicit $releaseVersion identity $releaseProductCode."
     }
     if ($packageNode.GetAttribute('UpgradeCode') -ne $releaseUpgradeCode) {
         throw "Release identity contract: package UpgradeCode must remain $releaseUpgradeCode."
@@ -204,7 +204,7 @@ function Test-ReleaseIdentityContract {
     if ($releaseProductCode -eq $previousProductCode -or
         $releasePackageCode -eq $previousPackageCode -or
         $releaseBundleId -eq $previousBundleId) {
-        throw "Release identity contract: 0.1.4 must not reuse a 0.1.3 package identity."
+        throw "Release identity contract: $releaseVersion must not reuse the previous release identity."
     }
     $majorUpgrade = @($packageNode.SelectNodes('./*[local-name()="MajorUpgrade"]'))
     if ($majorUpgrade.Count -ne 1 -or

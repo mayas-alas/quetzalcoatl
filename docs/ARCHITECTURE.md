@@ -2,7 +2,7 @@
 
 Estado: contrato normativo para implementación  
 Alcance: Incremento 1 (controller) e Incremento 2 (member)  
-Prioridad: validar el candidato 0.1.4 en controller y member antes de la aceptación física de tres nodos
+Prioridad: validar el candidato 0.1.5 en controller y member antes de la aceptación física de tres nodos
 
 ## 1. Objetivo
 
@@ -146,7 +146,7 @@ La máquina usa exclusivamente el artefacto WSL x86_64 de Podman Machine OS 6.0.
 
 WSL crea la interfaz exterior de esta máquina con MTU 1280, insuficiente para encapsular un paquete Tailscale de 1280 bytes. Antes de iniciar Tailscale, RuntimeGate fija y verifica MTU 1500 en `eth0`, `podman0` y cada veth del pod; se ejecuta de nuevo después de cada arranque de la máquina y recreación del pod. Esto evita el fallo silencioso donde pings pequeños funcionan pero TLS y SSH pierden sus segmentos grandes.
 
-Cada versión publicada obtiene un ProductCode MSI explícito y conserva el UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`. `MajorUpgrade` ejecuta `RemoveExistingProducts` después de `InstallInitialize`, de modo que una falla restaura la versión anterior. Quetzalcoatl 0.1.4 usa ProductCode `{EF6AC7CC-92A4-40C3-B8DA-D62845176E09}`, PackageCode `{0ED76FE6-9961-4D1A-8740-BAE336AFF777}` y Burn registration ID `{A3A9B194-9B26-4C85-A240-AAA053B8D433}`; el build comprueba que no se regeneren ni deriven. El 0.1.3 validado históricamente usó ProductCode `{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}`, PackageCode `{4931BD41-7686-4846-96A6-DFB5F1BB0AD8}` y Burn registration ID `{6FC46C58-8F5B-44E8-90D4-9E5E90A3EC33}`; el 0.1.2 usó `{BDF28B1E-C968-4D1D-BEB1-AD110D43408F}` y el 0.1.1 `{045129E9-858F-4546-B3D8-0373EBF51D19}`. Burn conserva ProviderKey y UpgradeCode `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`. La extensión de bind fijada a WiX 5.0.2 y la normalización de MSI/Burn hacen byte-reproducible el candidato; cada evidencia identifica el EXE concreto por SHA-256.
+Cada versión publicada obtiene un ProductCode MSI explícito y conserva el UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`. `MajorUpgrade` ejecuta `RemoveExistingProducts` después de `InstallInitialize`, de modo que una falla restaura la versión anterior. Quetzalcoatl 0.1.5 usa ProductCode `{F2F585E5-0D41-4BA5-8940-0E3AD5A86DCE}`, PackageCode `{476FA6C8-C5FB-4606-B3C0-7771ECE831C3}` y Burn registration ID `{0392B300-F7BF-4B02-8C3E-06B5D1AF5B57}`. Quetzalcoatl 0.1.4 usó ProductCode `{EF6AC7CC-92A4-40C3-B8DA-D62845176E09}`, PackageCode `{0ED76FE6-9961-4D1A-8740-BAE336AFF777}` y Burn registration ID `{A3A9B194-9B26-4C85-A240-AAA053B8D433}`. El 0.1.3 validado históricamente usó ProductCode `{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}`, PackageCode `{4931BD41-7686-4846-96A6-DFB5F1BB0AD8}` y Burn registration ID `{6FC46C58-8F5B-44E8-90D4-9E5E90A3EC33}`; el 0.1.2 usó `{BDF28B1E-C968-4D1D-BEB1-AD110D43408F}` y el 0.1.1 `{045129E9-858F-4546-B3D8-0373EBF51D19}`. Burn conserva ProviderKey y UpgradeCode `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`. La extensión de bind fijada a WiX 5.0.2 y la normalización de MSI/Burn hacen byte-reproducible el candidato; cada evidencia identifica el EXE concreto por SHA-256.
 
 ## 5. `runtime payload v1` y Quadlets
 

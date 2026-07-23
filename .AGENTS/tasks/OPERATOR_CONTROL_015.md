@@ -41,6 +41,7 @@ or secret-transport boundaries:
 - `installer/package.wxs`
 - `installer/bundle.wxs`
 - `installer/build.ps1`
+- `installer/wixext/Gnx.DeterministicBundle.wixext/**`
 - `.AGENTS/DECISIONS.md`
 - `.AGENTS/TRACKER.md`
 - `.AGENTS/EVIDENCE.md`

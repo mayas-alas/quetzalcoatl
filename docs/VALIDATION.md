@@ -13,14 +13,14 @@ Before any run, record:
 
 Do not combine evidence from different installers or an uncommitted source tree.
 
-For 0.1.4, the MSI identity is part of the frozen candidate:
+For 0.1.5, the MSI identity is part of the candidate:
 
 ```text
-ProductVersion = 0.1.4
-ProductCode     = {EF6AC7CC-92A4-40C3-B8DA-D62845176E09}
-PackageCode     = {0ED76FE6-9961-4D1A-8740-BAE336AFF777}
+ProductVersion = 0.1.5
+ProductCode     = {F2F585E5-0D41-4BA5-8940-0E3AD5A86DCE}
+PackageCode     = {476FA6C8-C5FB-4606-B3C0-7771ECE831C3}
 UpgradeCode     = {47D5BD44-D061-407B-913B-47D17EC3BEA9}
-Burn ID         = {A3A9B194-9B26-4C85-A240-AAA053B8D433}
+Burn ID         = {0392B300-F7BF-4B02-8C3E-06B5D1AF5B57}
 ```
 
 `installer/build.ps1` rejects drift across WiX sources, the pinned deterministic extension, Rust manifests, helper CacheIds and the generated MSI/Burn identities.
@@ -63,13 +63,28 @@ redacted OpenTofu failure stage if the run does not complete. Never retain the
 transient password file, environment, provider process environment or raw
 state.
 
-The first physical 0.1.4 controller run is an in-place upgrade from the
-installed 0.1.3 failure. Do not uninstall or purge 0.1.3 first. Record that
+The first physical 0.1.5 controller run is an in-place upgrade from the
+installed 0.1.4 controller. Do not uninstall or purge 0.1.4 first. Record that
 Windows Installer detects the preserved UpgradeCode, replaces ProductCode
-`{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}` with
-`{EF6AC7CC-92A4-40C3-B8DA-D62845176E09}`, retains the same service SID,
+`{EF6AC7CC-92A4-40C3-B8DA-D62845176E09}` with
+`{F2F585E5-0D41-4BA5-8940-0E3AD5A86DCE}`, retains the same service SID,
 role, controller identity and protected state, and resumes the failed
 OpenTofu stage idempotently.
+
+On the ready physical controller, validate the new controls from an elevated
+PowerShell console:
+
+```powershell
+gnx configure forgejo
+gnx restart
+gnx status --json
+```
+
+Enter Forgejo credentials only at the masked prompts. Confirm the new account
+can sign in over the private HTTPS URL, the prior managed account is prohibited
+when its username changed, the service returns to `READY`, and no credential
+appears in process arguments, logs, state, Compose, OpenTofu state, or leftover
+`/run` files.
 
 `PrepareWsl` y `ValidateHost` aceptan exclusivamente el exit code Rust `REBOOT_PENDING=14` como `forceReboot`; `PrepareWsl` conserva además el código MSI 3010 con ese comportamiento. El reinicio inmediato detiene la cadena antes del siguiente preflight y Burn la reanuda tras Windows; una ejecución Dockur que lo demuestre sólo aporta evidencia de compatibilidad del instalador y no cierra G5.
 
