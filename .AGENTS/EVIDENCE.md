@@ -182,3 +182,87 @@ Legacy evidence is useful regression context but awards no current-cycle points 
 - Rebuild audit: `PASS`; two builds from the same source produced byte-identical MSI and EXE files. The build fixes PackageCode and Burn registration identity, normalizes MSI/CFB/CAB timestamps, recalculates the attached-container SHA-512 and CAB checksums, then extracts the result before accepting it.
 - Secret scan: build and verification output contained no configured runtime secret.
 - Verdict: `PASS` for the unsigned local packaging and reproducibility gate. Dockur installation, controller/member runtime behavior, signing and physical G5 remain unclaimed.
+
+### E-RT-01
+
+- Gate: controller runtime regression; no additional points awarded.
+- Installed candidate: Quetzalcoatl 0.1.3 on a physical Windows 11 controller.
+- Environment: managed Podman Machine under `NT SERVICE\Quetzalcoatl`; PVE,
+  Tailscale Serve and KVM already ready.
+- End-user action: run `gnx status` and `gnx status --json` after controller
+  convergence stopped.
+- Expected: the pinned OpenTofu one-shot creates the selected controller
+  infrastructure and advances the controller toward `READY`.
+- Actual: `overall=failed`, `stage=FAILED`, `role=controller`,
+  `cluster.joined=true`, `cluster.quorate=true`, and
+  `components.opentofu=failed`. `gnx-opentofu.service` exited 1 and the wrapper
+  returned 67. Reverse-order journal capture plus the 1,600-character runtime
+  bound retained Podman `container died/remove` events and discarded the
+  underlying provider diagnostic.
+- Corrective source change: serialize `tofu apply` with `-parallelism=1`;
+  identify `init`, `validate`, and `apply` failures; preserve chronological
+  journal order; exclude verbose Podman lifecycle events; update locked payload
+  hashes.
+- Corrective candidate revision:
+  `40811611e058a7991b0e00a90aa9fc9d9e385594`.
+- Local verification: shell syntax for both changed payloads; PowerShell parse;
+  focused payload-manifest test; `cargo fmt --all -- --check`;
+  `cargo clippy -p gnx-service -- -D warnings`; `cargo test --workspace`
+  (40 passed); two successful complete `installer/build.ps1` runs; direct size,
+  SHA-256 and byte comparison.
+- Corrected entrypoint SHA-256:
+  `A09EAD5B5B8D960D10412DA4B8B716E8C12A0C94F3E5C9AD760CE9FE7460F023`.
+- Corrected prepare SHA-256:
+  `5F1C31BA826BBCBF689B0D862CD26E62E9CEDEC95ADFC7681969D836C80AF40C`.
+- Corrected manifest SHA-256:
+  `6450816D7B4AA39E2252F3DA2C7850BB467EC93A88B352D6DE437D074A67C2C9`.
+- Corrected MSI: 269,582,336 bytes; SHA-256
+  `82D030A7147F9CA3DE36E5D4AB8681909F67E6500F1A70DE01F7201FC1AD3834`.
+- Corrected Setup: 557,536,137 bytes; SHA-256
+  `9A447111E213EC7C1FCB93668A2E2A2F43A3511218E55BE03C2C0AF4F998A510`.
+- Rebuild audit: `PASS`; both corrected builds were byte-identical while
+  using version 0.1.4, new MSI/Burn identities and the preserved UpgradeCodes.
+- Artifact path: local installed `gnx status --json` response retained in the
+  task transcript; no raw journal or environment was persisted.
+- Secret scan result: status contained no configured secret value; protected
+  runtime directories and service-owned WSL state were not accessed.
+- Verdict: `FAIL` for the installed controller convergence, `PASS` for the
+  local code/package correction, and `INCONCLUSIVE` for live behavior until
+  the rebuilt 0.1.4 controller reaches `READY`.
+
+### E-PKG-04
+
+- Gate: packaging prerequisite for the 0.1.3 to 0.1.4 upgrade; live upgrade
+  behavior remains part of G6.
+- Source revision: `40811611e058a7991b0e00a90aa9fc9d9e385594`.
+- Environment: Windows 11 build host; Rust 1.96.1; .NET SDK 8.0.423; WiX
+  5.0.2; Visual Studio Build Tools 2022.
+- Command: workspace format, Clippy and tests; two complete
+  `installer/build.ps1` runs; direct size/SHA-256 comparison; Windows Installer
+  property query; Burn extraction and registration/related-bundle query.
+- Expected: 0.1.4 uses identities distinct from 0.1.3, preserves MSI and Burn
+  UpgradeCodes, embeds the generated MSI and is byte-reproducible.
+- Actual MSI: 269,582,336 bytes; SHA-256
+  `82D030A7147F9CA3DE36E5D4AB8681909F67E6500F1A70DE01F7201FC1AD3834`;
+  ProductVersion `0.1.4`; ProductCode
+  `{EF6AC7CC-92A4-40C3-B8DA-D62845176E09}`; PackageCode
+  `{0ED76FE6-9961-4D1A-8740-BAE336AFF777}`; preserved UpgradeCode
+  `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`.
+- Actual Setup: 557,536,137 bytes; SHA-256
+  `9A447111E213EC7C1FCB93668A2E2A2F43A3511218E55BE03C2C0AF4F998A510`;
+  Burn ID `{A3A9B194-9B26-4C85-A240-AAA053B8D433}`; version `0.1.4`;
+  preserved ProviderKey/related Upgrade bundle
+  `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`.
+- Installed predecessor audit: Windows registers MSI ProductCode
+  `{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}` and Burn ID
+  `{6FC46C58-8F5B-44E8-90D4-9E5E90A3EC33}` at version `0.1.3`.
+- Rebuild audit: `PASS`; both final MSI files and both final Setup files were
+  byte-identical. The build also extracted the bundle and confirmed the
+  embedded MSI and preserved upgrade relation.
+- Artifact paths: `target/installer/Quetzalcoatl.msi` and
+  `target/installer/QuetzalcoatlSetup.exe`.
+- Secret scan result: build, MSI/Burn property queries and status evidence
+  contained no configured secret value.
+- Verdict: `PASS` for local unsigned packaging, identities and reproducibility;
+  `INCONCLUSIVE` for the live in-place upgrade until 0.1.4 is run over the
+  installed 0.1.3 controller.
