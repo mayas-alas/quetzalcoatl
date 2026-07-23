@@ -503,10 +503,24 @@ Un reinicio en `joining` o `joined` vuelve a ejecutar la verificación idempoten
 CLI mínima:
 
 - `gnx configure`
+- `gnx configure forgejo`
+- `gnx restart`
 - `gnx status`
 - `gnx status --json`
 
 `gnx configure` entrega una sola vez las entradas interactivas al servicio; deshabilita eco para secretos y no los incluye en argv. Los comandos de estado consultan `gnx-service` por Named Pipe. La CLI no modifica WSL, Podman, PVE u OpenTofu directamente.
+
+`gnx configure forgejo` sólo se acepta en un controller `READY` que seleccionó
+Forgejo. Solicita usuario y password con confirmación y eco deshabilitado para
+el password. El servicio persiste primero una rotación pendiente con DPAPI,
+reconcilia la cuenta mediante la API privada de Forgejo usando stdin y archivos
+efímeros `0400` bajo `/run`, verifica el nuevo login y finalmente confirma la
+credencial protegida. Una interrupción conserva suficiente estado cifrado para
+reanudar la misma rotación sin exponer el secreto.
+
+`gnx restart` usa el Service Control Manager de Windows para detener y volver a
+iniciar `Quetzalcoatl`. Exige una consola elevada de administrador y no acepta
+secretos ni ejecuta comandos PowerShell construidos.
 
 Esquema mínimo de `gnx status --json`:
 

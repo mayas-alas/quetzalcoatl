@@ -1,5 +1,15 @@
 # Architecture and orchestration decisions
 
+## D-008 - Native operator recovery controls
+
+Accepted 2026-07-23 by explicit operator authorization. Quetzalcoatl 0.1.5 is
+the next increment over frozen 0.1.4. It adds `gnx restart` as an
+administrator-only SCM operation and `gnx configure forgejo` as an
+administrator-only, named-pipe-mediated credential rotation. Forgejo secrets
+remain DPAPI protected and cross Linux only through stdin and ephemeral
+root-only `/run` files. A rotation persists a pending credential before remote
+mutation so interruption is resumable.
+
 ## D-001 - Agent boundary
 
 Accepted 2026-07-21. All implementation, test, CI, and documentation workers are separate `codex exec` processes. Native subagents are prohibited except when Graphify itself requires them for semantic graph generation or update.
