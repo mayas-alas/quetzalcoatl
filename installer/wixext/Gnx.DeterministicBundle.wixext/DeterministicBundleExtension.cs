@@ -15,7 +15,7 @@ namespace Gnx.DeterministicBundle
 
     public sealed class DeterministicBundleBackendExtension : BaseBurnBackendBinderExtension
     {
-        public const string BundleId = "{0392B300-F7BF-4B02-8C3E-06B5D1AF5B57}";
+        public const string BundleId = "{B7AE53BF-D3A9-4948-AEC9-9C6F3490C2E2}";
 
         public override void SymbolsFinalized(IntermediateSection section)
         {

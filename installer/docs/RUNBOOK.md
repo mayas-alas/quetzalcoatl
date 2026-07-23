@@ -1,7 +1,7 @@
 # Runbook de build del instalador Quetzalcoatl
 
 Este procedimiento prepara un host Windows, valida el workspace y genera el
-MSI y el bundle reproducible de Quetzalcoatl 0.1.5.
+MSI y el bundle reproducible de Quetzalcoatl 0.1.6.
 
 Debe ejecutarse desde una copia confiable del repositorio. No introduce
 secretos, no instala el producto y no publica artefactos.
@@ -529,7 +529,7 @@ congelada del candidato.
 - La aceptación del clúster exige tres hosts físicos Windows 11 y se rige por
   `docs\VALIDATION.md`; este documento no reemplaza ese gate.
 
-## 19. Controles operativos de 0.1.5
+## 19. Controles operativos de 0.1.6
 
 Después de actualizar un controller `READY` que tenga Forgejo seleccionado,
 abra PowerShell como administrador. Para establecer el usuario y password
@@ -542,6 +542,9 @@ gnx configure forgejo
 La CLI solicita el usuario, el password y su confirmación. El password no se
 escribe como argumento ni se muestra en pantalla. Si una rotación se
 interrumpe, repita el mismo comando con los mismos valores para reanudarla.
+Esto incluye la recuperación de una cuenta creada sin privilegios por el fallo
+conocido de 0.1.5: actualice sin desinstalar y repita exactamente el usuario y
+password pendientes.
 
 Para reiniciar el servicio de Windows sin construir un comando PowerShell:
 
