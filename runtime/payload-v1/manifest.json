@@ -179,7 +179,7 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "9f47451717bf3594293ed3073fde60418eb6f002ce24058c83b54d4e48fd19e0"
+      "sha256": "f47ddc580bd453b29546e8efd38a28a60239c3533659a95cd5ddc22ccfccc58b"
     },
     {
       "path": "bin/gnx-proxmox-entrypoint",

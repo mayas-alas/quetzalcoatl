@@ -67,40 +67,59 @@ probe_new_login() {
 
 if ! probe_new_login; then
   write_auth_config "$current_username" "$current_password"
-  if [ "$current_username" = "$new_username" ]; then
-    jq -n --arg password "$new_password" \
-      '{password:$password,must_change_password:false}' > "$request"
-    in_service_netns curl --config "$curl_config" \
-      --request PATCH \
-      --data-binary "@$request" \
+  if [ "$current_username" != "$new_username" ] &&
+    ! in_service_netns curl --config "$curl_config" \
       --output "$response" \
-      "http://127.0.0.1:3000/api/v1/admin/users/$current_username"
-  else
+      "http://127.0.0.1:3000/api/v1/users/$new_username"; then
     jq -n \
       --arg username "$new_username" \
       --arg password "$new_password" \
       --arg email "$new_username@example.invalid" \
-      '{username:$username,password:$password,email:$email,admin:true,must_change_password:false}' \
+      '{username:$username,password:$password,email:$email,must_change_password:false}' \
       > "$request"
-    in_service_netns curl --config "$curl_config" \
+    if ! in_service_netns curl --config "$curl_config" \
       --request POST \
       --data-binary "@$request" \
       --output "$response" \
-      'http://127.0.0.1:3000/api/v1/admin/users'
+      'http://127.0.0.1:3000/api/v1/admin/users'; then
+      printf '%s\n' 'Forgejo API user creation failed' >&2
+      exit 70
+    fi
   fi
-  probe_new_login
+
+  jq -n --arg password "$new_password" \
+    '{password:$password,admin:true,must_change_password:false,prohibit_login:false}' \
+    > "$request"
+  if ! in_service_netns curl --config "$curl_config" \
+    --request PATCH \
+    --data-binary "@$request" \
+    --output "$response" \
+    "http://127.0.0.1:3000/api/v1/admin/users/$new_username"; then
+    printf '%s\n' 'Forgejo API administrator promotion failed' >&2
+    exit 71
+  fi
+  if ! probe_new_login; then
+    printf '%s\n' 'Forgejo promoted administrator verification failed' >&2
+    exit 72
+  fi
 fi
 
 if [ "$current_username" != "$new_username" ]; then
   write_auth_config "$new_username" "$new_password"
   jq -n '{prohibit_login:true}' > "$request"
-  in_service_netns curl --config "$curl_config" \
+  if ! in_service_netns curl --config "$curl_config" \
     --request PATCH \
     --data-binary "@$request" \
     --output "$response" \
-    "http://127.0.0.1:3000/api/v1/admin/users/$current_username"
+    "http://127.0.0.1:3000/api/v1/admin/users/$current_username"; then
+    printf '%s\n' 'Forgejo previous administrator disable failed' >&2
+    exit 73
+  fi
 fi
 
-probe_new_login
+if ! probe_new_login; then
+  printf '%s\n' 'Forgejo final administrator verification failed' >&2
+  exit 74
+fi
 rm -f "$curl_config" "$request" "$response"
 printf '%s\n' 'FORGEJO_CONFIGURATION=ready'
