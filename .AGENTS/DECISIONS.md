@@ -1,5 +1,14 @@
 # Architecture and orchestration decisions
 
+## D-009 - Forgejo administrator promotion is a separate API step
+
+Accepted 2026-07-23 after physical 0.1.5 evidence. Forgejo v16
+`CreateUserOption` does not contain an `admin` property. GNX therefore creates
+the requested local user when absent and always applies administrator status,
+password and must-change policy through the administrator edit endpoint before
+verifying the new credential. This reconciliation must also recover the
+non-admin account left by the failed 0.1.5 attempt.
+
 ## D-008 - Native operator recovery controls
 
 Accepted 2026-07-23 by explicit operator authorization. Quetzalcoatl 0.1.5 is
