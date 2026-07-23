@@ -27,7 +27,7 @@ Functional MVP is reached at 90/100 only when G1-G5 are all `VERIFIED`. Pilotabl
 | MVP-CLOSE 0.1.4 candidate and focused documentation | architect | LOCAL_VERIFIED | installed 0.1.3 controller failure | byte-reproducible EXE/MSI and normalized sources; live upgrade pending |
 | OPERATOR-CONTROL 0.1.5 native recovery controls | architect/operator | LOCAL_VERIFIED | live controller upgrade | `gnx restart`, resumable `gnx configure forgejo`, byte-reproducible installer |
 | FORGEJO-RECOVERY 0.1.6 administrator promotion | architect/operator | LOCAL_VERIFIED | physical 0.1.5-to-0.1.6 recovery | idempotent create/promote/retry and byte-reproducible installer |
-| FORGEJO-FINALIZE 0.1.7 serialized diagnostics | architect/operator | IN_PROGRESS | physical 0.1.6 failure | explicit login name, volatile READY gate, operation lock, stage diagnostics |
+| FORGEJO-FINALIZE 0.1.7 serialized diagnostics | architect/operator | LOCAL_VERIFIED | physical 0.1.6-to-0.1.7 recovery | explicit login name, volatile READY gate, operation lock, stage diagnostics |
 | CI-01 Dockur Actions lane | architect/operator | PARTIAL | reproducible 0.1.4 candidate | prior 0.1.3 runs retained; 0.1.4 rerun pending |
 | CORE-01 Persisted member and status contract | codex-cli-state | VERIFIED | GOV-01 | Rust changes and tests |
 | CORE-02 Deterministic member discovery/orchestration | codex-cli-runtime | VERIFIED | CORE-01 | Rust changes and tests |

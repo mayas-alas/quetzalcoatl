@@ -351,3 +351,48 @@ Legacy evidence is useful regression context but awards no current-cycle points 
 - Verdict: `PASS` for local correction, secret-safe diagnostics, package
   identities and reproducibility; `INCONCLUSIVE` until the physical controller
   upgrades 0.1.5 in place and retries the same pending Forgejo credential.
+
+### E-FORGEJO-017
+
+- Gate: local finalization and packaging evidence after the physical 0.1.6
+  retry still returned an unclassified podman exit 1; live recovery remains G6.
+- Physical evidence: the upgraded controller progressed through
+  `OPENTOFU_PREPARING`, `GARAGE_PREPARING`, `FORGEJO_PREPARING` and reached
+  volatile `READY`; the subsequent Forgejo command still returned exit 1 with
+  an empty diagnostic. No secret was captured.
+- Root causes: Forgejo v16's administrator edit maps `login_name` into
+  `UpdateAuth` even when callers omit it, so the request must send the local
+  login name explicitly. Separately, the RPC previously checked persisted
+  `state.json=READY`, allowing a command to race a restarted service whose
+  volatile status was still preparing applications.
+- Source revisions: contract `3804a2e`, functional correction `cd5c827`,
+  package `6366e1c3087d31cb81b897bfc40f24b12ed59975`.
+- Correction: explicit `login_name` for promotion and prior-admin disable;
+  shared operation mutex held for the complete runtime convergence; volatile
+  controller/Forgejo `READY` gate; fixed host/guest stage markers with raw curl
+  stderr and HTTP bodies suppressed.
+- Commands: shell syntax for both Forgejo payloads;
+  `cargo fmt --all -- --check`; `cargo clippy -p gnx-service -- -D warnings`;
+  `cargo test --workspace`; two complete installer builds; `fc /b` for both
+  artifacts.
+- Test result: `PASS`; protocol tests 3/3 and service tests 39/39 passed,
+  including the new volatile-status regression and payload manifest test.
+- Payload manifest SHA-256:
+  `3C9F017D497713D350D66BE4DE5E749063D8255E872669917619FFC85594E20A`.
+- MSI: 269,643,776 bytes; SHA-256
+  `E7285390742118B4F3A99DC7C4B90CF0399E3463C89B1120F5CAF8835525C31C`;
+  ProductVersion `0.1.7`; ProductCode
+  `{129BD77D-90DE-4992-86AE-F168C930D549}`; PackageCode
+  `{2164425B-7D79-4186-BDED-EF644CCB8804}`; preserved UpgradeCode
+  `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`.
+- Setup: 557,597,593 bytes; SHA-256
+  `E84C93D224099682F6EFD7DCB5A95BFF024ADCC73621A2E3461E997BB27A2BAF`;
+  Burn ID `{60314D27-47DF-4118-B937-6D1445BAC9D7}`; preserved ProviderKey and
+  UpgradeCode `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`.
+- Rebuild audit: `PASS`; both `fc /b` comparisons returned zero and both hash
+  pairs matched.
+- Artifact paths: `target/installer/Quetzalcoatl.msi` and
+  `target/installer/QuetzalcoatlSetup.exe`.
+- Verdict: `PASS` for local code, readiness serialization, diagnostics,
+  package identities and reproducibility; `INCONCLUSIVE` until the physical
+  0.1.6 controller upgrades in place and retries the pending credential.
