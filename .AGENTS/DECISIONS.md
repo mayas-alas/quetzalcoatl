@@ -1,5 +1,14 @@
 # Architecture and orchestration decisions
 
+## D-010 - Operational RPCs serialize with convergence
+
+Accepted 2026-07-23 after physical 0.1.6 evidence. A persisted controller stage
+can be `READY` while a restarted service is still reconverging OpenTofu and
+applications. Operational mutations therefore require both the volatile
+`READY` status and a shared runtime-operation lock. Forgejo administrator edits
+also send the local `login_name` explicitly because Forgejo v16 otherwise
+passes an empty login name into its authentication update.
+
 ## D-009 - Forgejo administrator promotion is a separate API step
 
 Accepted 2026-07-23 after physical 0.1.5 evidence. Forgejo v16
