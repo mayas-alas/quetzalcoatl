@@ -172,14 +172,14 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "dd18fdcfe07ecc944b379d279f435f182d6fdba1fe9d44b9702d85793419f004"
+      "sha256": "29ca427ead89cb0d20672e4df58e7f3daff211e28066b22b4de43d5800203d8e"
     },
     {
       "path": "bin/gnx-forgejo-configure-guest",
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "f47ddc580bd453b29546e8efd38a28a60239c3533659a95cd5ddc22ccfccc58b"
+      "sha256": "cc62225b7369ae4846e76b78617c9bb068af36aade3e654eb40d13fb23c6bbe2"
     },
     {
       "path": "bin/gnx-proxmox-entrypoint",

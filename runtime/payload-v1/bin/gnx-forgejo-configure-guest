@@ -8,9 +8,16 @@ input='/run/gnx/forgejo-configure.input'
 curl_config='/run/gnx/forgejo-configure.curl'
 request='/run/gnx/forgejo-configure.json'
 response='/run/gnx/forgejo-configure.response'
+guest_stage='INPUT_VALIDATION'
 
 cleanup() {
+  result=$?
+  trap - EXIT HUP INT TERM
   rm -f "$input" "$curl_config" "$request" "$response"
+  if [ "$result" -ne 0 ]; then
+    printf 'FORGEJO_GUEST_STAGE=%s\n' "$guest_stage"
+  fi
+  exit "$result"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -39,6 +46,7 @@ valid_username "$new_username"
 valid_password "$current_password"
 valid_password "$new_password"
 
+guest_stage='CONTAINER_DISCOVERY'
 application_pid=$(docker inspect --format '{{.State.Pid}}' gnx-forgejo)
 case "$application_pid" in ''|0|*[!0-9]*) exit 69 ;; esac
 in_service_netns() {
@@ -66,11 +74,14 @@ probe_new_login() {
 }
 
 if ! probe_new_login; then
+  guest_stage='CURRENT_AUTHENTICATION'
   write_auth_config "$current_username" "$current_password"
+  guest_stage='USER_LOOKUP'
   if [ "$current_username" != "$new_username" ] &&
     ! in_service_netns curl --config "$curl_config" \
       --output "$response" \
       "http://127.0.0.1:3000/api/v1/users/$new_username"; then
+    guest_stage='USER_CREATION'
     jq -n \
       --arg username "$new_username" \
       --arg password "$new_password" \
@@ -87,8 +98,9 @@ if ! probe_new_login; then
     fi
   fi
 
-  jq -n --arg password "$new_password" \
-    '{password:$password,admin:true,must_change_password:false,prohibit_login:false}' \
+  guest_stage='ADMIN_PROMOTION'
+  jq -n --arg username "$new_username" --arg password "$new_password" \
+    '{login_name:$username,password:$password,admin:true,must_change_password:false,prohibit_login:false}' \
     > "$request"
   if ! in_service_netns curl --config "$curl_config" \
     --request PATCH \
@@ -98,6 +110,7 @@ if ! probe_new_login; then
     printf '%s\n' 'Forgejo API administrator promotion failed' >&2
     exit 71
   fi
+  guest_stage='PROMOTED_VERIFICATION'
   if ! probe_new_login; then
     printf '%s\n' 'Forgejo promoted administrator verification failed' >&2
     exit 72
@@ -105,8 +118,10 @@ if ! probe_new_login; then
 fi
 
 if [ "$current_username" != "$new_username" ]; then
+  guest_stage='PREVIOUS_ADMIN_DISABLE'
   write_auth_config "$new_username" "$new_password"
-  jq -n '{prohibit_login:true}' > "$request"
+  jq -n --arg username "$current_username" \
+    '{login_name:$username,prohibit_login:true}' > "$request"
   if ! in_service_netns curl --config "$curl_config" \
     --request PATCH \
     --data-binary "@$request" \
@@ -117,6 +132,7 @@ if [ "$current_username" != "$new_username" ]; then
   fi
 fi
 
+guest_stage='FINAL_VERIFICATION'
 if ! probe_new_login; then
   printf '%s\n' 'Forgejo final administrator verification failed' >&2
   exit 74

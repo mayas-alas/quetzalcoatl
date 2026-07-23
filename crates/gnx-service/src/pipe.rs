@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 use std::mem::size_of;
 use std::ptr::null_mut;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock, TryLockError};
 
 use gnx_protocol::{
     Command, MAX_MESSAGE_BYTES, OperationResponse, PIPE_NAME, Request, StatusResponse,
@@ -30,11 +30,11 @@ use zeroize::Zeroize;
 
 const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)";
 
-pub fn serve(status: Arc<RwLock<StatusResponse>>) -> Result<(), String> {
+pub fn serve(status: Arc<RwLock<StatusResponse>>, operation: Arc<Mutex<()>>) -> Result<(), String> {
     let pipe = create_pipe()?;
     loop {
         connect(pipe.0)?;
-        if let Err(error) = serve_client(pipe.0, &status) {
+        if let Err(error) = serve_client(pipe.0, &status, &operation) {
             eprintln!("gnx-service: rejected pipe request: {error}");
         }
         // Safety: the handle is a connected named-pipe server instance.
@@ -45,7 +45,11 @@ pub fn serve(status: Arc<RwLock<StatusResponse>>) -> Result<(), String> {
     }
 }
 
-fn serve_client(pipe: HANDLE, status: &Arc<RwLock<StatusResponse>>) -> Result<(), String> {
+fn serve_client(
+    pipe: HANDLE,
+    status: &Arc<RwLock<StatusResponse>>,
+    operation: &Arc<Mutex<()>>,
+) -> Result<(), String> {
     let mut message = read_message(pipe)?;
     let parsed = serde_json::from_slice(&message);
     message.zeroize();
@@ -101,15 +105,12 @@ fn serve_client(pipe: HANDLE, status: &Arc<RwLock<StatusResponse>>) -> Result<()
                         "FORGEJO_CONFIGURATION_INVALID",
                         "Forgejo configure request is missing its configuration",
                     ),
-                    Some(configuration) => {
-                        match crate::runtime_gate::configure_forgejo(
-                            &configuration.username,
-                            &configuration.password,
-                        ) {
-                            Ok(()) => OperationResponse::accepted("FORGEJO_CONFIGURATION_STORED"),
-                            Err((code, message)) => OperationResponse::rejected(&code, &message),
-                        }
-                    }
+                    Some(configuration) => configure_forgejo(
+                        status,
+                        operation,
+                        &configuration.username,
+                        &configuration.password,
+                    ),
                 },
             };
             serde_json::to_vec(&operation)
@@ -117,6 +118,55 @@ fn serve_client(pipe: HANDLE, status: &Arc<RwLock<StatusResponse>>) -> Result<()
     }
     .map_err(|e| format!("cannot serialize response: {e}"))?;
     write_message(pipe, &response)
+}
+
+fn configure_forgejo(
+    status: &Arc<RwLock<StatusResponse>>,
+    operation: &Arc<Mutex<()>>,
+    username: &str,
+    password: &str,
+) -> OperationResponse {
+    let ready = match status.read() {
+        Ok(snapshot) => forgejo_runtime_ready(&snapshot),
+        Err(_) => {
+            return OperationResponse::rejected(
+                "FORGEJO_CONFIGURATION_INTERNAL",
+                "runtime status lock is poisoned",
+            );
+        }
+    };
+    if !ready {
+        return OperationResponse::rejected(
+            "FORGEJO_CONFIGURATION_NOT_READY",
+            "wait until gnx status reports controller READY and Forgejo ready",
+        );
+    }
+    let _guard = match operation.try_lock() {
+        Ok(guard) => guard,
+        Err(TryLockError::WouldBlock) => {
+            return OperationResponse::rejected(
+                "FORGEJO_CONFIGURATION_BUSY",
+                "the runtime is converging or another operational command is running",
+            );
+        }
+        Err(TryLockError::Poisoned(_)) => {
+            return OperationResponse::rejected(
+                "FORGEJO_CONFIGURATION_INTERNAL",
+                "runtime operation lock is poisoned",
+            );
+        }
+    };
+    match crate::runtime_gate::configure_forgejo(username, password) {
+        Ok(()) => OperationResponse::accepted("FORGEJO_CONFIGURATION_STORED"),
+        Err((code, message)) => OperationResponse::rejected(&code, &message),
+    }
+}
+
+fn forgejo_runtime_ready(status: &StatusResponse) -> bool {
+    status.overall == "ready"
+        && status.stage == "READY"
+        && status.role.as_deref() == Some("controller")
+        && status.services.forgejo == "ready"
 }
 
 fn create_pipe() -> Result<OwnedHandle, String> {
@@ -321,5 +371,25 @@ impl Drop for OwnedHandle {
     fn drop(&mut self) {
         // Safety: this type owns a non-null kernel handle exactly once.
         unsafe { CloseHandle(self.0) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forgejo_operation_requires_volatile_ready_status() {
+        let mut status = StatusResponse::service_ready();
+        status.role = Some("controller".into());
+        status.services.forgejo = "ready".into();
+        assert!(!forgejo_runtime_ready(&status));
+
+        status.overall = "ready".into();
+        status.stage = "READY".into();
+        assert!(forgejo_runtime_ready(&status));
+
+        status.services.forgejo = "pending".into();
+        assert!(!forgejo_runtime_ready(&status));
     }
 }
