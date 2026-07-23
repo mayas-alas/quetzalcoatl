@@ -266,3 +266,42 @@ Legacy evidence is useful regression context but awards no current-cycle points 
 - Verdict: `PASS` for local unsigned packaging, identities and reproducibility;
   `INCONCLUSIVE` for the live in-place upgrade until 0.1.4 is run over the
   installed 0.1.3 controller.
+
+### E-OPERATOR-015
+
+- Gate: local implementation and packaging evidence for the 0.1.5 native
+  operator controls; live behavior remains part of G6.
+- Source revisions: contract `cad2f2a`, implementation `0aa10cf`, package
+  `fbf65dfd2c2458f28d2e2777012eb055f17a2f82`.
+- Environment: Windows 11 build host; Rust 1.96.1; .NET SDK 8; WiX 5.0.2;
+  Visual Studio Build Tools 2022.
+- Commands: Git Bash `sh -n` for both new Forgejo payloads;
+  `cargo fmt --all -- --check`; `cargo clippy -p gnx-service -- -D warnings`;
+  `cargo test --workspace`; two complete `installer/build.ps1` runs; direct
+  `fc /b`, size and SHA-256 comparison.
+- Test result: `PASS`; protocol tests 3/3 and service tests 38/38 passed,
+  including legacy DPAPI service-secret compatibility and exact payload
+  manifest validation. Both shell syntax checks, format and Clippy passed.
+- Payload manifest SHA-256:
+  `FBF5735724FC31538DCA413C70DC498B069276B199F56132C43A301EED59B097`.
+- MSI: 269,631,488 bytes; SHA-256
+  `48B5283E9722EB5FBD71D3956AE068ACBBD2CE04A8539C3BEF32A12D5D4395BD`;
+  ProductVersion `0.1.5`; ProductCode
+  `{F2F585E5-0D41-4BA5-8940-0E3AD5A86DCE}`; PackageCode
+  `{476FA6C8-C5FB-4606-B3C0-7771ECE831C3}`; preserved UpgradeCode
+  `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`.
+- Setup: 557,585,305 bytes; SHA-256
+  `6EBC4002D9A07509C40B82207B4D75F996ECA140876F75F022DD5EB31273C78A`;
+  Burn ID `{0392B300-F7BF-4B02-8C3E-06B5D1AF5B57}`; preserved ProviderKey and
+  UpgradeCode `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`.
+- Rebuild audit: `PASS`; `fc /b` returned zero for both first-vs-second MSI
+  and Setup comparisons, and both SHA-256 pairs matched.
+- Secret-safety review: Forgejo values enter through masked console input,
+  cross the administrator-authorized named pipe, persist as current/pending
+  DPAPI data and cross Linux via stdin plus root-only ephemeral `/run` files.
+  The implementation does not place them in process arguments.
+- Artifact paths: `target/installer/Quetzalcoatl.msi` and
+  `target/installer/QuetzalcoatlSetup.exe`.
+- Verdict: `PASS` for local source, shell syntax, tests, package identities and
+  reproducibility; `INCONCLUSIVE` for `gnx restart`, live Forgejo rotation and
+  the 0.1.4-to-0.1.5 upgrade until exercised on the physical controller.
