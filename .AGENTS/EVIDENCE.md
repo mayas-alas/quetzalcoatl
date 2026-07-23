@@ -305,3 +305,49 @@ Legacy evidence is useful regression context but awards no current-cycle points 
 - Verdict: `PASS` for local source, shell syntax, tests, package identities and
   reproducibility; `INCONCLUSIVE` for `gnx restart`, live Forgejo rotation and
   the 0.1.4-to-0.1.5 upgrade until exercised on the physical controller.
+
+### E-FORGEJO-016
+
+- Gate: local correction and packaging evidence for recovery from the physical
+  0.1.5 Forgejo configuration failure; live recovery remains part of G6.
+- Physical 0.1.5 evidence: `gnx status` was `READY` on the controller;
+  `gnx configure forgejo` failed with
+  `FORGEJO_CONFIGURATION_FAILED` and podman probe exit 1. The bounded Burn and
+  GNX evidence contained no secret value.
+- Root cause: Forgejo v16 `CreateUserOption` accepts username, email and
+  password but no `admin` property. The 0.1.5 payload attempted to set
+  administrator status during creation, then correctly rejected the resulting
+  non-admin account.
+- Source revisions: contract `430aa55`, payload correction `40d45bd`, package
+  `e1f5318d849458e5007260cda02f8e9f993b914f`.
+- Correction: detect an existing requested user, create it only when absent,
+  always apply password, `admin=true`, must-change and login policy through the
+  administrator edit endpoint, verify the promoted credential and only then
+  commit the pending DPAPI rotation. Step failures expose fixed diagnostic text
+  without identifiers, authorization data, bodies or secrets.
+- Commands: Git Bash shell syntax; `cargo fmt --all -- --check`;
+  `cargo clippy -p gnx-service -- -D warnings`; `cargo test --workspace`; two
+  complete `installer/build.ps1` runs; direct `fc /b`, size and SHA-256
+  comparison.
+- Test result: `PASS`; protocol tests 3/3 and service tests 38/38 passed,
+  including payload manifest validation. Shell syntax, format and Clippy
+  passed.
+- Payload manifest SHA-256:
+  `9ADF35219173690F09F2E149DB42286AADE9EBB7E117309EAC8AFE8965903FE2`.
+- MSI: 269,631,488 bytes; SHA-256
+  `63735BFB1BB3C08F1B1EF5F1F16BE3B9CB8AA89BA828F8E7A347D70636F9E828`;
+  ProductVersion `0.1.6`; ProductCode
+  `{7E791841-74B0-4663-8993-952D43CD5C63}`; PackageCode
+  `{EC36F9AD-6477-4CA3-B40C-37CC8D4F1837}`; preserved UpgradeCode
+  `{47D5BD44-D061-407B-913B-47D17EC3BEA9}`.
+- Setup: 557,585,305 bytes; SHA-256
+  `041878F38670E782DA6AAD0161DDC38B43670F862FE69B35F2BEBD6641197CC8`;
+  Burn ID `{B7AE53BF-D3A9-4948-AEC9-9C6F3490C2E2}`; preserved ProviderKey and
+  UpgradeCode `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`.
+- Rebuild audit: `PASS`; `fc /b` returned zero for both MSI and Setup, and
+  both SHA-256 pairs matched.
+- Artifact paths: `target/installer/Quetzalcoatl.msi` and
+  `target/installer/QuetzalcoatlSetup.exe`.
+- Verdict: `PASS` for local correction, secret-safe diagnostics, package
+  identities and reproducibility; `INCONCLUSIVE` until the physical controller
+  upgrades 0.1.5 in place and retries the same pending Forgejo credential.
