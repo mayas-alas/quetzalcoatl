@@ -7,6 +7,7 @@ Use one authority per question:
 | What does the product implement? | `ARCHITECTURE.md` |
 | What is in or out of the MVP? | `../.AGENTS/SCOPE.md` |
 | How is it validated? | `VALIDATION.md` |
+| How is the reproducible installer built? | `../installer/docs/RUNBOOK.md` |
 | What is currently complete or blocked? | `../.AGENTS/TRACKER.md` |
 | What proof is accepted? | `../.AGENTS/EVIDENCE.md` |
 | What task may be changed now? | `../.AGENTS/tasks/MVP_CLOSURE.md` |

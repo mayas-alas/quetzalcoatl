@@ -4,10 +4,11 @@ umask 077
 
 secret='/run/gnx/opentofu-password'
 configuration='/run/gnx/opentofu.env'
+diagnostic='/run/gnx/opentofu-journal'
 
 cleanup() {
   podman rm -f gnx-opentofu >/dev/null 2>&1 || true
-  rm -f "$secret" "$configuration"
+  rm -f "$secret" "$configuration" "$diagnostic"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -42,7 +43,12 @@ systemctl daemon-reload
 systemctl stop gnx-opentofu.service >/dev/null 2>&1 || true
 systemctl reset-failed gnx-opentofu.service opentofu-image.service >/dev/null 2>&1 || true
 if ! systemctl start gnx-opentofu.service >/dev/null 2>&1; then
-  journalctl --no-pager -o cat -r -n 80 -u gnx-opentofu.service >&2 || true
+  journalctl --no-pager -o cat -n 120 -u gnx-opentofu.service > "$diagnostic" 2>/dev/null || true
+  stage=$(grep '^GNX_OPENTOFU_STAGE=' "$diagnostic" | tail -n 1 || true)
+  if [ -n "$stage" ]; then
+    printf '%s\n' "$stage" >&2
+  fi
+  sed '/ container \(died\|remove\) /d' "$diagnostic" | tail -n 32 >&2 || true
   exit 67
 fi
 systemctl is-active --quiet gnx-opentofu.service

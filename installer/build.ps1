@@ -10,13 +10,17 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $cacheRoot = Join-Path $repoRoot "target\installer-cache"
 $outputRoot = Join-Path $repoRoot "target\installer"
 $lockPath = Join-Path $PSScriptRoot "dependencies.lock.json"
-$releaseVersion = "0.1.3"
-$releaseProductCode = "{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}"
+$releaseVersion = "0.1.4"
+$releaseProductCode = "{EF6AC7CC-92A4-40C3-B8DA-D62845176E09}"
 $releaseUpgradeCode = "{47D5BD44-D061-407B-913B-47D17EC3BEA9}"
-$releasePackageCode = "{4931BD41-7686-4846-96A6-DFB5F1BB0AD8}"
-$releaseBundleId = "{6FC46C58-8F5B-44E8-90D4-9E5E90A3EC33}"
-$releaseTimestamp = [DateTime]::SpecifyKind([DateTime] "2026-07-22T00:00:00", [DateTimeKind]::Utc)
-$releaseCabDate = [uint16] (((2026 - 1980) -shl 9) -bor (7 -shl 5) -bor 22)
+$releasePackageCode = "{0ED76FE6-9961-4D1A-8740-BAE336AFF777}"
+$releaseBundleId = "{A3A9B194-9B26-4C85-A240-AAA053B8D433}"
+$previousProductCode = "{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}"
+$previousPackageCode = "{4931BD41-7686-4846-96A6-DFB5F1BB0AD8}"
+$previousBundleId = "{6FC46C58-8F5B-44E8-90D4-9E5E90A3EC33}"
+$bundleUpgradeCode = "{10B764B2-36AE-4911-A8C8-2F1A2A963769}"
+$releaseTimestamp = [DateTime]::SpecifyKind([DateTime] "2026-07-23T00:00:00", [DateTimeKind]::Utc)
+$releaseCabDate = [uint16] (((2026 - 1980) -shl 9) -bor (7 -shl 5) -bor 23)
 $releaseCabTime = [uint16] 0
 $dependencyLock = Get-Content -LiteralPath $lockPath -Raw -Encoding utf8 | ConvertFrom-Json
 
@@ -192,10 +196,24 @@ function Test-ReleaseIdentityContract {
         throw "Release identity contract: package and bundle must both use version $releaseVersion."
     }
     if ($packageNode.GetAttribute('ProductCode') -ne $releaseProductCode) {
-        throw "Release identity contract: package ProductCode must be the explicit 0.1.3 identity $releaseProductCode."
+        throw "Release identity contract: package ProductCode must be the explicit 0.1.4 identity $releaseProductCode."
     }
     if ($packageNode.GetAttribute('UpgradeCode') -ne $releaseUpgradeCode) {
         throw "Release identity contract: package UpgradeCode must remain $releaseUpgradeCode."
+    }
+    if ($releaseProductCode -eq $previousProductCode -or
+        $releasePackageCode -eq $previousPackageCode -or
+        $releaseBundleId -eq $previousBundleId) {
+        throw "Release identity contract: 0.1.4 must not reuse a 0.1.3 package identity."
+    }
+    $majorUpgrade = @($packageNode.SelectNodes('./*[local-name()="MajorUpgrade"]'))
+    if ($majorUpgrade.Count -ne 1 -or
+        $majorUpgrade[0].GetAttribute('Schedule') -ne 'afterInstallInitialize') {
+        throw "Release identity contract: MSI major upgrade must preserve rollback-safe scheduling."
+    }
+    if ($bundleNode.GetAttribute('ProviderKey') -ne $bundleUpgradeCode -or
+        $bundleNode.GetAttribute('UpgradeCode') -ne $bundleUpgradeCode) {
+        throw "Release identity contract: Burn ProviderKey and UpgradeCode must preserve $bundleUpgradeCode."
     }
 
     $extensionRoot = Join-Path $PSScriptRoot "wixext\Gnx.DeterministicBundle.wixext"
@@ -241,6 +259,29 @@ function Test-ReleaseIdentityContract {
         if ($manifest -notmatch "(?m)^version\s*=\s*`"$([regex]::Escape($releaseVersion))`"\s*$") {
             throw "Release identity contract: $manifestPath must use version $releaseVersion."
         }
+    }
+}
+
+function Test-OpenTofuRuntimeContract {
+    $entrypointPath = Join-Path $repoRoot "runtime\payload-v1\bin\gnx-opentofu-entrypoint"
+    $preparePath = Join-Path $repoRoot "runtime\payload-v1\bin\gnx-opentofu-prepare"
+    $entrypoint = Get-Content -LiteralPath $entrypointPath -Raw -Encoding utf8
+    $prepare = Get-Content -LiteralPath $preparePath -Raw -Encoding utf8
+
+    if ($entrypoint -notmatch '(?m)^run_stage apply tofu apply -auto-approve -input=false -no-color -parallelism=1$') {
+        throw "OpenTofu runtime contract: apply must serialize Proxmox mutations with -parallelism=1."
+    }
+    foreach ($stage in @('init', 'validate', 'apply')) {
+        if ($entrypoint -notmatch "(?m)^run_stage $stage tofu $stage\b") {
+            throw "OpenTofu runtime contract: $stage must emit a stage-specific failure marker."
+        }
+    }
+    if ($prepare -match 'journalctl[^\r\n]*\s-r(?:\s|$)') {
+        throw "OpenTofu runtime contract: diagnostics must preserve chronological journal order."
+    }
+    if ($prepare -notmatch '\^GNX_OPENTOFU_STAGE=' -or
+        -not $prepare.Contains("sed '/ container \(died\|remove\) /d'")) {
+        throw "OpenTofu runtime contract: diagnostics must retain the stage marker and filter Podman lifecycle noise."
     }
 }
 
@@ -583,6 +624,16 @@ function Test-BundleIdentityAndPayload {
             $actualBundleId = if ($registration) { $registration.GetAttribute('Id') } else { '<missing>' }
             throw "Built Burn registration identity mismatch: $actualBundleId"
         }
+        if ($registration.GetAttribute('Version') -ne $releaseVersion -or
+            $registration.GetAttribute('ProviderKey') -ne $bundleUpgradeCode) {
+            throw "Built Burn registration version or ProviderKey does not match the release upgrade contract."
+        }
+        $relatedUpgrade = @($manifest.SelectNodes('//*[local-name()="RelatedBundle"]') | Where-Object {
+            $_.GetAttribute('Id') -eq $bundleUpgradeCode -and $_.GetAttribute('Action') -eq 'Upgrade'
+        })
+        if ($relatedUpgrade.Count -ne 1) {
+            throw "Built Burn manifest must contain exactly one preserved upgrade relation."
+        }
 
         $embeddedProduct = @(Get-ChildItem -LiteralPath $payloadRoot -Recurse -File -Filter "Quetzalcoatl.msi")
         if ($embeddedProduct.Count -ne 1) {
@@ -609,6 +660,7 @@ $contractBundleXml = if ($TestRebootContractOnly) { $RebootContractBundleXml } e
 Test-RebootContract -BundlePath $contractBundlePath -BundleXml $contractBundleXml
 if ($TestRebootContractOnly) { return }
 Test-ReleaseIdentityContract
+Test-OpenTofuRuntimeContract
 
 $artifacts = @{}
 foreach ($artifact in $dependencyLock.artifacts) {

@@ -193,14 +193,14 @@
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "edcdf9ba5d8d4432649e5a0695c28e52316f05d85af486e9582889fc393b0324"
+      "sha256": "a09ead5b5b8d960d10412da4b8b716e8c12a0c94f3e5c9ad760ce9fe7460f023"
     },
     {
       "path": "bin/gnx-opentofu-prepare",
       "source": "quetzalcoatl",
       "version": 1,
       "mode": "0755",
-      "sha256": "f210d6c927c75b3a771d0bb4ae764b15a8dd2f273e5746635f132decad2f16e9"
+      "sha256": "5f1c31ba826bbcbf689b0d862cd26e62e9cedec95adfc7681969d836c80af40c"
     },
     {
       "path": "bin/gnx-opentofu-runner",

@@ -13,14 +13,14 @@ Before any run, record:
 
 Do not combine evidence from different installers or an uncommitted source tree.
 
-For 0.1.3, the MSI identity is part of the frozen candidate:
+For 0.1.4, the MSI identity is part of the frozen candidate:
 
 ```text
-ProductVersion = 0.1.3
-ProductCode     = {2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}
-PackageCode     = {4931BD41-7686-4846-96A6-DFB5F1BB0AD8}
+ProductVersion = 0.1.4
+ProductCode     = {EF6AC7CC-92A4-40C3-B8DA-D62845176E09}
+PackageCode     = {0ED76FE6-9961-4D1A-8740-BAE336AFF777}
 UpgradeCode     = {47D5BD44-D061-407B-913B-47D17EC3BEA9}
-Burn ID         = {6FC46C58-8F5B-44E8-90D4-9E5E90A3EC33}
+Burn ID         = {A3A9B194-9B26-4C85-A240-AAA053B8D433}
 ```
 
 `installer/build.ps1` rejects drift across WiX sources, the pinned deterministic extension, Rust manifests, helper CacheIds and the generated MSI/Burn identities.
@@ -43,13 +43,41 @@ Run the installer build twice without changing sources, retain the first pair ou
 
 Also run `sh -n` and `static-check` for `runtime/payload-v1/bin/gnx-pve-cluster-create`, then confirm its SHA-256 equals the entry in `runtime/payload-v1/manifest.json`.
 
+For controller OpenTofu changes, additionally verify:
+
+```powershell
+& 'C:\Program Files\Git\bin\sh.exe' -n runtime/payload-v1/bin/gnx-opentofu-entrypoint
+& 'C:\Program Files\Git\bin\sh.exe' -n runtime/payload-v1/bin/gnx-opentofu-prepare
+cargo test -p gnx-service payload_manifest_matches_all_installed_files
+```
+
+The installer build must reject an entrypoint that omits
+`-parallelism=1`, does not identify `init`, `validate`, and `apply` failures,
+reads the OpenTofu journal in reverse order, or retains Podman
+`container died/remove` lifecycle noise ahead of the provider diagnostic.
+
+The live controller regression selects Garage and Forgejo together and must
+show that the one-shot completes without concurrent Proxmox mutations. Retain
+the final `READY` status, VMIDs 200 and 201, both service health probes and a
+redacted OpenTofu failure stage if the run does not complete. Never retain the
+transient password file, environment, provider process environment or raw
+state.
+
+The first physical 0.1.4 controller run is an in-place upgrade from the
+installed 0.1.3 failure. Do not uninstall or purge 0.1.3 first. Record that
+Windows Installer detects the preserved UpgradeCode, replaces ProductCode
+`{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}` with
+`{EF6AC7CC-92A4-40C3-B8DA-D62845176E09}`, retains the same service SID,
+role, controller identity and protected state, and resumes the failed
+OpenTofu stage idempotently.
+
 `PrepareWsl` y `ValidateHost` aceptan exclusivamente el exit code Rust `REBOOT_PENDING=14` como `forceReboot`; `PrepareWsl` conserva además el código MSI 3010 con ese comportamiento. El reinicio inmediato detiene la cadena antes del siguiente preflight y Burn la reanuda tras Windows; una ejecución Dockur que lo demuestre sólo aporta evidencia de compatibilidad del instalador y no cierra G5.
 
 Los tres binarios Rust de Windows (`gnx-host-preflight.exe`, `gnx-service.exe` y `gnx.exe`) se compilan con CRT estático. El build inspecciona sus import tables y falla si cualquiera depende de `VCRUNTIME`, `MSVCP`, `MSVCR`, `CONCRT`, `VCOMP`, `UCRTBASE` o `api-ms-win-crt-*`.
 
 ## GitHub Actions Dockur compatibility
 
-Use the `validation/gnx-dockur-lifecycle` branch of `mayas-alas/windows-rdp-tailscale`. Create a temporary prerelease containing the frozen setup asset named `Quetzalcoatl-0.1.3-setup-x64.exe`, then dispatch the workflow with its exact release tag and SHA-256.
+Use the `validation/gnx-dockur-lifecycle` branch of `mayas-alas/windows-rdp-tailscale`. Create a temporary prerelease containing the frozen setup asset named `Quetzalcoatl-0.1.4-setup-x64.exe`, then dispatch the workflow with its exact release tag and SHA-256.
 
 The accepted end-user sequence is:
 

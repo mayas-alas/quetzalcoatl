@@ -26,6 +26,14 @@ Accepted 2026-07-21. Codex CLI agents use `medium` reasoning for runtime integra
 
 ## D-007 - Reproducible release identity
 
-Accepted 2026-07-22; expanded by explicit authorization on the same date. Quetzalcoatl 0.1.3 has MSI ProductCode `{2A1C371C-EDE5-48DE-A297-1EE70F18CD1C}`, PackageCode `{4931BD41-7686-4846-96A6-DFB5F1BB0AD8}`, preserved UpgradeCode `{47D5BD44-D061-407B-913B-47D17EC3BEA9}` and Burn registration ID `{6FC46C58-8F5B-44E8-90D4-9E5E90A3EC33}`. Package, bundle, Rust crates and CacheIds use the same version. The build rejects identity drift and verifies the generated MSI and Burn identities.
+Accepted 2026-07-22; expanded by explicit authorization on 2026-07-23.
+Quetzalcoatl 0.1.4 has MSI ProductCode
+`{EF6AC7CC-92A4-40C3-B8DA-D62845176E09}`, PackageCode
+`{0ED76FE6-9961-4D1A-8740-BAE336AFF777}`, preserved UpgradeCode
+`{47D5BD44-D061-407B-913B-47D17EC3BEA9}` and Burn registration ID
+`{A3A9B194-9B26-4C85-A240-AAA053B8D433}`. Package, bundle, Rust crates and
+CacheIds use the same version. The build rejects identity drift and verifies
+the generated MSI and Burn identities. The prior 0.1.3 identities remain
+historical and must not be reused for changed payloads.
 
 WiX 5 normally generates fresh bind identities and timestamps. The scoped packaging extension fixes the Burn registration ID; the build fixes MSI summary identity/timestamps, normalizes compound-file and cabinet timestamps, updates the attached-container hash and recalculates cabinet checksums. A release candidate is accepted only after two builds are byte-identical and its exact SHA-256 values are recorded.

@@ -39,9 +39,21 @@ else
 fi
 export TF_IN_AUTOMATION=1
 
-tofu init -input=false -lockfile=readonly -no-color
-tofu validate -no-color
-tofu apply -auto-approve -input=false -no-color
+run_stage() {
+  stage=$1
+  shift
+  if "$@"; then
+    return 0
+  else
+    status=$?
+    printf 'GNX_OPENTOFU_STAGE=%s_failed;EXIT=%s\n' "$stage" "$status" >&2
+    exit "$status"
+  fi
+}
+
+run_stage init tofu init -input=false -lockfile=readonly -no-color
+run_stage validate tofu validate -no-color
+run_stage apply tofu apply -auto-approve -input=false -no-color -parallelism=1
 
 [ "$(tofu output -json garage_vmid)" = "$([ "$install_garage" -eq 1 ] && printf '200' || printf 'null')" ]
 [ "$(tofu output -json forgejo_vmid)" = "$([ "$install_forgejo" -eq 1 ] && printf '201' || printf 'null')" ]

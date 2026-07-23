@@ -24,14 +24,16 @@ Functional MVP is reached at 90/100 only when G1-G5 are all `VERIFIED`. Pilotabl
 | Work item | Owner | State | Dependency | Output |
 |---|---|---|---|---|
 | GOV-01 Establish agent contract and tracker | architect | VERIFIED | none | `AGENTS.md`, `.AGENTS/` |
-| MVP-CLOSE 0.1.3 candidate and focused documentation | architect | LOCAL_VERIFIED | reviewed member implementation | byte-reproducible EXE/MSI and normalized sources |
-| CI-01 Dockur Actions lane | architect/operator | PARTIAL | reproducible 0.1.3 candidate | three successful workflow runs and redacted guest evidence; runtime blocked before role resolution |
+| MVP-CLOSE 0.1.4 candidate and focused documentation | architect | LOCAL_VERIFIED | installed 0.1.3 controller failure | byte-reproducible EXE/MSI and normalized sources; live upgrade pending |
+| CI-01 Dockur Actions lane | architect/operator | PARTIAL | reproducible 0.1.4 candidate | prior 0.1.3 runs retained; 0.1.4 rerun pending |
 | CORE-01 Persisted member and status contract | codex-cli-state | VERIFIED | GOV-01 | Rust changes and tests |
 | CORE-02 Deterministic member discovery/orchestration | codex-cli-runtime | VERIFIED | CORE-01 | Rust changes and tests |
 | PVE-01 Secure resumable Proxmox join | codex-cli-pve/architect | VERIFIED | CORE-01 | Payload changes and tests |
 | INT-01 Integrate controller/member paths | codex-cli-integration/architect | VERIFIED | CORE-02, PVE-01 | Workspace test evidence |
 | PKG-01 Prior integrated installer baseline | architect | VERIFIED | INT-01 | historical MSI/Setup hashes |
-| PKG-03 Reproducible 0.1.3 installer identity | architect | VERIFIED | MVP-CLOSE | fixed identities and byte-identical MSI/Setup rebuild |
+| PKG-03 Reproducible 0.1.3 installer identity | architect | VERIFIED | INT-01 | historical fixed identities and byte-identical MSI/Setup rebuild |
+| PKG-04 Reproducible 0.1.4 installer and upgrade identity | architect | LOCAL_VERIFIED | RT-01 | new identities and byte-identical MSI/Setup; live 0.1.3 upgrade pending |
+| RT-01 Serialize controller OpenTofu apply and retain useful failure stage | architect/operator | LOCAL_VERIFIED | installed 0.1.3 controller failure | corrected 0.1.4 payload; live controller rerun pending |
 | LAB-01 Three-host network and cluster acceptance | architect/operator | BLOCKED | CI-01, INT-01, three hosts | Physical evidence bundle |
 | DOC-01 Consolidate documentation authorities | architect | VERIFIED | MVP-CLOSE | ten maintained Markdown sources |
 
@@ -40,4 +42,11 @@ Functional MVP is reached at 90/100 only when G1-G5 are all `VERIFIED`. Pilotabl
 - The exact 0.1.3 hash completed successful interactive Dockur runs for `controller`, `member-1`, and `member-2`, including the real two-reboot installer path. All three guests entered Windows automatic repair when the nested Windows hypervisor started; disabling `hypervisorlaunchtype` recovered Windows and allowed installation/evidence export, but left `podman_machine=failed` before role resolution. This hosted limitation keeps G2 partial and does not prove controller/member runtime convergence.
 - Three physical consumer Windows 11 hosts have not yet supplied the required network and quorum evidence for this cycle.
 - The current integrated bundle is unsigned and has not completed current-candidate repair/uninstall/recovery runs, so G6 receives no points yet.
+- A physical Windows controller reached quorate PVE but failed during the
+  controller OpenTofu one-shot. The retained status bounded the reverse-order
+  journal before the provider diagnostic, so the exact `tofu` error was lost.
+  RT-01 serializes provider mutations with `-parallelism=1`, retains a
+  stage-specific chronological diagnostic and passed the local reproducible
+  package gate. The correction remains live-unverified until the rebuilt 0.1.4
+  controller reaches `READY`.
 - Existing GitHub runner evidence used DERP with approximately 64-73 ms RTT and cannot close G5.
