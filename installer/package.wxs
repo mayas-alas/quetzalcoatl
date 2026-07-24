@@ -2,8 +2,8 @@
   <Package
     Name="Quetzalcoatl"
     Manufacturer="Quetzalcoatl"
-    Version="0.1.8"
-    ProductCode="{F04621AE-B25E-423E-B29F-1DFE3B387D30}"
+    Version="0.1.10"
+    ProductCode="{51B87559-35D7-4AAC-A311-2313CE8C0647}"
     UpgradeCode="{47D5BD44-D061-407B-913B-47D17EC3BEA9}"
     Scope="perMachine">
 
@@ -23,6 +23,7 @@
     <Feature Id="ProductFeature" Title="Quetzalcoatl" Level="1">
       <ComponentRef Id="CliComponent" />
       <ComponentRef Id="ServiceComponent" />
+      <ComponentRef Id="GnxServiceBinaryComponent" />
       <ComponentRef Id="MachineImageComponent" />
       <ComponentRef Id="LicensesComponent" />
       <Files Include="$(var.RuntimePayload)\**" Directory="RuntimePayloadFolder" />
@@ -53,7 +54,6 @@
           Id="WinSWConfig"
           Source="$(var.ServiceConfig)"
           Name="Quetzalcoatl.Service.xml" />
-        <File Id="GnxService" Source="$(var.GnxService)" Name="gnx-service.exe" />
         <ServiceInstall
           Id="QuetzalcoatlService"
           Name="Quetzalcoatl"
@@ -71,6 +71,17 @@
           Stop="both"
           Remove="uninstall"
           Wait="yes" />
+      </Component>
+
+      <!-- Keep the supervised Rust service in its own keyed component.
+           Earlier packages grouped it behind the unchanged WinSW key path, which
+           allowed Windows Installer repair/upgrade paths to retain a stale binary. -->
+      <Component Id="GnxServiceBinaryComponent" Guid="*">
+        <File
+          Id="GnxService"
+          Source="$(var.GnxService)"
+          Name="gnx-service.exe"
+          KeyPath="yes" />
       </Component>
     </DirectoryRef>
 

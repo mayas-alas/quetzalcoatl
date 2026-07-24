@@ -22,6 +22,10 @@ const MACHINE_CPUS: u64 = 6;
 const MACHINE_MEMORY_MIB: u64 = 8192;
 const MACHINE_DISK_GIB: u64 = 100;
 const MACHINE_NETWORK_MTU: u32 = 1500;
+const RUNTIME_GENERATION: &str = "proxmox-cluster-v2";
+const RUNTIME_GENERATION_PATH: &str = "/etc/quetzalcoatl/runtime-generation";
+const TAILSCALE_STATE_PATH: &str =
+    "/var/lib/quetzalcoatl/tailscale/host/tailscaled.state";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const PVE_CLUSTER_CREATE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-cluster-create";
 const PVE_CONFIGURE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-configure";
@@ -169,16 +173,8 @@ install -d -m 0755 \
 install -d -m 0755 /run/gnx
 date --iso-8601=seconds > /run/gnx/proxmox-started-at
 systemctl daemon-reload
-systemctl stop \
-  tailscaled.service \
-  gnx-tailscale-enroll.service \
-  proxmox.service \
-  gnx-node-pod.service >/dev/null 2>&1 || true
-systemctl reset-failed \
-  gnx-node-pod.service \
-  proxmox.service \
-  gnx-tailscale-enroll.service \
-  tailscaled.service >/dev/null 2>&1 || true
+systemctl stop proxmox.service >/dev/null 2>&1 || true
+systemctl reset-failed gnx-node-pod.service proxmox.service >/dev/null 2>&1 || true
 if ! systemctl start gnx-node-pod.service >/dev/null 2>&1; then
   journalctl --no-pager -o cat -r -n 30 -u gnx-node-pod.service >&2 || true
   exit 1
@@ -275,27 +271,12 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
     set_stage(status, "PAYLOAD_APPLYING");
     apply_runtime_payload(&podman)?;
 
-    set_stage(status, "PROXMOX_STARTING");
-    start_proxmox(&podman)?;
-    set_stage(status, "POD_NETWORK_PREPARING");
-    configure_pod_network_mtu(&podman)?;
-    set_stage(status, "PROXMOX_CHECKING");
-    validate_proxmox_devices(&podman)?;
-    wait_for_proxmox(&podman)?;
-    set_component(status, Component::Proxmox, "ready");
-    set_stage(status, "PROXMOX_READY");
-    verify_tailscale_secret_cleanup(&podman)?;
-
     set_stage(status, "CONFIGURATION_WAITING");
     let mut configuration = wait_for_configuration()?;
     let persisted_state = load_persisted_state()?;
     if let Some(state) = persisted_state.as_ref() {
         validate_state_configuration(state, &configuration)?;
     }
-
-    set_stage(status, "PVE_CREDENTIAL_APPLYING");
-    configure_pve_password(&podman, &configuration.pve_root_password)?;
-    configuration.pve_root_password.zeroize();
 
     let hostname = match persisted_state.as_ref() {
         Some(state) => persisted_local_hostname(state)?.to_owned(),
@@ -310,13 +291,39 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
     let identity = wait_for_tailscale(&podman, &hostname, &configuration.tailnet)?;
     disable_tailscale_ssh(&podman)?;
     set_stage(status, "ROLE_DISCOVERING");
-    let mut controller =
-        resolve_controller(&podman, persisted_state, identity, &configuration.tailnet)?;
+    let mut controller = resolve_controller(
+        &podman,
+        persisted_state,
+        identity,
+        &configuration.tailnet,
+    )?;
     if controller.role.is_controller() {
         set_controller(status, &controller.controller.hostname);
     }
     set_component(status, Component::Tailscale, "ready");
     set_stage(status, "ROLE_RESOLVED");
+
+    set_stage(status, "PVE_IDENTITY_PREPARING");
+    prepare_pve_identity(
+        &podman,
+        controller.self_ip,
+        persisted_local_hostname(&controller)?,
+    )?;
+
+    set_stage(status, "PROXMOX_STARTING");
+    start_proxmox(&podman)?;
+    set_stage(status, "POD_NETWORK_PREPARING");
+    configure_pod_network_mtu(&podman)?;
+    set_stage(status, "PROXMOX_CHECKING");
+    validate_proxmox_devices(&podman)?;
+    wait_for_proxmox(&podman)?;
+    set_component(status, Component::Proxmox, "ready");
+    set_stage(status, "PROXMOX_READY");
+    verify_tailscale_secret_cleanup(&podman)?;
+
+    set_stage(status, "PVE_CREDENTIAL_APPLYING");
+    configure_pve_password(&podman, &configuration.pve_root_password)?;
+    configuration.pve_root_password.zeroize();
 
     set_stage(status, "TAILSCALE_SERVE_CHECKING");
     wait_for_tailscale_serve(
@@ -353,6 +360,8 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
         set_stage(status, "CONTROLLER_CLUSTER_CHECKING");
         verify_controller_cluster(&podman, controller.self_ip, &controller.controller.hostname)?;
     }
+    set_stage(status, "PVE_IDENTITY_CHECKING");
+    verify_pve_identity(&podman, controller.self_ip, &controller.controller.hostname)?;
     set_cluster_ready(status);
     set_stage(status, "CONTROLLER_CLUSTER_READY");
 
@@ -438,43 +447,31 @@ fn ensure_machine(podman: &Path, image: &MachineImage) -> Result<(), GateError> 
         ));
     }
 
-    match machines.iter().find(|machine| machine.name == MACHINE_NAME) {
-        Some(machine) => {
-            if machine.vm_type != "wsl" {
-                return Err(GateError::new(
-                    "MACHINE_CREATE_FAILED",
-                    Component::PodmanMachine,
-                    "managed machine exists with a provider other than WSL",
-                ));
+    let mut recreated = false;
+    if let Some(machine) = machines.iter().find(|machine| machine.name == MACHINE_NAME) {
+        if machine.vm_type != "wsl" {
+            return Err(GateError::new(
+                "MACHINE_CREATE_FAILED",
+                Component::PodmanMachine,
+                "managed machine exists with a provider other than WSL",
+            ));
+        }
+        ensure_machine_running(podman)?;
+        wait_for_machine_ssh(podman)?;
+        if read_runtime_generation(podman)?.as_deref() != Some(RUNTIME_GENERATION) {
+            let tailscale_state = read_managed_tailscale_state(podman)?;
+            remove_managed_machine(podman)?;
+            create_managed_machine(podman, image)?;
+            wait_for_machine_ssh(podman)?;
+            if let Some(state) = tailscale_state.as_deref() {
+                restore_managed_tailscale_state(podman, state)?;
             }
+            recreated = true;
         }
-        None => {
-            let image_path = installed_machine_image(image)?;
-            let cpus = MACHINE_CPUS.to_string();
-            let memory = MACHINE_MEMORY_MIB.to_string();
-            let disk = MACHINE_DISK_GIB.to_string();
-            let args = vec![
-                OsString::from("machine"),
-                OsString::from("init"),
-                OsString::from("--provider"),
-                OsString::from("wsl"),
-                OsString::from("--image"),
-                image_path.into_os_string(),
-                OsString::from("--cpus"),
-                OsString::from(cpus),
-                OsString::from("--memory"),
-                OsString::from(memory),
-                OsString::from("--disk-size"),
-                OsString::from(disk),
-                OsString::from("--rootful"),
-                OsString::from("--update-connection"),
-                OsString::from("--now"),
-                OsString::from(MACHINE_NAME),
-            ];
-            run_command(podman, args).map_err(|error| {
-                error.with_code("MACHINE_CREATE_FAILED", Component::PodmanMachine)
-            })?;
-        }
+    } else {
+        create_managed_machine(podman, image)?;
+        wait_for_machine_ssh(podman)?;
+        recreated = true;
     }
 
     let inspect = inspect_machine(podman)?;
@@ -491,10 +488,172 @@ fn ensure_machine(podman: &Path, image: &MachineImage) -> Result<(), GateError> 
         ));
     }
     if inspect.state != "running" {
-        run_command(podman, ["machine", "start", MACHINE_NAME])
-            .map_err(|error| error.with_code("MACHINE_CREATE_FAILED", Component::PodmanMachine))?;
+        ensure_machine_running(podman)?;
+        wait_for_machine_ssh(podman)?;
+    }
+
+    if recreated {
+        crate::state::reset_runtime_checkpoint().map_err(|error| {
+            GateError::new("STATE_STORAGE_FAILED", Component::None, error.message())
+        })?;
+        write_runtime_generation(podman)?;
     }
     Ok(())
+}
+
+fn create_managed_machine(podman: &Path, image: &MachineImage) -> Result<(), GateError> {
+    let image_path = installed_machine_image(image)?;
+    let cpus = MACHINE_CPUS.to_string();
+    let memory = MACHINE_MEMORY_MIB.to_string();
+    let disk = MACHINE_DISK_GIB.to_string();
+    let args = vec![
+        OsString::from("machine"),
+        OsString::from("init"),
+        OsString::from("--provider"),
+        OsString::from("wsl"),
+        OsString::from("--image"),
+        image_path.into_os_string(),
+        OsString::from("--cpus"),
+        OsString::from(cpus),
+        OsString::from("--memory"),
+        OsString::from(memory),
+        OsString::from("--disk-size"),
+        OsString::from(disk),
+        OsString::from("--rootful"),
+        OsString::from("--update-connection"),
+        OsString::from("--now"),
+        OsString::from(MACHINE_NAME),
+    ];
+    run_command(podman, args)
+        .map(|_| ())
+        .map_err(|error| error.with_code("MACHINE_CREATE_FAILED", Component::PodmanMachine))
+}
+
+fn ensure_machine_running(podman: &Path) -> Result<(), GateError> {
+    let inspect = inspect_machine(podman)?;
+    if inspect.state != "running" {
+        run_command(podman, ["machine", "start", MACHINE_NAME]).map_err(|error| {
+            error.with_code("MACHINE_CREATE_FAILED", Component::PodmanMachine)
+        })?;
+    }
+    Ok(())
+}
+
+fn wait_for_machine_ssh(podman: &Path) -> Result<(), GateError> {
+    let mut last_error = String::from("machine SSH is not ready");
+    for attempt in 0..30 {
+        match machine_stdin(podman, ["true"], &[]) {
+            Ok(_) => return Ok(()),
+            Err(error) => last_error = error.message,
+        }
+        if attempt + 1 < 30 {
+            thread::sleep(Duration::from_secs(1));
+        }
+    }
+    Err(GateError::new(
+        "MACHINE_CREATE_FAILED",
+        Component::PodmanMachine,
+        format!("managed machine SSH did not become ready: {last_error}"),
+    ))
+}
+
+fn read_runtime_generation(podman: &Path) -> Result<Option<String>, GateError> {
+    let script = format!(
+        "if test -f {RUNTIME_GENERATION_PATH}; then cat {RUNTIME_GENERATION_PATH}; fi\n"
+    );
+    let output = machine_stdin(podman, ["sh", "-s"], script.as_bytes()).map_err(|error| {
+        error.with_code("MACHINE_GENERATION_FAILED", Component::PodmanMachine)
+    })?;
+    let generation = String::from_utf8(output.stdout).map_err(|_| {
+        GateError::new(
+            "MACHINE_GENERATION_FAILED",
+            Component::PodmanMachine,
+            "managed machine generation marker is not UTF-8",
+        )
+    })?;
+    let generation = generation.trim();
+    if generation.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(generation.to_owned()))
+    }
+}
+
+fn write_runtime_generation(podman: &Path) -> Result<(), GateError> {
+    let script = format!(
+        "set -eu\ninstall -d -m 0755 /etc/quetzalcoatl\nprintf '%s\\n' \"$1\" > {RUNTIME_GENERATION_PATH}.new\nchmod 0644 {RUNTIME_GENERATION_PATH}.new\nmv -f {RUNTIME_GENERATION_PATH}.new {RUNTIME_GENERATION_PATH}\ntest \"$(cat {RUNTIME_GENERATION_PATH})\" = \"$1\"\n",
+    );
+    machine_stdin(
+        podman,
+        ["sh", "-s", "--", RUNTIME_GENERATION],
+        script.as_bytes(),
+    )
+    .map(|_| ())
+    .map_err(|error| error.with_code("MACHINE_GENERATION_FAILED", Component::PodmanMachine))
+}
+
+fn read_managed_tailscale_state(
+    podman: &Path,
+) -> Result<Option<Zeroizing<Vec<u8>>>, GateError> {
+    let script = format!(
+        "if test -s {TAILSCALE_STATE_PATH}; then cat {TAILSCALE_STATE_PATH}; fi\n"
+    );
+    let output = machine_stdin(podman, ["sh", "-s"], script.as_bytes()).map_err(|error| {
+        error.with_code("MACHINE_GENERATION_FAILED", Component::Tailscale)
+    })?;
+    if output.stdout.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(Zeroizing::new(output.stdout)))
+    }
+}
+
+fn restore_managed_tailscale_state(podman: &Path, state: &[u8]) -> Result<(), GateError> {
+    const STATE_DIRECTORY: &str = "/var/lib/quetzalcoatl/tailscale/host";
+    let pending_state = format!("{TAILSCALE_STATE_PATH}.new");
+
+    let result = (|| -> Result<(), GateError> {
+        machine_stdin(
+            podman,
+            ["install", "-d", "-m", "0700", STATE_DIRECTORY],
+            &[],
+        )?;
+        machine_stdin(
+            podman,
+            [
+                OsString::from("dd"),
+                OsString::from(format!("of={pending_state}")),
+                OsString::from("status=none"),
+            ],
+            state,
+        )?;
+        machine_stdin(podman, ["test", "-s", pending_state.as_str()], &[])?;
+        machine_stdin(
+            podman,
+            ["mv", "-f", pending_state.as_str(), TAILSCALE_STATE_PATH],
+            &[],
+        )?;
+        machine_stdin(podman, ["chmod", "0600", TAILSCALE_STATE_PATH], &[])?;
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = machine_stdin_output(podman, ["rm", "-f", pending_state.as_str()], &[]);
+    }
+
+    result.map_err(|error| error.with_code("MACHINE_GENERATION_FAILED", Component::Tailscale))
+}
+
+fn remove_managed_machine(podman: &Path) -> Result<(), GateError> {
+    let inspect = inspect_machine(podman)?;
+    if inspect.state == "running" {
+        run_command(podman, ["machine", "stop", MACHINE_NAME]).map_err(|error| {
+            error.with_code("MACHINE_GENERATION_FAILED", Component::PodmanMachine)
+        })?;
+    }
+    run_command(podman, ["machine", "rm", "--force", MACHINE_NAME])
+        .map(|_| ())
+        .map_err(|error| error.with_code("MACHINE_GENERATION_FAILED", Component::PodmanMachine))
 }
 
 fn installed_machine_image(image: &MachineImage) -> Result<PathBuf, GateError> {
@@ -874,6 +1033,9 @@ fn join_member_cluster(
     let join_result = join_member(podman, member, &configuration.pve_root_password);
     configuration.pve_root_password.zeroize();
     join_result?;
+
+    set_stage(status, "PVE_IDENTITY_CHECKING");
+    verify_pve_identity(podman, member.self_ip, persisted_local_hostname(member)?)?;
 
     member.cluster_join = crate::state::ClusterJoinState::Joined;
     member.stage = "READY".into();
@@ -1264,6 +1426,56 @@ fn confirm_empty_controller_inventory(
         ));
     }
     Ok(())
+}
+
+fn prepare_pve_identity(
+    podman: &Path,
+    self_ip: IpAddr,
+    hostname: &str,
+) -> Result<(), GateError> {
+    let input = format!("{self_ip}\n{hostname}\n");
+    let output = machine_stdin(podman, [PVE_CLUSTER_CREATE_BIN, "prepare"], input.as_bytes())
+        .map_err(|error| error.with_code("PVE_IDENTITY_PREPARE_FAILED", Component::Proxmox))?;
+    if String::from_utf8_lossy(&output.stdout).trim() != "PVE_IDENTITY=ready" {
+        return Err(GateError::new(
+            "PVE_IDENTITY_PREPARE_FAILED",
+            Component::Proxmox,
+            "PVE identity was not persisted before the first Proxmox start",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_pve_identity(
+    podman: &Path,
+    self_ip: IpAddr,
+    hostname: &str,
+) -> Result<(), GateError> {
+    let input = format!("{self_ip}\n{hostname}\n");
+    let mut last_error = String::from("PVE node identity is not coherent");
+    for attempt in 0..60 {
+        match machine_stdin(
+            podman,
+            [PVE_CLUSTER_CREATE_BIN, "verify-node"],
+            input.as_bytes(),
+        ) {
+            Ok(output)
+                if String::from_utf8_lossy(&output.stdout).trim() == "PVE_NODE=ready" =>
+            {
+                return Ok(());
+            }
+            Ok(output) => last_error = format!("unexpected output: {}", bounded_text(&output.stdout)),
+            Err(error) => last_error = error.message,
+        }
+        if attempt + 1 < 60 {
+            thread::sleep(Duration::from_secs(2));
+        }
+    }
+    Err(GateError::new(
+        "PVE_NODE_IDENTITY_MISMATCH",
+        Component::Proxmox,
+        last_error,
+    ))
 }
 
 fn create_controller_cluster(
@@ -1660,6 +1872,8 @@ where
     check_output(output, "podman machine probe")
 }
 
+// Podman machine SSH transports a remote command string, not a preserved argv vector.
+// Send multiword shell programs through stdin to `sh -s`; never pass them as a `sh -c` argument.
 fn machine_stdin_output<I, S>(podman: &Path, args: I, input: &[u8]) -> Result<Output, GateError>
 where
     I: IntoIterator<Item = S>,
@@ -1769,11 +1983,17 @@ fn parse_payload_manifest(bytes: &[u8]) -> Result<Vec<LockedPayloadFile>, GateEr
             format!("runtime manifest is invalid JSON: {error}"),
         )
     })?;
-    if manifest.payload_version != 1 || manifest.files.len() != PAYLOAD_FILES.len() {
+    if manifest.payload_version != 2 || manifest.files.len() != PAYLOAD_FILES.len() {
         return Err(GateError::new(
             "RUNTIME_PAYLOAD_INVALID",
             Component::Proxmox,
-            "runtime manifest does not contain the exact payload v1 file set",
+            format!(
+                "runtime/service payload contract mismatch: service_version={} expected_payload_version=2 expected_files={} manifest_payload_version={} manifest_files={}",
+                env!("CARGO_PKG_VERSION"),
+                PAYLOAD_FILES.len(),
+                manifest.payload_version,
+                manifest.files.len(),
+            ),
         ));
     }
 
@@ -2288,7 +2508,7 @@ mod tests {
 
     #[test]
     fn parses_locked_wsl_machine_image() {
-        let manifest = include_bytes!("../../../runtime/payload-v1/manifest.json");
+        let manifest = include_bytes!("../../../runtime/payload-v2/manifest.json");
         let image = parse_machine_image(manifest).expect("machine image pin");
         assert_eq!(image.artifact, MACHINE_IMAGE_ARTIFACT);
         assert_eq!(image.size, MACHINE_IMAGE_SIZE);
@@ -2297,9 +2517,9 @@ mod tests {
 
     #[test]
     fn payload_manifest_matches_all_installed_files() {
-        let manifest = include_bytes!("../../../runtime/payload-v1/manifest.json");
+        let manifest = include_bytes!("../../../runtime/payload-v2/manifest.json");
         let files = parse_payload_manifest(manifest).expect("payload v1 file set");
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/payload-v1");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/payload-v2");
 
         assert_eq!(files.len(), PAYLOAD_FILES.len());
         for file in files {
@@ -2311,6 +2531,23 @@ mod tests {
                 file.relative_path
             );
         }
+    }
+
+    #[test]
+    fn payload_contract_mismatch_reports_both_sides() {
+        let manifest = include_bytes!("../../../runtime/payload-v2/manifest.json");
+        let mut value: serde_json::Value = serde_json::from_slice(manifest).expect("manifest JSON");
+        value["files"].as_array_mut().expect("files array").pop();
+        let bytes = serde_json::to_vec(&value).expect("manifest bytes");
+        let error = match parse_payload_manifest(&bytes) {
+            Ok(_) => panic!("truncated manifest must fail"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.code, "RUNTIME_PAYLOAD_INVALID");
+        assert!(error.message.contains("service_version=0.1.10"));
+        assert!(error.message.contains("expected_files=11"));
+        assert!(error.message.contains("manifest_files=10"));
     }
 
     #[test]

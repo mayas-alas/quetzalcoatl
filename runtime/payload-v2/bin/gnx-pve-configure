@@ -1,0 +1,49 @@
+#!/bin/sh
+set -eu
+umask 077
+
+secret=/run/gnx/pve-root-password
+bootstrap=/run/gnx/pve-bootstrap-password
+
+cleanup() {
+  podman exec gnx-proxmox rm -f \
+    /run/gnx/pve-root-password \
+    /run/gnx/pve-bootstrap-password >/dev/null 2>&1 || true
+  rm -f "$secret" "$bootstrap"
+}
+trap cleanup EXIT HUP INT TERM
+
+cat > "$secret"
+test -s "$secret"
+podman exec gnx-proxmox install -d -m 0700 /run/gnx
+podman exec -i gnx-proxmox sh -c \
+  'umask 077; cat > /run/gnx/pve-root-password' < "$secret"
+{
+  printf 'root:'
+  cat "$secret"
+  printf '\n'
+} | podman exec -i gnx-proxmox chpasswd
+
+podman exec gnx-proxmox sh -eu -c '
+  curl -kfsS --max-time 15 \
+    --data-urlencode "username=root@pam" \
+    --data-urlencode "password@/run/gnx/pve-root-password" \
+    https://127.0.0.1:8006/api2/json/access/ticket \
+    | jq -e '\''.data.ticket | type == "string" and length > 0'\'' >/dev/null
+'
+
+printf 'root' > "$bootstrap"
+podman exec -i gnx-proxmox sh -c \
+  'umask 077; cat > /run/gnx/pve-bootstrap-password' < "$bootstrap"
+if podman exec gnx-proxmox sh -eu -c '
+  curl -kfsS --max-time 15 \
+    --data-urlencode "username=root@pam" \
+    --data-urlencode "password@/run/gnx/pve-bootstrap-password" \
+    https://127.0.0.1:8006/api2/json/access/ticket \
+    | jq -e '\''.data.ticket | type == "string" and length > 0'\'' >/dev/null
+'; then
+  echo 'known PVE bootstrap credential is still accepted' >&2
+  exit 1
+fi
+
+printf 'PVE_PASSWORD=ready\n'

@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+umask 077
+
+persistent_key='/var/lib/pve-cluster/quetzalcoatl-corosync.authkey'
+runtime_key='/etc/corosync/authkey'
+if [ -e "$persistent_key" ]; then
+  [ -f "$persistent_key" ] && [ ! -L "$persistent_key" ] && [ -s "$persistent_key" ] || exit 71
+  [ "$(stat -c '%u:%g:%a' "$persistent_key")" = '0:0:400' ] || exit 71
+  install -d -o 0 -g 0 -m 0755 /etc/corosync
+  install -o 0 -g 0 -m 0400 "$persistent_key" "$runtime_key"
+fi
+
+bootstrap_password="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+test "${#bootstrap_password}" -eq 64
+export PASSWORD="$bootstrap_password"
+/usr/libexec/quetzalcoatl/gnx-pve-cluster-create prepare-hostname
+exec /usr/local/bin/entrypoint.sh "$@"

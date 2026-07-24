@@ -1,0 +1,12 @@
+[Unit]
+Description=Reconcile the Quetzalcoatl host Tailscale enrollment
+Requires=gnx-node-pod.service
+After=gnx-node-pod.service
+Before=tailscaled.service
+
+[Service]
+Type=oneshot
+UMask=0077
+EnvironmentFile=-/run/gnx/tailscale-enroll.env
+ExecStart=/usr/libexec/quetzalcoatl/gnx-tailscale-enroll podman host ${GNX_TS_HOSTNAME}
+RemainAfterExit=yes

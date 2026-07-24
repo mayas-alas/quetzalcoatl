@@ -48,6 +48,10 @@ The payload contains exactly 11 files:
 
 `manifest.json` and the Rust `PAYLOAD_FILES` array form the exact payload allowlist. Every file is LF-only, SHA-256 locked, written atomically and installed with a fixed mode.
 
+## Managed runtime generation
+
+The dedicated Podman Machine carries a fixed runtime-generation marker. When the marker is absent or differs from the service contract, Quetzalcoatl preserves only the current Tailscale node state, removes and recreates the entire managed machine, resets the cluster checkpoint to `ROLE_RESOLVED`, and reapplies the 11-file payload. This guarantees that an upgrade cannot retain unmanaged files, containers, volumes or PVE resources from an incompatible runtime generation.
+
 ## Runtime state machine
 
 Common stages:

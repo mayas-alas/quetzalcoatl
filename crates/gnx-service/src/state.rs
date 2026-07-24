@@ -82,7 +82,12 @@ struct SchemaOneState {
 }
 
 impl PersistedState {
-    pub fn controller(self_id: String, self_ip: IpAddr, hostname: String, tailnet: String) -> Self {
+    pub fn controller(
+        self_id: String,
+        self_ip: IpAddr,
+        hostname: String,
+        tailnet: String,
+    ) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             stage: "ROLE_RESOLVED".into(),
@@ -153,6 +158,23 @@ pub fn load_optional() -> Result<Option<PersistedState>, StateError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(StateError::io("cannot read persisted state", &error)),
     }
+}
+
+pub fn reset_runtime_checkpoint() -> Result<(), StateError> {
+    let Some(mut state) = load_optional()? else {
+        return Ok(());
+    };
+    normalize_runtime_checkpoint(&mut state);
+    store(&state)
+}
+
+fn normalize_runtime_checkpoint(state: &mut PersistedState) {
+    state.stage = "ROLE_RESOLVED".into();
+    state.cluster_join = if state.role.is_controller() {
+        ClusterJoinState::NotApplicable
+    } else {
+        ClusterJoinState::NotStarted
+    };
 }
 
 fn load_current_from(path: &std::path::Path) -> Result<PersistedState, StateError> {
@@ -242,10 +264,7 @@ fn validate(state: &PersistedState) -> Result<(), StateError> {
 }
 
 fn valid_controller_stage(stage: &str) -> bool {
-    matches!(
-        stage,
-        "ROLE_RESOLVED" | "CONTROLLER_CLUSTER_READY" | "READY"
-    )
+    matches!(stage, "ROLE_RESOLVED" | "CONTROLLER_CLUSTER_READY" | "READY")
 }
 
 fn valid_member_stage(stage: &str, cluster_join: &ClusterJoinState) -> bool {
@@ -382,6 +401,41 @@ mod tests {
         assert_eq!(state.stage, "CONTROLLER_CLUSTER_READY");
         assert_eq!(state.member, None);
         assert_eq!(state.cluster_join, ClusterJoinState::NotApplicable);
+    }
+
+    #[test]
+    fn runtime_checkpoint_reset_preserves_controller_identity() {
+        let mut state = controller_state();
+        state.stage = "READY".into();
+        normalize_runtime_checkpoint(&mut state);
+
+        assert_eq!(state.stage, "ROLE_RESOLVED");
+        assert_eq!(state.cluster_join, ClusterJoinState::NotApplicable);
+        assert_eq!(state.self_id, "node-id-123");
+        assert_eq!(state.controller.hostname, "gnx-controller-node-id-123");
+    }
+
+    #[test]
+    fn runtime_checkpoint_reset_requires_member_rejoin() {
+        let controller = ControllerIdentity {
+            id: "controller-id".into(),
+            hostname: "gnx-controller-controller-id".into(),
+            ip: "100.100.10.20".parse().expect("IP"),
+        };
+        let mut state = PersistedState::member(
+            "member-id".into(),
+            "100.100.10.21".parse().expect("IP"),
+            "gnx-member-member-id".into(),
+            controller,
+            "tetra-balance.ts.net".into(),
+        );
+        state.stage = "READY".into();
+        state.cluster_join = ClusterJoinState::Joined;
+        normalize_runtime_checkpoint(&mut state);
+
+        assert_eq!(state.stage, "ROLE_RESOLVED");
+        assert_eq!(state.cluster_join, ClusterJoinState::NotStarted);
+        assert_eq!(state.self_id, "member-id");
     }
 
     #[test]

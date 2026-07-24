@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PAYLOAD = ROOT / "runtime" / "payload-v1"
+PAYLOAD = ROOT / "runtime" / "payload-v2"
 MANIFEST = PAYLOAD / "manifest.json"
 RUNTIME_GATE = ROOT / "crates" / "gnx-service" / "src" / "runtime_gate.rs"
 
@@ -46,7 +46,7 @@ def validate_manifest() -> None:
     data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     if set(data) != EXPECTED_MANIFEST_KEYS:
         fail(f"unexpected manifest keys: {sorted(set(data) - EXPECTED_MANIFEST_KEYS)}")
-    if data["schema_version"] != 1 or data["payload_version"] != 1:
+    if data["schema_version"] != 1 or data["payload_version"] != 2:
         fail("unsupported runtime manifest version")
 
     components = {entry["id"] for entry in data["components"]}
@@ -104,6 +104,23 @@ def validate_runtime_contract() -> None:
         fail("controller does not persist the final READY checkpoint")
     if "verify_controller_cluster(" not in source:
         fail("persisted controller cluster is not reverified")
+    required_generation_contract = {
+        'const RUNTIME_GENERATION: &str = "proxmox-cluster-v2";':
+            "runtime generation constant is missing",
+        "read_runtime_generation(":
+            "managed machine generation is not inspected",
+        "remove_managed_machine(":
+            "incompatible managed machines are not recreated",
+        "read_managed_tailscale_state(":
+            "current network identity is not preserved during recreation",
+        "reset_runtime_checkpoint()":
+            "cluster checkpoint is not reset after runtime recreation",
+        "write_runtime_generation(":
+            "managed machine generation is not committed",
+    }
+    for fragment, message in required_generation_contract.items():
+        if fragment not in source:
+            fail(message)
 
 
 def main() -> None:

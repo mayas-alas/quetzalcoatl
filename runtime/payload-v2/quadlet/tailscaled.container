@@ -1,0 +1,34 @@
+[Unit]
+Description=Quetzalcoatl Tailscale node sidecar
+Requires=gnx-node-pod.service gnx-tailscale-enroll.service
+After=gnx-node-pod.service gnx-tailscale-enroll.service
+
+[Container]
+ContainerName=gnx-tailscaled
+Image=docker.io/tailscale/tailscale@sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e
+Pod=gnx-node.pod
+StartWithPod=false
+AddCapability=NET_ADMIN
+AddDevice=/dev/net/tun
+EnvironmentFile=/etc/quetzalcoatl/node/node.env
+Environment=TS_STATE_DIR=/var/lib/tailscale
+Environment=TS_SERVE_CONFIG=/config/serve.json
+Environment=TS_USERSPACE=false
+Environment=TS_AUTH_ONCE=true
+Environment=TS_ACCEPT_DNS=false
+Environment=TS_ENABLE_HEALTH_CHECK=true
+Environment=TS_LOCAL_ADDR_PORT=127.0.0.1:41234
+Environment=TS_DEBUG_FIREWALL_MODE=nftables
+Environment="TS_EXTRA_ARGS=--advertise-tags=tag:quetzalcoatl-node"
+SecurityLabelDisable=true
+AddCapability=NET_RAW
+Volume=/var/lib/quetzalcoatl/tailscale/host:/var/lib/tailscale
+Volume=/etc/quetzalcoatl/node:/config:ro
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

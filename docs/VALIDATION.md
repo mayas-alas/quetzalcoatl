@@ -7,9 +7,13 @@ python3 ci/validate_runtime.py
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
-find runtime/payload-v1/bin -type f -print0 | xargs -0 -n1 sh -n
-shellcheck runtime/payload-v1/bin/*
+find runtime/payload-v2/bin -type f -print0 | xargs -0 -n1 sh -n
+shellcheck runtime/payload-v2/bin/*
+# On Windows CI, build.ps1 also compiles and administratively extracts the MSI.
 ```
+
+
+The Windows installer build deletes prior release executables before compilation, tests the embedded service/manifest contract, gives `gnx-service.exe` its own MSI key-path component, extracts the finished MSI, and compares the packaged service and complete runtime tree against the freshly built sources by SHA-256.
 
 The runtime validator checks:
 
@@ -18,7 +22,8 @@ The runtime validator checks:
 - equality between the 11 manifest entries, the physical payload and the Rust allowlist;
 - SHA-256 values and Unix modes;
 - the persisted controller `READY` checkpoint;
-- controller cluster verification on resume.
+- controller cluster verification on resume;
+- the managed-machine generation inspection, full recreation path, Tailscale identity preservation and cluster-checkpoint reset.
 
 ## Manual Windows acceptance
 

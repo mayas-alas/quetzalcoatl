@@ -10,17 +10,17 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $cacheRoot = Join-Path $repoRoot "target\installer-cache"
 $outputRoot = Join-Path $repoRoot "target\installer"
 $lockPath = Join-Path $PSScriptRoot "dependencies.lock.json"
-$releaseVersion = "0.1.8"
-$releaseProductCode = "{F04621AE-B25E-423E-B29F-1DFE3B387D30}"
+$releaseVersion = "0.1.10"
+$releaseProductCode = "{51B87559-35D7-4AAC-A311-2313CE8C0647}"
 $releaseUpgradeCode = "{47D5BD44-D061-407B-913B-47D17EC3BEA9}"
-$releasePackageCode = "{647FFA40-389D-4BAE-BA22-59953F8CD6DC}"
-$releaseBundleId = "{185B6D17-6A2B-4390-BC54-9DF4AA83AB03}"
-$previousProductCode = "{129BD77D-90DE-4992-86AE-F168C930D549}"
-$previousPackageCode = "{2164425B-7D79-4186-BDED-EF644CCB8804}"
-$previousBundleId = "{60314D27-47DF-4118-B937-6D1445BAC9D7}"
+$releasePackageCode = "{3BE07D30-37EA-4902-ABBF-4EB281CEFCCF}"
+$releaseBundleId = "{E49415D1-2A12-411B-9F41-3D863623F159}"
+$previousProductCode = "{ABDCB93E-1CC9-44AE-B697-D96BA9D4B21D}"
+$previousPackageCode = "{AA1D510C-C890-4C25-87D1-14AF78B6F7EC}"
+$previousBundleId = "{B72C8316-76AE-4BEB-97C0-02F9CD00F943}"
 $bundleUpgradeCode = "{10B764B2-36AE-4911-A8C8-2F1A2A963769}"
-$releaseTimestamp = [DateTime]::SpecifyKind([DateTime] "2026-07-23T00:00:00", [DateTimeKind]::Utc)
-$releaseCabDate = [uint16] (((2026 - 1980) -shl 9) -bor (7 -shl 5) -bor 23)
+$releaseTimestamp = [DateTime]::SpecifyKind([DateTime] "2026-07-24T00:00:00", [DateTimeKind]::Utc)
+$releaseCabDate = [uint16] (((2026 - 1980) -shl 9) -bor (7 -shl 5) -bor 24)
 $releaseCabTime = [uint16] 0
 $dependencyLock = Get-Content -LiteralPath $lockPath -Raw -Encoding utf8 | ConvertFrom-Json
 
@@ -211,6 +211,24 @@ function Test-ReleaseIdentityContract {
         $majorUpgrade[0].GetAttribute('Schedule') -ne 'afterInstallInitialize') {
         throw "Release identity contract: MSI major upgrade must preserve rollback-safe scheduling."
     }
+    $serviceBinaryComponents = @($package.SelectNodes('//*[local-name()="Component" and @Id="GnxServiceBinaryComponent"]'))
+    if ($serviceBinaryComponents.Count -ne 1) {
+        throw "Release identity contract: gnx-service.exe must have exactly one dedicated MSI component."
+    }
+    $serviceBinaryFiles = @($serviceBinaryComponents[0].SelectNodes('./*[local-name()="File" and @Id="GnxService"]'))
+    if ($serviceBinaryFiles.Count -ne 1 -or
+        $serviceBinaryFiles[0].GetAttribute('KeyPath') -ne 'yes' -or
+        $serviceBinaryFiles[0].GetAttribute('Name') -ne 'gnx-service.exe') {
+        throw "Release identity contract: gnx-service.exe must be the key path of GnxServiceBinaryComponent."
+    }
+    $legacyGroupedServiceFiles = @($package.SelectNodes('//*[local-name()="Component" and @Id="ServiceComponent"]/*[local-name()="File" and @Id="GnxService"]'))
+    if ($legacyGroupedServiceFiles.Count -ne 0) {
+        throw "Release identity contract: gnx-service.exe must not remain grouped behind the WinSW key path."
+    }
+    $serviceBinaryRefs = @($package.SelectNodes('//*[local-name()="Feature"]/*[local-name()="ComponentRef" and @Id="GnxServiceBinaryComponent"]'))
+    if ($serviceBinaryRefs.Count -ne 1) {
+        throw "Release identity contract: ProductFeature must install GnxServiceBinaryComponent exactly once."
+    }
     if ($bundleNode.GetAttribute('ProviderKey') -ne $bundleUpgradeCode -or
         $bundleNode.GetAttribute('UpgradeCode') -ne $bundleUpgradeCode) {
         throw "Release identity contract: Burn ProviderKey and UpgradeCode must preserve $bundleUpgradeCode."
@@ -259,6 +277,80 @@ function Test-ReleaseIdentityContract {
         if ($manifest -notmatch "(?m)^version\s*=\s*`"$([regex]::Escape($releaseVersion))`"\s*$") {
             throw "Release identity contract: $manifestPath must use version $releaseVersion."
         }
+    }
+}
+
+function Test-MsiPayloadCoherence {
+    param(
+        [Parameter(Mandatory)][string] $MsiPath,
+        [Parameter(Mandatory)][string] $ServiceBinary,
+        [Parameter(Mandatory)][string] $RuntimePayload
+    )
+
+    $verificationRoot = Join-Path $outputRoot "msi-payload-verification"
+    $verificationLog = Join-Path $outputRoot "msi-payload-verification.log"
+    Remove-Item -LiteralPath $verificationRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $verificationLog -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $verificationRoot | Out-Null
+
+    try {
+        # Wait for the full administrative extraction before inspecting the staged tree.
+        $msiexecPath = Join-Path $env:SystemRoot "System32\msiexec.exe"
+        $msiexecArguments = "/a `"$MsiPath`" /qn /norestart TARGETDIR=`"$verificationRoot`" /L*V `"$verificationLog`""
+        $msiexecProcess = Start-Process `
+            -FilePath $msiexecPath `
+            -ArgumentList $msiexecArguments `
+            -Wait `
+            -PassThru
+        if ($msiexecProcess.ExitCode -ne 0) {
+            throw "MSI administrative extraction failed with exit code $($msiexecProcess.ExitCode). Log: $verificationLog"
+        }
+
+        $stagedServices = @(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File -Filter "gnx-service.exe")
+        if ($stagedServices.Count -ne 1) {
+            $stagedFileCount = @(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File).Count
+            throw "MSI payload coherence: expected exactly one staged gnx-service.exe; found $($stagedServices.Count) among $stagedFileCount extracted files. Log: $verificationLog"
+        }
+        $sourceServiceHash = (Get-FileHash -LiteralPath $ServiceBinary -Algorithm SHA256).Hash
+        $stagedServiceHash = (Get-FileHash -LiteralPath $stagedServices[0].FullName -Algorithm SHA256).Hash
+        if ($sourceServiceHash -ne $stagedServiceHash) {
+            throw "MSI payload coherence: staged gnx-service.exe differs from the freshly built binary."
+        }
+
+        $stagedManifests = @(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File -Filter "manifest.json" | Where-Object {
+            $_.Directory.Name -eq 'runtime'
+        })
+        if ($stagedManifests.Count -ne 1) {
+            throw "MSI payload coherence: expected exactly one staged runtime manifest; found $($stagedManifests.Count)."
+        }
+        $stagedRuntime = $stagedManifests[0].Directory.FullName
+
+        function Get-TreeHashes([string] $Root) {
+            $resolvedRoot = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\')
+            $result = @{}
+            foreach ($file in Get-ChildItem -LiteralPath $resolvedRoot -Recurse -File) {
+                $relative = $file.FullName.Substring($resolvedRoot.Length).TrimStart('\').Replace('\', '/')
+                $result[$relative] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+            }
+            return $result
+        }
+
+        $sourceRuntimeHashes = Get-TreeHashes $RuntimePayload
+        $stagedRuntimeHashes = Get-TreeHashes $stagedRuntime
+        $sourcePaths = @($sourceRuntimeHashes.Keys | Sort-Object)
+        $stagedPaths = @($stagedRuntimeHashes.Keys | Sort-Object)
+        if (($sourcePaths -join "`n") -ne ($stagedPaths -join "`n")) {
+            $missing = @($sourcePaths | Where-Object { -not $stagedRuntimeHashes.ContainsKey($_) })
+            $extra = @($stagedPaths | Where-Object { -not $sourceRuntimeHashes.ContainsKey($_) })
+            throw "MSI payload coherence: runtime file set differs; missing=$($missing -join ', '); extra=$($extra -join ', ')."
+        }
+        foreach ($relative in $sourcePaths) {
+            if ($sourceRuntimeHashes[$relative] -ne $stagedRuntimeHashes[$relative]) {
+                throw "MSI payload coherence: staged runtime file hash differs for $relative."
+            }
+        }
+    } finally {
+        Remove-Item -LiteralPath $verificationRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -682,14 +774,30 @@ try {
         throw "Deterministic Burn extension DLL is absent: $deterministicBundleExtension"
     }
 
-    foreach ($rustPackage in @('gnx-host-preflight', 'gnx-service', 'gnx-cli')) {
-        & cargo rustc --release -p $rustPackage -- -C target-feature=+crt-static
-        if ($LASTEXITCODE -ne 0) { throw "Static-CRT Rust release build failed for $rustPackage." }
-    }
-
     $hostPreflight = Join-Path $repoRoot "target\release\gnx-host-preflight.exe"
     $gnxService = Join-Path $repoRoot "target\release\gnx-service.exe"
     $gnxCli = Join-Path $repoRoot "target\release\gnx.exe"
+    $releaseBinaries = @($hostPreflight, $gnxService, $gnxCli)
+    Remove-Item -LiteralPath $releaseBinaries -Force -ErrorAction SilentlyContinue
+    $rustBuildStarted = [DateTime]::UtcNow
+
+    foreach ($rustPackage in @('gnx-host-preflight', 'gnx-service', 'gnx-cli')) {
+        & cargo rustc --locked --release -p $rustPackage -- -C target-feature=+crt-static
+        if ($LASTEXITCODE -ne 0) { throw "Static-CRT Rust release build failed for $rustPackage." }
+    }
+    foreach ($releaseBinary in $releaseBinaries) {
+        if (-not (Test-Path -LiteralPath $releaseBinary)) {
+            throw "Fresh Rust release binary is absent: $releaseBinary"
+        }
+        if ((Get-Item -LiteralPath $releaseBinary).LastWriteTimeUtc -lt $rustBuildStarted.AddSeconds(-2)) {
+            throw "Rust release binary was not freshly produced by this build: $releaseBinary"
+        }
+    }
+
+    & cargo test --locked --release -p gnx-service payload_manifest_matches_all_installed_files
+    if ($LASTEXITCODE -ne 0) {
+        throw "gnx-service/runtime manifest build contract test failed."
+    }
     $productMsi = Join-Path $outputRoot "Quetzalcoatl.msi"
     $setupExe = Join-Path $outputRoot "QuetzalcoatlSetup.exe"
 
@@ -714,7 +822,7 @@ try {
         -d "ServiceConfig=$(Join-Path $PSScriptRoot 'Quetzalcoatl.Service.xml')" `
         -d "WinSWLicense=$(Join-Path $PSScriptRoot 'licenses\WinSW.txt')" `
         -d "PodmanMachineImage=$($artifacts.podman_machine)" `
-        -d "RuntimePayload=$(Join-Path $repoRoot 'runtime\payload-v1')" `
+        -d "RuntimePayload=$(Join-Path $repoRoot 'runtime\payload-v2')" `
         -out $productMsi
     if ($LASTEXITCODE -ne 0) { throw "MSI build failed." }
     Set-MsiDeterministicMetadata -Path $productMsi
@@ -729,6 +837,11 @@ try {
         $actualPackageCode -ne $releasePackageCode) {
         throw "Built MSI identity mismatch: version=$actualProductVersion ProductCode=$actualProductCode UpgradeCode=$actualUpgradeCode PackageCode=$actualPackageCode"
     }
+
+    Test-MsiPayloadCoherence `
+        -MsiPath $productMsi `
+        -ServiceBinary $gnxService `
+        -RuntimePayload (Join-Path $repoRoot 'runtime\payload-v2')
 
     & dotnet tool run wix -- build `
         (Join-Path $PSScriptRoot "bundle.wxs") `
