@@ -23,10 +23,6 @@ const MACHINE_MEMORY_MIB: u64 = 8192;
 const MACHINE_DISK_GIB: u64 = 100;
 const MACHINE_NETWORK_MTU: u32 = 1500;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-const LXC_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-lxc-prepare";
-const LXC_SERVICE_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-lxc-service-prepare";
-const FORGEJO_CONFIGURE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-forgejo-configure";
-const OPENTOFU_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-opentofu-prepare";
 const PVE_CLUSTER_CREATE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-cluster-create";
 const PVE_CONFIGURE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-pve-configure";
 const TAILSCALE_PREPARE_BIN: &str = "/usr/libexec/quetzalcoatl/gnx-tailscale-prepare";
@@ -42,40 +38,10 @@ const MACHINE_IMAGE_ARTIFACT: &str = "podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_URL: &str = "https://github.com/podman-container-tools/podman-machine-os/releases/download/v6.0.1/podman-machine.x86_64.wsl.tar.zst";
 const MACHINE_IMAGE_SIZE: u64 = 249_510_008;
 
-const PAYLOAD_FILES: [PayloadSpec; 32] = [
+const PAYLOAD_FILES: [PayloadSpec; 11] = [
     PayloadSpec::new(
         "bin/gnx-proxmox-entrypoint",
         "/usr/libexec/quetzalcoatl/gnx-proxmox-entrypoint",
-        "0755",
-    ),
-    PayloadSpec::new(
-        "bin/gnx-lxc-docker-bootstrap",
-        "/usr/libexec/quetzalcoatl/gnx-lxc-docker-bootstrap",
-        "0755",
-    ),
-    PayloadSpec::new(
-        "bin/gnx-lxc-prepare",
-        "/usr/libexec/quetzalcoatl/gnx-lxc-prepare",
-        "0755",
-    ),
-    PayloadSpec::new(
-        "bin/gnx-lxc-service-bootstrap",
-        "/usr/libexec/quetzalcoatl/gnx-lxc-service-bootstrap",
-        "0755",
-    ),
-    PayloadSpec::new(
-        "bin/gnx-lxc-service-prepare",
-        "/usr/libexec/quetzalcoatl/gnx-lxc-service-prepare",
-        "0755",
-    ),
-    PayloadSpec::new(
-        "bin/gnx-forgejo-configure",
-        "/usr/libexec/quetzalcoatl/gnx-forgejo-configure",
-        "0755",
-    ),
-    PayloadSpec::new(
-        "bin/gnx-forgejo-configure-guest",
-        "/usr/libexec/quetzalcoatl/gnx-forgejo-configure-guest",
         "0755",
     ),
     PayloadSpec::new(
@@ -86,21 +52,6 @@ const PAYLOAD_FILES: [PayloadSpec; 32] = [
     PayloadSpec::new(
         "bin/gnx-pve-cluster-create",
         "/usr/libexec/quetzalcoatl/gnx-pve-cluster-create",
-        "0755",
-    ),
-    PayloadSpec::new(
-        "bin/gnx-opentofu-entrypoint",
-        "/usr/libexec/quetzalcoatl/gnx-opentofu-entrypoint",
-        "0755",
-    ),
-    PayloadSpec::new(
-        "bin/gnx-opentofu-prepare",
-        "/usr/libexec/quetzalcoatl/gnx-opentofu-prepare",
-        "0755",
-    ),
-    PayloadSpec::new(
-        "bin/gnx-opentofu-runner",
-        "/usr/libexec/quetzalcoatl/gnx-opentofu-runner",
         "0755",
     ),
     PayloadSpec::new(
@@ -129,11 +80,6 @@ const PAYLOAD_FILES: [PayloadSpec; 32] = [
         "0644",
     ),
     PayloadSpec::new(
-        "quadlet/opentofu.image",
-        "/etc/containers/systemd/opentofu.image",
-        "0644",
-    ),
-    PayloadSpec::new(
         "quadlet/proxmox.container",
         "/etc/containers/systemd/proxmox.container",
         "0644",
@@ -141,61 +87,6 @@ const PAYLOAD_FILES: [PayloadSpec; 32] = [
     PayloadSpec::new(
         "quadlet/tailscaled.container",
         "/etc/containers/systemd/tailscaled.container",
-        "0644",
-    ),
-    PayloadSpec::new(
-        "opentofu/controller/.terraform.lock.hcl",
-        "/usr/share/quetzalcoatl/opentofu/controller/.terraform.lock.hcl",
-        "0600",
-    ),
-    PayloadSpec::new(
-        "opentofu/controller/main.tf",
-        "/usr/share/quetzalcoatl/opentofu/controller/main.tf",
-        "0600",
-    ),
-    PayloadSpec::new(
-        "opentofu/controller/versions.tf",
-        "/usr/share/quetzalcoatl/opentofu/controller/versions.tf",
-        "0600",
-    ),
-    PayloadSpec::new(
-        "services/forgejo/compose.yaml",
-        "/usr/share/quetzalcoatl/services/forgejo/compose.yaml",
-        "0644",
-    ),
-    PayloadSpec::new(
-        "services/forgejo/serve/serve.json",
-        "/usr/share/quetzalcoatl/services/forgejo/serve/serve.json",
-        "0644",
-    ),
-    PayloadSpec::new(
-        "services/forgejo/git_probe.sh",
-        "/usr/share/quetzalcoatl/services/forgejo/git_probe.sh",
-        "0755",
-    ),
-    PayloadSpec::new(
-        "services/garage/compose.yaml",
-        "/usr/share/quetzalcoatl/services/garage/compose.yaml",
-        "0644",
-    ),
-    PayloadSpec::new(
-        "services/garage/garage.toml.template",
-        "/usr/share/quetzalcoatl/services/garage/garage.toml.template",
-        "0644",
-    ),
-    PayloadSpec::new(
-        "services/garage/s3_probe.py",
-        "/usr/share/quetzalcoatl/services/garage/s3_probe.py",
-        "0755",
-    ),
-    PayloadSpec::new(
-        "services/garage/serve/serve.json",
-        "/usr/share/quetzalcoatl/services/garage/serve/serve.json",
-        "0644",
-    ),
-    PayloadSpec::new(
-        "systemd/gnx-opentofu.service",
-        "/etc/systemd/system/gnx-opentofu.service",
         "0644",
     ),
     PayloadSpec::new(
@@ -351,87 +242,11 @@ test -z "$(podman ps -aq --filter name='^gnx-host-enroll$')"
 printf 'TAILSCALE_SECRET_CLEAN=ready\n'
 "#;
 
-const OPENTOFU_SECRET_CLEANUP_PROBE: &str = r#"set -eu
-test ! -e /run/gnx/opentofu-password
-test ! -e /run/gnx/opentofu.env
-test -z "$(podman ps -aq --filter name='^gnx-opentofu$')"
-printf 'OPENTOFU_SECRET_CLEAN=ready\n'
-"#;
-
 pub fn run(status: Arc<RwLock<StatusResponse>>) {
     set_stage(&status, "RUNTIME_IDENTITY");
     if let Err(error) = run_inner(&status) {
         fail(&status, error);
     }
-}
-
-pub fn configure_forgejo(username: &str, password: &str) -> Result<(), (String, String)> {
-    configure_forgejo_inner(username, password)
-        .map_err(|error| (error.code.to_owned(), error.message))
-}
-
-fn configure_forgejo_inner(username: &str, password: &str) -> Result<(), GateError> {
-    let state = load_persisted_state()?.ok_or_else(|| {
-        GateError::new(
-            "FORGEJO_CONFIGURATION_UNAVAILABLE",
-            Component::Forgejo,
-            "the persisted role is not available",
-        )
-    })?;
-    if !state.role.is_controller() || state.stage != "READY" || !state.install_forgejo {
-        return Err(GateError::new(
-            "FORGEJO_CONFIGURATION_UNAVAILABLE",
-            Component::Forgejo,
-            "Forgejo configuration requires a ready controller with Forgejo selected",
-        ));
-    }
-    let podman = podman_binary()?;
-    let mut secrets =
-        crate::service_secrets::load_required(state.install_garage, state.install_forgejo)
-            .map_err(|error| {
-                GateError::new("FORGEJO_SECRET_FAILED", Component::Forgejo, error.message())
-            })?;
-    crate::service_secrets::begin_forgejo_update(&mut secrets, username, password).map_err(
-        |error| {
-            GateError::new(
-                "FORGEJO_CONFIGURATION_INVALID",
-                Component::Forgejo,
-                error.message(),
-            )
-        },
-    )?;
-    let forgejo = secrets.forgejo.as_ref().ok_or_else(|| {
-        GateError::new(
-            "FORGEJO_CONFIGURATION_UNAVAILABLE",
-            Component::Forgejo,
-            "Forgejo protected credentials are unavailable",
-        )
-    })?;
-    let pending = forgejo.pending_admin.as_ref().ok_or_else(|| {
-        GateError::new(
-            "FORGEJO_SECRET_FAILED",
-            Component::Forgejo,
-            "Forgejo pending credential was not persisted",
-        )
-    })?;
-    let mut input = Zeroizing::new(format!(
-        "{}\n{}\n{}\n{}\n",
-        forgejo.admin_username, forgejo.admin_password, pending.username, pending.password
-    ));
-    let output = machine_stdin(&podman, [FORGEJO_CONFIGURE_BIN], input.as_bytes())
-        .map_err(|error| error.with_code("FORGEJO_CONFIGURATION_FAILED", Component::Forgejo));
-    input.zeroize();
-    let output = output?;
-    if output.stdout != b"FORGEJO_CONFIGURATION=ready\n" {
-        return Err(GateError::new(
-            "FORGEJO_CONFIGURATION_FAILED",
-            Component::Forgejo,
-            "Forgejo credential rotation did not confirm the fixed output contract",
-        ));
-    }
-    crate::service_secrets::commit_forgejo_update(&mut secrets).map_err(|error| {
-        GateError::new("FORGEJO_SECRET_FAILED", Component::Forgejo, error.message())
-    })
 }
 
 fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
@@ -495,14 +310,8 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
     let identity = wait_for_tailscale(&podman, &hostname, &configuration.tailnet)?;
     disable_tailscale_ssh(&podman)?;
     set_stage(status, "ROLE_DISCOVERING");
-    let mut controller = resolve_controller(
-        &podman,
-        persisted_state,
-        identity,
-        &configuration.tailnet,
-        configuration.install_garage,
-        configuration.install_forgejo,
-    )?;
+    let mut controller =
+        resolve_controller(&podman, persisted_state, identity, &configuration.tailnet)?;
     if controller.role.is_controller() {
         set_controller(status, &controller.controller.hostname);
     }
@@ -523,11 +332,11 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
         return Ok(());
     }
 
-    let mut stage_rank = controller_stage_rank(&controller.stage).ok_or_else(|| {
+    let stage_rank = controller_stage_rank(&controller.stage).ok_or_else(|| {
         GateError::new(
             "STATE_STAGE_UNSUPPORTED",
             Component::None,
-            "persisted controller state has an unsupported I1 stage",
+            "persisted controller state has an unsupported platform stage",
         )
     })?;
     if stage_rank == 0 {
@@ -535,127 +344,20 @@ fn run_inner(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
         confirm_empty_controller_inventory(&podman, &controller)?;
     }
 
-    set_stage(status, "CONTROLLER_CLUSTER_CREATING");
-    create_controller_cluster(&podman, controller.self_ip, &controller.controller.hostname)?;
-    if stage_rank < 1 {
+    if stage_rank == 0 {
+        set_stage(status, "CONTROLLER_CLUSTER_CREATING");
+        create_controller_cluster(&podman, controller.self_ip, &controller.controller.hostname)?;
         controller.stage = "CONTROLLER_CLUSTER_READY".into();
         store_persisted_state(&controller)?;
-        stage_rank = 1;
+    } else {
+        set_stage(status, "CONTROLLER_CLUSTER_CHECKING");
+        verify_controller_cluster(&podman, controller.self_ip, &controller.controller.hostname)?;
     }
     set_cluster_ready(status);
     set_stage(status, "CONTROLLER_CLUSTER_READY");
 
-    set_stage(status, "OPENTOFU_PREPARING");
-    let mut infrastructure_configuration = load_protected_configuration()?;
-    infrastructure_configuration.auth_key.zeroize();
-    validate_state_configuration(&controller, &infrastructure_configuration)?;
-    let opentofu_result = apply_opentofu(
-        &podman,
-        &controller.role,
-        &infrastructure_configuration.pve_root_password,
-        &controller.controller.hostname,
-        controller.install_garage,
-        controller.install_forgejo,
-    );
-    infrastructure_configuration.pve_root_password.zeroize();
-    opentofu_result?;
-    set_component(status, Component::OpenTofu, "ready");
-    if stage_rank < 2 {
-        controller.stage = "OPENTOFU_READY".into();
-        store_persisted_state(&controller)?;
-        stage_rank = 2;
-    }
-    set_stage(status, "OPENTOFU_READY");
-
-    if controller.install_garage {
-        set_stage(status, "GARAGE_LXC_DOCKER_PREPARING");
-        prepare_lxc_docker(&podman, ServiceKind::Garage)?;
-    }
-    if controller.install_forgejo {
-        set_stage(status, "FORGEJO_LXC_DOCKER_PREPARING");
-        prepare_lxc_docker(&podman, ServiceKind::Forgejo)?;
-    }
-    if stage_rank < 3 {
-        controller.stage = "LXC_DOCKER_READY".into();
-        store_persisted_state(&controller)?;
-        stage_rank = 3;
-    }
-    set_stage(status, "LXC_DOCKER_READY");
-
-    set_stage(status, "SERVICE_SECRETS_PREPARING");
-    let load_service_secrets = if stage_rank >= 4 {
-        crate::service_secrets::load_required
-    } else {
-        crate::service_secrets::load_or_create
-    };
-    let mut service_secrets =
-        load_service_secrets(controller.install_garage, controller.install_forgejo).map_err(
-            |error| GateError::new("SERVICE_SECRETS_FAILED", Component::None, error.message()),
-        )?;
-    let mut service_configuration = load_protected_configuration()?;
-    service_configuration.pve_root_password.zeroize();
-    validate_state_configuration(&controller, &service_configuration)?;
-
-    if controller.install_garage {
-        set_stage(status, "GARAGE_PREPARING");
-        let hostname = service_hostname(ServiceKind::Garage, &controller.controller.hostname)?;
-        let credential = prepare_lxc_service(
-            &podman,
-            ServiceKind::Garage,
-            &hostname,
-            &controller.tailnet,
-            &service_configuration.auth_key,
-            &service_secrets,
-        )?
-        .ok_or_else(|| {
-            GateError::new(
-                "GARAGE_BOOTSTRAP_FAILED",
-                Component::Garage,
-                "Garage bootstrap did not return its S3 credential",
-            )
-        })?;
-        crate::service_secrets::record_garage_s3(
-            &mut service_secrets,
-            &credential.access_key,
-            &credential.secret_key,
-        )
-        .map_err(|error| {
-            GateError::new("GARAGE_SECRET_FAILED", Component::Garage, error.message())
-        })?;
-        set_component(status, Component::Garage, "ready");
-    } else {
-        set_component(status, Component::Garage, "not_selected");
-    }
-
-    if controller.install_forgejo {
-        set_stage(status, "FORGEJO_PREPARING");
-        let hostname = service_hostname(ServiceKind::Forgejo, &controller.controller.hostname)?;
-        let credential = prepare_lxc_service(
-            &podman,
-            ServiceKind::Forgejo,
-            &hostname,
-            &controller.tailnet,
-            &service_configuration.auth_key,
-            &service_secrets,
-        )?;
-        if credential.is_some() {
-            return Err(GateError::new(
-                "FORGEJO_BOOTSTRAP_FAILED",
-                Component::Forgejo,
-                "Forgejo bootstrap returned an unexpected credential",
-            ));
-        }
-        set_component(status, Component::Forgejo, "ready");
-    } else {
-        set_component(status, Component::Forgejo, "not_selected");
-    }
-    service_configuration.auth_key.zeroize();
-
-    set_stage(status, "SERVICES_READY");
-    if stage_rank < 4 {
-        controller.stage = "READY".into();
-        store_persisted_state(&controller)?;
-    }
+    controller.stage = "READY".into();
+    store_persisted_state(&controller)?;
     complete(status);
     Ok(())
 }
@@ -1125,10 +827,7 @@ fn store_persisted_state(state: &crate::state::PersistedState) -> Result<(), Gat
 fn controller_stage_rank(stage: &str) -> Option<u8> {
     match stage {
         "ROLE_RESOLVED" => Some(0),
-        "CONTROLLER_CLUSTER_READY" => Some(1),
-        "OPENTOFU_READY" => Some(2),
-        "LXC_DOCKER_READY" => Some(3),
-        "READY" => Some(4),
+        "CONTROLLER_CLUSTER_READY" | "READY" => Some(1),
         _ => None,
     }
 }
@@ -1137,10 +836,7 @@ fn validate_state_configuration(
     state: &crate::state::PersistedState,
     configuration: &InstallerConfiguration,
 ) -> Result<(), GateError> {
-    let matches = state.tailnet == configuration.tailnet
-        && (state.role.is_member()
-            || (state.install_garage == configuration.install_garage
-                && state.install_forgejo == configuration.install_forgejo));
+    let matches = state.tailnet == configuration.tailnet;
     if !matches {
         return Err(GateError::new(
             "STATE_CONFIGURATION_MISMATCH",
@@ -1308,8 +1004,6 @@ fn resolve_controller(
     persisted: Option<crate::state::PersistedState>,
     identity: TailscaleIdentity,
     tailnet: &str,
-    install_garage: bool,
-    install_forgejo: bool,
 ) -> Result<crate::state::PersistedState, GateError> {
     if let Some(state) = persisted {
         let (state, node_id_rotated) = reconcile_persisted_identity(state, &identity)?;
@@ -1336,8 +1030,6 @@ fn resolve_controller(
                     identity.self_ip,
                     hostname.clone(),
                     tailnet.to_owned(),
-                    install_garage,
-                    install_forgejo,
                 ),
                 hostname,
             )
@@ -1592,241 +1284,22 @@ fn create_controller_cluster(
     Ok(())
 }
 
-fn apply_opentofu(
+fn verify_controller_cluster(
     podman: &Path,
-    role: &crate::state::PersistedRole,
-    password: &str,
+    self_ip: IpAddr,
     hostname: &str,
-    install_garage: bool,
-    install_forgejo: bool,
 ) -> Result<(), GateError> {
-    if role.is_member() {
+    let input = format!("{self_ip}\n{hostname}\n");
+    let output = machine_stdin(podman, [PVE_CLUSTER_CREATE_BIN, "verify"], input.as_bytes())
+        .map_err(|error| error.with_code("PVE_CLUSTER_VERIFY_FAILED", Component::Proxmox))?;
+    if String::from_utf8_lossy(&output.stdout).trim() != "PVE_CLUSTER=ready" {
         return Err(GateError::new(
-            "MEMBER_OPENTOFU_DENIED",
-            Component::OpenTofu,
-            "OpenTofu execution is denied for members",
-        ));
-    }
-    let mut input = Vec::with_capacity(password.len() + hostname.len() + 8);
-    input.extend_from_slice(password.as_bytes());
-    input.push(b'\n');
-    input.extend_from_slice(hostname.as_bytes());
-    input.push(b'\n');
-    input.extend_from_slice(if install_garage { b"1\n" } else { b"0\n" });
-    input.extend_from_slice(if install_forgejo { b"1\n" } else { b"0\n" });
-    let result = machine_stdin(podman, [OPENTOFU_PREPARE_BIN], &input);
-    input.zeroize();
-
-    let output = match result {
-        Ok(output) => output,
-        Err(error) => {
-            verify_opentofu_secret_cleanup(podman)?;
-            return Err(error.with_code("OPENTOFU_APPLY_FAILED", Component::OpenTofu));
-        }
-    };
-    verify_opentofu_secret_cleanup(podman)?;
-    if String::from_utf8_lossy(&output.stdout).trim() != "OPENTOFU=ready" {
-        return Err(GateError::new(
-            "OPENTOFU_APPLY_FAILED",
-            Component::OpenTofu,
-            "OpenTofu one-shot did not confirm the controller workspace",
+            "PVE_CLUSTER_VERIFY_FAILED",
+            Component::Proxmox,
+            "PVE did not confirm the persisted controller cluster contract",
         ));
     }
     Ok(())
-}
-
-fn verify_opentofu_secret_cleanup(podman: &Path) -> Result<(), GateError> {
-    let output = machine_stdin(
-        podman,
-        ["sh", "-s"],
-        OPENTOFU_SECRET_CLEANUP_PROBE.as_bytes(),
-    )
-    .map_err(|error| error.with_code("OPENTOFU_SECRET_CLEANUP_FAILED", Component::OpenTofu))?;
-    if String::from_utf8_lossy(&output.stdout).trim() != "OPENTOFU_SECRET_CLEAN=ready" {
-        return Err(GateError::new(
-            "OPENTOFU_SECRET_CLEANUP_FAILED",
-            Component::OpenTofu,
-            "OpenTofu did not confirm transient credential cleanup",
-        ));
-    }
-    Ok(())
-}
-
-fn prepare_lxc_docker(podman: &Path, service: ServiceKind) -> Result<(), GateError> {
-    let input = format!("{}\n", service.name());
-    let output = machine_stdin(
-        podman,
-        ["podman", "exec", "-i", "gnx-proxmox", LXC_PREPARE_BIN],
-        input.as_bytes(),
-    )
-    .map_err(|error| error.with_code("LXC_DOCKER_FAILED", service.component()))?;
-    let expected = format!(
-        "LXC_DOCKER=ready;SERVICE={};VMID={}",
-        service.name(),
-        service.vmid()
-    );
-    if String::from_utf8_lossy(&output.stdout).trim() != expected {
-        return Err(GateError::new(
-            "LXC_DOCKER_FAILED",
-            service.component(),
-            "LXC did not confirm the fixed Docker runtime contract",
-        ));
-    }
-    Ok(())
-}
-
-fn service_hostname(service: ServiceKind, controller_hostname: &str) -> Result<String, GateError> {
-    let suffix = controller_hostname
-        .strip_prefix("gnx-controller-")
-        .filter(|suffix| {
-            !suffix.is_empty()
-                && !suffix.starts_with('-')
-                && !suffix.ends_with('-')
-                && suffix
-                    .bytes()
-                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-        })
-        .ok_or_else(|| {
-            GateError::new(
-                service.bootstrap_error_code(),
-                service.component(),
-                "controller identity cannot form a service hostname",
-            )
-        })?;
-    let hostname = format!("gnx-{}-{suffix}", service.name());
-    if hostname.len() > 63 {
-        return Err(GateError::new(
-            service.bootstrap_error_code(),
-            service.component(),
-            "service hostname exceeds the DNS label limit",
-        ));
-    }
-    Ok(hostname)
-}
-
-fn prepare_lxc_service(
-    podman: &Path,
-    service: ServiceKind,
-    hostname: &str,
-    tailnet: &str,
-    auth_key: &str,
-    secrets: &crate::service_secrets::ServiceSecrets,
-) -> Result<Option<GarageCredential>, GateError> {
-    let mut input = Vec::with_capacity(1024);
-    for value in [service.name(), hostname, tailnet, auth_key] {
-        input.extend_from_slice(value.as_bytes());
-        input.push(b'\n');
-    }
-    match service {
-        ServiceKind::Garage => {
-            let garage = secrets.garage.as_ref().ok_or_else(|| {
-                GateError::new(
-                    service.bootstrap_error_code(),
-                    service.component(),
-                    "protected Garage secrets are missing",
-                )
-            })?;
-            for value in [
-                garage.rpc_secret.as_str(),
-                garage.admin_token.as_str(),
-                garage.s3_access_key.as_deref().unwrap_or_default(),
-                garage.s3_secret_key.as_deref().unwrap_or_default(),
-            ] {
-                input.extend_from_slice(value.as_bytes());
-                input.push(b'\n');
-            }
-        }
-        ServiceKind::Forgejo => {
-            let forgejo = secrets.forgejo.as_ref().ok_or_else(|| {
-                GateError::new(
-                    service.bootstrap_error_code(),
-                    service.component(),
-                    "protected Forgejo secrets are missing",
-                )
-            })?;
-            for value in [
-                forgejo.secret_key.as_str(),
-                forgejo.internal_token.as_str(),
-                forgejo.admin_password.as_str(),
-                "",
-            ] {
-                input.extend_from_slice(value.as_bytes());
-                input.push(b'\n');
-            }
-        }
-    }
-
-    let result = machine_stdin(
-        podman,
-        [
-            "podman",
-            "exec",
-            "-i",
-            "gnx-proxmox",
-            LXC_SERVICE_PREPARE_BIN,
-        ],
-        &input,
-    );
-    input.zeroize();
-    let mut output = result
-        .map_err(|error| error.with_code(service.bootstrap_error_code(), service.component()))?;
-    let parsed = parse_service_bootstrap_output(&output.stdout, service);
-    output.stdout.zeroize();
-    output.stderr.zeroize();
-    parsed
-}
-
-fn parse_service_bootstrap_output(
-    bytes: &[u8],
-    service: ServiceKind,
-) -> Result<Option<GarageCredential>, GateError> {
-    let text = std::str::from_utf8(bytes).map_err(|_| {
-        GateError::new(
-            service.bootstrap_error_code(),
-            service.component(),
-            "LXC service bootstrap returned non-UTF-8 output",
-        )
-    })?;
-    let lines = text.lines().collect::<Vec<_>>();
-    let status = format!(
-        "LXC_SERVICE=ready;SERVICE={};VMID={}",
-        service.name(),
-        service.vmid()
-    );
-    match service {
-        ServiceKind::Garage if lines.len() == 3 && lines[2] == status => {
-            let access_key = lines[0]
-                .strip_prefix("GARAGE_ACCESS_KEY=")
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    GateError::new(
-                        service.bootstrap_error_code(),
-                        service.component(),
-                        "Garage bootstrap omitted the S3 access key",
-                    )
-                })?;
-            let secret_key = lines[1]
-                .strip_prefix("GARAGE_SECRET_KEY=")
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    GateError::new(
-                        service.bootstrap_error_code(),
-                        service.component(),
-                        "Garage bootstrap omitted the S3 secret key",
-                    )
-                })?;
-            Ok(Some(GarageCredential {
-                access_key: access_key.to_owned(),
-                secret_key: secret_key.to_owned(),
-            }))
-        }
-        ServiceKind::Forgejo if lines.as_slice() == [status.as_str()] => Ok(None),
-        _ => Err(GateError::new(
-            service.bootstrap_error_code(),
-            service.component(),
-            "LXC service bootstrap did not confirm the fixed output contract",
-        )),
-    }
 }
 
 fn configure_pve_password(podman: &Path, password: &str) -> Result<(), GateError> {
@@ -2471,7 +1944,6 @@ fn check_output(output: Output, operation: &str) -> Result<Output, GateError> {
         bounded_text(detail)
     )))
 }
-
 fn bounded_text(bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes).replace(['\r', '\n'], " ");
     text.chars()
@@ -2506,9 +1978,6 @@ fn set_member_joining_status(status: &Arc<RwLock<StatusResponse>>, controller: &
     if let Ok(mut status) = status.write() {
         status.role = Some("member".into());
         status.controller = Some(controller.into());
-        status.components.opentofu = "not_applicable".into();
-        status.services.garage = "not_applicable".into();
-        status.services.forgejo = "not_applicable".into();
         status.stage = "MEMBER_JOINING".into();
         status.overall = "pending".into();
     }
@@ -2544,48 +2013,6 @@ fn fail(status: &Arc<RwLock<StatusResponse>>, error: GateError) {
     }
 }
 
-#[derive(Clone, Copy)]
-enum ServiceKind {
-    Garage,
-    Forgejo,
-}
-
-impl ServiceKind {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Garage => "garage",
-            Self::Forgejo => "forgejo",
-        }
-    }
-
-    fn vmid(self) -> u16 {
-        match self {
-            Self::Garage => 200,
-            Self::Forgejo => 201,
-        }
-    }
-
-    fn component(self) -> Component {
-        match self {
-            Self::Garage => Component::Garage,
-            Self::Forgejo => Component::Forgejo,
-        }
-    }
-
-    fn bootstrap_error_code(self) -> &'static str {
-        match self {
-            Self::Garage => "GARAGE_BOOTSTRAP_FAILED",
-            Self::Forgejo => "FORGEJO_BOOTSTRAP_FAILED",
-        }
-    }
-}
-
-#[derive(zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
-struct GarageCredential {
-    access_key: String,
-    secret_key: String,
-}
-
 #[derive(Clone, Copy, Debug)]
 enum Component {
     None,
@@ -2595,9 +2022,6 @@ enum Component {
     Proxmox,
     Tailscale,
     TailscaleServe,
-    OpenTofu,
-    Garage,
-    Forgejo,
 }
 
 impl Component {
@@ -2610,9 +2034,6 @@ impl Component {
             Self::Proxmox => status.components.proxmox = value.into(),
             Self::Tailscale => status.components.tailscale = value.into(),
             Self::TailscaleServe => status.components.tailscale_serve = value.into(),
-            Self::OpenTofu => status.components.opentofu = value.into(),
-            Self::Garage => status.services.garage = value.into(),
-            Self::Forgejo => status.services.forgejo = value.into(),
         }
     }
 }
@@ -2991,9 +2412,9 @@ mod tests {
             },
               "peer-key-service":{
               "ID":"node-id-service",
-              "HostName":"gnx-garage-existing",
-              "DNSName":"gnx-garage-existing.tetra-balance.ts.net.",
-              "Tags":["tag:quetzalcoatl-service"],
+              "HostName":"gnx-unmanaged-existing",
+              "DNSName":"gnx-unmanaged-existing.tetra-balance.ts.net.",
+              "Tags":["tag:other"],
               "Online":true,
                 "Expired":false
               },
@@ -3085,7 +2506,7 @@ mod tests {
             "gnx-controller-",
             "gnx-member-",
             "gnx-controller--node",
-            "gnx-garage-node",
+            "gnx-worker-node",
             "controller-node",
             "gnx-member-node_123",
         ] {
@@ -3187,7 +2608,7 @@ mod tests {
     }
 
     #[test]
-    fn member_configuration_uses_tailnet_without_controller_workload_selection() {
+    fn member_configuration_matches_only_the_persisted_tailnet() {
         let state = crate::state::PersistedState::member(
             "member".into(),
             "100.100.10.22".parse().expect("IP"),
@@ -3203,8 +2624,6 @@ mod tests {
             tailnet: "tetra-balance.ts.net".into(),
             auth_key: "unused".into(),
             pve_root_password: "unused".into(),
-            install_garage: true,
-            install_forgejo: true,
         };
 
         assert!(validate_state_configuration(&state, &configuration).is_ok());
@@ -3217,7 +2636,7 @@ mod tests {
     }
 
     #[test]
-    fn member_joining_status_keeps_local_components_ready_and_disables_controller_workloads() {
+    fn member_joining_status_keeps_local_components_ready() {
         let status = Arc::new(RwLock::new(StatusResponse::service_ready()));
         {
             let mut value = status.write().expect("status lock");
@@ -3239,9 +2658,6 @@ mod tests {
         );
         assert_eq!(value.stage, "MEMBER_JOINING");
         assert_eq!(value.components.proxmox, "ready");
-        assert_eq!(value.components.opentofu, "not_applicable");
-        assert_eq!(value.services.garage, "not_applicable");
-        assert_eq!(value.services.forgejo, "not_applicable");
     }
 
     #[test]
@@ -3310,20 +2726,6 @@ mod tests {
     }
 
     #[test]
-    fn member_opentofu_guard_returns_before_starting_a_process() {
-        let error = apply_opentofu(
-            Path::new("not-launched"),
-            &crate::state::PersistedRole::Member,
-            "test-credential",
-            "gnx-controller-controller",
-            false,
-            false,
-        )
-        .expect_err("members must not invoke OpenTofu");
-        assert_eq!(error.code, "MEMBER_OPENTOFU_DENIED");
-    }
-
-    #[test]
     fn member_ready_status_uses_the_final_member_contract() {
         let status = Arc::new(RwLock::new(StatusResponse::service_ready()));
         set_member_ready_status(&status, "gnx-controller-controller");
@@ -3333,7 +2735,6 @@ mod tests {
         assert_eq!(value.role.as_deref(), Some("member"));
         assert!(value.cluster.joined);
         assert!(value.cluster.quorate);
-        assert_eq!(value.components.opentofu, "not_applicable");
     }
 
     #[test]
@@ -3346,29 +2747,12 @@ mod tests {
     }
 
     #[test]
-    fn service_hostnames_share_only_the_stable_logical_suffix() {
-        assert_eq!(
-            service_hostname(ServiceKind::Garage, "gnx-controller-nabc123")
-                .expect("Garage hostname"),
-            "gnx-garage-nabc123"
-        );
-        assert_eq!(
-            service_hostname(ServiceKind::Forgejo, "gnx-controller-nabc123")
-                .expect("Forgejo hostname"),
-            "gnx-forgejo-nabc123"
-        );
-        assert!(service_hostname(ServiceKind::Garage, "gnx-controller-").is_err());
-    }
-
-    #[test]
     fn reconciles_reauthenticated_node_id_only_with_logical_identity_continuity() {
         let state = crate::state::PersistedState::controller(
             "node-id-before".into(),
             "100.100.10.20".parse().expect("IP"),
             "gnx-controller-node-id-before".into(),
             "tetra-balance.ts.net".into(),
-            true,
-            true,
         );
         let identity = TailscaleIdentity {
             self_id: "node-id-after".into(),
@@ -3434,30 +2818,6 @@ mod tests {
         assert_eq!(
             persisted_local_hostname(&reconciled).expect("local hostname"),
             "gnx-member-member-id-before"
-        );
-    }
-
-    #[test]
-    fn service_bootstrap_output_has_no_alternate_shape() {
-        let garage = b"GARAGE_ACCESS_KEY=GK0123456789abcdef01234567\nGARAGE_SECRET_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nLXC_SERVICE=ready;SERVICE=garage;VMID=200\n";
-        let credential = parse_service_bootstrap_output(garage, ServiceKind::Garage)
-            .expect("Garage output")
-            .expect("Garage credential");
-        assert_eq!(credential.access_key, "GK0123456789abcdef01234567");
-        assert_eq!(credential.secret_key.len(), 64);
-
-        let forgejo = b"LXC_SERVICE=ready;SERVICE=forgejo;VMID=201\n";
-        assert!(
-            parse_service_bootstrap_output(forgejo, ServiceKind::Forgejo)
-                .expect("Forgejo output")
-                .is_none()
-        );
-        assert!(
-            parse_service_bootstrap_output(
-                b"diagnostic\nLXC_SERVICE=ready;SERVICE=forgejo;VMID=201\n",
-                ServiceKind::Forgejo,
-            )
-            .is_err()
         );
     }
 

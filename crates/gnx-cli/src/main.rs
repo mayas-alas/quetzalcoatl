@@ -13,7 +13,7 @@ use std::thread;
 #[cfg(windows)]
 use std::time::{Duration, Instant};
 
-use gnx_protocol::{ForgejoConfiguration, InstallerConfiguration, StatusResponse};
+use gnx_protocol::{InstallerConfiguration, StatusResponse};
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::{GetLastError, HANDLE, INVALID_HANDLE_VALUE};
 #[cfg(windows)]
@@ -33,12 +33,11 @@ use zeroize::Zeroize;
 enum Action {
     Status { json: bool },
     Configure,
-    ConfigureForgejo,
     Restart,
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  gnx status [--json]\n  gnx configure\n  gnx configure forgejo\n  gnx restart"
+    "Usage:\n  gnx status [--json]\n  gnx configure\n  gnx restart"
 }
 
 fn parse_args() -> Result<Action, ()> {
@@ -49,9 +48,6 @@ fn parse_args() -> Result<Action, ()> {
             Ok(Action::Status { json: true })
         }
         (Some(command), None, None) if command == "configure" => Ok(Action::Configure),
-        (Some(command), Some(target), None) if command == "configure" && target == "forgejo" => {
-            Ok(Action::ConfigureForgejo)
-        }
         (Some(command), None, None) if command == "restart" => Ok(Action::Restart),
         _ => Err(()),
     }
@@ -90,53 +86,12 @@ fn run(action: Action) -> Result<(), String> {
             }
             println!("configuration accepted: {}", response.stage);
         }
-        Action::ConfigureForgejo => {
-            let configuration = collect_forgejo_configuration()?;
-            let response = pipe::configure_forgejo(configuration)?;
-            require_accepted(response, "FORGEJO_CONFIGURATION_REJECTED")?;
-            println!("Forgejo configuration accepted");
-        }
         Action::Restart => {
             restart_service()?;
             println!("Quetzalcoatl service restarted");
         }
     }
     Ok(())
-}
-
-#[cfg(windows)]
-fn require_accepted(
-    response: gnx_protocol::OperationResponse,
-    fallback_code: &str,
-) -> Result<(), String> {
-    if response.accepted {
-        Ok(())
-    } else {
-        Err(format!(
-            "{}: {}",
-            response.error_code.as_deref().unwrap_or(fallback_code),
-            response
-                .message
-                .as_deref()
-                .unwrap_or("operation was rejected")
-        ))
-    }
-}
-
-#[cfg(windows)]
-fn collect_forgejo_configuration() -> Result<ForgejoConfiguration, String> {
-    let username = read_public("Forgejo administrator username: ")?
-        .trim()
-        .to_owned();
-    let password = read_secret("Forgejo administrator password: ")?;
-    let confirmation = read_secret("Confirm Forgejo administrator password: ")?;
-    if password.as_str() != confirmation.as_str() {
-        return Err("Forgejo administrator password confirmation does not match".into());
-    }
-    Ok(ForgejoConfiguration {
-        username,
-        password: password.into_inner(),
-    })
 }
 
 #[cfg(windows)]
@@ -246,8 +201,6 @@ fn collect_configuration() -> Result<InstallerConfiguration, String> {
     let tailnet = read_public("Tailnet DNS name (example: tetra-balance.ts.net): ")?
         .trim()
         .to_ascii_lowercase();
-    let install_garage = read_boolean("Install Garage? [y/N]: ")?;
-    let install_forgejo = read_boolean("Install Forgejo? [y/N]: ")?;
     let auth_key = read_secret("Tailscale auth_key: ")?;
     let pve_root_password = read_secret("New PVE root password: ")?;
     let confirmation = read_secret("Confirm PVE root password: ")?;
@@ -258,8 +211,6 @@ fn collect_configuration() -> Result<InstallerConfiguration, String> {
         tailnet,
         auth_key: auth_key.into_inner(),
         pve_root_password: pve_root_password.into_inner(),
-        install_garage,
-        install_forgejo,
     })
 }
 
@@ -317,15 +268,6 @@ fn read_console_line() -> Result<String, String> {
         value.pop();
     }
     Ok(value)
-}
-
-#[cfg(windows)]
-fn read_boolean(prompt: &str) -> Result<bool, String> {
-    match read_public(prompt)?.trim().to_ascii_lowercase().as_str() {
-        "" | "n" | "no" => Ok(false),
-        "y" | "yes" => Ok(true),
-        _ => Err("answer y or n".into()),
-    }
 }
 
 #[cfg(windows)]

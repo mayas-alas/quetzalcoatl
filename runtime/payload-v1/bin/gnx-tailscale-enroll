@@ -17,14 +17,8 @@ case "$engine:$scope" in
     extra_args="--advertise-tags=$tag"
     permanent_name='gnx-tailscaled'
     ;;
-  docker:garage|docker:forgejo)
-    state_dir="/var/lib/quetzalcoatl/tailscale/$scope"
-    tag='tag:quetzalcoatl-service'
-    extra_args="--advertise-tags=$tag"
-    permanent_name="gnx-$scope-tailscale"
-    ;;
   *)
-    echo 'usage: gnx-tailscale-enroll podman host <hostname> | docker garage|forgejo <hostname>' >&2
+    echo 'usage: gnx-tailscale-enroll podman host <hostname>' >&2
     exit 64
     ;;
 esac
@@ -54,20 +48,6 @@ case "$(stat -c '%a' "$auth_file")" in
 esac
 
 if ! command -v "$engine" >/dev/null 2>&1; then
-  if [ "$engine" = 'docker' ]; then
-    docker_cli='missing'
-    if [ -e /usr/bin/docker ]; then
-      docker_cli=$(stat -c '%F:%a:%u:%g' /usr/bin/docker 2>/dev/null || printf 'unreadable')
-    fi
-    docker_packages=$(dpkg-query -W -f='${Package}=${Version};' docker-ce docker-ce-cli 2>/dev/null || printf 'missing')
-    docker_service=$(systemctl is-active docker.service 2>/dev/null || printf 'unavailable')
-    docker_evidence='missing'
-    if [ -s /var/lib/quetzalcoatl/evidence/docker-runtime.env ]; then
-      docker_evidence=$(tr '\n' ';' < /var/lib/quetzalcoatl/evidence/docker-runtime.env | cut -c 1-512)
-    fi
-    printf 'docker diagnostic: hostname=%s cli=%s packages=%s service=%s evidence=%s\n' \
-      "$(hostname)" "$docker_cli" "$docker_packages" "$docker_service" "$docker_evidence" >&2
-  fi
   echo "required container engine is unavailable: $engine" >&2
   exit 70
 fi

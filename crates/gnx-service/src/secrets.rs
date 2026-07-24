@@ -266,20 +266,6 @@ fn unprotect(ciphertext: &[u8]) -> Result<Vec<u8>, ConfigurationError> {
     crypt(ciphertext, DPAPI_ENTROPY, false)
 }
 
-pub(crate) fn protect_payload(
-    plaintext: &[u8],
-    entropy: &[u8],
-) -> Result<Vec<u8>, ConfigurationError> {
-    crypt(plaintext, entropy, true)
-}
-
-pub(crate) fn unprotect_payload(
-    ciphertext: &[u8],
-    entropy: &[u8],
-) -> Result<Vec<u8>, ConfigurationError> {
-    crypt(ciphertext, entropy, false)
-}
-
 fn crypt(input: &[u8], entropy: &[u8], protect_data: bool) -> Result<Vec<u8>, ConfigurationError> {
     let input_len = u32::try_from(input.len())
         .map_err(|_| ConfigurationError::storage("DPAPI input is too large"))?;
@@ -444,13 +430,11 @@ mod tests {
             tailnet: "tetra-balance.ts.net".into(),
             auth_key: "tskey-auth-k-example-not-a-real-key".into(),
             pve_root_password: "not-a-real-password".into(),
-            install_garage: true,
-            install_forgejo: true,
         }
     }
 
     #[test]
-    fn configuration_validation_accepts_the_single_i1_input_shape() {
+    fn configuration_validation_accepts_the_platform_input_shape() {
         assert!(validate(&valid_configuration()).is_ok());
     }
 

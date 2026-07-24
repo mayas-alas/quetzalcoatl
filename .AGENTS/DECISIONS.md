@@ -1,82 +1,17 @@
-# Architecture and orchestration decisions
+# Architecture decisions
 
-## D-010 - Operational RPCs serialize with convergence
+## D-001 — Product completion is cluster READY
 
-Accepted 2026-07-23 after physical 0.1.6 evidence. A persisted controller stage
-can be `READY` while a restarted service is still reconverging OpenTofu and
-applications. Operational mutations therefore require both the volatile
-`READY` status and a shared runtime-operation lock. Forgejo administrator edits
-also send the local `login_name` explicitly because Forgejo v16 otherwise
-passes an empty login name into its authentication update.
+Accepted 2026-07-23. Convergence completes after controller cluster verification or member join.
 
-## D-009 - Forgejo administrator promotion is a separate API step
+## D-002 — Persist only the cluster contract
 
-Accepted 2026-07-23 after physical 0.1.5 evidence. Forgejo v16
-`CreateUserOption` does not contain an `admin` property. GNX therefore creates
-the requested local user when absent and always applies administrator status,
-password and must-change policy through the administrator edit endpoint before
-verifying the new credential. This reconciliation must also recover the
-non-admin account left by the failed 0.1.5 attempt.
+Protected state contains node identity, role, controller identity, tailnet and join checkpoint. Supplementary schema-one fields are not written into schema two.
 
-## D-008 - Native operator recovery controls
+## D-003 — Runtime payload is exact and minimal
 
-Accepted 2026-07-23 by explicit operator authorization. Quetzalcoatl 0.1.5 is
-the next increment over frozen 0.1.4. It adds `gnx restart` as an
-administrator-only SCM operation and `gnx configure forgejo` as an
-administrator-only, named-pipe-mediated credential rotation. Forgejo secrets
-remain DPAPI protected and cross Linux only through stdin and ephemeral
-root-only `/run` files. A rotation persists a pending credential before remote
-mutation so interruption is resumable.
+Every installed runtime file must appear exactly once in both the Rust `PAYLOAD_FILES` contract and the locked manifest with an exact SHA-256.
 
-## D-001 - Agent boundary
+## D-004 — Resume verifies rather than recreates
 
-Accepted 2026-07-21. All implementation, test, CI, and documentation workers are separate `codex exec` processes. Native subagents are prohibited except when Graphify itself requires them for semantic graph generation or update.
-
-## D-002 - MVP topology
-
-Accepted 2026-07-21. The release gate is exactly one controller plus two members. Member code is generic, but fourth-node acceptance does not count toward this cycle and must not delay closure.
-
-## D-003 - Evidence hierarchy
-
-Accepted 2026-07-21. Dockur on a Linux GitHub runner is the required CI compatibility lane. Windows-native GitHub runners are not a required release signal. Three real consumer Windows hosts on a low-latency site are the sole authority for Corosync and quorum acceptance.
-
-## D-004 - Documentation authority
-
-Accepted 2026-07-21; consolidated 2026-07-22. `docs/ARCHITECTURE.md` is the normative technical contract, `.AGENTS/SCOPE.md` fixes the product boundary, `docs/VALIDATION.md` is the acceptance runbook, `.AGENTS/TRACKER.md` is the only progress tracker and `.AGENTS/EVIDENCE.md` is the evidence ledger. Retired specifications, prompts and task fragments are historical Git objects, not active sources.
-
-## D-005 - Score integrity
-
-Accepted 2026-07-21. Points are awarded only for reproducible evidence. Missing physical three-host evidence caps the score at 70/100. Any secret exposure, Windows-published Proxmox port, non-direct Tailscale cluster path, or non-quorate cluster blocks release regardless of numeric score.
-
-## D-006 - CLI reasoning allocation
-
-Accepted 2026-07-21. Codex CLI agents use `medium` reasoning for runtime integration, CI, security, secrets, recovery, and Proxmox work. `low` is reserved for narrow mechanical edits with deterministic acceptance. Agent self-reports never replace architect review.
-
-## D-007 - Reproducible release identity
-
-Accepted 2026-07-22; expanded by explicit authorization on 2026-07-23.
-Quetzalcoatl 0.1.7 has MSI ProductCode
-`{129BD77D-90DE-4992-86AE-F168C930D549}`, PackageCode
-`{2164425B-7D79-4186-BDED-EF644CCB8804}`, preserved UpgradeCode
-`{47D5BD44-D061-407B-913B-47D17EC3BEA9}` and Burn registration ID
-`{60314D27-47DF-4118-B937-6D1445BAC9D7}`.
-Quetzalcoatl 0.1.6 has MSI ProductCode
-`{7E791841-74B0-4663-8993-952D43CD5C63}`, PackageCode
-`{EC36F9AD-6477-4CA3-B40C-37CC8D4F1837}`, preserved UpgradeCode
-`{47D5BD44-D061-407B-913B-47D17EC3BEA9}` and Burn registration ID
-`{B7AE53BF-D3A9-4948-AEC9-9C6F3490C2E2}`.
-Quetzalcoatl 0.1.5 has MSI ProductCode
-`{F2F585E5-0D41-4BA5-8940-0E3AD5A86DCE}`, PackageCode
-`{476FA6C8-C5FB-4606-B3C0-7771ECE831C3}`, preserved UpgradeCode
-`{47D5BD44-D061-407B-913B-47D17EC3BEA9}` and Burn registration ID
-`{0392B300-F7BF-4B02-8C3E-06B5D1AF5B57}`.
-Quetzalcoatl 0.1.4 has MSI ProductCode
-`{EF6AC7CC-92A4-40C3-B8DA-D62845176E09}`, PackageCode
-`{0ED76FE6-9961-4D1A-8740-BAE336AFF777}`, preserved UpgradeCode
-`{47D5BD44-D061-407B-913B-47D17EC3BEA9}` and Burn registration ID
-`{A3A9B194-9B26-4C85-A240-AAA053B8D433}`. Package, bundle, Rust crates and
-CacheIds use the same version. The build rejects identity drift and verifies
-the generated MSI and Burn identities. The prior 0.1.3 identities remain
-historical and must not be reused for changed payloads.
-
-WiX 5 normally generates fresh bind identities and timestamps. The scoped packaging extension fixes the Burn registration ID; the build fixes MSI summary identity/timestamps, normalizes compound-file and cabinet timestamps, updates the attached-container hash and recalculates cabinet checksums. A release candidate is accepted only after two builds are byte-identical and its exact SHA-256 values are recorded.
+A controller with a persisted cluster checkpoint must verify the existing cluster before final `READY`. A member must resume against its pinned controller.

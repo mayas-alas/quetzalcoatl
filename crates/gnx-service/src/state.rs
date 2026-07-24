@@ -4,7 +4,8 @@ use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
 
 const STATE_NAME: &str = "state.json";
-const SCHEMA_VERSION: u8 = 1;
+const SCHEMA_VERSION: u8 = 2;
+const PREVIOUS_SCHEMA_VERSION: u8 = 1;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -16,8 +17,6 @@ pub struct PersistedState {
     pub self_ip: IpAddr,
     pub controller: ControllerIdentity,
     pub tailnet: String,
-    pub install_garage: bool,
-    pub install_forgejo: bool,
     #[serde(default)]
     pub member: Option<MemberIdentity>,
     #[serde(default)]
@@ -67,15 +66,23 @@ pub enum ClusterJoinState {
     Joined,
 }
 
+#[derive(Deserialize)]
+struct SchemaOneState {
+    schema_version: u8,
+    stage: String,
+    role: PersistedRole,
+    self_id: String,
+    self_ip: IpAddr,
+    controller: ControllerIdentity,
+    tailnet: String,
+    #[serde(default)]
+    member: Option<MemberIdentity>,
+    #[serde(default)]
+    cluster_join: ClusterJoinState,
+}
+
 impl PersistedState {
-    pub fn controller(
-        self_id: String,
-        self_ip: IpAddr,
-        hostname: String,
-        tailnet: String,
-        install_garage: bool,
-        install_forgejo: bool,
-    ) -> Self {
+    pub fn controller(self_id: String, self_ip: IpAddr, hostname: String, tailnet: String) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             stage: "ROLE_RESOLVED".into(),
@@ -88,8 +95,6 @@ impl PersistedState {
             self_id,
             self_ip,
             tailnet,
-            install_garage,
-            install_forgejo,
             member: None,
             cluster_join: ClusterJoinState::NotApplicable,
         }
@@ -115,8 +120,6 @@ impl PersistedState {
             self_ip,
             controller,
             tailnet,
-            install_garage: false,
-            install_forgejo: false,
             cluster_join: ClusterJoinState::NotStarted,
         }
     }
@@ -128,7 +131,7 @@ pub fn store(state: &PersistedState) -> Result<(), StateError> {
         .map_err(|_| StateError::new("cannot encode persisted state"))?;
     let path = state_path()?;
     crate::secrets::atomic_write(&path, &bytes).map_err(StateError::from_storage)?;
-    let verified = load_from(&path)?;
+    let verified = load_current_from(&path)?;
     if &verified != state {
         return Err(StateError::new(
             "state read-after-write verification failed",
@@ -140,23 +143,61 @@ pub fn store(state: &PersistedState) -> Result<(), StateError> {
 pub fn load_optional() -> Result<Option<PersistedState>, StateError> {
     let path = state_path()?;
     match fs::read(&path) {
-        Ok(bytes) => parse(&bytes).map(Some),
+        Ok(bytes) => {
+            let (state, migrated) = decode(&bytes)?;
+            if migrated {
+                store(&state)?;
+            }
+            Ok(Some(state))
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(StateError::io("cannot read persisted state", &error)),
     }
 }
 
-fn load_from(path: &std::path::Path) -> Result<PersistedState, StateError> {
+fn load_current_from(path: &std::path::Path) -> Result<PersistedState, StateError> {
     let bytes =
         fs::read(path).map_err(|error| StateError::io("cannot read persisted state", &error))?;
-    parse(&bytes)
-}
-
-fn parse(bytes: &[u8]) -> Result<PersistedState, StateError> {
-    let state = serde_json::from_slice(bytes)
-        .map_err(|_| StateError::new("state.json has invalid data"))?;
+    let state: PersistedState = serde_json::from_slice(&bytes)
+        .map_err(|_| StateError::new("state.json has invalid current data"))?;
     validate(&state)?;
     Ok(state)
+}
+
+fn decode(bytes: &[u8]) -> Result<(PersistedState, bool), StateError> {
+    if let Ok(state) = serde_json::from_slice::<PersistedState>(bytes) {
+        validate(&state)?;
+        return Ok((state, false));
+    }
+
+    let previous: SchemaOneState = serde_json::from_slice(bytes)
+        .map_err(|_| StateError::new("state.json has invalid data"))?;
+    if previous.schema_version != PREVIOUS_SCHEMA_VERSION {
+        return Err(StateError::new("state.json schema version is unsupported"));
+    }
+
+    let stage = if previous.role.is_controller() {
+        if previous.stage == "ROLE_RESOLVED" {
+            previous.stage
+        } else {
+            "CONTROLLER_CLUSTER_READY".into()
+        }
+    } else {
+        previous.stage
+    };
+    let state = PersistedState {
+        schema_version: SCHEMA_VERSION,
+        stage,
+        role: previous.role,
+        self_id: previous.self_id,
+        self_ip: previous.self_ip,
+        controller: previous.controller,
+        tailnet: previous.tailnet,
+        member: previous.member,
+        cluster_join: previous.cluster_join,
+    };
+    validate(&state)?;
+    Ok((state, true))
 }
 
 fn validate(state: &PersistedState) -> Result<(), StateError> {
@@ -182,15 +223,14 @@ fn validate(state: &PersistedState) -> Result<(), StateError> {
         (PersistedRole::Controller, None)
             if state.controller.id == state.self_id
                 && state.controller.ip == state.self_ip
-                && state.cluster_join == ClusterJoinState::NotApplicable => {}
+                && state.cluster_join == ClusterJoinState::NotApplicable
+                && valid_controller_stage(&state.stage) => {}
         (PersistedRole::Member, Some(member))
             if member.id == state.self_id
                 && member.ip == state.self_ip
                 && valid_node_hostname(&member.hostname)
                 && state.controller.id != state.self_id
                 && state.controller.ip != state.self_ip
-                && !state.install_garage
-                && !state.install_forgejo
                 && valid_member_stage(&state.stage, &state.cluster_join) => {}
         _ => {
             return Err(StateError::new(
@@ -199,6 +239,13 @@ fn validate(state: &PersistedState) -> Result<(), StateError> {
         }
     }
     Ok(())
+}
+
+fn valid_controller_stage(stage: &str) -> bool {
+    matches!(
+        stage,
+        "ROLE_RESOLVED" | "CONTROLLER_CLUSTER_READY" | "READY"
+    )
 }
 
 fn valid_member_stage(stage: &str, cluster_join: &ClusterJoinState) -> bool {
@@ -292,15 +339,14 @@ mod tests {
             "100.100.10.20".parse().expect("IP"),
             "gnx-controller-node-id-123".into(),
             "tetra-balance.ts.net".into(),
-            true,
-            true,
         )
     }
 
     #[test]
     fn controller_state_round_trips_without_secrets() {
         let bytes = serde_json::to_vec(&controller_state()).expect("serialize state");
-        let state = parse(&bytes).expect("parse state");
+        let (state, migrated) = decode(&bytes).expect("parse state");
+        assert!(!migrated);
         assert_eq!(state, controller_state());
         let json = String::from_utf8(bytes).expect("UTF-8");
         assert!(!json.contains("auth_key"));
@@ -315,10 +361,10 @@ mod tests {
     }
 
     #[test]
-    fn legacy_controller_state_deserializes_with_member_defaults() {
-        let legacy = r#"{
+    fn schema_one_state_is_normalized_to_the_current_cluster_contract() {
+        let schema_one = r#"{
             "schema_version": 1,
-            "stage": "ROLE_RESOLVED",
+            "stage": "READY",
             "role": "controller",
             "self_id": "node-id-123",
             "self_ip": "100.100.10.20",
@@ -328,10 +374,12 @@ mod tests {
                 "ip": "100.100.10.20"
             },
             "tailnet": "tetra-balance.ts.net",
-            "install_garage": true,
-            "install_forgejo": true
+            "supplemental_metadata": {"enabled": true}
         }"#;
-        let state = parse(legacy.as_bytes()).expect("parse legacy state");
+        let (state, migrated) = decode(schema_one.as_bytes()).expect("normalize schema one state");
+        assert!(migrated);
+        assert_eq!(state.schema_version, SCHEMA_VERSION);
+        assert_eq!(state.stage, "CONTROLLER_CLUSTER_READY");
         assert_eq!(state.member, None);
         assert_eq!(state.cluster_join, ClusterJoinState::NotApplicable);
     }
@@ -351,7 +399,7 @@ mod tests {
             "tetra-balance.ts.net".into(),
         );
         let bytes = serde_json::to_vec(&state).expect("serialize state");
-        assert_eq!(parse(&bytes).expect("parse member state"), state);
+        assert_eq!(decode(&bytes).expect("parse member state").0, state);
     }
 
     #[test]

@@ -1,8 +1,8 @@
 use std::ptr::{null, null_mut};
 
 use gnx_protocol::{
-    Command, ForgejoConfiguration, InstallerConfiguration, MAX_MESSAGE_BYTES, OperationResponse,
-    PIPE_NAME, Request, StatusResponse,
+    Command, InstallerConfiguration, MAX_MESSAGE_BYTES, OperationResponse, PIPE_NAME, Request,
+    StatusResponse,
 };
 use windows_sys::Win32::Foundation::{
     CloseHandle, GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
@@ -20,12 +20,11 @@ pub fn status() -> Result<StatusResponse, String> {
     let request = serde_json::to_vec(&Request {
         command: Command::Status,
         configuration: None,
-        forgejo_configuration: None,
     })
     .map_err(|e| format!("cannot encode request: {e}"))?;
     write_message(pipe.0, &request)?;
     serde_json::from_slice(&read_message(pipe.0)?)
-        .map_err(|e| format!("service returned invalid protocol v1 JSON: {e}"))
+        .map_err(|e| format!("service returned invalid protocol v2 JSON: {e}"))
 }
 
 pub fn configure(configuration: InstallerConfiguration) -> Result<OperationResponse, String> {
@@ -33,7 +32,6 @@ pub fn configure(configuration: InstallerConfiguration) -> Result<OperationRespo
     let request = Request {
         command: Command::Configure,
         configuration: Some(configuration),
-        forgejo_configuration: None,
     };
     let mut bytes = serde_json::to_vec(&request)
         .map_err(|e| format!("cannot encode configure request: {e}"))?;
@@ -42,24 +40,7 @@ pub fn configure(configuration: InstallerConfiguration) -> Result<OperationRespo
     bytes.zeroize();
     write_result?;
     serde_json::from_slice(&read_message(pipe.0)?)
-        .map_err(|e| format!("service returned invalid protocol v1 JSON: {e}"))
-}
-
-pub fn configure_forgejo(configuration: ForgejoConfiguration) -> Result<OperationResponse, String> {
-    let pipe = connect()?;
-    let request = Request {
-        command: Command::ConfigureForgejo,
-        configuration: None,
-        forgejo_configuration: Some(configuration),
-    };
-    let mut bytes = serde_json::to_vec(&request)
-        .map_err(|e| format!("cannot encode Forgejo configure request: {e}"))?;
-    drop(request);
-    let write_result = write_message(pipe.0, &bytes);
-    bytes.zeroize();
-    write_result?;
-    serde_json::from_slice(&read_message(pipe.0)?)
-        .map_err(|e| format!("service returned invalid protocol v1 JSON: {e}"))
+        .map_err(|e| format!("service returned invalid protocol v2 JSON: {e}"))
 }
 
 fn connect() -> Result<OwnedHandle, String> {
@@ -94,7 +75,7 @@ fn connect() -> Result<OwnedHandle, String> {
 
 fn write_message(pipe: HANDLE, bytes: &[u8]) -> Result<(), String> {
     if bytes.len() > MAX_MESSAGE_BYTES {
-        return Err("request exceeds protocol v1 message limit".into());
+        return Err("request exceeds protocol v2 message limit".into());
     }
     let mut written = 0u32;
     // Safety: bytes is readable and pipe is a connected synchronous handle.

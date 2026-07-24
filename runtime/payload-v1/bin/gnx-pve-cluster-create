@@ -317,6 +317,34 @@ case "$mode" in
       podman exec -i gnx-proxmox "$script" inside
     exit 0
     ;;
+  verify)
+    IFS= read -r pve_ip
+    IFS= read -r pve_hostname
+    validate_input
+    validate_controller_input
+    printf '%s\n%s\n' "$pve_ip" "$pve_hostname" |
+      podman exec -i gnx-proxmox "$script" verify-inside
+    exit 0
+    ;;
+  verify-inside)
+    IFS= read -r pve_ip
+    IFS= read -r pve_hostname
+    validate_input
+    validate_controller_input
+    apply_hostname
+    verify_network
+    config=/etc/pve/corosync.conf
+    [ -s "$config" ] || exit 70
+    verify_corosync_key
+    status=$(pvecm status 2>/dev/null || true)
+    systemctl is-active --quiet pve-cluster.service corosync.service &&
+      printf '%s\n' "$status" | grep -Eq '^[[:space:]]*Name:[[:space:]]+quetzalcoatl[[:space:]]*$' &&
+      printf '%s\n' "$status" | grep -Eq '^[[:space:]]*Quorate:[[:space:]]+Yes[[:space:]]*$' &&
+      awk -v expected="$pve_hostname" '$1 == "name:" && $2 == expected { found=1 } END { exit !found }' "$config" &&
+      awk -v expected="$pve_ip" '$1 == "ring0_addr:" && $2 == expected { found=1 } END { exit !found }' "$config" || exit 70
+    printf 'PVE_CLUSTER=ready\n'
+    exit 0
+    ;;
   join)
     # stdin: controller IP, controller hostname, member IP, member hostname, PVE password.
     # The password is never accepted as an argument or written outside /run.

@@ -5,24 +5,17 @@ mod runtime_gate;
 #[cfg(windows)]
 mod secrets;
 #[cfg(windows)]
-mod service_secrets;
-#[cfg(windows)]
 mod state;
 
 #[cfg(windows)]
 fn main() {
-    use std::sync::{Arc, Mutex, RwLock};
+    use std::sync::{Arc, RwLock};
 
     let status = Arc::new(RwLock::new(gnx_protocol::StatusResponse::service_ready()));
-    let operation = Arc::new(Mutex::new(()));
     let runtime_status = Arc::clone(&status);
-    let runtime_operation = Arc::clone(&operation);
-    std::thread::spawn(move || match runtime_operation.lock() {
-        Ok(_guard) => runtime_gate::run(runtime_status),
-        Err(_) => eprintln!("gnx-service: runtime operation lock is poisoned"),
-    });
+    std::thread::spawn(move || runtime_gate::run(runtime_status));
 
-    if let Err(error) = pipe::serve(status, operation) {
+    if let Err(error) = pipe::serve(status) {
         eprintln!("gnx-service: {error}");
         std::process::exit(1);
     }

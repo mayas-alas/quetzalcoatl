@@ -10,14 +10,14 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $cacheRoot = Join-Path $repoRoot "target\installer-cache"
 $outputRoot = Join-Path $repoRoot "target\installer"
 $lockPath = Join-Path $PSScriptRoot "dependencies.lock.json"
-$releaseVersion = "0.1.7"
-$releaseProductCode = "{129BD77D-90DE-4992-86AE-F168C930D549}"
+$releaseVersion = "0.1.8"
+$releaseProductCode = "{F04621AE-B25E-423E-B29F-1DFE3B387D30}"
 $releaseUpgradeCode = "{47D5BD44-D061-407B-913B-47D17EC3BEA9}"
-$releasePackageCode = "{2164425B-7D79-4186-BDED-EF644CCB8804}"
-$releaseBundleId = "{60314D27-47DF-4118-B937-6D1445BAC9D7}"
-$previousProductCode = "{7E791841-74B0-4663-8993-952D43CD5C63}"
-$previousPackageCode = "{EC36F9AD-6477-4CA3-B40C-37CC8D4F1837}"
-$previousBundleId = "{B7AE53BF-D3A9-4948-AEC9-9C6F3490C2E2}"
+$releasePackageCode = "{647FFA40-389D-4BAE-BA22-59953F8CD6DC}"
+$releaseBundleId = "{185B6D17-6A2B-4390-BC54-9DF4AA83AB03}"
+$previousProductCode = "{129BD77D-90DE-4992-86AE-F168C930D549}"
+$previousPackageCode = "{2164425B-7D79-4186-BDED-EF644CCB8804}"
+$previousBundleId = "{60314D27-47DF-4118-B937-6D1445BAC9D7}"
 $bundleUpgradeCode = "{10B764B2-36AE-4911-A8C8-2F1A2A963769}"
 $releaseTimestamp = [DateTime]::SpecifyKind([DateTime] "2026-07-23T00:00:00", [DateTimeKind]::Utc)
 $releaseCabDate = [uint16] (((2026 - 1980) -shl 9) -bor (7 -shl 5) -bor 23)
@@ -259,29 +259,6 @@ function Test-ReleaseIdentityContract {
         if ($manifest -notmatch "(?m)^version\s*=\s*`"$([regex]::Escape($releaseVersion))`"\s*$") {
             throw "Release identity contract: $manifestPath must use version $releaseVersion."
         }
-    }
-}
-
-function Test-OpenTofuRuntimeContract {
-    $entrypointPath = Join-Path $repoRoot "runtime\payload-v1\bin\gnx-opentofu-entrypoint"
-    $preparePath = Join-Path $repoRoot "runtime\payload-v1\bin\gnx-opentofu-prepare"
-    $entrypoint = Get-Content -LiteralPath $entrypointPath -Raw -Encoding utf8
-    $prepare = Get-Content -LiteralPath $preparePath -Raw -Encoding utf8
-
-    if ($entrypoint -notmatch '(?m)^run_stage apply tofu apply -auto-approve -input=false -no-color -parallelism=1$') {
-        throw "OpenTofu runtime contract: apply must serialize Proxmox mutations with -parallelism=1."
-    }
-    foreach ($stage in @('init', 'validate', 'apply')) {
-        if ($entrypoint -notmatch "(?m)^run_stage $stage tofu $stage\b") {
-            throw "OpenTofu runtime contract: $stage must emit a stage-specific failure marker."
-        }
-    }
-    if ($prepare -match 'journalctl[^\r\n]*\s-r(?:\s|$)') {
-        throw "OpenTofu runtime contract: diagnostics must preserve chronological journal order."
-    }
-    if ($prepare -notmatch '\^GNX_OPENTOFU_STAGE=' -or
-        -not $prepare.Contains("sed '/ container \(died\|remove\) /d'")) {
-        throw "OpenTofu runtime contract: diagnostics must retain the stage marker and filter Podman lifecycle noise."
     }
 }
 
@@ -660,7 +637,6 @@ $contractBundleXml = if ($TestRebootContractOnly) { $RebootContractBundleXml } e
 Test-RebootContract -BundlePath $contractBundlePath -BundleXml $contractBundleXml
 if ($TestRebootContractOnly) { return }
 Test-ReleaseIdentityContract
-Test-OpenTofuRuntimeContract
 
 $artifacts = @{}
 foreach ($artifact in $dependencyLock.artifacts) {

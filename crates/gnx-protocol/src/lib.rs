@@ -3,15 +3,13 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub const PIPE_NAME: &str = r"\\.\pipe\Quetzalcoatl";
 pub const MAX_MESSAGE_BYTES: usize = 16 * 1024;
+pub const PROTOCOL_SCHEMA_VERSION: u8 = 2;
 
 #[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct Request {
     pub command: Command,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub configuration: Option<InstallerConfiguration>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub forgejo_configuration: Option<ForgejoConfiguration>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -19,24 +17,13 @@ pub struct Request {
 pub enum Command {
     Status,
     Configure,
-    ConfigureForgejo,
 }
 
 #[derive(Deserialize, PartialEq, Serialize, Zeroize, ZeroizeOnDrop)]
-#[serde(deny_unknown_fields)]
 pub struct InstallerConfiguration {
     pub tailnet: String,
     pub auth_key: String,
     pub pve_root_password: String,
-    pub install_garage: bool,
-    pub install_forgejo: bool,
-}
-
-#[derive(Deserialize, PartialEq, Serialize, Zeroize, ZeroizeOnDrop)]
-#[serde(deny_unknown_fields)]
-pub struct ForgejoConfiguration {
-    pub username: String,
-    pub password: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -51,7 +38,7 @@ pub struct OperationResponse {
 impl OperationResponse {
     pub fn accepted(stage: &str) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: PROTOCOL_SCHEMA_VERSION,
             accepted: true,
             stage: stage.into(),
             error_code: None,
@@ -61,7 +48,7 @@ impl OperationResponse {
 
     pub fn rejected(error_code: &str, message: &str) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: PROTOCOL_SCHEMA_VERSION,
             accepted: false,
             stage: "CONFIGURATION_REJECTED".into(),
             error_code: Some(error_code.into()),
@@ -79,7 +66,6 @@ pub struct StatusResponse {
     pub controller: Option<String>,
     pub components: Components,
     pub cluster: Cluster,
-    pub services: Services,
     pub last_error: Option<String>,
 }
 
@@ -92,7 +78,6 @@ pub struct Components {
     pub tailscale: String,
     pub tailscale_serve: String,
     pub proxmox: String,
-    pub opentofu: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -101,16 +86,10 @@ pub struct Cluster {
     pub quorate: bool,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
-pub struct Services {
-    pub garage: String,
-    pub forgejo: String,
-}
-
 impl StatusResponse {
     pub fn service_ready() -> Self {
         Self {
-            schema_version: 1,
+            schema_version: PROTOCOL_SCHEMA_VERSION,
             overall: "pending".into(),
             stage: "SERVICE_READY".into(),
             role: None,
@@ -123,15 +102,10 @@ impl StatusResponse {
                 tailscale: "pending".into(),
                 tailscale_serve: "pending".into(),
                 proxmox: "pending".into(),
-                opentofu: "pending".into(),
             },
             cluster: Cluster {
                 joined: false,
                 quorate: false,
-            },
-            services: Services {
-                garage: "pending".into(),
-                forgejo: "pending".into(),
             },
             last_error: None,
         }
@@ -149,11 +123,8 @@ impl StatusResponse {
         status.components.tailscale = "ready".into();
         status.components.tailscale_serve = "ready".into();
         status.components.proxmox = "ready".into();
-        status.components.opentofu = "not_applicable".into();
         status.cluster.joined = true;
         status.cluster.quorate = true;
-        status.services.garage = "not_applicable".into();
-        status.services.forgejo = "not_applicable".into();
         status
     }
 }
@@ -163,8 +134,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn service_ready_does_not_claim_increment_ready() {
+    fn service_ready_does_not_claim_platform_ready() {
         let status = StatusResponse::service_ready();
+        assert_eq!(status.schema_version, PROTOCOL_SCHEMA_VERSION);
         assert_eq!(status.overall, "pending");
         assert_eq!(status.stage, "SERVICE_READY");
         assert_eq!(status.components.service, "ready");
@@ -176,7 +148,6 @@ mod tests {
         let request = Request {
             command: Command::Status,
             configuration: None,
-            forgejo_configuration: None,
         };
         assert_eq!(
             serde_json::to_string(&request).expect("serialize status request"),
@@ -185,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn member_ready_serializes_the_final_member_contract() {
+    fn member_ready_serializes_the_final_platform_contract() {
         let status = StatusResponse::member_ready("gnx-controller-a".into());
         let json = serde_json::to_value(&status).expect("serialize status");
         assert_eq!(json["overall"], "ready");
@@ -200,8 +171,6 @@ mod tests {
         assert_eq!(json["components"]["tailscale"], "ready");
         assert_eq!(json["components"]["tailscale_serve"], "ready");
         assert_eq!(json["components"]["proxmox"], "ready");
-        assert_eq!(json["components"]["opentofu"], "not_applicable");
-        assert_eq!(json["services"]["garage"], "not_applicable");
-        assert_eq!(json["services"]["forgejo"], "not_applicable");
+        assert!(json.get("services").is_none());
     }
 }
