@@ -1,0 +1,61 @@
+#!/bin/sh
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+umask 077
+
+secret=/run/gnx/pve-root-password
+bootstrap=/run/gnx/pve-bootstrap-password
+container_secret=/run/gnx/pve-root-password
+container_bootstrap=/run/gnx/pve-bootstrap-password
+
+cleanup() {
+  podman exec gnx-proxmox rm -f \
+    "$container_secret" \
+    "$container_bootstrap" >/dev/null 2>&1 || true
+  rm -f "$secret" "$bootstrap"
+}
+trap cleanup EXIT HUP INT TERM
+
+install -d -m 0700 /run/gnx
+
+copy_secret() {
+  source_path=$1
+  target_path=$2
+  podman exec gnx-proxmox install -d -m 0700 /run/gnx
+  podman exec -i gnx-proxmox tee "$target_path" >/dev/null < "$source_path"
+  podman exec gnx-proxmox chmod 0600 "$target_path"
+}
+
+valid_ticket() {
+  password_path=$1
+  response=$(podman exec gnx-proxmox curl -kfsS --max-time 15 \
+    --data-urlencode 'username=root@pam' \
+    --data-urlencode "password@$password_path" \
+    https://127.0.0.1:8006/api2/json/access/ticket) || return 1
+  printf '%s' "$response" |
+    podman exec -i gnx-proxmox jq -e \
+      '.data.ticket | type == "string" and length > 0' >/dev/null
+}
+
+cat > "$secret"
+test -s "$secret"
+copy_secret "$secret" "$container_secret"
+{
+  printf 'root:'
+  cat "$secret"
+  printf '\n'
+} | podman exec -i gnx-proxmox chpasswd
+valid_ticket "$container_secret" || {
+  echo 'new PVE root credential was not accepted' >&2
+  exit 1
+}
+
+printf 'root' > "$bootstrap"
+copy_secret "$bootstrap" "$container_bootstrap"
+if valid_ticket "$container_bootstrap"; then
+  echo 'known PVE bootstrap credential is still accepted' >&2
+  exit 1
+fi
+
+printf 'PVE_PASSWORD=ready\n'

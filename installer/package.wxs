@@ -2,8 +2,8 @@
   <Package
     Name="Quetzalcoatl"
     Manufacturer="Quetzalcoatl"
-    Version="0.1.10"
-    ProductCode="{51B87559-35D7-4AAC-A311-2313CE8C0647}"
+    Version="0.1.12"
+    ProductCode="{621E6E65-5BB1-5495-A887-F3AF3AA57125}"
     UpgradeCode="{47D5BD44-D061-407B-913B-47D17EC3BEA9}"
     Scope="perMachine">
 

@@ -1,22 +1,39 @@
-# Scope and definition of done
+# Scope and definition of done — 0.1.12
 
 ## Product boundary
 
 ```text
-Windows 11
+Windows 11 service and CLI
   -> WSL2
-  -> dedicated Fedora Podman Machine
+  -> one dedicated Fedora Podman Machine
   -> KVM, TUN and FUSE validation
-  -> Proxmox VE container
-  -> Tailscale identity and HTTPS Serve
-  -> controller cluster creation or member join
+  -> one hash-locked runtime payload
+  -> Proxmox VE plus Tailscale
+  -> persistent controller or member role
+  -> cluster verified or member joined
   -> READY
 ```
 
-## Functional acceptance
+## Included
 
-- A clean controller reaches `READY` with PVE healthy and quorate.
-- A member discovers exactly one controller, joins idempotently and reaches `READY`.
-- Restart resumes from persisted state without changing role or controller.
-- Runtime status contains only platform components and cluster state.
-- The Fedora payload contains only the files required for PVE, Tailscale and cluster operations.
+- preserve the four existing Rust crates and all CLI/Named Pipe contracts;
+- extract reconciliation from the runtime module facade without changing stage order;
+- replace free-form runtime-agent argv construction with a closed Rust operation enum;
+- retain only static `sh -s` programs sent through stdin and reject `sh -c` command strings;
+- bound remote stdin/stdout/stderr and terminate operations that exceed the transport timeout;
+- remove shell-string execution from PVE credential configuration;
+- separate runtime payload and Rust build verification from `installer/build.ps1`;
+- preserve state schema, machine generation and controller/member semantics;
+- generate coherent 0.1.12 MSI and Burn identities while retaining upgrade families.
+
+## Excluded
+
+- new Rust crates, GitHub Actions or hosted CI;
+- OpenTofu, generalized OCI orchestration or enrollment HTTPS;
+- tray UI, a second Windows service or a Fedora daemon/listener;
+- state schema redesign, machine-generation migration or CLI changes;
+- arbitrary command execution through the Fedora agent.
+
+## Definition of done
+
+Static source checks must pass locally. Release acceptance additionally requires Rust format, Clippy, workspace tests, the Windows installer build, upgrade from 0.1.11 and physical runtime verification.

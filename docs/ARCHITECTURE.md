@@ -1,8 +1,6 @@
-# Quetzalcoatl architecture
+# Quetzalcoatl architecture — 0.1.12
 
 ## Product boundary
-
-Quetzalcoatl prepares a Windows 11 host as a Proxmox VE cluster node. Its runtime owns only the path required to reach a healthy, joined and quorate cluster state.
 
 ```text
 Windows service + CLI
@@ -14,6 +12,8 @@ WSL2 configuration
 Dedicated Fedora Podman Machine
         |
         +--> KVM, TUN and FUSE validation
+        +--> exact runtime payload v4
+        +--> on-demand typed gnx-runtime-agent
         |
         v
 Podman pod
@@ -23,88 +23,64 @@ Podman pod
         v
 persistent role resolution
   +--> controller: create or verify cluster
-  +--> member: discover and join controller
+  +--> member: resume and join pinned controller
         |
         v
 READY
 ```
 
-## Windows components
+## Workspace
 
-- `gnx-service`: convergence authority running under the dedicated Windows service identity.
-- `gnx`: local CLI for status, protected configuration and service restart.
-- Named pipe: authenticated local protocol between CLI and service.
-- DPAPI: protects the tailnet, Tailscale auth key and PVE root password.
-- `state.json`: stores only schema version, node identity, role, controller identity and cluster checkpoint.
-
-## Fedora runtime
-
-The payload contains exactly 11 files:
-
-- six executable scripts for PVE and Tailscale operations;
-- one Tailscale Serve configuration;
-- three Quadlet definitions;
-- one systemd enrollment unit.
-
-`manifest.json` and the Rust `PAYLOAD_FILES` array form the exact payload allowlist. Every file is LF-only, SHA-256 locked, written atomically and installed with a fixed mode.
-
-## Managed runtime generation
-
-The dedicated Podman Machine carries a fixed runtime-generation marker. When the marker is absent or differs from the service contract, Quetzalcoatl preserves only the current Tailscale node state, removes and recreates the entire managed machine, resets the cluster checkpoint to `ROLE_RESOLVED`, and reapplies the 11-file payload. This guarantees that an upgrade cannot retain unmanaged files, containers, volumes or PVE resources from an incompatible runtime generation.
-
-## Runtime state machine
-
-Common stages:
+The workspace remains limited to:
 
 ```text
-SERVICE_READY
-RUNTIME_IDENTITY
-WSL_PREPARING
-MACHINE_PREPARING
-MACHINE_NETWORK_PREPARING
-MACHINE_READY
-KVM_CHECKING
-KVM_READY
-PAYLOAD_APPLYING
-PROXMOX_STARTING
-POD_NETWORK_PREPARING
-PROXMOX_CHECKING
-PROXMOX_READY
-CONFIGURATION_WAITING
-PVE_CREDENTIAL_APPLYING
-TAILSCALE_ENROLLING
-TAILSCALE_CHECKING
-ROLE_DISCOVERING
-ROLE_RESOLVED
-TAILSCALE_SERVE_CHECKING
-TAILSCALE_READY
+crates/
+├─ gnx-protocol
+├─ gnx-cli
+├─ host-preflight
+└─ gnx-service
 ```
 
-Controller completion:
+No new crate, service, listener or remote API is introduced.
+
+## Windows runtime modules
 
 ```text
-CONTROLLER_CLUSTER_PRECHECK
-CONTROLLER_CLUSTER_CREATING
-CONTROLLER_CLUSTER_READY
-READY
+gnx-service/src/runtime/
+├─ mod.rs                 facade and fixed release constants
+├─ reconciler.rs          convergence sequence
+├─ error.rs               runtime error classification
+├─ model.rs               internal data contracts
+├─ status.rs              observable status transitions
+├─ host.rs                service identity and WSL configuration
+├─ machine.rs             Podman Machine lifecycle and devices
+├─ payload.rs             manifest and atomic payload application
+├─ tailscale.rs           enrollment, identity, Serve and health
+├─ proxmox.rs             PVE startup, identity and cluster operations
+├─ topology.rs            persistent role and member join
+├─ remote/
+│  ├─ operation.rs        closed Fedora operation enum
+│  ├─ client.rs           typed agent client
+│  ├─ transport.rs        Podman Machine process transport
+│  ├─ limits.rs           input, output and timeout contracts
+│  └─ mod.rs
+└─ tests.rs
 ```
 
-Member completion:
+`mod.rs` starts the runtime and maps terminal failure. `reconciler.rs` owns the established 0.1.11 sequence; stage names, state schema and controller/member behavior remain unchanged.
 
-```text
-MEMBER_JOINING
-READY
-```
+## Fedora payload
 
-`READY` means the local PVE runtime is healthy and cluster membership is quorate.
+`runtime/payload` is the only source payload. `manifest.json`, the physical file set and Rust `PAYLOAD_FILES` form one exact 12-file contract. Payload version 4 changes the runtime agent hardening and PVE credential helper but does not change machine generation.
 
-## Persistence
+## Execution boundary
 
-Schema 2 contains only the cluster contract. A schema 1 record is normalized once by selecting the current identity, role, controller and join fields; supplementary fields are not persisted. A resumed controller verifies its existing cluster before returning to `READY`.
+After atomic payload application and handshake, sensitive PVE and Tailscale operations are selected through `RuntimeOperation` and dispatched by `gnx-runtime-agent`. The agent executes fixed payload paths only. It has no listener, daemon mode or generic exec branch.
 
-## Security invariants
+Bootstrap and health probes that need multiple shell statements use fixed programs sent to `sh -s` through stdin. Dynamic values use argv or stdin. Managed runtime code contains no `sh -c` or `bash -c` command-string execution.
 
-- Secrets never enter process arguments, persisted state, runtime status or logs.
-- Secret files under `/run/gnx` are root-owned, tightly permissioned and removed by traps.
-- PVE access is available through Tailscale Serve; no PVE listener is published on Windows.
-- Node role and controller identity cannot silently drift after persistence.
+## Managed generation and persistence
+
+The managed generation remains `proxmox-cluster-v2`. Existing compatible machines receive payload v4 without forced recreation. An incompatible generation preserves only managed Tailscale state, recreates the machine, resets the cluster checkpoint and reapplies the runtime.
+
+Protected state continues to store the node identity, role, controller identity, tailnet and join checkpoint. A persisted controller is verified rather than recreated; a member resumes against its pinned controller.

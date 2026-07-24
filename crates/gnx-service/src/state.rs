@@ -82,12 +82,7 @@ struct SchemaOneState {
 }
 
 impl PersistedState {
-    pub fn controller(
-        self_id: String,
-        self_ip: IpAddr,
-        hostname: String,
-        tailnet: String,
-    ) -> Self {
+    pub fn controller(self_id: String, self_ip: IpAddr, hostname: String, tailnet: String) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             stage: "ROLE_RESOLVED".into(),
@@ -264,7 +259,10 @@ fn validate(state: &PersistedState) -> Result<(), StateError> {
 }
 
 fn valid_controller_stage(stage: &str) -> bool {
-    matches!(stage, "ROLE_RESOLVED" | "CONTROLLER_CLUSTER_READY" | "READY")
+    matches!(
+        stage,
+        "ROLE_RESOLVED" | "CONTROLLER_CLUSTER_READY" | "READY"
+    )
 }
 
 fn valid_member_stage(stage: &str, cluster_join: &ClusterJoinState) -> bool {

@@ -1,7 +1,7 @@
 #[cfg(windows)]
 mod pipe;
 #[cfg(windows)]
-mod runtime_gate;
+mod runtime;
 #[cfg(windows)]
 mod secrets;
 #[cfg(windows)]
@@ -13,7 +13,7 @@ fn main() {
 
     let status = Arc::new(RwLock::new(gnx_protocol::StatusResponse::service_ready()));
     let runtime_status = Arc::clone(&status);
-    std::thread::spawn(move || runtime_gate::run(runtime_status));
+    std::thread::spawn(move || runtime::run(runtime_status));
 
     if let Err(error) = pipe::serve(status) {
         eprintln!("gnx-service: {error}");

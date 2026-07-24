@@ -11,6 +11,9 @@ use std::ffi::OsString;
 use exit_codes::*;
 use model::{Check, Report, Status};
 
+#[cfg(windows)]
+type CheckSpec = (&'static str, i32, fn() -> checks::Verdict);
+
 enum Format {
     Human,
     Json,
@@ -98,7 +101,7 @@ fn emit(format: &Format, report: &Report) {
 #[cfg(windows)]
 fn run(format: &Format) -> i32 {
     let mut report = Report::new();
-    let checks: [(&str, i32, fn() -> checks::Verdict); 7] = [
+    let checks: [CheckSpec; 7] = [
         ("windows_host", WINDOWS_INCOMPATIBLE, checks::windows_host),
         ("elevation", NOT_ELEVATED, checks::elevation),
         (
@@ -146,7 +149,7 @@ fn run(format: &Format) -> i32 {
 #[cfg(windows)]
 fn prepare_wsl(format: &Format) -> i32 {
     let mut report = Report::new();
-    let checks: [(&str, i32, fn() -> checks::Verdict); 4] = [
+    let checks: [CheckSpec; 4] = [
         ("windows_host", WINDOWS_INCOMPATIBLE, checks::windows_host),
         ("elevation", NOT_ELEVATED, checks::elevation),
         (

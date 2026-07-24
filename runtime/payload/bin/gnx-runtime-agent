@@ -1,0 +1,53 @@
+#!/bin/sh
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+umask 077
+
+LIBEXEC=/usr/libexec/quetzalcoatl
+
+fail_usage() {
+  printf '%s\n' "gnx-runtime-agent: unsupported operation or arguments" >&2
+  exit 64
+}
+
+operation=${1-}
+[ -n "$operation" ] || fail_usage
+shift
+
+case "$operation" in
+  ping)
+    [ "$#" -eq 0 ] || fail_usage
+    printf '%s\n' 'GNX_RUNTIME_AGENT=1'
+    ;;
+  pve-cluster-create)
+    [ "$#" -eq 1 ] || fail_usage
+    mode=$1
+    case "$mode" in
+      create)
+        exec "$LIBEXEC/gnx-pve-cluster-create"
+        ;;
+      prepare|verify-node|verify|join)
+        exec "$LIBEXEC/gnx-pve-cluster-create" "$mode"
+        ;;
+      *)
+        fail_usage
+        ;;
+    esac
+    ;;
+  pve-configure)
+    [ "$#" -eq 0 ] || fail_usage
+    exec "$LIBEXEC/gnx-pve-configure"
+    ;;
+  tailscale-prepare)
+    [ "$#" -eq 0 ] || fail_usage
+    exec "$LIBEXEC/gnx-tailscale-prepare"
+    ;;
+  tailscale-rename)
+    [ "$#" -eq 0 ] || fail_usage
+    exec "$LIBEXEC/gnx-tailscale-rename"
+    ;;
+  *)
+    fail_usage
+    ;;
+esac

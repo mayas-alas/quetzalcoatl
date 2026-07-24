@@ -1,11 +1,32 @@
-# Evidence
+# Evidence — 0.1.12
 
-The source tree must satisfy all of the following:
+## Local source evidence
 
-- workspace format, Clippy and tests pass;
-- every shell payload parses with `sh -n` and passes ShellCheck;
-- runtime manifest hashes and the Rust payload allowlist agree;
-- installer static contracts pass;
-- the generated source ZIP is produced from the validated tree.
+Run:
 
-Hosted CI is static and build evidence. It does not replace physical Windows, nested virtualization, Tailscale direct-path or multi-host Corosync acceptance.
+```powershell
+python .\ci\validate_repository.py
+python .\ci\validate_runtime.py
+python .\ci\validate_remote_execution.py
+python .\ci\validate_release_contract.py
+```
+
+These checks prove the four-crate scope, exact payload file set and hashes, typed runtime operations, absence of `sh -c`, bounded transport markers, module boundaries and coherent release identities.
+
+## Windows build evidence
+
+Capture:
+
+```powershell
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-targets --locked
+.\installer\build.ps1 -TestRebootContractOnly
+.\installer\build.ps1
+```
+
+Retain MSI administrative extraction results and final MSI/Burn SHA-256 values.
+
+## Runtime evidence
+
+Validate clean install, service/CLI pipe, runtime-agent handshake, controller creation, member join, reboot resume, upgrade from 0.1.11 and uninstall. Do not mark these complete from static source checks alone.

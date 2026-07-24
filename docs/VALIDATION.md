@@ -1,38 +1,38 @@
-# Validation
+# Validation — 0.1.12
 
-## CI checks
+## Source checks
 
-```bash
-python3 ci/validate_runtime.py
+```powershell
+python .\ci\validate_repository.py
+python .\ci\validate_runtime.py
+python .\ci\validate_remote_execution.py
+python .\ci\validate_release_contract.py
+```
+
+## Rust checks
+
+```powershell
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
-find runtime/payload-v2/bin -type f -print0 | xargs -0 -n1 sh -n
-shellcheck runtime/payload-v2/bin/*
-# On Windows CI, build.ps1 also compiles and administratively extracts the MSI.
 ```
 
+## Installer checks
 
-The Windows installer build deletes prior release executables before compilation, tests the embedded service/manifest contract, gives `gnx-service.exe` its own MSI key-path component, extracts the finished MSI, and compares the packaged service and complete runtime tree against the freshly built sources by SHA-256.
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+Get-ChildItem -Recurse -File | Unblock-File
+.\installer\build.ps1 -TestRebootContractOnly
+.\installer\build.ps1
+```
 
-The runtime validator checks:
+The build clears Mark-of-the-Web from the pinned `.config/dotnet-tools.json` manifest before restoring WiX. It also verifies source payload hashes before compiling Rust, static CRT imports, MSI identities, administrative extraction, installed payload coherence and deterministic Burn metadata.
 
-- manifest JSON and version;
-- the exact three-component set;
-- equality between the 11 manifest entries, the physical payload and the Rust allowlist;
-- SHA-256 values and Unix modes;
-- the persisted controller `READY` checkpoint;
-- controller cluster verification on resume;
-- the managed-machine generation inspection, full recreation path, Tailscale identity preservation and cluster-checkpoint reset.
+## Required acceptance outside source validation
 
-## Manual Windows acceptance
-
-On a clean compatible Windows 11 host:
-
-1. Install the bundle.
-2. Run elevated `gnx configure` and provide the tailnet, auth key and PVE password.
-3. Observe `gnx status` until `READY`.
-4. Verify PVE through the approved tailnet HTTPS route.
-5. Restart Windows and confirm the same role and controller identity return to `READY`.
-
-For member nodes, verify a direct Tailscale path, synchronized clocks, usable MTU, TCP 22/8006, Corosync UDP 5405-5412 and quorum. Hosted CI cannot prove these physical network properties.
+- clean Windows 11 install and CLI/service Named Pipe operation;
+- upgrade from installed 0.1.11 without losing protected state or the managed machine;
+- runtime-agent handshake and operation rejection behavior in Fedora;
+- controller cluster creation and persisted verification after reboot;
+- member join and resume against the pinned controller;
+- uninstall and secret-residue inspection.

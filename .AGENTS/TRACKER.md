@@ -1,11 +1,12 @@
-# Delivery tracker
+# Delivery tracker — 0.1.12
 
-| Item | State | Evidence |
-|---|---|---|
-| Runtime limited to Proxmox cluster convergence | implemented | source and payload review |
-| Exact 11-file payload | implemented | manifest validator |
-| Platform-only protocol and status | implemented | protocol tests |
-| Schema-one cluster state normalization | implemented | state tests |
-| Controller/member resume behavior | implemented | runtime tests |
-| Rust, script and installer validation | pending CI | GitHub Actions |
-| Physical Windows/PVE cluster acceptance | not run | target hosts required |
+| Workstream | Source status | External evidence |
+|---|---:|---:|
+| Typed runtime-agent operations | implemented | Rust build pending Windows host |
+| Remote input/output limits and timeout | implemented | runtime execution pending Windows/Fedora |
+| Reconciler extraction | implemented | workspace tests pending Windows host |
+| PVE credential `sh -c` removal | implemented | nested PVE acceptance pending |
+| Payload v4 manifest and hashes | validated locally | MSI extraction pending Windows host |
+| Installer runtime/Rust modules | implemented | full WiX build pending Windows host |
+| 0.1.12 release identities | validated locally | built MSI/Burn inspection pending |
+| Upgrade 0.1.11 to 0.1.12 | source contract prepared | physical upgrade pending |

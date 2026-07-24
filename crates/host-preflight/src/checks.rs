@@ -196,7 +196,7 @@ fn decode_wsl(bytes: &[u8]) -> Result<String, String> {
     let pairs_look_utf16le = bytes.len() >= 2 && bytes.chunks_exact(2).all(|pair| pair[1] == 0);
     let utf16le = bytes.starts_with(&[0xff, 0xfe]) || pairs_look_utf16le;
     if utf16le {
-        if bytes.len() % 2 != 0 {
+        if !bytes.len().is_multiple_of(2) {
             return Err("wsl returned malformed UTF-16LE output".into());
         }
         let content = if bytes.starts_with(&[0xff, 0xfe]) {
@@ -241,7 +241,7 @@ fn reboot_pending() -> Result<Option<&'static str>, String> {
         open_64(SESSION_MANAGER).map_err(|e| format!("cannot query {SESSION_MANAGER}: {e}"))?;
     match key.get_raw_value("PendingFileRenameOperations") {
         Ok(value) => {
-            if value.vtype != RegType::REG_MULTI_SZ || value.bytes.len() % 2 != 0 {
+            if value.vtype != RegType::REG_MULTI_SZ || !value.bytes.len().is_multiple_of(2) {
                 return Err("PendingFileRenameOperations has an ambiguous registry value".into());
             }
             let values = String::from_utf16(
