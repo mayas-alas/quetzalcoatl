@@ -1,6 +1,6 @@
 # Target architecture for 0.2.x
 
-0.1.14 establishes internal boundaries without creating packages prematurely. After upgrade, reboot and recovery behavior are proven, 0.2.x may separate executable applications from reusable libraries:
+0.1.15 establishes internal boundaries without creating packages prematurely. After upgrade, reboot and recovery behavior are proven, 0.2.x may separate executable applications from reusable libraries:
 
 ```text
 apps/

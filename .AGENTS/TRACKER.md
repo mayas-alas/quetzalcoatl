@@ -1,9 +1,11 @@
-# Delivery tracker — 0.1.14
+# Delivery tracker — 0.1.15
 
 | Workstream | State | Evidence |
 |---|---|---|
-| CLI/protocol/preflight | integrated | module inventory and CLI contract validator |
-| Service boundaries | integrated | service composition and architecture validator |
-| Release integrity | integrated | version, WiX and source-package contracts |
-| Windows certification | pending external run | fmt, Clippy, tests and full installer build |
-| Upgrade 0.1.13 → 0.1.14 | pending physical run | configuration/runtime preservation |
+| Installer recovery | integrated | stable staging helper, journal and `validate_installer_resume.py` |
+| CLI/release contract | integrated | `gnx -v`, `gnx --version`, CLI and release validators |
+| Cluster membership | integrated | persisted phases, typed confirmation and `validate_cluster_contract.py` |
+| Integration gate | source-validated | seven Python validators, Python compile and shell syntax |
+| Rust/Windows certification | pending physical run | fmt, Clippy, tests and WiX build |
+| Clean Dockur member install | pending physical run | reboot/resume and stable MSI cache evidence |
+| First real member join | pending physical run | `pvecm` and bilateral cluster-state evidence |

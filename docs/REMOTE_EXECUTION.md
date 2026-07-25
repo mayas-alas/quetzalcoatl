@@ -1,37 +1,29 @@
-# Remote execution contract
+# Controlled remote execution
 
-## Threat addressed
+The Windows service communicates with the managed Fedora machine through one typed runtime agent.
 
-Podman Machine SSH ultimately receives a command string. Passing dynamic data through `sh -c` would make correctness and security depend on shell quoting.
+## Threat boundary
 
-## 0.1.14 rules
+Podman Machine SSH ultimately receives a command string. Dynamic `sh -c`, caller-provided argv or generic execution would make correctness and security depend on shell quoting and would bypass the runtime allowlist.
 
-1. Runtime-agent call sites select a `RuntimeOperation` enum variant.
-2. Enum variants map to fixed argument vectors in one file.
-3. The Fedora agent validates operation names and exact argument counts.
-4. The agent dispatches only to fixed `/usr/libexec/quetzalcoatl` paths.
-5. No agent operation accepts an arbitrary command, executable path or shell program.
-6. Multi-line bootstrap/probe programs are fixed source constants sent to `sh -s` through stdin.
-7. Secrets and external values travel through stdin, argv with prior validation, or root-only ephemeral files.
-8. Remote stdin is limited to 8 MiB, each output stream to 1 MiB, and one operation to 15 minutes.
+## 0.1.15 rules
 
-## Allowed flow
+1. Runtime call sites select a `RuntimeOperation` enum variant.
+2. Variants map to fixed argument vectors in `runtime/remote/operation.rs`.
+3. Dynamic data is delivered only through bounded stdin.
+4. The Fedora agent accepts an exact operation and argument shape.
+5. Managed payload scripts use fixed subcommands and reject trailing input.
+6. Output, timeout and cancellation limits remain enforced by the transport.
+7. Secrets are zeroized in Rust and PVE join credentials are not accepted as argv.
+8. Membership confirmation is the closed operation `pve-cluster-create confirm-member`; there is no generic PVE command.
 
-```text
-Rust domain module
-  -> RuntimeOperation
-  -> typed client
-  -> bounded Podman Machine transport
-  -> gnx-runtime-agent
-  -> fixed helper
-```
-
-## Forbidden flow
+## Forbidden patterns
 
 ```text
-external value
-  -> formatted shell string
-  -> sh -c / bash -c
+sh -c <dynamic>
+bash -c <dynamic>
+pve-exec <caller text>
+RuntimeOperation::Arbitrary(...)
 ```
 
-Run `python .\ci\validate_remote_execution.py` to enforce the source contract.
+`ci/validate_remote_execution.py` and `ci/validate_cluster_contract.py` enforce the source-level operation contract. Runtime execution still requires a Windows/Fedora test.

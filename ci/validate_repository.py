@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.14"
+VERSION = "0.1.15"
 CRATES = {
     "gnx-cli": "gnx-cli",
     "gnx-protocol": "gnx-protocol",
@@ -30,9 +30,20 @@ CLI_MODULES = {
     "commands/mod.rs",
     "commands/restart.rs",
     "commands/status.rs",
+    "commands/version.rs",
     "error.rs",
     "main.rs",
     "output.rs",
+}
+PREFLIGHT_MODULES = {
+    "checks.rs",
+    "dependency.rs",
+    "exit_codes.rs",
+    "journal.rs",
+    "main.rs",
+    "model.rs",
+    "staging.rs",
+    "windows.rs",
 }
 PROTOCOL_MODULES = {
     "lib.rs",
@@ -44,6 +55,11 @@ PROTOCOL_MODULES = {
 SERVICE_MODULES = {
     "ipc/mod.rs",
     "main.rs",
+    "runtime/cluster/authorize_member.rs",
+    "runtime/cluster/confirm_membership.rs",
+    "runtime/cluster/mod.rs",
+    "runtime/cluster/prepare_member.rs",
+    "runtime/cluster/verify_member.rs",
     "runtime/control.rs",
     "runtime/error.rs",
     "runtime/host.rs",
@@ -115,7 +131,7 @@ def validate_versions() -> None:
 def validate_workspace() -> None:
     workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
     if set(workspace["workspace"]["members"]) != WORKSPACE_MEMBERS:
-        fail("workspace must contain the four 0.1.14 packages")
+        fail("workspace must contain the four 0.1.15 packages")
     if (ROOT / "crates" / "host-preflight").exists():
         fail("legacy crates/host-preflight directory remains")
     if (ROOT / ".github").exists():
@@ -125,6 +141,7 @@ def validate_workspace() -> None:
 def validate_module_sets() -> None:
     module_roots = (
         (ROOT / "crates" / "gnx-cli" / "src", CLI_MODULES, "CLI"),
+        (ROOT / "crates" / "gnx-host-preflight" / "src", PREFLIGHT_MODULES, "preflight"),
         (ROOT / "crates" / "gnx-protocol" / "src", PROTOCOL_MODULES, "protocol"),
         (ROOT / "crates" / "gnx-service" / "src", SERVICE_MODULES, "service"),
     )
@@ -246,17 +263,20 @@ def validate_powershell_structure() -> None:
 
 def validate_delivery_records() -> None:
     required = {
-        ROOT / ".AGENTS" / "agents" / "cli-protocol-preflight.md",
-        ROOT / ".AGENTS" / "agents" / "service-boundaries.md",
-        ROOT / ".AGENTS" / "agents" / "release-integrity.md",
-        ROOT / ".AGENTS" / "tasks" / "RELEASE_0.1.14.md",
-        ROOT / ".AGENTS" / "tasks" / "STRUCTURAL_REFACTOR.md",
+        ROOT / ".AGENTS" / "agents" / "installer-recovery.md",
+        ROOT / ".AGENTS" / "agents" / "cli-release-contract.md",
+        ROOT / ".AGENTS" / "agents" / "cluster-membership.md",
+        ROOT / ".AGENTS" / "tasks" / "RELEASE_0.1.15.md",
+        ROOT / ".AGENTS" / "tasks" / "INSTALLER_RECOVERY.md",
+        ROOT / ".AGENTS" / "tasks" / "MEMBER_JOIN.md",
         ROOT / "docs" / "ARCHITECTURE.md",
+        ROOT / "docs" / "INSTALLER_RECOVERY.md",
+        ROOT / "docs" / "MEMBER_MEMBERSHIP.md",
         ROOT / "docs" / "TARGET_0.2.md",
     }
     missing = [str(path.relative_to(ROOT)) for path in required if not path.is_file()]
     if missing:
-        fail(f"0.1.14 delivery records are absent: {missing}")
+        fail(f"0.1.15 delivery records are absent: {missing}")
 
 
 def main() -> None:

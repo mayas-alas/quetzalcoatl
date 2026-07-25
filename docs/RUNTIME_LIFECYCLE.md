@@ -1,22 +1,40 @@
 # Runtime lifecycle and recovery
 
-The 0.1.14 reconciler preserves this order:
+The 0.1.15 reconciler preserves the established host/runtime order:
 
 1. validate the dedicated Windows service identity;
 2. configure WSL and ensure the managed Podman Machine;
-3. validate Fedora, KVM, TUN and FUSE;
-4. apply and verify payload v4 and the runtime-agent handshake;
-5. load protected configuration and persisted state;
-6. enroll or resume Tailscale and resolve the persistent role;
-7. prepare PVE identity and start the nested runtime;
-8. apply the PVE credential and verify Tailscale Serve;
-9. create/verify the controller cluster or resume/join the member;
-10. persist READY and publish final status.
+3. validate Fedora and nested KVM;
+4. apply and verify runtime payload version 5;
+5. enroll and stabilize Tailscale identity;
+6. resolve or validate the persisted controller/member role;
+7. configure local PVE identity and services;
+8. create or join the PVE cluster;
+9. verify readiness and publish status.
 
-Recovery is convergence-based:
+## Controller
 
-- compatible resources are verified and reused;
-- payload writes are temporary, hash-checked and atomic;
-- controller state at or beyond the cluster checkpoint triggers verification;
-- member joining state resumes against the pinned controller;
-- incompatible machine generation triggers controlled recreation with Tailscale-state preservation.
+A new tailnet with no GNX peers elects one controller. The controller creates and verifies the `quetzalcoatl` PVE cluster, then persists `READY`.
+
+## Member
+
+A node that discovers exactly one controller follows:
+
+```text
+MEMBER_PREPARING
+→ MEMBER_AUTHORIZING
+→ MEMBER_JOINING
+→ MEMBER_VERIFYING
+→ MEMBER_CONFIRMING
+→ READY
+```
+
+The persisted checkpoint remains `Joining` through the intermediate phases, so the state schema does not change. On restart, the idempotent join inspects PVE state before deciding whether `pvecm add` is still required. A previously `Joined` member is revalidated before returning to `READY`.
+
+## Multiple members
+
+Discovery no longer rejects a topology based on member count. It still fails closed if peers exist without an identifiable controller or if more than one controller is visible.
+
+## Installer recovery is separate
+
+Dependency setup uses `C:\ProgramData\Quetzalcoatl\Installer\install-state.json`. Runtime state remains under the established product state location; installer recovery does not alter cluster-state schema.

@@ -25,12 +25,17 @@ pub(super) fn set_controller(status: &Arc<RwLock<StatusResponse>>, hostname: &st
     }
 }
 
-pub(super) fn set_member_joining_status(status: &Arc<RwLock<StatusResponse>>, controller: &str) {
+pub(super) fn set_member_stage_status(
+    status: &Arc<RwLock<StatusResponse>>,
+    controller: &str,
+    stage: &str,
+) {
     if let Ok(mut status) = status.write() {
         status.role = Some("member".into());
         status.controller = Some(controller.into());
-        status.stage = "MEMBER_JOINING".into();
+        status.stage = stage.into();
         status.overall = "pending".into();
+        status.last_error = None;
     }
 }
 

@@ -1,16 +1,28 @@
-# Quetzalcoatl operator runbook
+# Quetzalcoatl operator runbook — 0.1.15
 
-## Purpose
-
-The installer prepares WSL2, a dedicated Fedora Podman Machine, Proxmox VE, Tailscale and Proxmox cluster membership.
-
-## Install and configure
+## Install
 
 1. Run `QuetzalcoatlSetup.exe` as an administrator.
-2. Open an elevated terminal.
-3. Run:
+2. Allow setup to reboot Windows when WSL features require it.
+3. After resume, setup stages the pinned WSL and Podman MSIs under:
+
+```text
+C:\ProgramData\Quetzalcoatl\Installer\cache
+```
+
+4. On a dependency failure, retain:
+
+```text
+C:\ProgramData\Quetzalcoatl\Installer\install-state.json
+C:\ProgramData\Quetzalcoatl\Installer\logs
+```
+
+Do not delete the stable cache before collecting evidence.
+
+## CLI and configure
 
 ```powershell
+gnx --version
 gnx configure
 ```
 
@@ -18,16 +30,33 @@ Provide:
 
 - the lowercase tailnet DNS suffix ending in `.ts.net`;
 - a valid Tailscale auth key;
-- a new PVE root password of 12–128 characters.
+- a PVE root password of 12–128 characters.
 
-4. Check progress:
+Check progress:
 
 ```powershell
 gnx status
 gnx status --json
 ```
 
-A successful node reports `overall=ready`, `stage=READY`, healthy platform components and a joined/quorate cluster.
+## Controller behavior
+
+With no eligible GNX peers, the first node becomes controller, receives a stable hostname derived from its Tailscale identity, creates or verifies the PVE cluster and reaches `READY`.
+
+## Member behavior
+
+A later node must discover exactly one eligible controller. Any number of existing members may be visible. The member progresses through:
+
+```text
+MEMBER_PREPARING
+MEMBER_AUTHORIZING
+MEMBER_JOINING
+MEMBER_VERIFYING
+MEMBER_CONFIRMING
+READY
+```
+
+`MEMBER_JOINING` preserves the existing idempotent `pvecm add`. Confirmation requires controller and member visibility in PVE cluster state.
 
 ## Restart convergence
 
@@ -35,24 +64,16 @@ A successful node reports `overall=ready`, `stage=READY`, healthy platform compo
 gnx restart
 ```
 
-The role and controller are loaded from protected persistent state. A restart does not repeat topology selection.
-
-## Controller behavior
-
-With no eligible peer, the first node becomes controller, receives a stable hostname derived from its Tailscale node ID, creates or verifies the PVE cluster and reaches `READY`.
-
-## Member behavior
-
-A later node must discover exactly one eligible controller with a direct Tailscale path. It persists that controller before joining, resumes an interrupted join, verifies quorum and reaches `READY`.
+Role and controller identity are loaded from protected persistent state. A joined member is revalidated before returning to `READY`.
 
 ## Failure handling
 
-Use `gnx status --json` and the Windows service log. Error messages are bounded and must not contain secrets. Failure categories cover Windows identity, WSL, Podman Machine, required devices, payload integrity, PVE health, Tailscale enrollment, topology, direct-path requirements, state mismatch and cluster join.
+Use `gnx status --json`, dependency MSI logs and the Windows service log. Error messages are bounded and must not contain secrets. A setup phase is attempted at most three times for the same product version before stopping with a resume-limit error.
 
 ## Upgrade
 
-The current state record is reduced to the cluster contract and the local cluster is verified before returning to `READY`.
+Upgrade from 0.1.14 preserves the MSI/Burn upgrade families. Validate protected configuration, managed machine identity and cluster membership after the upgrade.
 
 ## Uninstall
 
-Normal uninstall removes the Windows product. Persistent PVE data is not deleted automatically.
+Normal uninstall removes the Windows product. Persistent PVE data and the diagnostic installer cache are not treated as implicit destructive cleanup; inspect them before manual removal.

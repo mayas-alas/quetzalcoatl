@@ -39,7 +39,7 @@ fn payload_contract_mismatch_reports_both_sides() {
     };
 
     assert_eq!(error.code, "RUNTIME_PAYLOAD_INVALID");
-    assert!(error.message.contains("service_version=0.1.14"));
+    assert!(error.message.contains("service_version=0.1.15"));
     assert!(error.message.contains("expected_files=12"));
     assert!(error.message.contains("manifest_files=11"));
 }
@@ -182,7 +182,7 @@ fn discovery_counts_offline_hosts_and_excludes_expired_peers_and_sidecars() {
 }
 
 #[test]
-fn topology_matrix_is_bounded_and_selects_exactly_one_controller() {
+fn topology_matrix_selects_exactly_one_controller_without_a_member_count_limit() {
     let host = |id: &str, hostname: &str| HostPeer {
         id: id.into(),
         hostname: hostname.into(),
@@ -214,10 +214,16 @@ fn topology_matrix_is_bounded_and_selects_exactly_one_controller() {
         select_topology(&identity(vec![host("a", "gnx-controller-a"), host("b", "gnx-controller-b")])),
         Err(error) if error.code == "TOPOLOGY_UNSUPPORTED"
     ));
-    assert!(matches!(
-        select_topology(&identity(vec![host("a", "gnx-controller-a"), host("b", "gnx-member-b"), host("c", "gnx-member-c")])),
-        Err(error) if error.code == "TOPOLOGY_UNSUPPORTED"
-    ));
+    assert_eq!(
+        select_topology(&identity(vec![
+            host("a", "gnx-controller-a"),
+            host("b", "gnx-member-b"),
+            host("c", "gnx-member-c"),
+            host("d", "gnx-member-d"),
+        ]))
+        .expect("additional member"),
+        TopologyDecision::Member(host("a", "gnx-controller-a"))
+    );
 }
 
 #[test]
@@ -367,7 +373,7 @@ fn member_configuration_matches_only_the_persisted_tailnet() {
 }
 
 #[test]
-fn member_joining_status_keeps_local_components_ready() {
+fn member_stage_status_keeps_local_components_ready() {
     let status = Arc::new(RwLock::new(StatusResponse::service_ready()));
     {
         let mut value = status.write().expect("status lock");
@@ -379,7 +385,7 @@ fn member_joining_status_keeps_local_components_ready() {
         value.components.proxmox = "ready".into();
     }
 
-    set_member_joining_status(&status, "gnx-controller-controller");
+    set_member_stage_status(&status, "gnx-controller-controller", "MEMBER_JOINING");
 
     let value = status.read().expect("status lock");
     assert_eq!(value.role.as_deref(), Some("member"));
@@ -446,13 +452,15 @@ fn member_join_checkpoint_resumes_without_rediscovery_or_controller_change() {
     );
     assert!(begin_member_join(&mut member).expect("transition to joining"));
     assert_eq!(member.cluster_join, crate::state::ClusterJoinState::Joining);
-    assert_eq!(member.stage, "MEMBER_JOINING");
+    assert_eq!(member.stage, "MEMBER_PREPARING");
     assert!(!begin_member_join(&mut member).expect("resume joining"));
     assert_eq!(member.controller, controller);
 
     member.cluster_join = crate::state::ClusterJoinState::Joined;
     member.stage = "READY".into();
-    assert!(!begin_member_join(&mut member).expect("resume joined verification"));
+    assert!(begin_member_join(&mut member).expect("resume joined verification"));
+    assert_eq!(member.cluster_join, crate::state::ClusterJoinState::Joining);
+    assert_eq!(member.stage, "MEMBER_PREPARING");
     assert_eq!(member.controller, controller);
 }
 
@@ -588,6 +596,10 @@ fn runtime_agent_operations_have_fixed_argument_vectors() {
     assert_eq!(
         RuntimeOperation::PveClusterJoin.argv(),
         &["pve-cluster-create", "join"]
+    );
+    assert_eq!(
+        RuntimeOperation::PveClusterConfirmMember.argv(),
+        &["pve-cluster-create", "confirm-member"]
     );
     assert_eq!(RuntimeOperation::PveConfigure.argv(), &["pve-configure"]);
     assert_eq!(

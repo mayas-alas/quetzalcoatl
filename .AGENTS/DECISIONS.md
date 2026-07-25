@@ -1,10 +1,12 @@
-# Decisions — 0.1.14
+# Decisions — 0.1.15
 
-1. `crates/` remains the correct Rust workspace convention; executables and libraries are not split into `apps/` until 0.2.x.
-2. The workspace remains at four packages.
-3. `crates/host-preflight` becomes `crates/gnx-host-preflight`; the package and executable names remain unchanged.
-4. CLI commands are modules, not new binaries or protocol operations.
-5. `gnx-service` remains one crate but receives explicit composition zones.
-6. IPC cannot call Podman, Tailscale or Proxmox implementation modules directly.
-7. Runtime reconciliation order, public stages and error codes are unchanged.
-8. MSI/Burn upgrade families are retained while 0.1.14 receives new release identities.
+1. The observed MSI 2203/path failure is addressed by copying each dependency into a GNX-owned stable cache before `msiexec`; global Package Cache ACLs are not modified.
+2. WSL and Podman are ancillary payloads of closed `gnx-host-preflight` helper modes, not direct Burn MSI packages.
+3. Dependency version, file name, exact size and SHA-256 remain pinned in `installer/dependencies.lock.json` and duplicated only as build-validated Rust constants.
+4. The install journal is product-version scoped and limits a repeated phase to three attempts.
+5. Existing compatible dependencies are post-validated and reused; incompatible MSI registrations stop the installation.
+6. `gnx -v` and `gnx --version` use `CARGO_PKG_VERSION` and never open the Named Pipe.
+7. `prepare-member` and `authorize-member` are controlled reconciler decisions, not public CLI commands or new remote endpoints.
+8. `confirm-membership` uses one new typed runtime-agent operation and existing PVE cluster state; it does not accept arbitrary argv.
+9. Topology discovery accepts any number of members but still fails closed when zero or multiple controllers are visible.
+10. Protocol schema 2, persisted-state schema 2 and runtime generation `proxmox-cluster-v2` remain unchanged. Runtime payload version advances to 5 because the agent allowlist changes.

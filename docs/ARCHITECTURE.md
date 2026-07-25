@@ -1,4 +1,4 @@
-# Quetzalcoatl architecture — 0.1.14
+# Quetzalcoatl architecture — 0.1.15
 
 Quetzalcoatl remains a four-package Rust workspace plus a versioned Fedora payload and a WiX installer.
 
@@ -7,12 +7,16 @@ crates/
 ├─ gnx-cli/              user-facing CLI
 ├─ gnx-protocol/         Named Pipe schema and shared response models
 ├─ gnx-service/          Windows service and runtime reconciliation
-└─ gnx-host-preflight/   installer host checks
+└─ gnx-host-preflight/   installer host checks and dependency staging
 ```
 
 ## CLI boundary
 
-`gnx-cli` is organized by commands. `main.rs` only parses, dispatches and maps process exit behavior. `client.rs` owns Named Pipe transport and protocol-version checks. Output rendering and interactive configuration input are isolated from transport.
+`gnx-cli` owns parsing, local rendering and Named Pipe access. `-v` and `--version` terminate locally through `CARGO_PKG_VERSION`; `status`, `configure` and `restart` preserve their existing behavior.
+
+## Installer boundary
+
+Burn prepares Windows features and invokes two typed host-preflight helper modes. WSL and Podman arrive as ancillary payloads, are validated and copied into the GNX-owned stable cache, and only then are executed through `msiexec`. The helper accepts no arbitrary payload path or version.
 
 ## Service boundary
 
@@ -24,15 +28,21 @@ gnx-service/src/
 ├─ secrets/      protected configuration persistence
 ├─ state/        persisted runtime state and validation
 └─ runtime/      reconciliation and infrastructure adapters
+   └─ cluster/   bounded member join coordination
 ```
 
-The IPC layer can read status and store validated configuration, but it cannot invoke Podman, Tailscale or Proxmox modules directly. `RuntimeControl` owns runtime startup and delegates to the existing reconciler.
+IPC consumes shared protocol commands and never calls Podman, Tailscale or Proxmox implementation modules directly. Runtime startup passes through `RuntimeControl` and the reconciler.
 
-## Compatibility preserved
+## Member boundary
 
-- Protocol schema: 2
-- Named Pipe: `\\.\pipe\Quetzalcoatl`
-- CLI: `status`, `configure`, `restart`
+The member keeps the existing typed, idempotent join operation. Rust coordinates prepare, authorize, join, verify and confirm phases; Fedora executes only allowlisted runtime-agent operations. Confirmation observes PVE cluster state and does not open a new GNX endpoint.
+
+## Versioned contracts
+
+- Product version: `0.1.15`
+- Protocol schema: `2`
+- Persisted-state schema: `2`
 - Runtime generation: `proxmox-cluster-v2`
-- Payload contract: version 4
-- MSI and Burn upgrade families: unchanged
+- Runtime payload: `5`
+
+See `TARGET_0.2.md` for boundaries deliberately deferred until the installed MVP is proven.

@@ -12,17 +12,17 @@ $cacheRoot = Join-Path $repoRoot "target\installer-cache"
 $outputRoot = Join-Path $repoRoot "target\installer"
 $lockPath = Join-Path $installerRoot "dependencies.lock.json"
 $dotnetToolManifest = Join-Path $repoRoot ".config\dotnet-tools.json"
-$releaseVersion = "0.1.14"
-$releaseProductCode = "{ACFA43DA-DDE5-501B-A773-C50BED15F59F}"
+$releaseVersion = "0.1.15"
+$releaseProductCode = "{F5F93BC3-1E26-5F41-943A-17465E358D91}"
 $releaseUpgradeCode = "{47D5BD44-D061-407B-913B-47D17EC3BEA9}"
-$releasePackageCode = "{ACE7E7A7-7411-5444-8DD3-3DBF7F2DCAD2}"
-$releaseBundleId = "{C7F7AE72-0CA0-5D2E-96B4-E91C50C294B9}"
-$previousProductCode = "{56E3CF39-864C-51F8-BE28-86C9ADE58118}"
-$previousPackageCode = "{96520581-4D5C-53CA-80F8-8329F919CA69}"
-$previousBundleId = "{8C9449BC-368E-516A-BEEF-CFA0D3C243E7}"
+$releasePackageCode = "{D937B18F-E797-59AD-AB9A-0C334610D3F1}"
+$releaseBundleId = "{47B57628-E063-5738-BB41-F574C1164B09}"
+$previousProductCode = "{ACFA43DA-DDE5-501B-A773-C50BED15F59F}"
+$previousPackageCode = "{ACE7E7A7-7411-5444-8DD3-3DBF7F2DCAD2}"
+$previousBundleId = "{C7F7AE72-0CA0-5D2E-96B4-E91C50C294B9}"
 $bundleUpgradeCode = "{10B764B2-36AE-4911-A8C8-2F1A2A963769}"
-$releaseTimestamp = [DateTime]::SpecifyKind([DateTime] "2026-07-24T00:00:00", [DateTimeKind]::Utc)
-$releaseCabDate = [uint16] (((2026 - 1980) -shl 9) -bor (7 -shl 5) -bor 24)
+$releaseTimestamp = [DateTime]::SpecifyKind([DateTime] "2026-07-25T00:00:00", [DateTimeKind]::Utc)
+$releaseCabDate = [uint16] (((2026 - 1980) -shl 9) -bor (7 -shl 5) -bor 25)
 $releaseCabTime = [uint16] 0
 $dependencyLock = Get-Content -LiteralPath $lockPath -Raw -Encoding utf8 | ConvertFrom-Json
 
@@ -47,7 +47,8 @@ $contractBundleXml = if ($TestRebootContractOnly) { $RebootContractBundleXml } e
 Test-RebootContract -BundlePath $contractBundlePath -BundleXml $contractBundleXml
 if ($TestRebootContractOnly) { return }
 Test-ReleaseIdentityContract
-Test-RuntimePayloadSource -RuntimePayload (Join-Path $repoRoot 'runtime\payload') -ExpectedPayloadVersion 4
+Test-DependencyStagingContract
+Test-RuntimePayloadSource -RuntimePayload (Join-Path $repoRoot 'runtime\payload') -ExpectedPayloadVersion 5
 
 if (-not (Test-Path -LiteralPath $dotnetToolManifest -PathType Leaf)) {
     throw "Pinned .NET tool manifest is absent: $dotnetToolManifest"
@@ -160,7 +161,11 @@ try {
         -out $setupExe
     if ($LASTEXITCODE -ne 0) { throw "Bundle build failed." }
     Set-BurnDeterministicMetadata -Path $setupExe
-    Test-BundleIdentityAndPayload -BundlePath $setupExe -ProductMsiPath $productMsi
+    Test-BundleIdentityAndPayload `
+        -BundlePath $setupExe `
+        -ProductMsiPath $productMsi `
+        -WslMsiPath $artifacts.wsl `
+        -PodmanMsiPath $artifacts.podman
 
     Get-FileHash -Algorithm SHA256 -LiteralPath $productMsi, $setupExe
 } finally {

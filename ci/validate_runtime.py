@@ -56,7 +56,7 @@ def validate_manifest() -> None:
     data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     if set(data) != EXPECTED_MANIFEST_KEYS:
         fail(f"unexpected manifest keys: {sorted(set(data) ^ EXPECTED_MANIFEST_KEYS)}")
-    if data["schema_version"] != 1 or data["payload_version"] != 4:
+    if data["schema_version"] != 1 or data["payload_version"] != 5:
         fail("unsupported runtime manifest version")
 
     components = {entry["id"] for entry in data["components"]}
@@ -120,8 +120,8 @@ def validate_runtime_contract() -> None:
         path.read_text(encoding="utf-8") for path in sorted(RUNTIME_ROOT.rglob("*.rs"))
     )
     payload_parser = (RUNTIME_ROOT / "payload.rs").read_text(encoding="utf-8")
-    if "manifest.payload_version != 4" not in payload_parser or "expected_payload_version=4" not in payload_parser:
-        fail("Rust payload parser does not enforce payload version 4")
+    if "manifest.payload_version != 5" not in payload_parser or "expected_payload_version=5" not in payload_parser:
+        fail("Rust payload parser does not enforce payload version 5")
     runtime_tests = (RUNTIME_ROOT / "tests.rs").read_text(encoding="utf-8")
     if "expected_files=12" not in runtime_tests or "manifest_files=11" not in runtime_tests:
         fail("Rust payload contract test does not reflect the 12-file payload")

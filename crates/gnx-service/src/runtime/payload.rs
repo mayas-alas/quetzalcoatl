@@ -128,12 +128,12 @@ pub(super) fn parse_payload_manifest(bytes: &[u8]) -> Result<Vec<LockedPayloadFi
             format!("runtime manifest is invalid JSON: {error}"),
         )
     })?;
-    if manifest.payload_version != 4 || manifest.files.len() != PAYLOAD_FILES.len() {
+    if manifest.payload_version != 5 || manifest.files.len() != PAYLOAD_FILES.len() {
         return Err(GateError::new(
             "RUNTIME_PAYLOAD_INVALID",
             Component::Proxmox,
             format!(
-                "runtime/service payload contract mismatch: service_version={} expected_payload_version=4 expected_files={} manifest_payload_version={} manifest_files={}",
+                "runtime/service payload contract mismatch: service_version={} expected_payload_version=5 expected_files={} manifest_payload_version={} manifest_files={}",
                 env!("CARGO_PKG_VERSION"),
                 PAYLOAD_FILES.len(),
                 manifest.payload_version,

@@ -58,7 +58,9 @@ function Set-BurnDeterministicMetadata {
 function Test-BundleIdentityAndPayload {
     param(
         [Parameter(Mandatory)][string] $BundlePath,
-        [Parameter(Mandatory)][string] $ProductMsiPath
+        [Parameter(Mandatory)][string] $ProductMsiPath,
+        [Parameter(Mandatory)][string] $WslMsiPath,
+        [Parameter(Mandatory)][string] $PodmanMsiPath
     )
 
     $verificationRoot = Join-Path $outputRoot ("verify-" + [guid]::NewGuid().ToString('N'))
@@ -101,6 +103,21 @@ function Test-BundleIdentityAndPayload {
         $embeddedHash = (Get-FileHash -LiteralPath $embeddedProduct[0].FullName -Algorithm SHA256).Hash
         if ($sourceHash -ne $embeddedHash) {
             throw "Embedded MSI does not match the deterministic product MSI."
+        }
+
+        foreach ($dependency in @(
+            @{ Name = 'wsl.2.7.10.0.x64.msi'; Source = $WslMsiPath },
+            @{ Name = 'podman-installer-windows-amd64.msi'; Source = $PodmanMsiPath }
+        )) {
+            $embeddedDependency = @(Get-ChildItem -LiteralPath $payloadRoot -Recurse -File -Filter $dependency.Name)
+            if ($embeddedDependency.Count -ne 1) {
+                throw "Bundle must contain exactly one $($dependency.Name) ancillary payload; found $($embeddedDependency.Count)."
+            }
+            $expectedDependencyHash = (Get-FileHash -LiteralPath $dependency.Source -Algorithm SHA256).Hash
+            $embeddedDependencyHash = (Get-FileHash -LiteralPath $embeddedDependency[0].FullName -Algorithm SHA256).Hash
+            if ($expectedDependencyHash -ne $embeddedDependencyHash) {
+                throw "Embedded dependency payload does not match its pinned source: $($dependency.Name)"
+            }
         }
     } finally {
         if (Test-Path -LiteralPath $resolvedVerificationRoot) {

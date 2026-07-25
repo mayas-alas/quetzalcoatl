@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "payload_version": 4,
+  "payload_version": 5,
   "target": {
     "os": "linux",
     "architecture": "amd64"
@@ -60,9 +60,9 @@
     {
       "path": "bin/gnx-runtime-agent",
       "source": "quetzalcoatl",
-      "version": 4,
+      "version": 5,
       "mode": "0755",
-      "sha256": "5a3ee2a4e7d3a6b4669894d3aab39af3dfe9b84aac659357d38019e60f2cabda"
+      "sha256": "ca3f0ed53c1d8aecb798a0b72ff6cf59f907c05a1035e9b90584129af83dfdd7"
     },
     {
       "path": "bin/gnx-proxmox-entrypoint",
@@ -81,9 +81,9 @@
     {
       "path": "bin/gnx-pve-cluster-create",
       "source": "quetzalcoatl",
-      "version": 3,
+      "version": 4,
       "mode": "0755",
-      "sha256": "b5c26b53b94569ffa4e9140ddec3745549f195357ecce1d1d7f6d174ee8f49eb"
+      "sha256": "415b9e6fe481bf260d0d1b815edf9252a33340633535b9db5b723ff97d91b1e1"
     },
     {
       "path": "bin/gnx-tailscale-prepare",

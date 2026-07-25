@@ -269,7 +269,11 @@ fn valid_member_stage(stage: &str, cluster_join: &ClusterJoinState) -> bool {
     matches!(
         (stage, cluster_join),
         ("ROLE_RESOLVED", ClusterJoinState::NotStarted)
+            | ("MEMBER_PREPARING", ClusterJoinState::Joining)
+            | ("MEMBER_AUTHORIZING", ClusterJoinState::Joining)
             | ("MEMBER_JOINING", ClusterJoinState::Joining)
+            | ("MEMBER_VERIFYING", ClusterJoinState::Joining)
+            | ("MEMBER_CONFIRMING", ClusterJoinState::Joining)
             | ("READY", ClusterJoinState::Joined)
     )
 }
@@ -518,7 +522,16 @@ mod tests {
         member.stage = "MEMBER_JOINING".into();
         assert!(validate(&member).is_err());
         member.cluster_join = ClusterJoinState::Joining;
-        assert!(validate(&member).is_ok());
+        for stage in [
+            "MEMBER_PREPARING",
+            "MEMBER_AUTHORIZING",
+            "MEMBER_JOINING",
+            "MEMBER_VERIFYING",
+            "MEMBER_CONFIRMING",
+        ] {
+            member.stage = stage.into();
+            assert!(validate(&member).is_ok(), "rejected {stage}");
+        }
 
         member.stage = "READY".into();
         assert!(validate(&member).is_err());

@@ -17,6 +17,7 @@ EXPECTED = {
     "PveClusterCreate": ("pve-cluster-create", "create"),
     "PveClusterVerify": ("pve-cluster-create", "verify"),
     "PveClusterJoin": ("pve-cluster-create", "join"),
+    "PveClusterConfirmMember": ("pve-cluster-create", "confirm-member"),
     "PveConfigure": ("pve-configure",),
     "TailscalePrepare": ("tailscale-prepare",),
     "TailscaleRename": ("tailscale-rename",),

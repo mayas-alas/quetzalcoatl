@@ -1,14 +1,15 @@
 # Changelog
 
-## 0.1.14 — structural boundaries
+## 0.1.15 — installer recovery and member confirmation
 
-- Split the CLI into command, output and Named Pipe client modules without changing commands or output contracts.
-- Split protocol request, response, status and version definitions without changing schema 2.
-- Renamed the source directory to `crates/gnx-host-preflight` while preserving package and executable identities.
-- Organized the Windows service into service, IPC, secrets, state and runtime zones.
-- Added a narrow runtime-control facade while preserving reconciliation order.
-- Updated Cargo, WiX, validators, release documentation and 0.1.14 identities.
-- Added architecture guards that reject legacy paths and direct IPC-to-runtime coupling.
+- Replaced direct Burn execution of the pinned WSL and Podman MSIs with closed host-preflight helpers.
+- Added fixed-name, exact-size and SHA-256 validation plus stable staging under `ProgramData` before `msiexec`.
+- Added persistent dependency MSI logs and a product-version-scoped, three-attempt install journal.
+- Added `gnx -v` and `gnx --version` as local CLI actions that do not contact the service.
+- Added persisted member prepare, authorize, verify and confirm stages around the existing idempotent join.
+- Added one allowlisted runtime-agent membership-confirmation operation and bumped the exact payload contract to version 5.
+- Removed the topology rejection based on member count while preserving the requirement for exactly one controller.
+- Preserved protocol schema 2, persisted-state schema 2, runtime generation and the four-package workspace.
 
 ## 0.1.13 — CLI contract and source hygiene
 

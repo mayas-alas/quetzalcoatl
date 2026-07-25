@@ -1,12 +1,21 @@
-# Evidence — 0.1.14
+# Evidence — 0.1.15
 
-## Static evidence included in the source tree
+## Source evidence included in the tree
 
 - `ci/validate_repository.py`
 - `ci/validate_runtime.py`
 - `ci/validate_remote_execution.py`
 - `ci/validate_cli_contract.py`
 - `ci/validate_release_contract.py`
+- `ci/validate_installer_resume.py`
+- `ci/validate_cluster_contract.py`
+
+## Runtime shell evidence
+
+```sh
+sh -n runtime/payload/bin/gnx-runtime-agent
+sh -n runtime/payload/bin/gnx-pve-cluster-create
+```
 
 ## Required Windows evidence
 
@@ -18,4 +27,10 @@ cargo test --workspace --all-targets --locked
 .\installer\build.ps1
 ```
 
-Install 0.1.14 over the working 0.1.13 installation and confirm `gnx status`, `gnx status --json`, `gnx restart`, configuration preservation and runtime readiness.
+The physical acceptance run must retain:
+
+- `C:\ProgramData\Quetzalcoatl\Installer\install-state.json`;
+- stable WSL/Podman MSI logs;
+- Burn and product MSI logs;
+- `gnx --version`, `gnx status --json`;
+- `pvecm status`, `pvecm nodes` and cluster resource evidence from the member test.

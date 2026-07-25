@@ -31,6 +31,16 @@ function Test-RebootContract {
             $rebootPending = 'forceReboot'
             $rebootRequired = 'forceReboot'
         }
+        InstallWsl = @{
+            '0' = 'success'
+            '1641' = 'forceReboot'
+            $rebootRequired = 'forceReboot'
+        }
+        InstallPodman = @{
+            '0' = 'success'
+            '1641' = 'forceReboot'
+            $rebootRequired = 'forceReboot'
+        }
         ValidateHost = @{
             '0' = 'success'
             $rebootPending = 'forceReboot'
@@ -184,7 +194,7 @@ function Test-ReleaseIdentityContract {
         throw "Release identity contract: deterministic binder package lock must resolve WixToolset.Extensibility $($dependencyLock.wix.version)."
     }
 
-    foreach ($packageId in @('PrepareWsl', 'ValidateHost')) {
+    foreach ($packageId in @('PrepareWsl', 'InstallWsl', 'InstallPodman', 'ValidateHost')) {
         $exePackage = @($bundle.SelectNodes('//*[local-name()="ExePackage"]') | Where-Object {
             $_.GetAttribute('Id') -eq $packageId
         })
@@ -206,3 +216,76 @@ function Test-ReleaseIdentityContract {
     }
 }
 
+
+function Test-DependencyStagingContract {
+    $bundlePath = Join-Path $installerRoot "bundle.wxs"
+    $bundle = [xml] (Get-Content -LiteralPath $bundlePath -Raw -Encoding utf8)
+    $dependencySourcePath = Join-Path $repoRoot "crates\gnx-host-preflight\src\dependency.rs"
+    $dependencySource = Get-Content -LiteralPath $dependencySourcePath -Raw -Encoding utf8
+    $normalizedDependencySource = $dependencySource -replace '_', ''
+
+    $contracts = @(
+        @{
+            ArtifactId = 'wsl'
+            PackageId = 'InstallWsl'
+            PayloadId = 'WslMsiPayload'
+            SourceVariable = '$(var.WslMsi)'
+            InstallArguments = 'install-wsl --format json'
+        },
+        @{
+            ArtifactId = 'podman'
+            PackageId = 'InstallPodman'
+            PayloadId = 'PodmanMsiPayload'
+            SourceVariable = '$(var.PodmanMsi)'
+            InstallArguments = 'install-podman --format json'
+        }
+    )
+
+    foreach ($contract in $contracts) {
+        $artifact = @($dependencyLock.artifacts | Where-Object { $_.id -eq $contract.ArtifactId })
+        if ($artifact.Count -ne 1) {
+            throw "Dependency staging contract: lock entry $($contract.ArtifactId) is not unique."
+        }
+        $artifact = $artifact[0]
+        foreach ($value in @(
+            [string] $artifact.version,
+            [string] $artifact.file_name,
+            [string] $artifact.sha256,
+            [string] $artifact.size
+        )) {
+            if ($normalizedDependencySource -notlike "*$value*") {
+                throw "Dependency staging contract: helper constants differ for $($contract.ArtifactId): $value"
+            }
+        }
+
+        $legacyMsi = @($bundle.SelectNodes('//*[local-name()="MsiPackage"]') | Where-Object {
+            $_.GetAttribute('Id') -in @('Wsl', 'Podman')
+        })
+        if ($legacyMsi.Count -ne 0) {
+            throw "Dependency staging contract: WSL and Podman must not execute directly as Burn MsiPackage entries."
+        }
+
+        $packages = @($bundle.SelectNodes('//*[local-name()="ExePackage"]') | Where-Object {
+            $_.GetAttribute('Id') -eq $contract.PackageId
+        })
+        if ($packages.Count -ne 1) {
+            throw "Dependency staging contract: expected exactly one $($contract.PackageId) helper."
+        }
+        $package = $packages[0]
+        if ($package.GetAttribute('SourceFile') -ne '$(var.HostPreflight)' -or
+            $package.GetAttribute('InstallArguments') -ne $contract.InstallArguments -or
+            $package.GetAttribute('PerMachine') -ne 'yes' -or
+            $package.GetAttribute('Vital') -ne 'yes') {
+            throw "Dependency staging contract: $($contract.PackageId) execution policy differs."
+        }
+        $payloads = @($package.SelectNodes('./*[local-name()="Payload"]') | Where-Object {
+            $_.GetAttribute('Id') -eq $contract.PayloadId
+        })
+        if ($payloads.Count -ne 1 -or
+            $payloads[0].GetAttribute('SourceFile') -ne $contract.SourceVariable -or
+            $payloads[0].GetAttribute('Name') -ne $artifact.file_name -or
+            $payloads[0].GetAttribute('Compressed') -ne 'yes') {
+            throw "Dependency staging contract: $($contract.PackageId) payload differs from the lock."
+        }
+    }
+}

@@ -80,8 +80,8 @@ pub(super) fn join_member_cluster(
     if begin_member_join(member)? {
         store_persisted_state(member)?;
     }
-    set_member_joining_status(status, &member.controller.hostname);
 
+    prepare_member(status, member)?;
     let mut configuration = load_protected_configuration()?;
     configuration.auth_key.zeroize();
     let configuration_matches = validate_state_configuration(member, &configuration);
@@ -89,12 +89,14 @@ pub(super) fn join_member_cluster(
         configuration.pve_root_password.zeroize();
         return configuration_matches;
     }
+    authorize_member(status, member, &configuration.pve_root_password)?;
+    persist_member_stage(status, member, "MEMBER_JOINING")?;
     let join_result = join_member(podman, member, &configuration.pve_root_password);
     configuration.pve_root_password.zeroize();
     join_result?;
 
-    set_stage(status, "PVE_IDENTITY_CHECKING");
-    verify_pve_identity(podman, member.self_ip, persisted_local_hostname(member)?)?;
+    verify_member(status, podman, member)?;
+    confirm_membership(status, podman, member)?;
 
     member.cluster_join = crate::state::ClusterJoinState::Joined;
     member.stage = "READY".into();
@@ -109,11 +111,14 @@ pub(super) fn begin_member_join(
     match member.cluster_join {
         crate::state::ClusterJoinState::NotStarted => {
             member.cluster_join = crate::state::ClusterJoinState::Joining;
-            member.stage = "MEMBER_JOINING".into();
+            member.stage = "MEMBER_PREPARING".into();
             Ok(true)
         }
-        crate::state::ClusterJoinState::Joining | crate::state::ClusterJoinState::Joined => {
-            Ok(false)
+        crate::state::ClusterJoinState::Joining => Ok(false),
+        crate::state::ClusterJoinState::Joined => {
+            member.cluster_join = crate::state::ClusterJoinState::Joining;
+            member.stage = "MEMBER_PREPARING".into();
+            Ok(true)
         }
         crate::state::ClusterJoinState::NotApplicable => Err(GateError::new(
             "STATE_IDENTITY_INVALID",
@@ -332,33 +337,27 @@ pub(super) enum TopologyDecision {
 }
 
 pub(super) fn select_topology(identity: &TailscaleIdentity) -> Result<TopologyDecision, GateError> {
-    match identity.host_peers.len() {
-        0 => Ok(TopologyDecision::Controller),
-        1 | 2 => {
-            let controllers = identity
-                .host_peers
-                .iter()
-                .filter(|peer| peer.hostname.starts_with("gnx-controller-"))
-                .cloned()
-                .collect::<Vec<_>>();
-            match controllers.as_slice() {
-                [] => Err(GateError::new(
-                    "TOPOLOGY_UNSUPPORTED",
-                    Component::Tailscale,
-                    "bounded topology has no identifiable controller",
-                )),
-                [controller] => Ok(TopologyDecision::Member(controller.clone())),
-                _ => Err(GateError::new(
-                    "TOPOLOGY_UNSUPPORTED",
-                    Component::Tailscale,
-                    "bounded topology has multiple identifiable controllers",
-                )),
-            }
-        }
+    if identity.host_peers.is_empty() {
+        return Ok(TopologyDecision::Controller);
+    }
+
+    let controllers = identity
+        .host_peers
+        .iter()
+        .filter(|peer| peer.hostname.starts_with("gnx-controller-"))
+        .cloned()
+        .collect::<Vec<_>>();
+    match controllers.as_slice() {
+        [] => Err(GateError::new(
+            "TOPOLOGY_UNSUPPORTED",
+            Component::Tailscale,
+            "GNX inventory has members but no identifiable controller",
+        )),
+        [controller] => Ok(TopologyDecision::Member(controller.clone())),
         _ => Err(GateError::new(
             "TOPOLOGY_UNSUPPORTED",
             Component::Tailscale,
-            "bounded topology has more than two existing GNX hosts",
+            "GNX inventory has multiple identifiable controllers",
         )),
     }
 }

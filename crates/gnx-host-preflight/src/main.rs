@@ -1,7 +1,13 @@
 #[cfg(windows)]
 mod checks;
+#[cfg(windows)]
+mod dependency;
 mod exit_codes;
+#[cfg(windows)]
+mod journal;
 mod model;
+#[cfg(windows)]
+mod staging;
 #[cfg(windows)]
 mod windows;
 
@@ -22,6 +28,8 @@ enum Format {
 enum Mode {
     Validate,
     PrepareWsl,
+    InstallWsl,
+    InstallPodman,
 }
 
 struct Options {
@@ -30,12 +38,15 @@ struct Options {
 }
 
 fn usage() -> &'static str {
-    "Usage: gnx-host-preflight [prepare-wsl] [--format human|json]"
+    "Usage: gnx-host-preflight [prepare-wsl|install-wsl|install-podman] [--format human|json]"
 }
 
 fn parse_args_from(mut args: impl Iterator<Item = OsString>) -> Result<Options, ()> {
-    let mode = match args.next() {
+    let first = args.next();
+    let mode = match first.as_ref() {
         Some(arg) if arg == "prepare-wsl" => Mode::PrepareWsl,
+        Some(arg) if arg == "install-wsl" => Mode::InstallWsl,
+        Some(arg) if arg == "install-podman" => Mode::InstallPodman,
         Some(arg) if arg == "--help" || arg == "-h" => {
             if args.next().is_none() {
                 println!("{}", usage());
@@ -135,7 +146,7 @@ fn run(format: &Format) -> i32 {
             report.status = if code == OPERATIONAL_ERROR {
                 Status::Error
             } else {
-                Status::Fail
+                status
             };
             report.exit_code = code;
             emit(format, &report);
@@ -198,6 +209,49 @@ fn prepare_wsl(format: &Format) -> i32 {
     code
 }
 
+#[cfg(windows)]
+fn install_dependency(format: &Format, selected: dependency::Dependency) -> i32 {
+    let mut report = Report::new();
+    let check_id = selected.check_id();
+    match dependency::install(selected) {
+        Ok(dependency::InstallOutcome::Success(message)) => {
+            report.checks.push(Check {
+                id: check_id,
+                status: Status::Pass,
+                message,
+            });
+            emit(format, &report);
+            OK
+        }
+        Ok(dependency::InstallOutcome::Reboot(message)) => {
+            report.status = Status::RebootRequired;
+            report.exit_code = REBOOT_REQUIRED;
+            report.checks.push(Check {
+                id: check_id,
+                status: Status::RebootRequired,
+                message,
+            });
+            emit(format, &report);
+            REBOOT_REQUIRED
+        }
+        Err(error) => {
+            report.status = if error.exit_code >= OPERATIONAL_ERROR {
+                Status::Error
+            } else {
+                Status::Fail
+            };
+            report.exit_code = error.exit_code;
+            report.checks.push(Check {
+                id: check_id,
+                status: report.status,
+                message: format!("{}: {}", error.code, error.message),
+            });
+            emit(format, &report);
+            error.exit_code
+        }
+    }
+}
+
 #[cfg(not(windows))]
 fn prepare_wsl(format: &Format) -> i32 {
     run(format)
@@ -217,6 +271,11 @@ fn run(format: &Format) -> i32 {
     WINDOWS_INCOMPATIBLE
 }
 
+#[cfg(not(windows))]
+fn install_dependency(format: &Format, _selected: ()) -> i32 {
+    run(format)
+}
+
 fn main() {
     let options = match parse_args() {
         Ok(options) => options,
@@ -228,6 +287,28 @@ fn main() {
     let code = match options.mode {
         Mode::Validate => run(&options.format),
         Mode::PrepareWsl => prepare_wsl(&options.format),
+        #[cfg(windows)]
+        Mode::InstallWsl => install_dependency(&options.format, dependency::Dependency::Wsl),
+        #[cfg(windows)]
+        Mode::InstallPodman => install_dependency(&options.format, dependency::Dependency::Podman),
+        #[cfg(not(windows))]
+        Mode::InstallWsl | Mode::InstallPodman => install_dependency(&options.format, ()),
     };
     std::process::exit(code);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(values: &[&str]) -> Result<Options, ()> {
+        parse_args_from(values.iter().map(|value| OsString::from(*value)))
+    }
+
+    #[test]
+    fn dependency_modes_accept_only_the_optional_format() {
+        assert!(parse(&["install-wsl"]).is_ok());
+        assert!(parse(&["install-podman", "--format", "json"]).is_ok());
+        assert!(parse(&["install-podman", "extra"]).is_err());
+    }
 }

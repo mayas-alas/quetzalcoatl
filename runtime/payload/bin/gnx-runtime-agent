@@ -27,7 +27,7 @@ case "$operation" in
       create)
         exec "$LIBEXEC/gnx-pve-cluster-create"
         ;;
-      prepare|verify-node|verify|join)
+      prepare|verify-node|verify|join|confirm-member)
         exec "$LIBEXEC/gnx-pve-cluster-create" "$mode"
         ;;
       *)

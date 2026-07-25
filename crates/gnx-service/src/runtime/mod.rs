@@ -16,6 +16,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, Zeroizing};
 
+mod cluster;
 pub(crate) mod control;
 mod error;
 mod host;
@@ -29,6 +30,7 @@ mod status;
 mod tailscale;
 mod topology;
 
+use cluster::*;
 use error::*;
 use host::*;
 use machine::*;

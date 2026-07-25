@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.14"
+VERSION = "0.1.15"
 
 
 def fail(message: str) -> None:
@@ -26,12 +26,19 @@ def main() -> None:
         fail("CLI binary identity differs")
 
     commands = (cli_root / "src" / "commands" / "mod.rs").read_text(encoding="utf-8")
-    for command in ("gnx status [--json]", "gnx configure", "gnx restart"):
+    for command in ("gnx status [--json]", "gnx configure", "gnx restart", "gnx -v", "gnx --version"):
         if command not in commands:
             fail(f"CLI usage omits {command}")
-    for variant in ("Status", "Configure", "Restart"):
+    for variant in ("Status", "Configure", "Restart", "Version"):
         if variant not in commands:
             fail(f"CLI action set omits {variant}")
+
+
+    version = (cli_root / "src" / "commands" / "version.rs").read_text(encoding="utf-8")
+    if 'env!("CARGO_PKG_VERSION")' not in version or 'println!("gnx {}"' not in version:
+        fail("CLI version output is not bound to the crate version")
+    if "Action::Version => version::run()" not in commands:
+        fail("CLI version path is not local to the CLI")
 
     output = (cli_root / "src" / "output.rs").read_text(encoding="utf-8")
     for label in (

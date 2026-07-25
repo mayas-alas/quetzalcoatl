@@ -243,6 +243,38 @@ join_inside() {
   printf 'PVE_JOIN=ready\n'
 }
 
+confirm_membership_inside() {
+  IFS= read -r controller_ip || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  IFS= read -r controller_hostname || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  IFS= read -r member_ip || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  IFS= read -r member_hostname || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  reject_trailing_input
+  validate_member_input
+  status=$(pvecm status 2>/dev/null || true)
+  nodes=$(pvecm nodes 2>/dev/null || true)
+  systemctl is-active --quiet pve-cluster.service corosync.service ||
+    fail PVE_CONFIRM_SERVICES_NOT_READY 83
+  printf '%s\n' "$status" |
+    grep -Eq '^[[:space:]]*Name:[[:space:]]+quetzalcoatl[[:space:]]*$' ||
+    fail PVE_CONFIRM_CLUSTER_MISMATCH 83
+  printf '%s\n' "$status" |
+    grep -Eq '^[[:space:]]*Quorate:[[:space:]]+Yes[[:space:]]*$' ||
+    fail PVE_CONFIRM_NOT_QUORATE 83
+  printf '%s\n' "$nodes" | grep -F "$controller_hostname" >/dev/null ||
+    fail PVE_CONFIRM_CONTROLLER_MISSING 83
+  printf '%s\n' "$nodes" | grep -F "$member_hostname" >/dev/null ||
+    fail PVE_CONFIRM_MEMBER_MISSING 83
+  topology_matches || fail PVE_CONFIRM_TOPOLOGY_MISMATCH 83
+  resources=$(pvesh get /cluster/resources --type node --output-format json 2>/dev/null) ||
+    fail PVE_CONFIRM_API_UNAVAILABLE 83
+  printf '%s\n' "$resources" |
+    jq -e --arg controller "$controller_hostname" --arg member "$member_hostname" '
+      any(.[]; .node == $controller and .status == "online") and
+      any(.[]; .node == $member and .status == "online")
+    ' >/dev/null || fail PVE_CONFIRM_NODE_OFFLINE 83
+  printf 'PVE_MEMBERSHIP=confirmed\n'
+}
+
 persist_identity() {
   IFS= read -r pve_ip || fail PVE_IDENTITY_INPUT_INCOMPLETE 64
   IFS= read -r pve_hostname || fail PVE_IDENTITY_INPUT_INCOMPLETE 64
@@ -313,6 +345,19 @@ join_host() {
     "$controller_ip" "$controller_hostname" "$member_ip" "$member_hostname" "$join_password" |
     podman exec -i gnx-proxmox "$script" join-inside
   unset join_password
+}
+
+confirm_member_host() {
+  IFS= read -r controller_ip || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  IFS= read -r controller_hostname || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  IFS= read -r member_ip || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  IFS= read -r member_hostname || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  reject_trailing_input
+  validate_member_input
+  verify_direct_tailscale_route
+  printf '%s\n%s\n%s\n%s\n' \
+    "$controller_ip" "$controller_hostname" "$member_ip" "$member_hostname" |
+    podman exec -i gnx-proxmox "$script" confirm-member-inside
 }
 
 persist_corosync_key() {
@@ -414,6 +459,15 @@ case "$mode" in
     ;;
   join-inside)
     join_inside
+    exit 0
+    ;;
+  confirm-member)
+    # stdin: controller IP, controller hostname, member IP, member hostname.
+    confirm_member_host
+    exit 0
+    ;;
+  confirm-member-inside)
+    confirm_membership_inside
     exit 0
     ;;
   static-check)

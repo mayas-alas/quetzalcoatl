@@ -4,7 +4,7 @@
   <Bundle
     Name="Quetzalcoatl"
     Manufacturer="Quetzalcoatl"
-    Version="0.1.14"
+    Version="0.1.15"
     ProviderKey="{10B764B2-36AE-4911-A8C8-2F1A2A963769}"
     UpgradeCode="{10B764B2-36AE-4911-A8C8-2F1A2A963769}">
 
@@ -19,7 +19,7 @@
         Id="PrepareWsl"
         SourceFile="$(var.HostPreflight)"
         Name="gnx-host-prepare.exe"
-        CacheId="gnx-host-prepare-0.1.14"
+        CacheId="gnx-host-prepare-0.1.15"
         DetectCondition="0"
         InstallArguments="prepare-wsl --format json"
         PerMachine="yes"
@@ -31,26 +31,56 @@
         <ExitCode Behavior="error" />
       </ExePackage>
 
-      <MsiPackage
-        Id="Wsl"
-        SourceFile="$(var.WslMsi)"
-        Compressed="yes"
+      <!-- WSL and Podman are ancillary payloads of typed helpers. The helpers
+           copy them into the GNX-owned ProgramData cache, validate size and
+           SHA-256, and only then invoke msiexec from the stable path. -->
+      <ExePackage
+        Id="InstallWsl"
+        SourceFile="$(var.HostPreflight)"
+        Name="gnx-host-install-wsl.exe"
+        CacheId="gnx-host-install-wsl-0.1.15"
+        DetectCondition="0"
+        InstallArguments="install-wsl --format json"
+        PerMachine="yes"
         Permanent="yes"
-        Vital="yes" />
+        Vital="yes">
+        <Payload
+          Id="WslMsiPayload"
+          SourceFile="$(var.WslMsi)"
+          Name="wsl.2.7.10.0.x64.msi"
+          Compressed="yes" />
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="1641" Behavior="forceReboot" />
+        <ExitCode Value="3010" Behavior="forceReboot" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
 
-      <MsiPackage
-        Id="Podman"
-        SourceFile="$(var.PodmanMsi)"
-        Compressed="yes"
-        ForcePerMachine="yes"
+      <ExePackage
+        Id="InstallPodman"
+        SourceFile="$(var.HostPreflight)"
+        Name="gnx-host-install-podman.exe"
+        CacheId="gnx-host-install-podman-0.1.15"
+        DetectCondition="0"
+        InstallArguments="install-podman --format json"
+        PerMachine="yes"
         Permanent="yes"
-        Vital="yes" />
+        Vital="yes">
+        <Payload
+          Id="PodmanMsiPayload"
+          SourceFile="$(var.PodmanMsi)"
+          Name="podman-installer-windows-amd64.msi"
+          Compressed="yes" />
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="1641" Behavior="forceReboot" />
+        <ExitCode Value="3010" Behavior="forceReboot" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
 
       <ExePackage
         Id="ValidateHost"
         SourceFile="$(var.HostPreflight)"
         Name="gnx-host-validate.exe"
-        CacheId="gnx-host-validate-0.1.14"
+        CacheId="gnx-host-validate-0.1.15"
         DetectCondition="0"
         InstallArguments="--format json"
         PerMachine="yes"
