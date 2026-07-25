@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.12"
+VERSION = "0.1.13"
 CRATES = {
     "gnx-cli": "gnx-cli",
     "gnx-protocol": "gnx-protocol",
@@ -75,8 +75,8 @@ def validate_versions() -> None:
         fail("WiX package or bundle root is absent")
     if package.attrib.get("Version") != VERSION or bundle.attrib.get("Version") != VERSION:
         fail("WiX versions do not match the release")
-    if package.attrib.get("ProductCode") == "{D0A35E80-8D6D-5C16-9C72-E233A92858DB}":
-        fail("0.1.12 reused the 0.1.11 ProductCode")
+    if package.attrib.get("ProductCode") == "{621E6E65-5BB1-5495-A887-F3AF3AA57125}":
+        fail("0.1.13 reused the 0.1.12 ProductCode")
 
     build = (ROOT / "installer" / "build.ps1").read_text(encoding="utf-8")
     if f'$releaseVersion = "{VERSION}"' not in build:
@@ -159,6 +159,19 @@ def validate_rust_module_boundaries() -> None:
 
 
 
+def validate_cli_boundary() -> None:
+    if not (ROOT / "ci" / "validate_cli_contract.py").is_file():
+        fail("CLI contract validator is absent")
+    for path in (
+        ROOT / ".AGENTS" / "agents" / "runtime-modularization.md",
+        ROOT / ".AGENTS" / "tasks" / "PROXMOX_CLUSTER_RUNTIME.md",
+        ROOT / ".AGENTS" / "tasks" / "RELEASE_0.1.11.md",
+        ROOT / ".AGENTS" / "tasks" / "RELEASE_0.1.12.md",
+    ):
+        if path.exists():
+            fail(f"legacy delivery record remains: {path.relative_to(ROOT)}")
+
+
 def validate_powershell_structure() -> None:
     for path in sorted((ROOT / "installer").rglob("*.ps1")):
         source = path.read_text(encoding="utf-8")
@@ -199,7 +212,7 @@ def validate_powershell_structure() -> None:
 
 def validate_scope() -> None:
     if (ROOT / ".github").exists():
-        fail("hosted workflow infrastructure is outside the 0.1.12 MVP scope")
+        fail("hosted workflow infrastructure is outside the 0.1.13 MVP scope")
     workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
     if set(workspace["workspace"]["members"]) != {
         "crates/gnx-cli",
@@ -212,19 +225,22 @@ def validate_scope() -> None:
         ROOT / ".AGENTS" / "agents" / "runtime-transport.md",
         ROOT / ".AGENTS" / "agents" / "reconciler-recovery.md",
         ROOT / ".AGENTS" / "agents" / "release-integrity.md",
-        ROOT / ".AGENTS" / "tasks" / "RELEASE_0.1.12.md",
+        ROOT / ".AGENTS" / "agents" / "cli-contract.md",
+        ROOT / ".AGENTS" / "tasks" / "RELEASE_0.1.13.md",
+        ROOT / ".AGENTS" / "tasks" / "CLI_CONTRACT_AUDIT.md",
         ROOT / ".AGENTS" / "tasks" / "REMOTE_EXECUTION_REMEDIATION.md",
         ROOT / ".AGENTS" / "tasks" / "RECONCILER_RECOVERY.md",
     }
     missing = [str(path.relative_to(ROOT)) for path in required_agent_docs if not path.is_file()]
     if missing:
-        fail(f"0.1.12 agent delivery records are absent: {missing}")
+        fail(f"0.1.13 agent delivery records are absent: {missing}")
 
 
 def main() -> None:
     validate_versions()
     validate_installer_modules()
     validate_rust_module_boundaries()
+    validate_cli_boundary()
     validate_powershell_structure()
     validate_scope()
     print("repository-validation: ok")

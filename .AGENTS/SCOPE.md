@@ -1,39 +1,21 @@
-# Scope and definition of done — 0.1.12
-
-## Product boundary
-
-```text
-Windows 11 service and CLI
-  -> WSL2
-  -> one dedicated Fedora Podman Machine
-  -> KVM, TUN and FUSE validation
-  -> one hash-locked runtime payload
-  -> Proxmox VE plus Tailscale
-  -> persistent controller or member role
-  -> cluster verified or member joined
-  -> READY
-```
+# Scope and definition of done — 0.1.13
 
 ## Included
 
-- preserve the four existing Rust crates and all CLI/Named Pipe contracts;
-- extract reconciliation from the runtime module facade without changing stage order;
-- replace free-form runtime-agent argv construction with a closed Rust operation enum;
-- retain only static `sh -s` programs sent through stdin and reject `sh -c` command strings;
-- bound remote stdin/stdout/stderr and terminate operations that exceed the transport timeout;
-- remove shell-string execution from PVE credential configuration;
-- separate runtime payload and Rust build verification from `installer/build.ps1`;
-- preserve state schema, machine generation and controller/member semantics;
-- generate coherent 0.1.12 MSI and Burn identities while retaining upgrade families.
+- preserve the four existing Rust crates and the `status`, `configure`, `restart` CLI surface;
+- remove inactive legacy source files and closed release records from active scope;
+- expose every `StatusResponse` field in human `gnx status` output;
+- reject CLI/service protocol schema mismatches;
+- verify `gnx.exe` source identity, MSI PATH registration and extracted binary hash;
+- preserve runtime payload v4, state schema, machine generation and controller/member behavior;
+- generate coherent 0.1.13 MSI and Burn identities while retaining upgrade families.
 
 ## Excluded
 
-- new Rust crates, GitHub Actions or hosted CI;
-- OpenTofu, generalized OCI orchestration or enrollment HTTPS;
-- tray UI, a second Windows service or a Fedora daemon/listener;
-- state schema redesign, machine-generation migration or CLI changes;
-- arbitrary command execution through the Fedora agent.
+- new CLI commands, crates, services, daemon/listener or state migration;
+- GitHub Actions, OpenTofu, tray UI or generalized orchestration;
+- runtime behavior changes unrelated to source hygiene.
 
 ## Definition of done
 
-Static source checks must pass locally. Release acceptance additionally requires Rust format, Clippy, workspace tests, the Windows installer build, upgrade from 0.1.11 and physical runtime verification.
+All five static validators, Rust format, Clippy, workspace tests and the Windows installer build pass. Upgrade acceptance requires installing 0.1.13 over the existing 0.1.12 installation and confirming `gnx status`, configuration preservation and runtime readiness.

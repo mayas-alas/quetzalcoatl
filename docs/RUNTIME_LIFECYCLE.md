@@ -1,6 +1,6 @@
 # Runtime lifecycle and recovery
 
-The 0.1.12 reconciler preserves this order:
+The 0.1.13 reconciler preserves this order:
 
 1. validate the dedicated Windows service identity;
 2. configure WSL and ensure the managed Podman Machine;

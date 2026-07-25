@@ -1,4 +1,4 @@
-# Quetzalcoatl architecture — 0.1.12
+# Quetzalcoatl architecture — 0.1.13
 
 ## Product boundary
 
@@ -42,6 +42,10 @@ crates/
 ```
 
 No new crate, service, listener or remote API is introduced.
+
+## CLI boundary
+
+The installed `gnx.exe` exposes three commands: `status`, `configure` and `restart`. `status --json` returns protocol v2 JSON; human status exposes the same overall, stage, role, controller, component and cluster fields. The CLI rejects responses with a different schema version. WiX installs one keyed CLI binary, registers `[INSTALLFOLDER]` in the system PATH and verifies its hash during administrative extraction.
 
 ## Windows runtime modules
 

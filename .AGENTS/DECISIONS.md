@@ -1,37 +1,25 @@
 # Architecture decisions
 
 ## D-001 — Product completion is cluster READY
-
 Convergence completes only after controller cluster verification or member join.
 
-## D-002 — Persist only the cluster contract
+## D-002 — Four crates remain the MVP boundary
+0.1.13 adds no crate and changes no state schema or machine generation.
 
-Protected state contains node identity, role, controller identity, tailnet and join checkpoint. Version 0.1.12 does not change the state schema.
+## D-003 — CLI is a stable product boundary
+The supported command surface remains `status`, `configure` and `restart`. Human and JSON status views represent the same complete `StatusResponse` contract.
 
-## D-003 — One exact runtime payload
+## D-004 — CLI/service schema mismatch is an error
+The CLI validates protocol schema version on status and operation responses so a partial or incoherent upgrade fails explicitly.
 
-`runtime/payload` is the only source payload. Its physical files, manifest entries and Rust `PAYLOAD_FILES` allowlist must be identical.
+## D-005 — The installer owns CLI integrity
+The MSI installs one keyed `gnx.exe`, adds `[INSTALLFOLDER]` to the system PATH and verifies the extracted CLI hash against the freshly built artifact.
 
-## D-004 — Resume verifies rather than recreates
+## D-006 — One exact runtime payload
+`runtime/payload` remains the only source payload; payload version stays at 4.
 
-A persisted controller verifies its existing cluster. A member resumes against the pinned controller. Machine recreation remains limited to an incompatible managed generation.
+## D-007 — Fedora execution remains on-demand and typed
+The runtime agent has no listener or generic exec operation. Fixed shell programs may use stdin-fed `sh -s`; dynamic shell command strings remain forbidden.
 
-## D-005 — Four crates remain the MVP boundary
-
-0.1.12 improves internal modules but adds no crate. A module may become a crate only after its boundary survives build, upgrade, reboot and recovery evidence.
-
-## D-006 — Fedora execution is on-demand and typed
-
-The Windows service invokes `gnx-runtime-agent` over the existing Podman Machine SSH transport. Rust selects operations from `RuntimeOperation`; the agent has no listener and no generic exec operation.
-
-## D-007 — Static shell programs use stdin, never dynamic `sh -c`
-
-Bootstrap and probes may send fixed programs to `sh -s`. External values and secrets must use argv, stdin or fixed ephemeral files and must never be interpolated into a remote shell command string.
-
-## D-008 — Remote process resources are bounded
-
-Remote stdin and captured output have fixed limits. An operation exceeding the transport timeout is terminated and reported as a bounded error.
-
-## D-009 — Build entry point remains stable
-
-`installer/build.ps1` remains the single operator entry point. Dependency, contract, runtime, Rust, MSI and Burn implementation lives in dot-sourced modules that use the root supplied by the entry point.
+## D-008 — Build entry point remains stable
+`installer/build.ps1` remains the single artifact-build entry point.

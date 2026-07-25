@@ -2,6 +2,7 @@ function Test-MsiPayloadCoherence {
     param(
         [Parameter(Mandatory)][string] $MsiPath,
         [Parameter(Mandatory)][string] $ServiceBinary,
+        [Parameter(Mandatory)][string] $CliBinary,
         [Parameter(Mandatory)][string] $RuntimePayload
     )
 
@@ -33,6 +34,16 @@ function Test-MsiPayloadCoherence {
         $stagedServiceHash = (Get-FileHash -LiteralPath $stagedServices[0].FullName -Algorithm SHA256).Hash
         if ($sourceServiceHash -ne $stagedServiceHash) {
             throw "MSI payload coherence: staged gnx-service.exe differs from the freshly built binary."
+        }
+
+        $stagedClis = @(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File -Filter "gnx.exe")
+        if ($stagedClis.Count -ne 1) {
+            throw "MSI payload coherence: expected exactly one staged gnx.exe; found $($stagedClis.Count)."
+        }
+        $sourceCliHash = (Get-FileHash -LiteralPath $CliBinary -Algorithm SHA256).Hash
+        $stagedCliHash = (Get-FileHash -LiteralPath $stagedClis[0].FullName -Algorithm SHA256).Hash
+        if ($sourceCliHash -ne $stagedCliHash) {
+            throw "MSI payload coherence: staged gnx.exe differs from the freshly built binary."
         }
 
         $stagedManifests = @(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File -Filter "manifest.json" | Where-Object {

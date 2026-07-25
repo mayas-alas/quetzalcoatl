@@ -311,17 +311,33 @@ impl Drop for ConsoleEchoGuard {
     }
 }
 
-fn print_human(status: &StatusResponse) {
-    println!("overall: {}", status.overall);
-    println!("stage: {}", status.stage);
-    println!("role: {}", status.role.as_deref().unwrap_or("not_resolved"));
-    println!("service: {}", status.components.service);
-    println!("wsl: {}", status.components.wsl);
-    println!("podman_machine: {}", status.components.podman_machine);
-    println!("kvm: {}", status.components.kvm);
+fn format_human(status: &StatusResponse) -> String {
+    let mut lines = vec![
+        format!("overall: {}", status.overall),
+        format!("stage: {}", status.stage),
+        format!("role: {}", status.role.as_deref().unwrap_or("not_resolved")),
+        format!(
+            "controller: {}",
+            status.controller.as_deref().unwrap_or("not_resolved")
+        ),
+        format!("service: {}", status.components.service),
+        format!("wsl: {}", status.components.wsl),
+        format!("podman_machine: {}", status.components.podman_machine),
+        format!("kvm: {}", status.components.kvm),
+        format!("tailscale: {}", status.components.tailscale),
+        format!("tailscale_serve: {}", status.components.tailscale_serve),
+        format!("proxmox: {}", status.components.proxmox),
+        format!("cluster_joined: {}", status.cluster.joined),
+        format!("cluster_quorate: {}", status.cluster.quorate),
+    ];
     if let Some(error) = &status.last_error {
-        println!("last_error: {error}");
+        lines.push(format!("last_error: {error}"));
     }
+    lines.join("\n")
+}
+
+fn print_human(status: &StatusResponse) {
+    println!("{}", format_human(status));
 }
 
 fn main() {
@@ -335,5 +351,33 @@ fn main() {
     if let Err(error) = run(action) {
         eprintln!("gnx: {error}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn human_status_exposes_the_complete_mvp_contract() {
+        let status = StatusResponse::member_ready("gnx-controller-a".into());
+        let output = format_human(&status);
+        for expected in [
+            "overall: ready",
+            "stage: READY",
+            "role: member",
+            "controller: gnx-controller-a",
+            "service: ready",
+            "wsl: ready",
+            "podman_machine: ready",
+            "kvm: ready",
+            "tailscale: ready",
+            "tailscale_serve: ready",
+            "proxmox: ready",
+            "cluster_joined: true",
+            "cluster_quorate: true",
+        ] {
+            assert!(output.lines().any(|line| line == expected));
+        }
     }
 }

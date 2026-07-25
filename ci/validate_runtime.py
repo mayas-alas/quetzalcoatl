@@ -6,9 +6,10 @@ import json
 import os
 import re
 import stat
-import subprocess
 import sys
 from pathlib import Path
+
+from shell_syntax import find_posix_shell, validate_shell_syntax
 
 ROOT = Path(__file__).resolve().parents[1]
 PAYLOAD = ROOT / "runtime" / "payload"
@@ -143,12 +144,21 @@ def validate_runtime_contract() -> None:
 
 
 def validate_shell_payload() -> None:
+    shell = find_posix_shell()
+    if shell is None:
+        print(
+            "runtime-validation: WARNING: shell syntax skipped; "
+            "install Git Bash or set GNX_SH to a POSIX sh executable",
+            file=sys.stderr,
+        )
+        return
+
     for path in sorted((PAYLOAD / "bin").iterdir()):
         if not path.is_file():
             continue
-        result = subprocess.run(["sh", "-n", str(path)], capture_output=True, text=True)
-        if result.returncode != 0:
-            fail(f"shell syntax failed for {path.name}: {result.stderr.strip()}")
+        error = validate_shell_syntax(path, shell)
+        if error is not None:
+            fail(f"shell syntax failed for {path.name}: {error}")
 
 
 def validate_layout() -> None:

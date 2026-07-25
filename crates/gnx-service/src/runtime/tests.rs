@@ -39,7 +39,7 @@ fn payload_contract_mismatch_reports_both_sides() {
     };
 
     assert_eq!(error.code, "RUNTIME_PAYLOAD_INVALID");
-    assert!(error.message.contains("service_version=0.1.12"));
+    assert!(error.message.contains("service_version=0.1.13"));
     assert!(error.message.contains("expected_files=12"));
     assert!(error.message.contains("manifest_files=11"));
 }

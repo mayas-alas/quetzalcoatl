@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from pathlib import Path
+
+from shell_syntax import find_posix_shell, validate_shell_syntax
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "crates" / "gnx-service" / "src" / "runtime"
@@ -84,9 +85,18 @@ def validate_agent() -> None:
     forbidden = ("nc -l", "ncat -l", "socat", "listen(", "0.0.0.0", "exec \"$@\"")
     if any(fragment in source for fragment in forbidden):
         fail("runtime agent exposes a listener or arbitrary execution")
-    result = subprocess.run(["sh", "-n", str(AGENT)], capture_output=True, text=True)
-    if result.returncode != 0:
-        fail(f"runtime agent shell syntax failed: {result.stderr.strip()}")
+    shell = find_posix_shell()
+    if shell is None:
+        print(
+            "remote-execution-validation: WARNING: runtime agent shell syntax skipped; "
+            "install Git Bash or set GNX_SH to a POSIX sh executable",
+            file=sys.stderr,
+        )
+        return
+
+    error = validate_shell_syntax(AGENT, shell)
+    if error is not None:
+        fail(f"runtime agent shell syntax failed: {error}")
 
 
 def main() -> None:

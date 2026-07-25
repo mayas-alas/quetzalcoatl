@@ -1,8 +1,8 @@
 use std::ptr::{null, null_mut};
 
 use gnx_protocol::{
-    Command, InstallerConfiguration, MAX_MESSAGE_BYTES, OperationResponse, PIPE_NAME, Request,
-    StatusResponse,
+    Command, InstallerConfiguration, MAX_MESSAGE_BYTES, OperationResponse, PIPE_NAME,
+    PROTOCOL_SCHEMA_VERSION, Request, StatusResponse,
 };
 use windows_sys::Win32::Foundation::{
     CloseHandle, GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
@@ -23,8 +23,7 @@ pub fn status() -> Result<StatusResponse, String> {
     })
     .map_err(|e| format!("cannot encode request: {e}"))?;
     write_message(pipe.0, &request)?;
-    serde_json::from_slice(&read_message(pipe.0)?)
-        .map_err(|e| format!("service returned invalid protocol v2 JSON: {e}"))
+    decode_status_response(&read_message(pipe.0)?)
 }
 
 pub fn configure(configuration: InstallerConfiguration) -> Result<OperationResponse, String> {
@@ -39,8 +38,31 @@ pub fn configure(configuration: InstallerConfiguration) -> Result<OperationRespo
     let write_result = write_message(pipe.0, &bytes);
     bytes.zeroize();
     write_result?;
-    serde_json::from_slice(&read_message(pipe.0)?)
-        .map_err(|e| format!("service returned invalid protocol v2 JSON: {e}"))
+    decode_operation_response(&read_message(pipe.0)?)
+}
+
+fn decode_status_response(bytes: &[u8]) -> Result<StatusResponse, String> {
+    let response: StatusResponse = serde_json::from_slice(bytes)
+        .map_err(|e| format!("service returned invalid protocol v2 JSON: {e}"))?;
+    if response.schema_version != PROTOCOL_SCHEMA_VERSION {
+        return Err(format!(
+            "service protocol schema mismatch: expected {}, received {}",
+            PROTOCOL_SCHEMA_VERSION, response.schema_version
+        ));
+    }
+    Ok(response)
+}
+
+fn decode_operation_response(bytes: &[u8]) -> Result<OperationResponse, String> {
+    let response: OperationResponse = serde_json::from_slice(bytes)
+        .map_err(|e| format!("service returned invalid protocol v2 JSON: {e}"))?;
+    if response.schema_version != PROTOCOL_SCHEMA_VERSION {
+        return Err(format!(
+            "service protocol schema mismatch: expected {}, received {}",
+            PROTOCOL_SCHEMA_VERSION, response.schema_version
+        ));
+    }
+    Ok(response)
 }
 
 fn connect() -> Result<OwnedHandle, String> {

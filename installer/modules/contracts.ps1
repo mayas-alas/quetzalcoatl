@@ -131,6 +131,30 @@ function Test-ReleaseIdentityContract {
     if ($serviceBinaryRefs.Count -ne 1) {
         throw "Release identity contract: ProductFeature must install GnxServiceBinaryComponent exactly once."
     }
+    $cliComponents = @($package.SelectNodes('//*[local-name()="Component" and @Id="CliComponent"]'))
+    if ($cliComponents.Count -ne 1) {
+        throw "Release identity contract: gnx.exe must have exactly one CLI component."
+    }
+    $cliFiles = @($cliComponents[0].SelectNodes('./*[local-name()="File" and @Id="GnxCli"]'))
+    if ($cliFiles.Count -ne 1 -or
+        $cliFiles[0].GetAttribute('KeyPath') -ne 'yes' -or
+        $cliFiles[0].GetAttribute('Name') -ne 'gnx.exe') {
+        throw "Release identity contract: gnx.exe must be the key path of CliComponent."
+    }
+    $cliPathEntries = @($cliComponents[0].SelectNodes('./*[local-name()="Environment" and @Id="SystemPath"]'))
+    if ($cliPathEntries.Count -ne 1 -or
+        $cliPathEntries[0].GetAttribute('Name') -ne 'PATH' -or
+        $cliPathEntries[0].GetAttribute('Value') -ne '[INSTALLFOLDER]' -or
+        $cliPathEntries[0].GetAttribute('Action') -ne 'set' -or
+        $cliPathEntries[0].GetAttribute('Part') -ne 'last' -or
+        $cliPathEntries[0].GetAttribute('System') -ne 'yes' -or
+        $cliPathEntries[0].GetAttribute('Permanent') -ne 'no') {
+        throw "Release identity contract: gnx.exe system PATH registration differs."
+    }
+    $cliRefs = @($package.SelectNodes('//*[local-name()="Feature"]/*[local-name()="ComponentRef" and @Id="CliComponent"]'))
+    if ($cliRefs.Count -ne 1) {
+        throw "Release identity contract: ProductFeature must install CliComponent exactly once."
+    }
     if ($bundleNode.GetAttribute('ProviderKey') -ne $bundleUpgradeCode -or
         $bundleNode.GetAttribute('UpgradeCode') -ne $bundleUpgradeCode) {
         throw "Release identity contract: Burn ProviderKey and UpgradeCode must preserve $bundleUpgradeCode."

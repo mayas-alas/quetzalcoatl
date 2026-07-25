@@ -4,7 +4,7 @@
 
 Podman Machine SSH ultimately receives a command string. Passing dynamic data through `sh -c` would make correctness and security depend on shell quoting.
 
-## 0.1.12 rules
+## 0.1.13 rules
 
 1. Runtime-agent call sites select a `RuntimeOperation` enum variant.
 2. Enum variants map to fixed argument vectors in one file.

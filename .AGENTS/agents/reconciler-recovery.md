@@ -17,4 +17,4 @@ Keep the exact 0.1.11 convergence sequence while making the orchestration bounda
 - Role and controller identity remain immutable after persistence.
 - Controller resume verifies the cluster instead of recreating it.
 - Member resume uses the pinned controller and existing join checkpoint.
-- State schema and runtime generation remain unchanged in 0.1.12.
+- State schema and runtime generation remain unchanged in 0.1.13.

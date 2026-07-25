@@ -1,21 +1,16 @@
-# Evidence — 0.1.12
+# Evidence — 0.1.13
 
-## Local source evidence
-
-Run:
+## Static source evidence
 
 ```powershell
 python .\ci\validate_repository.py
 python .\ci\validate_runtime.py
 python .\ci\validate_remote_execution.py
+python .\ci\validate_cli_contract.py
 python .\ci\validate_release_contract.py
 ```
 
-These checks prove the four-crate scope, exact payload file set and hashes, typed runtime operations, absence of `sh -c`, bounded transport markers, module boundaries and coherent release identities.
-
 ## Windows build evidence
-
-Capture:
 
 ```powershell
 cargo fmt --all --check
@@ -25,8 +20,8 @@ cargo test --workspace --all-targets --locked
 .\installer\build.ps1
 ```
 
-Retain MSI administrative extraction results and final MSI/Burn SHA-256 values.
+The MSI administrative extraction must prove that both `gnx-service.exe` and `gnx.exe` match the freshly built SHA-256 values.
 
-## Runtime evidence
+## Upgrade evidence
 
-Validate clean install, service/CLI pipe, runtime-agent handshake, controller creation, member join, reboot resume, upgrade from 0.1.11 and uninstall. Do not mark these complete from static source checks alone.
+Install 0.1.13 over the working 0.1.12 installation. Confirm protected configuration, managed machine and role remain intact; run `gnx status` and `gnx status --json`; then verify restart and runtime readiness.

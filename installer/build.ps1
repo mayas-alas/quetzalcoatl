@@ -12,14 +12,14 @@ $cacheRoot = Join-Path $repoRoot "target\installer-cache"
 $outputRoot = Join-Path $repoRoot "target\installer"
 $lockPath = Join-Path $installerRoot "dependencies.lock.json"
 $dotnetToolManifest = Join-Path $repoRoot ".config\dotnet-tools.json"
-$releaseVersion = "0.1.12"
-$releaseProductCode = "{621E6E65-5BB1-5495-A887-F3AF3AA57125}"
+$releaseVersion = "0.1.13"
+$releaseProductCode = "{56E3CF39-864C-51F8-BE28-86C9ADE58118}"
 $releaseUpgradeCode = "{47D5BD44-D061-407B-913B-47D17EC3BEA9}"
-$releasePackageCode = "{329DE363-62FE-5FBA-A820-0F90A9630411}"
-$releaseBundleId = "{42D4F602-1355-5B82-B60C-2E5D7F03BFB5}"
-$previousProductCode = "{D0A35E80-8D6D-5C16-9C72-E233A92858DB}"
-$previousPackageCode = "{82CE2E46-63AB-5475-B4C6-ABC5C469C964}"
-$previousBundleId = "{11F52020-5187-5E79-B5C3-434CF943E61D}"
+$releasePackageCode = "{96520581-4D5C-53CA-80F8-8329F919CA69}"
+$releaseBundleId = "{8C9449BC-368E-516A-BEEF-CFA0D3C243E7}"
+$previousProductCode = "{621E6E65-5BB1-5495-A887-F3AF3AA57125}"
+$previousPackageCode = "{329DE363-62FE-5FBA-A820-0F90A9630411}"
+$previousBundleId = "{42D4F602-1355-5B82-B60C-2E5D7F03BFB5}"
 $bundleUpgradeCode = "{10B764B2-36AE-4911-A8C8-2F1A2A963769}"
 $releaseTimestamp = [DateTime]::SpecifyKind([DateTime] "2026-07-24T00:00:00", [DateTimeKind]::Utc)
 $releaseCabDate = [uint16] (((2026 - 1980) -shl 9) -bor (7 -shl 5) -bor 24)
@@ -144,6 +144,7 @@ try {
     Test-MsiPayloadCoherence `
         -MsiPath $productMsi `
         -ServiceBinary $gnxService `
+        -CliBinary $gnxCli `
         -RuntimePayload (Join-Path $repoRoot 'runtime\payload')
 
     & dotnet tool run wix -- build `
