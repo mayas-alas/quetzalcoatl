@@ -1,21 +1,17 @@
 #[cfg(windows)]
-mod pipe;
+mod ipc;
 #[cfg(windows)]
 mod runtime;
 #[cfg(windows)]
 mod secrets;
 #[cfg(windows)]
+mod service;
+#[cfg(windows)]
 mod state;
 
 #[cfg(windows)]
 fn main() {
-    use std::sync::{Arc, RwLock};
-
-    let status = Arc::new(RwLock::new(gnx_protocol::StatusResponse::service_ready()));
-    let runtime_status = Arc::clone(&status);
-    std::thread::spawn(move || runtime::run(runtime_status));
-
-    if let Err(error) = pipe::serve(status) {
+    if let Err(error) = service::run() {
         eprintln!("gnx-service: {error}");
         std::process::exit(1);
     }

@@ -4,7 +4,7 @@ function Test-RebootContract {
         [string] $BundleXml
     )
 
-    $exitCodesPath = Join-Path $repoRoot "crates\host-preflight\src\exit_codes.rs"
+    $exitCodesPath = Join-Path $repoRoot "crates\gnx-host-preflight\src\exit_codes.rs"
     $exitCodes = Get-Content -LiteralPath $exitCodesPath -Raw -Encoding utf8
     $rebootValues = @{}
     foreach ($constantName in @('REBOOT_PENDING', 'REBOOT_REQUIRED')) {
@@ -197,7 +197,7 @@ function Test-ReleaseIdentityContract {
         'crates\gnx-cli\Cargo.toml',
         'crates\gnx-protocol\Cargo.toml',
         'crates\gnx-service\Cargo.toml',
-        'crates\host-preflight\Cargo.toml'
+        'crates\gnx-host-preflight\Cargo.toml'
     )) {
         $manifest = Get-Content -LiteralPath (Join-Path $repoRoot $manifestPath) -Raw -Encoding utf8
         if ($manifest -notmatch "(?m)^version\s*=\s*`"$([regex]::Escape($releaseVersion))`"\s*$") {

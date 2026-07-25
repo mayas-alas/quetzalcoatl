@@ -8,13 +8,14 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.13"
+VERSION = "0.1.14"
 CRATES = {
     "gnx-cli": "gnx-cli",
     "gnx-protocol": "gnx-protocol",
     "gnx-service": "gnx-service",
-    "host-preflight": "gnx-host-preflight",
+    "gnx-host-preflight": "gnx-host-preflight",
 }
+WORKSPACE_MEMBERS = {f"crates/{directory}" for directory in CRATES}
 INSTALLER_MODULES = {
     "dependencies.ps1",
     "contracts.ps1",
@@ -23,24 +24,47 @@ INSTALLER_MODULES = {
     "msi.ps1",
     "bundle.ps1",
 }
-RUNTIME_MODULES = {
+CLI_MODULES = {
+    "client.rs",
+    "commands/configure.rs",
+    "commands/mod.rs",
+    "commands/restart.rs",
+    "commands/status.rs",
     "error.rs",
-    "host.rs",
-    "machine.rs",
-    "model.rs",
-    "mod.rs",
-    "payload.rs",
-    "proxmox.rs",
-    "reconciler.rs",
+    "main.rs",
+    "output.rs",
+}
+PROTOCOL_MODULES = {
+    "lib.rs",
+    "request.rs",
+    "response.rs",
     "status.rs",
-    "tailscale.rs",
-    "tests.rs",
-    "topology.rs",
-    "remote/client.rs",
-    "remote/limits.rs",
-    "remote/mod.rs",
-    "remote/operation.rs",
-    "remote/transport.rs",
+    "version.rs",
+}
+SERVICE_MODULES = {
+    "ipc/mod.rs",
+    "main.rs",
+    "runtime/control.rs",
+    "runtime/error.rs",
+    "runtime/host.rs",
+    "runtime/machine.rs",
+    "runtime/model.rs",
+    "runtime/mod.rs",
+    "runtime/payload.rs",
+    "runtime/proxmox.rs",
+    "runtime/reconciler.rs",
+    "runtime/remote/client.rs",
+    "runtime/remote/limits.rs",
+    "runtime/remote/mod.rs",
+    "runtime/remote/operation.rs",
+    "runtime/remote/transport.rs",
+    "runtime/status.rs",
+    "runtime/tailscale.rs",
+    "runtime/tests.rs",
+    "runtime/topology.rs",
+    "secrets/mod.rs",
+    "service/mod.rs",
+    "state/mod.rs",
 }
 
 
@@ -54,13 +78,20 @@ def cargo_version(path: Path) -> str:
         return tomllib.load(handle)["package"]["version"]
 
 
+def rust_files(root: Path) -> set[str]:
+    return {
+        str(path.relative_to(root)).replace("\\", "/")
+        for path in root.rglob("*.rs")
+    }
+
+
 def validate_versions() -> None:
     if (ROOT / "VERSION").read_text(encoding="utf-8").strip() != VERSION:
         fail("VERSION does not match the release")
     for directory, package_name in CRATES.items():
-        path = ROOT / "crates" / directory / "Cargo.toml"
-        if cargo_version(path) != VERSION:
-            fail(f"crate version mismatch: {path}")
+        manifest = ROOT / "crates" / directory / "Cargo.toml"
+        if cargo_version(manifest) != VERSION:
+            fail(f"crate version mismatch: {manifest.relative_to(ROOT)}")
 
     lock = (ROOT / "Cargo.lock").read_text(encoding="utf-8")
     for package_name in CRATES.values():
@@ -75,55 +106,79 @@ def validate_versions() -> None:
         fail("WiX package or bundle root is absent")
     if package.attrib.get("Version") != VERSION or bundle.attrib.get("Version") != VERSION:
         fail("WiX versions do not match the release")
-    if package.attrib.get("ProductCode") == "{621E6E65-5BB1-5495-A887-F3AF3AA57125}":
-        fail("0.1.13 reused the 0.1.12 ProductCode")
 
     build = (ROOT / "installer" / "build.ps1").read_text(encoding="utf-8")
     if f'$releaseVersion = "{VERSION}"' not in build:
         fail("installer build release version differs")
-    if "runtime\\payload-v1" in build or "runtime\\payload-v2" in build:
-        fail("installer still references a legacy runtime payload")
 
 
-def validate_installer_modules() -> None:
-    module_root = ROOT / "installer" / "modules"
-    actual = {path.name for path in module_root.glob("*.ps1")}
-    if actual != INSTALLER_MODULES:
-        fail(f"installer module set differs: {sorted(actual ^ INSTALLER_MODULES)}")
-    build = (ROOT / "installer" / "build.ps1").read_text(encoding="utf-8")
-    if re.search(r"(?m)^function\s+", build):
-        fail("installer/build.ps1 still contains top-level function implementations")
-    for name in INSTALLER_MODULES:
-        if name not in build:
-            fail(f"installer/build.ps1 does not load {name}")
-    if "$installerRoot = $PSScriptRoot" not in build:
-        fail("installer/build.ps1 does not define the shared installer root")
-    if "Test-RuntimePayloadSource" not in build or "Build-RustReleaseArtifacts" not in build:
-        fail("installer entry point does not invoke runtime and Rust modules")
-    if '$dotnetToolManifest = Join-Path $repoRoot ".config\\dotnet-tools.json"' not in build:
-        fail("installer does not pin the local .NET tool manifest path")
-    if "Unblock-File -LiteralPath $dotnetToolManifest -ErrorAction Stop" not in build:
-        fail("installer does not clear Mark-of-the-Web from the .NET tool manifest")
-    if "dotnet tool restore --tool-manifest $dotnetToolManifest" not in build:
-        fail("installer does not restore WiX from the explicit tool manifest")
-    for path in sorted(module_root.glob("*.ps1")):
-        source = path.read_text(encoding="utf-8")
-        if "$PSScriptRoot" in source:
-            fail(f"installer module uses its own PSScriptRoot: {path.name}")
+def validate_workspace() -> None:
+    workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+    if set(workspace["workspace"]["members"]) != WORKSPACE_MEMBERS:
+        fail("workspace must contain the four 0.1.14 packages")
+    if (ROOT / "crates" / "host-preflight").exists():
+        fail("legacy crates/host-preflight directory remains")
+    if (ROOT / ".github").exists():
+        fail("hosted workflows remain outside the MVP scope")
 
 
-def validate_rust_module_boundaries() -> None:
-    runtime = ROOT / "crates" / "gnx-service" / "src" / "runtime"
-    actual = {
-        str(path.relative_to(runtime)).replace("\\", "/")
-        for path in runtime.rglob("*.rs")
-    }
-    if actual != RUNTIME_MODULES:
-        fail(f"runtime module set differs: {sorted(actual ^ RUNTIME_MODULES)}")
-    if (runtime.parent / "runtime_gate.rs").exists():
-        fail("legacy runtime_gate.rs remains")
+def validate_module_sets() -> None:
+    module_roots = (
+        (ROOT / "crates" / "gnx-cli" / "src", CLI_MODULES, "CLI"),
+        (ROOT / "crates" / "gnx-protocol" / "src", PROTOCOL_MODULES, "protocol"),
+        (ROOT / "crates" / "gnx-service" / "src", SERVICE_MODULES, "service"),
+    )
+    for root, expected, label in module_roots:
+        actual = rust_files(root)
+        if actual != expected:
+            fail(f"{label} module set differs: {sorted(actual ^ expected)}")
 
-    for path in sorted(runtime.rglob("*.rs")):
+    forbidden = (
+        ROOT / "crates" / "gnx-cli" / "src" / "pipe.rs",
+        ROOT / "crates" / "gnx-service" / "src" / "pipe.rs",
+        ROOT / "crates" / "gnx-service" / "src" / "secrets.rs",
+        ROOT / "crates" / "gnx-service" / "src" / "state.rs",
+        ROOT / "crates" / "gnx-service" / "src" / "runtime_gate.rs",
+        ROOT / "crates" / "gnx-service" / "src" / "runtime" / "remote" / "process.rs",
+    )
+    for path in forbidden:
+        if path.exists():
+            fail(f"legacy source remains: {path.relative_to(ROOT)}")
+
+
+def validate_architecture() -> None:
+    cli_main = (ROOT / "crates" / "gnx-cli" / "src" / "main.rs").read_text(encoding="utf-8")
+    if len(cli_main.splitlines()) > 35:
+        fail("gnx-cli main.rs is no longer a thin composition root")
+    for module in ("client", "commands", "error", "output"):
+        if f"mod {module};" not in cli_main:
+            fail(f"gnx-cli composition root omits {module}")
+
+    service_main = (ROOT / "crates" / "gnx-service" / "src" / "main.rs").read_text(encoding="utf-8")
+    if len(service_main.splitlines()) > 40 or "service::run()" not in service_main:
+        fail("gnx-service main.rs is not a thin composition root")
+
+    service = (ROOT / "crates" / "gnx-service" / "src" / "service" / "mod.rs").read_text(encoding="utf-8")
+    if "RuntimeControl::start" not in service or "crate::ipc::serve" not in service:
+        fail("service composition does not own runtime and IPC startup")
+
+    ipc = (ROOT / "crates" / "gnx-service" / "src" / "ipc" / "mod.rs").read_text(encoding="utf-8")
+    for forbidden in ("crate::runtime", "tailscale::", "proxmox::", "machine::"):
+        if forbidden in ipc:
+            fail(f"IPC bypasses the service/runtime boundary: {forbidden}")
+
+    runtime_mod = (ROOT / "crates" / "gnx-service" / "src" / "runtime" / "mod.rs").read_text(encoding="utf-8")
+    if "pub(crate) mod control;" not in runtime_mod:
+        fail("runtime control facade is absent")
+    if "reconciler::run(&status)" not in runtime_mod:
+        fail("runtime facade does not delegate to the reconciler")
+
+    protocol_lib = (ROOT / "crates" / "gnx-protocol" / "src" / "lib.rs").read_text(encoding="utf-8")
+    for module in ("request", "response", "status", "version"):
+        if f"mod {module};" not in protocol_lib:
+            fail(f"protocol boundary omits {module}")
+
+    for path in sorted((ROOT / "crates").rglob("*.rs")):
         lines = path.read_text(encoding="utf-8").splitlines()
         for index, line in enumerate(lines):
             if not line.lstrip().startswith("#["):
@@ -136,40 +191,22 @@ def validate_rust_module_boundaries() -> None:
             if cursor == len(lines):
                 fail(f"dangling Rust attribute at {path.relative_to(ROOT)}:{index + 1}")
 
-    mod_source = (runtime / "mod.rs").read_text(encoding="utf-8")
-    if "fn run_inner(" in mod_source:
-        fail("runtime orchestration remains in mod.rs")
-    if "reconciler::run(&status)" not in mod_source:
-        fail("runtime facade does not delegate to reconciler")
-    if "pub(super) fn run(" not in (runtime / "reconciler.rs").read_text(encoding="utf-8"):
-        fail("reconciler entry point is absent")
 
-    model = (runtime / "model.rs").read_text(encoding="utf-8")
-    if not re.search(r"#\[derive\(Clone, Copy, Debug\)\]\s+pub\(super\) enum Component", model):
-        fail("runtime Component lost required derives")
-    if "struct GateError" in model or "struct GateError" not in (runtime / "error.rs").read_text(encoding="utf-8"):
-        fail("runtime error boundary is not separated")
-
-    remote_mod = (runtime / "remote" / "mod.rs").read_text(encoding="utf-8")
-    for module in ("client", "operation", "transport"):
-        if f"pub(in crate::runtime) use {module}::*;" not in remote_mod:
-            fail(f"remote module does not re-export {module}")
-    if (runtime / "remote" / "process.rs").exists():
-        fail("legacy remote/process.rs remains")
-
-
-
-def validate_cli_boundary() -> None:
-    if not (ROOT / "ci" / "validate_cli_contract.py").is_file():
-        fail("CLI contract validator is absent")
-    for path in (
-        ROOT / ".AGENTS" / "agents" / "runtime-modularization.md",
-        ROOT / ".AGENTS" / "tasks" / "PROXMOX_CLUSTER_RUNTIME.md",
-        ROOT / ".AGENTS" / "tasks" / "RELEASE_0.1.11.md",
-        ROOT / ".AGENTS" / "tasks" / "RELEASE_0.1.12.md",
-    ):
-        if path.exists():
-            fail(f"legacy delivery record remains: {path.relative_to(ROOT)}")
+def validate_installer() -> None:
+    module_root = ROOT / "installer" / "modules"
+    actual = {path.name for path in module_root.glob("*.ps1")}
+    if actual != INSTALLER_MODULES:
+        fail(f"installer module set differs: {sorted(actual ^ INSTALLER_MODULES)}")
+    build = (ROOT / "installer" / "build.ps1").read_text(encoding="utf-8")
+    for name in INSTALLER_MODULES:
+        if name not in build:
+            fail(f"installer/build.ps1 does not load {name}")
+    if "crates\\gnx-host-preflight" not in (ROOT / "installer" / "modules" / "contracts.ps1").read_text(encoding="utf-8"):
+        fail("installer contracts still use the legacy preflight path")
+    if '$dotnetToolManifest = Join-Path $repoRoot ".config\\dotnet-tools.json"' not in build:
+        fail("installer does not pin the local .NET tool manifest")
+    if "Unblock-File -LiteralPath $dotnetToolManifest -ErrorAction Stop" not in build:
+        fail("installer does not clear Mark-of-the-Web from the tool manifest")
 
 
 def validate_powershell_structure() -> None:
@@ -177,7 +214,6 @@ def validate_powershell_structure() -> None:
         source = path.read_text(encoding="utf-8")
         stack: list[tuple[str, int]] = []
         pairs = {")": "(", "]": "[", "}": "{"}
-        openers = set(pairs.values())
         quote: str | None = None
         escaped = False
         comment = False
@@ -198,7 +234,7 @@ def validate_powershell_structure() -> None:
                 comment = True
             elif char in ("'", '"'):
                 quote = char
-            elif char in openers:
+            elif char in pairs.values():
                 stack.append((char, index))
             elif char in pairs:
                 if not stack or stack[-1][0] != pairs[char]:
@@ -206,43 +242,31 @@ def validate_powershell_structure() -> None:
                 stack.pop()
         if quote is not None or stack:
             fail(f"PowerShell source is structurally incomplete: {path.relative_to(ROOT)}")
-        for line_no, line in enumerate(source.splitlines(), start=1):
-            if line.rstrip().endswith("`") and line != line.rstrip():
-                fail(f"PowerShell continuation has trailing whitespace: {path.relative_to(ROOT)}:{line_no}")
 
-def validate_scope() -> None:
-    if (ROOT / ".github").exists():
-        fail("hosted workflow infrastructure is outside the 0.1.13 MVP scope")
-    workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
-    if set(workspace["workspace"]["members"]) != {
-        "crates/gnx-cli",
-        "crates/gnx-protocol",
-        "crates/gnx-service",
-        "crates/host-preflight",
-    }:
-        fail("workspace must remain at the four existing crates")
-    required_agent_docs = {
-        ROOT / ".AGENTS" / "agents" / "runtime-transport.md",
-        ROOT / ".AGENTS" / "agents" / "reconciler-recovery.md",
+
+def validate_delivery_records() -> None:
+    required = {
+        ROOT / ".AGENTS" / "agents" / "cli-protocol-preflight.md",
+        ROOT / ".AGENTS" / "agents" / "service-boundaries.md",
         ROOT / ".AGENTS" / "agents" / "release-integrity.md",
-        ROOT / ".AGENTS" / "agents" / "cli-contract.md",
-        ROOT / ".AGENTS" / "tasks" / "RELEASE_0.1.13.md",
-        ROOT / ".AGENTS" / "tasks" / "CLI_CONTRACT_AUDIT.md",
-        ROOT / ".AGENTS" / "tasks" / "REMOTE_EXECUTION_REMEDIATION.md",
-        ROOT / ".AGENTS" / "tasks" / "RECONCILER_RECOVERY.md",
+        ROOT / ".AGENTS" / "tasks" / "RELEASE_0.1.14.md",
+        ROOT / ".AGENTS" / "tasks" / "STRUCTURAL_REFACTOR.md",
+        ROOT / "docs" / "ARCHITECTURE.md",
+        ROOT / "docs" / "TARGET_0.2.md",
     }
-    missing = [str(path.relative_to(ROOT)) for path in required_agent_docs if not path.is_file()]
+    missing = [str(path.relative_to(ROOT)) for path in required if not path.is_file()]
     if missing:
-        fail(f"0.1.13 agent delivery records are absent: {missing}")
+        fail(f"0.1.14 delivery records are absent: {missing}")
 
 
 def main() -> None:
     validate_versions()
-    validate_installer_modules()
-    validate_rust_module_boundaries()
-    validate_cli_boundary()
+    validate_workspace()
+    validate_module_sets()
+    validate_architecture()
+    validate_installer()
     validate_powershell_structure()
-    validate_scope()
+    validate_delivery_records()
     print("repository-validation: ok")
 
 

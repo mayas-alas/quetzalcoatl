@@ -1,8 +1,10 @@
 # Documentation
 
-- `ARCHITECTURE.md` — implemented 0.1.13 product and module boundaries.
-- `AUDIT_0.1.13.md` — release-hygiene and CLI findings.
-- `RUNTIME_LIFECYCLE.md` — convergence, persistence and recovery sequence.
-- `REMOTE_EXECUTION.md` — typed operation and shell-transport security contract.
-- `VALIDATION.md` — source, build, upgrade and physical acceptance commands.
-- `../installer/docs/RUNBOOK.md` — Windows artifact build instructions.
+- `ARCHITECTURE.md` — implemented 0.1.14 boundaries.
+- `TARGET_0.2.md` — gated workspace evolution after the MVP is proven.
+- `REMOTE_EXECUTION.md` — controlled Fedora execution rules.
+- `RUNTIME_LIFECYCLE.md` — current reconciliation order.
+- `VALIDATION.md` — local and Windows release validation.
+- `AUDIT_0.1.14.md` — scope and residual-risk report.
+
+Historical release audits live under `archive/releases/`.

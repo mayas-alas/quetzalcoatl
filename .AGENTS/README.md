@@ -1,10 +1,13 @@
-# Agent execution contract — 0.1.13
+# Agent execution contract — 0.1.14
 
-This directory scopes the four delivery roles used for the 0.1.13 MVP release-hygiene pass. It records implemented decisions and evidence requirements; it is not a future-platform roadmap.
+This directory records the three bounded workstreams used for the 0.1.14 structural refactor. The release preserves the four-package workspace, protocol schema 2, persisted-state schema, runtime generation and existing CLI behavior.
 
-Roles:
+## Workstreams
 
-1. `cli-contract.md` — command surface, status output, protocol and MSI CLI integrity.
-2. `runtime-transport.md` — typed Fedora operations and bounded process transport.
-3. `reconciler-recovery.md` — convergence ordering, persistence and resume behavior.
-4. `release-integrity.md` — versions, payload, WiX build and cross-role validation.
+1. `cli-protocol-preflight.md` — CLI, protocol and host-preflight ownership.
+2. `service-boundaries.md` — Windows service composition and internal module boundaries.
+3. `release-integrity.md` — Cargo, WiX, validators, documentation and source packaging.
+
+The integrator owns cross-workstream files, final validation and the release archive.
+
+Closed 0.1.13 execution records are retained under `.AGENTS/archive/0.1.13/` and are not active instructions.

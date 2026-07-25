@@ -1,25 +1,10 @@
-# Architecture decisions
+# Decisions — 0.1.14
 
-## D-001 — Product completion is cluster READY
-Convergence completes only after controller cluster verification or member join.
-
-## D-002 — Four crates remain the MVP boundary
-0.1.13 adds no crate and changes no state schema or machine generation.
-
-## D-003 — CLI is a stable product boundary
-The supported command surface remains `status`, `configure` and `restart`. Human and JSON status views represent the same complete `StatusResponse` contract.
-
-## D-004 — CLI/service schema mismatch is an error
-The CLI validates protocol schema version on status and operation responses so a partial or incoherent upgrade fails explicitly.
-
-## D-005 — The installer owns CLI integrity
-The MSI installs one keyed `gnx.exe`, adds `[INSTALLFOLDER]` to the system PATH and verifies the extracted CLI hash against the freshly built artifact.
-
-## D-006 — One exact runtime payload
-`runtime/payload` remains the only source payload; payload version stays at 4.
-
-## D-007 — Fedora execution remains on-demand and typed
-The runtime agent has no listener or generic exec operation. Fixed shell programs may use stdin-fed `sh -s`; dynamic shell command strings remain forbidden.
-
-## D-008 — Build entry point remains stable
-`installer/build.ps1` remains the single artifact-build entry point.
+1. `crates/` remains the correct Rust workspace convention; executables and libraries are not split into `apps/` until 0.2.x.
+2. The workspace remains at four packages.
+3. `crates/host-preflight` becomes `crates/gnx-host-preflight`; the package and executable names remain unchanged.
+4. CLI commands are modules, not new binaries or protocol operations.
+5. `gnx-service` remains one crate but receives explicit composition zones.
+6. IPC cannot call Podman, Tailscale or Proxmox implementation modules directly.
+7. Runtime reconciliation order, public stages and error codes are unchanged.
+8. MSI/Burn upgrade families are retained while 0.1.14 receives new release identities.

@@ -16,6 +16,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, Zeroizing};
 
+pub(crate) mod control;
 mod error;
 mod host;
 mod machine;

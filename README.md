@@ -1,14 +1,22 @@
-# Quetzalcoatl 0.1.13
+# Quetzalcoatl 0.1.14
 
-Quetzalcoatl is a Windows 11 bootstrap and convergence service for one managed Fedora Podman Machine running a Tailscale-connected Proxmox VE cluster node.
+Quetzalcoatl is a Windows-managed MVP that provisions and reconciles a Fedora Podman Machine containing the Tailscale and Proxmox runtime used by controller/member nodes.
 
-Version 0.1.13 is a release-hygiene and CLI-contract update over the installed 0.1.12 MVP. It removes inactive legacy sources, preserves the four-crate/runtime architecture, exposes the complete runtime state through `gnx status`, and verifies that the exact `gnx.exe` built by Cargo is the one embedded in the MSI.
+Version 0.1.14 is a behavior-preserving structural release. It keeps the four-package workspace and all installed contracts, while separating CLI commands, protocol models and Windows service responsibilities into explicit modules.
 
-Start with:
+## Build and validation
 
-- `docs/ARCHITECTURE.md`
-- `docs/AUDIT_0.1.13.md`
-- `docs/RUNTIME_LIFECYCLE.md`
-- `docs/REMOTE_EXECUTION.md`
-- `docs/VALIDATION.md`
-- `installer/docs/RUNBOOK.md`
+```powershell
+python .\ci\validate_repository.py
+python .\ci\validate_runtime.py
+python .\ci\validate_remote_execution.py
+python .\ci\validate_cli_contract.py
+python .\ci\validate_release_contract.py
+
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-targets --locked
+.\installer\build.ps1
+```
+
+See `docs/ARCHITECTURE.md`, `docs/AUDIT_0.1.14.md` and `docs/TARGET_0.2.md`.

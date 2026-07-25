@@ -3,7 +3,7 @@ members = [
     "crates/gnx-cli",
     "crates/gnx-protocol",
     "crates/gnx-service",
-    "crates/host-preflight",
+    "crates/gnx-host-preflight",
 ]
 resolver = "2"
 

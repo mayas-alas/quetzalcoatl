@@ -1,4 +1,4 @@
-# Validation — 0.1.13
+# Validation — 0.1.14
 
 ## Source checks
 
@@ -32,7 +32,7 @@ The build clears Mark-of-the-Web from the pinned `.config/dotnet-tools.json` man
 ## Required acceptance outside source validation
 
 - clean Windows 11 install and CLI/service Named Pipe operation;
-- upgrade from installed 0.1.12 without losing protected state or the managed machine;
+- upgrade from installed 0.1.13 without losing protected state or the managed machine;
 - runtime-agent handshake and operation rejection behavior in Fedora;
 - controller cluster creation and persisted verification after reboot;
 - member join and resume against the pinned controller;

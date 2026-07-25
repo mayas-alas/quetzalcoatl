@@ -1,16 +1,14 @@
-# Evidence — 0.1.13
+# Evidence — 0.1.14
 
-## Static source evidence
+## Static evidence included in the source tree
 
-```powershell
-python .\ci\validate_repository.py
-python .\ci\validate_runtime.py
-python .\ci\validate_remote_execution.py
-python .\ci\validate_cli_contract.py
-python .\ci\validate_release_contract.py
-```
+- `ci/validate_repository.py`
+- `ci/validate_runtime.py`
+- `ci/validate_remote_execution.py`
+- `ci/validate_cli_contract.py`
+- `ci/validate_release_contract.py`
 
-## Windows build evidence
+## Required Windows evidence
 
 ```powershell
 cargo fmt --all --check
@@ -20,8 +18,4 @@ cargo test --workspace --all-targets --locked
 .\installer\build.ps1
 ```
 
-The MSI administrative extraction must prove that both `gnx-service.exe` and `gnx.exe` match the freshly built SHA-256 values.
-
-## Upgrade evidence
-
-Install 0.1.13 over the working 0.1.12 installation. Confirm protected configuration, managed machine and role remain intact; run `gnx status` and `gnx status --json`; then verify restart and runtime readiness.
+Install 0.1.14 over the working 0.1.13 installation and confirm `gnx status`, `gnx status --json`, `gnx restart`, configuration preservation and runtime readiness.

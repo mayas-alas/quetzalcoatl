@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.14 — structural boundaries
+
+- Split the CLI into command, output and Named Pipe client modules without changing commands or output contracts.
+- Split protocol request, response, status and version definitions without changing schema 2.
+- Renamed the source directory to `crates/gnx-host-preflight` while preserving package and executable identities.
+- Organized the Windows service into service, IPC, secrets, state and runtime zones.
+- Added a narrow runtime-control facade while preserving reconciliation order.
+- Updated Cargo, WiX, validators, release documentation and 0.1.14 identities.
+- Added architecture guards that reject legacy paths and direct IPC-to-runtime coupling.
 
 ## 0.1.13 — CLI contract and source hygiene
 

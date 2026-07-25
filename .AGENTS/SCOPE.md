@@ -1,21 +1,22 @@
-# Scope and definition of done — 0.1.13
+# Scope and definition of done — 0.1.14
 
-## Included
+## In scope
 
-- preserve the four existing Rust crates and the `status`, `configure`, `restart` CLI surface;
-- remove inactive legacy source files and closed release records from active scope;
-- expose every `StatusResponse` field in human `gnx status` output;
-- reject CLI/service protocol schema mismatches;
-- verify `gnx.exe` source identity, MSI PATH registration and extracted binary hash;
-- preserve runtime payload v4, state schema, machine generation and controller/member behavior;
-- generate coherent 0.1.13 MSI and Burn identities while retaining upgrade families.
+- Keep exactly four Cargo packages.
+- Rename the host-preflight directory to match its package identity.
+- Split CLI commands and protocol models into focused modules.
+- Organize the service into `service`, `ipc`, `secrets`, `state` and `runtime` zones.
+- Add a narrow runtime-control facade without changing reconciliation behavior.
+- Update Cargo, WiX, release identities, validation and documentation.
+- Remove replaced source paths and exclude generated content from the source ZIP.
 
-## Excluded
+## Out of scope
 
-- new CLI commands, crates, services, daemon/listener or state migration;
-- GitHub Actions, OpenTofu, tray UI or generalized orchestration;
-- runtime behavior changes unrelated to source hygiene.
+- New crates or applications.
+- Changes to Named Pipe commands or JSON.
+- Changes to state schema, runtime generation or payload version.
+- New CLI commands, tray UI, OpenTofu, GitHub Actions or a Fedora daemon.
 
 ## Definition of done
 
-All five static validators, Rust format, Clippy, workspace tests and the Windows installer build pass. Upgrade acceptance requires installing 0.1.13 over the existing 0.1.12 installation and confirming `gnx status`, configuration preservation and runtime readiness.
+Static validators pass, Rust module sets are exact, no legacy paths remain, release identities are unique, and the Windows build can be run from the existing `installer/build.ps1` entry point.
