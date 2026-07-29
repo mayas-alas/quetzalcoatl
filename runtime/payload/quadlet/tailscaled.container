@@ -12,7 +12,6 @@ AddCapability=NET_ADMIN
 AddDevice=/dev/net/tun
 EnvironmentFile=/etc/quetzalcoatl/node/node.env
 Environment=TS_STATE_DIR=/var/lib/tailscale
-Environment=TS_SERVE_CONFIG=/config/serve.json
 Environment=TS_USERSPACE=false
 Environment=TS_AUTH_ONCE=true
 Environment=TS_ACCEPT_DNS=false

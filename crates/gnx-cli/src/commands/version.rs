@@ -9,6 +9,6 @@ pub(crate) fn run() -> CliResult<()> {
 mod tests {
     #[test]
     fn version_contract_uses_the_crate_version() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "0.1.15");
+        assert_eq!(env!("CARGO_PKG_VERSION"), "0.1.17");
     }
 }

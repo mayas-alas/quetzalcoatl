@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.15"
+VERSION = "0.1.17"
 CRATES = {
     "gnx-cli": "gnx-cli",
     "gnx-protocol": "gnx-protocol",
@@ -39,6 +39,7 @@ PREFLIGHT_MODULES = {
     "checks.rs",
     "dependency.rs",
     "exit_codes.rs",
+    "host_profile.rs",
     "journal.rs",
     "main.rs",
     "model.rs",
@@ -67,6 +68,7 @@ SERVICE_MODULES = {
     "runtime/model.rs",
     "runtime/mod.rs",
     "runtime/payload.rs",
+    "runtime/profile.rs",
     "runtime/proxmox.rs",
     "runtime/reconciler.rs",
     "runtime/remote/client.rs",
@@ -131,7 +133,7 @@ def validate_versions() -> None:
 def validate_workspace() -> None:
     workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
     if set(workspace["workspace"]["members"]) != WORKSPACE_MEMBERS:
-        fail("workspace must contain the four 0.1.15 packages")
+        fail("workspace must contain the four 0.1.17 packages")
     if (ROOT / "crates" / "host-preflight").exists():
         fail("legacy crates/host-preflight directory remains")
     if (ROOT / ".github").exists():
@@ -266,17 +268,18 @@ def validate_delivery_records() -> None:
         ROOT / ".AGENTS" / "agents" / "installer-recovery.md",
         ROOT / ".AGENTS" / "agents" / "cli-release-contract.md",
         ROOT / ".AGENTS" / "agents" / "cluster-membership.md",
-        ROOT / ".AGENTS" / "tasks" / "RELEASE_0.1.15.md",
+        ROOT / ".AGENTS" / "tasks" / "RELEASE_0.1.17.md",
         ROOT / ".AGENTS" / "tasks" / "INSTALLER_RECOVERY.md",
         ROOT / ".AGENTS" / "tasks" / "MEMBER_JOIN.md",
         ROOT / "docs" / "ARCHITECTURE.md",
         ROOT / "docs" / "INSTALLER_RECOVERY.md",
         ROOT / "docs" / "MEMBER_MEMBERSHIP.md",
+        ROOT / "docs" / "HOST_RESOURCE_PROFILE.md",
         ROOT / "docs" / "TARGET_0.2.md",
     }
     missing = [str(path.relative_to(ROOT)) for path in required if not path.is_file()]
     if missing:
-        fail(f"0.1.15 delivery records are absent: {missing}")
+        fail(f"0.1.17 delivery records are absent: {missing}")
 
 
 def main() -> None:

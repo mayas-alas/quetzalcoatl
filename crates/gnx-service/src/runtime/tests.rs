@@ -39,7 +39,7 @@ fn payload_contract_mismatch_reports_both_sides() {
     };
 
     assert_eq!(error.code, "RUNTIME_PAYLOAD_INVALID");
-    assert!(error.message.contains("service_version=0.1.15"));
+    assert!(error.message.contains("service_version=0.1.17"));
     assert!(error.message.contains("expected_files=12"));
     assert!(error.message.contains("manifest_files=11"));
 }
@@ -56,7 +56,9 @@ fn parses_podman_inspect_contract() {
     let inspect: Vec<MachineInspect> = serde_json::from_slice(json).expect("inspect JSON");
     assert_eq!(inspect[0].name, MACHINE_NAME);
     assert!(inspect[0].rootful);
-    assert_eq!(inspect[0].resources.memory, MACHINE_MEMORY_MIB);
+    assert_eq!(inspect[0].resources.cpus, 6);
+    assert_eq!(inspect[0].resources.memory, 8192);
+    assert_eq!(inspect[0].resources.disk_size, 100);
 }
 
 #[test]
@@ -104,7 +106,7 @@ fn accepts_pinned_tailscale_identity_contract() {
 }
 
 #[test]
-fn discovery_counts_offline_hosts_and_excludes_expired_peers_and_sidecars() {
+fn discovery_excludes_offline_expired_member_and_unmanaged_peers() {
     let json = br#"{
       "BackendState":"Running",
       "TUN":true,
@@ -170,15 +172,10 @@ fn discovery_counts_offline_hosts_and_excludes_expired_peers_and_sidecars() {
     }"#;
     let identity = parse_tailscale_status(json, "gnx-candidate-nitro", "tetra-balance.ts.net")
         .expect("valid discovery status");
-    assert_eq!(
-        identity
-            .host_peers
-            .iter()
-            .map(|peer| peer.id.clone())
-            .collect::<Vec<_>>(),
-        vec!["node-id-host".to_string()]
+    assert!(
+        identity.host_peers.is_empty(),
+        "offline, expired, member and unmanaged peers must not participate in controller discovery"
     );
-    assert!(identity.host_peers[0].direct);
 }
 
 #[test]
@@ -206,14 +203,19 @@ fn topology_matrix_selects_exactly_one_controller_without_a_member_count_limit()
             .expect("second host"),
         TopologyDecision::Member(host("controller", "gnx-controller-a"))
     );
-    assert!(matches!(
-        select_topology(&identity(vec![host("member", "gnx-member-a")])),
-        Err(error) if error.code == "TOPOLOGY_UNSUPPORTED"
-    ));
-    assert!(matches!(
-        select_topology(&identity(vec![host("a", "gnx-controller-a"), host("b", "gnx-controller-b")])),
-        Err(error) if error.code == "TOPOLOGY_UNSUPPORTED"
-    ));
+    assert_eq!(
+        select_topology(&identity(vec![host("member", "gnx-member-a")]))
+            .expect("members do not block controller promotion"),
+        TopologyDecision::Controller
+    );
+    assert_eq!(
+        select_topology(&identity(vec![
+            host("a", "gnx-controller-a"),
+            host("b", "gnx-controller-b")
+        ]))
+        .expect("existing controller deterministically selects member role"),
+        TopologyDecision::Member(host("a", "gnx-controller-a"))
+    );
     assert_eq!(
         select_topology(&identity(vec![
             host("a", "gnx-controller-a"),
@@ -306,7 +308,7 @@ fn member_retry_requires_the_pinned_controller_to_remain_direct_and_available() 
 }
 
 #[test]
-fn initial_member_decision_pins_an_offline_controller_before_availability_fails() {
+fn initial_decision_ignores_an_offline_controller() {
     let controller = HostPeer {
         id: "controller".into(),
         hostname: "gnx-controller-controller".into(),
@@ -315,32 +317,15 @@ fn initial_member_decision_pins_an_offline_controller_before_availability_fails(
         direct: false,
     };
     let identity = TailscaleIdentity {
-        self_id: "member".into(),
+        self_id: "new-node".into(),
         self_ip: "100.100.10.22".parse().expect("IP"),
         hostname: "gnx-candidate".into(),
-        host_peers: vec![controller.clone()],
+        host_peers: vec![controller],
     };
-    let TopologyDecision::Member(selected) = select_topology(&identity).expect("member role")
-    else {
-        panic!("expected member role");
-    };
-    let state = crate::state::PersistedState::member(
-        identity.self_id.clone(),
-        identity.self_ip,
-        member_hostname(&identity.self_id).expect("member hostname"),
-        crate::state::ControllerIdentity {
-            id: selected.id,
-            hostname: selected.hostname,
-            ip: selected.ip,
-        },
-        "tetra-balance.ts.net".into(),
-    );
 
-    assert!(state.role.is_member());
-    assert_eq!(state.controller.id, controller.id);
     assert!(matches!(
-        validate_persisted_member_controller(&state, &identity),
-        Err(error) if error.code == "CONTROLLER_UNAVAILABLE"
+        select_topology(&identity).expect("topology decision"),
+        TopologyDecision::Controller
     ));
 }
 
@@ -561,17 +546,12 @@ fn reconciles_reauthenticated_member_without_mutating_the_pinned_controller() {
 }
 
 #[test]
-fn accepts_only_the_fixed_pve_serve_route() {
-    let json = br#"{
-      "TCP":{"443":{"HTTPS":true}},
-      "Web":{
-        "gnx-candidate-nitro.tetra-balance.ts.net:443":{
-          "Handlers":{"/":{"Proxy":"https+insecure://127.0.0.1:8006"}}
-        }
-      },
-      "AllowFunnel":{"gnx-candidate-nitro.tetra-balance.ts.net:443":false}
-    }"#;
-    assert!(parse_serve_status(json, "gnx-candidate-nitro.tetra-balance.ts.net:443").is_ok());
+fn builds_and_accepts_only_the_fixed_pve_serve_route() {
+    let host_port = "gnx-controller-nitro.tetra-balance.ts.net:443";
+    let json = tailscale_serve_config("gnx-controller-nitro", "tetra-balance.ts.net")
+        .expect("fixed Serve config");
+    assert!(parse_serve_status(&json, host_port).is_ok());
+    assert!(!String::from_utf8_lossy(&json).contains("TS_CERT_DOMAIN"));
 }
 
 #[test]

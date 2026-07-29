@@ -1,36 +1,24 @@
-# Evidence — 0.1.15
+# Evidence — 0.1.17
 
-## Source evidence included in the tree
+## Source evidence
 
-- `ci/validate_repository.py`
-- `ci/validate_runtime.py`
-- `ci/validate_remote_execution.py`
-- `ci/validate_cli_contract.py`
-- `ci/validate_release_contract.py`
-- `ci/validate_installer_resume.py`
-- `ci/validate_cluster_contract.py`
-
-## Runtime shell evidence
-
-```sh
-sh -n runtime/payload/bin/gnx-runtime-agent
-sh -n runtime/payload/bin/gnx-pve-cluster-create
-```
+- `crates/gnx-host-preflight/src/host_profile.rs` owns inventory, policy and persistence.
+- `crates/gnx-service/src/runtime/profile.rs` owns service-side loading and validation.
+- `runtime/host.rs` generates `.wslconfig`; `runtime/machine.rs` applies the same profile to Podman.
+- `runtime/tailscale.rs` parses online controllers, generates the fixed Serve JSON and sends it through stdin to `tailscale serve set-raw`.
+- `runtime/topology.rs` resolves controller/member state without a member-count limit.
+- `runtime/reconciler.rs` starts PVE before applying and validating Serve.
+- `runtime/remote/operation.rs` contains the closed Fedora-agent operation map.
+- `runtime/remote/transport.rs` enforces bounded stdin/output, timeout, cancellation and zeroization.
+- `ci/validate_remote_execution.py` rejects shell-string execution and shell-control syntax in direct remote argv arrays.
+- `docs/REMOTE_EXECUTION.md` and `docs/REMOTE_EXECUTION_REVIEW.md` define the normative policy and review evidence.
 
 ## Required Windows evidence
 
-```powershell
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --all-targets --locked
-.\installer\build.ps1 -TestRebootContractOnly
-.\installer\build.ps1
-```
-
-The physical acceptance run must retain:
-
-- `C:\ProgramData\Quetzalcoatl\Installer\install-state.json`;
-- stable WSL/Podman MSI logs;
-- Burn and product MSI logs;
-- `gnx --version`, `gnx status --json`;
-- `pvecm status`, `pvecm nodes` and cluster resource evidence from the member test.
+- `cargo fmt --all --check`.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`.
+- `cargo test --workspace --all-targets --locked`.
+- `installer/build.ps1 -TestRebootContractOnly`.
+- `installer/build.ps1`.
+- Clean Dockur install showing the selected host profile, controller readiness and functional Tailscale HTTPS to PVE.
+- A later Dockur node selecting member when an online controller exists.

@@ -1,16 +1,19 @@
 use super::*;
 
 pub(super) fn run(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError> {
-    let profile = validate_identity()?;
+    let service_profile = validate_identity()?;
+
+    set_stage(status, "HOST_PROFILE_LOADING");
+    let host_profile = load_host_profile()?;
 
     set_stage(status, "WSL_PREPARING");
-    configure_wsl(&profile)?;
+    configure_wsl(&service_profile, &host_profile)?;
     set_component(status, Component::Wsl, "ready");
 
     set_stage(status, "MACHINE_PREPARING");
     let image = load_machine_image()?;
     let podman = podman_binary()?;
-    ensure_machine(&podman, &image)?;
+    ensure_machine(&podman, &image, &host_profile.selected)?;
     set_stage(status, "MACHINE_NETWORK_PREPARING");
     configure_machine_outer_mtu(&podman)?;
     set_component(status, Component::PodmanMachine, "ready");
@@ -77,12 +80,11 @@ pub(super) fn run(status: &Arc<RwLock<StatusResponse>>) -> Result<(), GateError>
     configure_pve_password(&podman, &configuration.pve_root_password)?;
     configuration.pve_root_password.zeroize();
 
+    let local_hostname = persisted_local_hostname(&controller)?;
+    set_stage(status, "TAILSCALE_SERVE_APPLYING");
+    apply_tailscale_serve(&podman, local_hostname, &configuration.tailnet)?;
     set_stage(status, "TAILSCALE_SERVE_CHECKING");
-    wait_for_tailscale_serve(
-        &podman,
-        persisted_local_hostname(&controller)?,
-        &configuration.tailnet,
-    )?;
+    wait_for_tailscale_serve(&podman, local_hostname, &configuration.tailnet)?;
     set_component(status, Component::TailscaleServe, "ready");
     set_stage(status, "TAILSCALE_READY");
 

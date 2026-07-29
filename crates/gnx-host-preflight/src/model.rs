@@ -5,6 +5,8 @@ pub struct Report {
     pub schema_version: u8,
     pub status: Status,
     pub exit_code: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_profile: Option<crate::host_profile::HostProfile>,
     pub checks: Vec<Check>,
 }
 
@@ -30,6 +32,7 @@ impl Report {
             schema_version: 1,
             status: Status::Pass,
             exit_code: 0,
+            host_profile: None,
             checks: Vec::new(),
         }
     }

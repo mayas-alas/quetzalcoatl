@@ -1,11 +1,16 @@
-# Delivery tracker — 0.1.15
+# Delivery tracker — 0.1.17
 
-| Workstream | State | Evidence |
-|---|---|---|
-| Installer recovery | integrated | stable staging helper, journal and `validate_installer_resume.py` |
-| CLI/release contract | integrated | `gnx -v`, `gnx --version`, CLI and release validators |
-| Cluster membership | integrated | persisted phases, typed confirmation and `validate_cluster_contract.py` |
-| Integration gate | source-validated | seven Python validators, Python compile and shell syntax |
-| Rust/Windows certification | pending physical run | fmt, Clippy, tests and WiX build |
-| Clean Dockur member install | pending physical run | reboot/resume and stable MSI cache evidence |
-| First real member join | pending physical run | `pvecm` and bilateral cluster-state evidence |
+- [x] Preserve 0.1.15 installer recovery and member checkpoints.
+- [x] Add closed host inventory and one persisted resource profile.
+- [x] Remove fixed WSL and Podman resource values.
+- [x] Simplify new-node discovery to online controller presence.
+- [x] Ignore member count and non-controller peer noise during role selection.
+- [x] Commit role state after Tailscale rename verification.
+- [x] Defer Serve activation until PVE readiness.
+- [x] Replace Serve shell redirection with structured stdin.
+- [x] Formalize argv/stdin/file execution policy and review checklist.
+- [x] Strengthen source validation against multiline `sh -c` and shell syntax in remote argv.
+- [ ] Certify Cargo formatting, Clippy and workspace tests on Windows.
+- [ ] Build WiX bundle on Windows.
+- [ ] Repeat clean Dockur controller installation.
+- [ ] Repeat member installation against the ready controller.

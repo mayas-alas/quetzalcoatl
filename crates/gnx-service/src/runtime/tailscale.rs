@@ -111,10 +111,10 @@ pub(super) fn wait_for_tailscale(
         }
     }
     Err(GateError::new(
-        "TAILSCALE_ENROLL_FAILED",
+        "TAILSCALE_LOCAL_NOT_READY",
         Component::Tailscale,
         format!(
-            "Tailscale did not satisfy the pinned identity contract: {last_error}; {}",
+            "Local Tailscale identity did not become ready: {last_error}; {}",
             tailscale_diagnostics(podman)
         ),
     ))
@@ -220,7 +220,10 @@ pub(super) fn parse_tailscale_status(
         || !current_tailnet.magic_dns_enabled
         || self_node.host_name != hostname
         || self_node.dns_name != expected_dns_name
-        || self_node.tags.as_slice() != ["tag:quetzalcoatl-node"]
+        || !self_node
+            .tags
+            .iter()
+            .any(|tag| tag == "tag:quetzalcoatl-node")
         || !status.cert_domains.iter().any(|value| value == &domain)
         || cgnat_ipv4.len() != 1
         || self_node.id.is_empty()
@@ -233,7 +236,8 @@ pub(super) fn parse_tailscale_status(
     for peer in status.peers.values() {
         if peer.expired
             || peer.id == self_node.id
-            || peer.tags.as_slice() != ["tag:quetzalcoatl-node"]
+            || !peer.tags.iter().any(|tag| tag == "tag:quetzalcoatl-node")
+            || !peer.host_name.starts_with("gnx-controller-")
         {
             continue;
         }
@@ -247,10 +251,11 @@ pub(super) fn parse_tailscale_status(
             || !peer.id.bytes().all(|byte| byte.is_ascii_graphic())
             || peer_ips.len() != 1
             || !valid_discovered_hostname(&peer.host_name)
+            || !peer.online
         {
-            return Err(
-                "tagged Tailscale host peer does not satisfy the GNX host identity contract".into(),
-            );
+            // Discovery is intentionally controller-only and tolerant. A stale,
+            // malformed or offline tagged peer must not block a healthy node.
+            continue;
         }
         host_peers.push(HostPeer {
             id: peer.id.clone(),
@@ -271,6 +276,71 @@ pub(super) fn parse_tailscale_status(
         hostname: self_node.host_name,
         host_peers,
     })
+}
+
+pub(super) fn tailscale_serve_config(hostname: &str, tailnet: &str) -> Result<Vec<u8>, GateError> {
+    let host_port = format!("{hostname}.{tailnet}:443");
+
+    let mut web = serde_json::Map::new();
+    web.insert(
+        host_port.clone(),
+        serde_json::json!({
+            "Handlers": {
+                "/": {
+                    "Proxy": "https+insecure://127.0.0.1:8006"
+                }
+            }
+        }),
+    );
+
+    let mut allow_funnel = serde_json::Map::new();
+    allow_funnel.insert(host_port, serde_json::Value::Bool(false));
+
+    let mut root = serde_json::Map::new();
+    root.insert(
+        "TCP".into(),
+        serde_json::json!({
+            "443": {
+                "HTTPS": true
+            }
+        }),
+    );
+    root.insert("Web".into(), serde_json::Value::Object(web));
+    root.insert(
+        "AllowFunnel".into(),
+        serde_json::Value::Object(allow_funnel),
+    );
+
+    serde_json::to_vec(&serde_json::Value::Object(root)).map_err(|error| {
+        GateError::new(
+            "TAILSCALE_SERVE_CONFIG_INVALID",
+            Component::TailscaleServe,
+            format!("cannot serialize the fixed Tailscale Serve config: {error}"),
+        )
+    })
+}
+
+pub(super) fn apply_tailscale_serve(
+    podman: &Path,
+    hostname: &str,
+    tailnet: &str,
+) -> Result<(), GateError> {
+    let config = tailscale_serve_config(hostname, tailnet)?;
+    machine_stdin(
+        podman,
+        [
+            "podman",
+            "exec",
+            "-i",
+            "gnx-tailscaled",
+            "tailscale",
+            "serve",
+            "set-raw",
+        ],
+        &config,
+    )
+    .map(|_| ())
+    .map_err(|error| error.with_code("TAILSCALE_SERVE_APPLY_FAILED", Component::TailscaleServe))
 }
 
 pub(super) fn wait_for_tailscale_serve(

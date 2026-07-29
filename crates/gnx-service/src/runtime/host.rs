@@ -27,23 +27,24 @@ pub(super) fn validate_identity() -> Result<PathBuf, GateError> {
     Ok(profile)
 }
 
-pub(super) fn configure_wsl(profile: &Path) -> Result<(), GateError> {
+pub(super) fn configure_wsl(profile: &Path, host_profile: &HostProfile) -> Result<(), GateError> {
     let wsl = system_binary("wsl.exe")
         .map_err(|error| error.with_code("WSL_NESTED_VIRT_FAILED", Component::Wsl))?;
     run_command(&wsl, ["--version"])
         .map_err(|error| error.with_code("WSL_NESTED_VIRT_FAILED", Component::Wsl))?;
 
+    let managed_config = managed_wsl_config(host_profile);
     let config = profile.join(".wslconfig");
-    let changed = fs::read(&config).map_or(true, |current| current != WSL_CONFIG.as_bytes());
+    let changed = fs::read(&config).map_or(true, |current| current != managed_config.as_bytes());
     if changed {
-        fs::write(&config, WSL_CONFIG).map_err(|error| {
+        fs::write(&config, managed_config.as_bytes()).map_err(|error| {
             GateError::new(
                 "WSL_NESTED_VIRT_FAILED",
                 Component::Wsl,
                 format!("cannot write managed .wslconfig: {error}"),
             )
         })?;
-        if fs::read(&config).ok().as_deref() != Some(WSL_CONFIG.as_bytes()) {
+        if fs::read(&config).ok().as_deref() != Some(managed_config.as_bytes()) {
             return Err(GateError::new(
                 "WSL_NESTED_VIRT_FAILED",
                 Component::Wsl,

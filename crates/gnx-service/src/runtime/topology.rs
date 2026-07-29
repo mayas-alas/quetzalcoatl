@@ -247,7 +247,8 @@ pub(super) fn resolve_controller(
         return Ok(state);
     }
 
-    let identity = stabilize_host_inventory(podman, identity, tailnet)?;
+    // Lean discovery only needs to know whether an online controller exists.
+    // Members and transient candidates never affect role selection.
     let decision = select_topology(&identity)?;
     let (state, hostname) = match decision {
         TopologyDecision::Controller => {
@@ -280,14 +281,14 @@ pub(super) fn resolve_controller(
             )
         }
     };
-    store_persisted_state(&state)?;
-
     rename_tailscale(podman, &hostname)?;
     let renamed = wait_for_tailscale(podman, &hostname, tailnet)?;
     validate_state_identity(&state, &renamed)?;
     if state.role.is_member() {
         validate_persisted_member_controller(&state, &renamed)?;
     }
+    // Commit only after Tailscale confirms the final hostname and identity.
+    store_persisted_state(&state)?;
     Ok(state)
 }
 
@@ -337,28 +338,16 @@ pub(super) enum TopologyDecision {
 }
 
 pub(super) fn select_topology(identity: &TailscaleIdentity) -> Result<TopologyDecision, GateError> {
-    if identity.host_peers.is_empty() {
-        return Ok(TopologyDecision::Controller);
-    }
-
-    let controllers = identity
+    // host_peers is controller-only and sorted by stable Tailscale node ID.
+    // Any controller means this node is a member; the number of members is irrelevant.
+    match identity
         .host_peers
         .iter()
-        .filter(|peer| peer.hostname.starts_with("gnx-controller-"))
-        .cloned()
-        .collect::<Vec<_>>();
-    match controllers.as_slice() {
-        [] => Err(GateError::new(
-            "TOPOLOGY_UNSUPPORTED",
-            Component::Tailscale,
-            "GNX inventory has members but no identifiable controller",
-        )),
-        [controller] => Ok(TopologyDecision::Member(controller.clone())),
-        _ => Err(GateError::new(
-            "TOPOLOGY_UNSUPPORTED",
-            Component::Tailscale,
-            "GNX inventory has multiple identifiable controllers",
-        )),
+        .filter(|peer| peer.online && peer.hostname.starts_with("gnx-controller-"))
+        .min_by(|left, right| left.id.cmp(&right.id))
+    {
+        Some(controller) => Ok(TopologyDecision::Member(controller.clone())),
+        None => Ok(TopologyDecision::Controller),
     }
 }
 

@@ -23,6 +23,7 @@ mod host;
 mod machine;
 mod model;
 mod payload;
+mod profile;
 mod proxmox;
 mod reconciler;
 mod remote;
@@ -36,6 +37,7 @@ use host::*;
 use machine::*;
 use model::*;
 use payload::*;
+use profile::*;
 use proxmox::*;
 use remote::*;
 use status::*;
@@ -44,9 +46,6 @@ use topology::*;
 
 const EXPECTED_SERVICE_SID: &str = "S-1-5-80-1414281857-1943412974-186110390-2486725240-2230548587";
 const MACHINE_NAME: &str = "quetzalcoatl";
-const MACHINE_CPUS: u64 = 6;
-const MACHINE_MEMORY_MIB: u64 = 8192;
-const MACHINE_DISK_GIB: u64 = 100;
 const MACHINE_NETWORK_MTU: u32 = 1500;
 const RUNTIME_GENERATION: &str = "proxmox-cluster-v2";
 const RUNTIME_GENERATION_PATH: &str = "/etc/quetzalcoatl/runtime-generation";
@@ -126,8 +125,6 @@ const PAYLOAD_FILES: [PayloadSpec; 12] = [
         "0644",
     ),
 ];
-
-const WSL_CONFIG: &str = "[wsl2]\nprocessors=6\nmemory=8GB\nswap=2GB\nnestedVirtualization=true\n";
 
 const FEDORA_PROBE: &str = r#"set -eu
 test "$(ps -p 1 -o comm= | tr -d ' ')" = systemd

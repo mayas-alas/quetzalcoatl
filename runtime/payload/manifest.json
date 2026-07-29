@@ -132,7 +132,7 @@
       "source": "quetzalcoatl",
       "version": 3,
       "mode": "0644",
-      "sha256": "004f07ae1093f84f3aab4d18b5d8c61c1e26e9bb88ce85d9f4c30d8e2a9e4e04"
+      "sha256": "d6aa1724947db0bc40c6821da369f631ba8aebd58a837547b0492af10050fcb4"
     },
     {
       "path": "systemd/gnx-tailscale-enroll.service",

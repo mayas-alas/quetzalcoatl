@@ -1,6 +1,10 @@
 use super::*;
 
-pub(super) fn ensure_machine(podman: &Path, image: &MachineImage) -> Result<(), GateError> {
+pub(super) fn ensure_machine(
+    podman: &Path,
+    image: &MachineImage,
+    profile: &MachineProfile,
+) -> Result<(), GateError> {
     let list = run_command(podman, ["machine", "list", "--format", "json"])
         .map_err(|error| error.with_code("MACHINE_CREATE_FAILED", Component::PodmanMachine))?;
     let machines: Vec<MachineListEntry> =
@@ -34,7 +38,7 @@ pub(super) fn ensure_machine(podman: &Path, image: &MachineImage) -> Result<(), 
         if read_runtime_generation(podman)?.as_deref() != Some(RUNTIME_GENERATION) {
             let tailscale_state = read_managed_tailscale_state(podman)?;
             remove_managed_machine(podman)?;
-            create_managed_machine(podman, image)?;
+            create_managed_machine(podman, image, profile)?;
             wait_for_machine_ssh(podman)?;
             if let Some(state) = tailscale_state.as_deref() {
                 restore_managed_tailscale_state(podman, state)?;
@@ -42,7 +46,7 @@ pub(super) fn ensure_machine(podman: &Path, image: &MachineImage) -> Result<(), 
             recreated = true;
         }
     } else {
-        create_managed_machine(podman, image)?;
+        create_managed_machine(podman, image, profile)?;
         wait_for_machine_ssh(podman)?;
         recreated = true;
     }
@@ -50,14 +54,17 @@ pub(super) fn ensure_machine(podman: &Path, image: &MachineImage) -> Result<(), 
     let inspect = inspect_machine(podman)?;
     if inspect.name != MACHINE_NAME
         || !inspect.rootful
-        || inspect.resources.cpus != MACHINE_CPUS
-        || inspect.resources.memory != MACHINE_MEMORY_MIB
-        || inspect.resources.disk_size != MACHINE_DISK_GIB
+        || inspect.resources.cpus != profile.machine_cpus
+        || inspect.resources.memory != profile.machine_memory_mib
+        || inspect.resources.disk_size < profile.machine_disk_gib
     {
         return Err(GateError::new(
             "MACHINE_CREATE_FAILED",
             Component::PodmanMachine,
-            "managed machine configuration does not match the fixed runtime profile",
+            format!(
+                "managed machine configuration does not match host profile: expected {} CPU, {} MiB RAM and {} GiB disk",
+                profile.machine_cpus, profile.machine_memory_mib, profile.machine_disk_gib
+            ),
         ));
     }
     if inspect.state != "running" {
@@ -74,11 +81,15 @@ pub(super) fn ensure_machine(podman: &Path, image: &MachineImage) -> Result<(), 
     Ok(())
 }
 
-pub(super) fn create_managed_machine(podman: &Path, image: &MachineImage) -> Result<(), GateError> {
+pub(super) fn create_managed_machine(
+    podman: &Path,
+    image: &MachineImage,
+    profile: &MachineProfile,
+) -> Result<(), GateError> {
     let image_path = installed_machine_image(image)?;
-    let cpus = MACHINE_CPUS.to_string();
-    let memory = MACHINE_MEMORY_MIB.to_string();
-    let disk = MACHINE_DISK_GIB.to_string();
+    let cpus = profile.machine_cpus.to_string();
+    let memory = profile.machine_memory_mib.to_string();
+    let disk = profile.machine_disk_gib.to_string();
     let args = vec![
         OsString::from("machine"),
         OsString::from("init"),

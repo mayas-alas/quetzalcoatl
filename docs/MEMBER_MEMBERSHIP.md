@@ -1,12 +1,15 @@
-# Member membership — 0.1.15
+# Member membership — 0.1.17
 
 ## Discovery rule
 
-- No GNX peers: become the controller.
-- Existing peers with exactly one `gnx-controller-*`: become a member of that controller.
-- Existing peers with no controller or more than one controller: fail closed.
+For a new installation, GNX validates local Tailscale readiness and searches only for valid online `gnx-controller-*` peers carrying `tag:quetzalcoatl-node`.
 
-The number of existing members is not used as a rejection rule.
+- No online controller: become the controller.
+- One or more online controllers: become a member and select the controller deterministically by stable Tailscale node ID.
+- Existing `gnx-member-*` peers do not affect the decision and do not impose a count limit.
+- Candidates, expired peers, offline controllers, malformed peers and unrelated tagged peers are ignored by the initial role decision.
+
+This is deliberately a lean single-cluster-per-tailnet rule. Multiple controllers indicate external drift, but 0.1.17 does not block a new member because of their count.
 
 ## Join sequence
 
@@ -19,16 +22,22 @@ MEMBER_PREPARING
 → READY
 ```
 
-`MEMBER_JOINING` preserves the existing allowlisted and idempotent `pvecm add` operation. A reboot or rerun inspects the real cluster state before repeating destructive work.
+`MEMBER_JOINING` preserves the allowlisted and idempotent `pvecm add` operation. A reboot or rerun inspects real PVE state before repeating mutation.
 
-`MEMBER_VERIFYING` validates the local PVE identity and services. `MEMBER_CONFIRMING` invokes one typed Fedora-agent operation that checks cluster name, quorum, `pvecm nodes`, local topology and PVE cluster resources for both controller and member.
+`MEMBER_VERIFYING` validates local PVE identity and services. `MEMBER_CONFIRMING` invokes the typed Fedora-agent operation that checks cluster name, quorum, `pvecm nodes`, local topology and PVE cluster resources.
+
+## Upgrade rule
+
+A valid persisted member does not rediscover or replace its controller during an upgrade. GNX validates that the persisted controller remains compatible and available before continuing.
 
 ## Lean authorization boundary
 
-`authorize-member` is a reconciler decision based on protected configuration and persisted controller/member identity. It is not a new service endpoint, token protocol or public CLI command.
+`authorize-member` is a local reconciler validation based on protected configuration and persisted identities. It is not a controller-side approval API, token protocol or public CLI command.
 
 ## Deliberately absent
 
+- controller failover or distributed election;
+- multi-cluster identity within one tailnet;
 - QDevice and HA automation;
 - arbitrary cluster commands;
 - node removal or forced repair;

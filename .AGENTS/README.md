@@ -1,13 +1,7 @@
-# Agent execution contract — 0.1.15
+# Agent execution contract — 0.1.17
 
-This directory records three bounded workstreams and one integration gate. Each workstream has exclusive ownership so that installer recovery, CLI contracts and cluster membership cannot silently rewrite each other.
+The active mission is to stabilize the installed MVP without expanding its public surface. Work may harden host sizing, installer recovery, lean controller/member discovery, PVE readiness, Tailscale Serve activation and the closed remote-execution boundary.
 
-## Workstreams
+Agents must preserve the four-package workspace, protocol schema 2, persisted-state schema 2, runtime generation `proxmox-cluster-v2`, payload contract 5 and the existing Named Pipe command set.
 
-1. `agents/installer-recovery.md` — stable dependency staging, reboot recovery and installer evidence.
-2. `agents/cli-release-contract.md` — local version flags, public CLI compatibility and release identities.
-3. `agents/cluster-membership.md` — member preflight, authorization decision, verification, confirmation and multiple-member discovery.
-
-The integrator owns shared Cargo/WiX files, payload manifest regeneration, cross-workstream validation and the final source archive.
-
-Closed 0.1.13 execution records remain under `.AGENTS/archive/0.1.13/` and are not active instructions.
+Before changing any command that crosses into Podman Machine or a managed container, read `docs/REMOTE_EXECUTION.md` and complete `docs/REMOTE_EXECUTION_REVIEW.md`. Dynamic shell commands and arbitrary remote argv are not permitted.

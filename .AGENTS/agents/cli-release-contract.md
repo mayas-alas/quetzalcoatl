@@ -19,4 +19,4 @@ Add `gnx -v` and `gnx --version` as local, zero-service operations while preserv
 
 ## Result
 
-Integrated. Both flags print `gnx 0.1.15` through `CARGO_PKG_VERSION`; trailing arguments remain usage errors.
+Integrated. Both flags print `gnx 0.1.17` through `CARGO_PKG_VERSION`; trailing arguments remain usage errors.

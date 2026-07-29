@@ -3,6 +3,7 @@ mod checks;
 #[cfg(windows)]
 mod dependency;
 mod exit_codes;
+mod host_profile;
 #[cfg(windows)]
 mod journal;
 mod model;
@@ -92,6 +93,12 @@ fn parse_args() -> Result<Options, ()> {
 fn emit(format: &Format, report: &Report) {
     match format {
         Format::Human => {
+            if let Some(profile) = &report.host_profile {
+                println!("host_profile: {}", host_profile::summary(profile));
+                for warning in &profile.warnings {
+                    println!("host_profile_warning: {warning}");
+                }
+            }
             for check in &report.checks {
                 let status = match check.status {
                     Status::Pass => "pass",
@@ -106,6 +113,45 @@ fn emit(format: &Format, report: &Report) {
             "{}",
             serde_json::to_string(report).expect("serializable report")
         ),
+    }
+}
+
+#[cfg(windows)]
+fn append_host_profile(format: &Format, report: &mut Report) -> Result<(), i32> {
+    match host_profile::detect_and_store() {
+        Ok(profile) => {
+            let supported = profile.supported;
+            let message = host_profile::summary(&profile);
+            report.host_profile = Some(profile);
+            report.checks.push(Check {
+                id: "host_resources",
+                status: if supported {
+                    Status::Pass
+                } else {
+                    Status::Fail
+                },
+                message,
+            });
+            if supported {
+                Ok(())
+            } else {
+                report.status = Status::Fail;
+                report.exit_code = HOST_RESOURCES_INSUFFICIENT;
+                emit(format, report);
+                Err(HOST_RESOURCES_INSUFFICIENT)
+            }
+        }
+        Err(error) => {
+            report.status = Status::Error;
+            report.exit_code = OPERATIONAL_ERROR;
+            report.checks.push(Check {
+                id: "host_resources",
+                status: Status::Error,
+                message: error.message().into(),
+            });
+            emit(format, report);
+            Err(OPERATIONAL_ERROR)
+        }
     }
 }
 
@@ -153,6 +199,9 @@ fn run(format: &Format) -> i32 {
             return code;
         }
     }
+    if let Err(code) = append_host_profile(format, &mut report) {
+        return code;
+    }
     emit(format, &report);
     OK
 }
@@ -189,6 +238,10 @@ fn prepare_wsl(format: &Format) -> i32 {
             emit(format, &report);
             return code;
         }
+    }
+
+    if let Err(code) = append_host_profile(format, &mut report) {
+        return code;
     }
 
     let verdict = checks::prepare_windows_features();

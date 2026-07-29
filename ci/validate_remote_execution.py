@@ -46,6 +46,81 @@ def validate_typed_operations() -> None:
         fail("runtime agent call site constructs a free-form argv array")
 
 
+
+def explicit_remote_argv_arrays(source: str) -> list[str]:
+    """Return explicit array literals used as the argv argument of machine transport calls.
+
+    This is intentionally narrow: variable command builders are validated through their typed
+    contracts, while direct array call sites must remain shell-free.
+    """
+    arrays: list[str] = []
+    call = re.compile(r"machine_stdin(?:_output)?\s*\(")
+    for match in call.finditer(source):
+        cursor = match.end()
+        depth = 1
+        comma_count = 0
+        in_string = False
+        escaped = False
+        array_start: int | None = None
+        array_depth = 0
+        index = cursor
+        while index < len(source) and depth > 0:
+            char = source[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                index += 1
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif depth == 1 and char == ",":
+                comma_count += 1
+            elif depth == 1 and comma_count == 1 and char == "[":
+                array_start = index
+                array_depth = 1
+                index += 1
+                while index < len(source) and array_depth > 0:
+                    inner = source[index]
+                    if inner == '"':
+                        index += 1
+                        while index < len(source):
+                            if source[index] == "\\":
+                                index += 2
+                                continue
+                            if source[index] == '"':
+                                break
+                            index += 1
+                    elif inner == "[":
+                        array_depth += 1
+                    elif inner == "]":
+                        array_depth -= 1
+                    index += 1
+                if array_start is not None and array_depth == 0:
+                    arrays.append(source[array_start:index])
+                break
+            index += 1
+    return arrays
+
+
+def validate_direct_remote_argv(rust_source: str) -> None:
+    shell_control = re.compile(r"(?:<|>|\||&&|\|\||\$\(|`)")
+    for argv in explicit_remote_argv_arrays(rust_source):
+        literals = re.findall(r'"((?:\\.|[^"\\])*)"', argv)
+        for literal in literals:
+            if shell_control.search(literal):
+                fail(
+                    "direct remote argv contains shell-control syntax; "
+                    f"move variable data to stdin instead: {literal!r}"
+                )
+
 def validate_transport() -> None:
     transport = (RUNTIME / "remote" / "transport.rs").read_text(encoding="utf-8")
     limits = (RUNTIME / "remote" / "limits.rs").read_text(encoding="utf-8")
@@ -66,16 +141,20 @@ def validate_transport() -> None:
         if path.is_file()
     )
     combined = rust_source + "\n" + payload_source
-    forbidden = (
-        '"sh", "-c"',
-        '"bash", "-c"',
+    forbidden_fragments = (
         " sh -c ",
         " sh -eu -c ",
         " bash -c ",
     )
-    for fragment in forbidden:
+    for fragment in forbidden_fragments:
         if fragment in combined:
             fail(f"forbidden shell-string execution remains: {fragment!r}")
+
+    forbidden_argv = re.compile(r'"(?:ba)?sh"\s*,\s*"-c"')
+    if forbidden_argv.search(combined):
+        fail("forbidden shell-string argv remains: sh/bash followed by -c")
+
+    validate_direct_remote_argv(rust_source)
 
 
 def validate_agent() -> None:
