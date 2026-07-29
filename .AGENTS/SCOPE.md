@@ -1,8 +1,8 @@
-# 0.2.0 release-hardening scope
+# 0.2.1 installer-recovery scope
 
 ## Outcome
 
-Deliver one coherent 0.2.0 source tree and one validated
+Deliver one coherent 0.2.1 source tree and one validated
 `QuetzalcoatlSetup.exe`. Setup remains the sole user-facing installation, upgrade
 and repair interface.
 
@@ -18,6 +18,7 @@ and repair interface.
 | REL | Release-source consolidation | Version/copyright metadata is derived where possible; redundant `VERSION` and static fixtures are removed or consumed directly. |
 | DOC | Documentation reduction | Minimal authoritative architecture, contracts, operations and validation documents. |
 | DEL | Delivery assurance | Source gates, MSI extraction, Burn identity, branding, install/upgrade/repair/restart contracts and final hashes pass. |
+| REC | Installed-payload recovery | New MSI/Burn identities replace broken 0.2.0 installs; locked runtime and machine image validate before service start. |
 
 ## Preserved invariants
 
@@ -46,6 +47,7 @@ Hosted CI on another Windows host is not part of this delivery. The local
 | CRLF corrupts Linux runtime programs | 5 | 4 | 5 | 5 | 30 | P0 | RUN |
 | Cosmetic folders hide coupled Rust modules | 5 | 4 | 4 | 5 | 29 | P0 | ARC |
 | Upgrade/repair replaces an incomplete product | 5 | 4 | 4 | 5 | 29 | P0 | DEL |
+| Reused MSI identity mixes a stale database with a changed cabinet | 5 | 5 | 5 | 5 | 35 | P0 | REC |
 | Invalid string state crosses a contract boundary | 4 | 4 | 3 | 5 | 24 | P1 | TYP |
 | Branding/version facts drift between tools | 4 | 4 | 3 | 5 | 24 | P1 | BRD/REL |
 | Runtime facts are duplicated in lock and source | 4 | 3 | 3 | 5 | 20 | P1 | RUN |

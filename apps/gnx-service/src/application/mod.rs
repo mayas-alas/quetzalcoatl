@@ -1,4 +1,5 @@
 pub(crate) mod control;
+pub(crate) mod installation;
 pub(crate) mod pipe_service;
 mod reconciler;
 pub(crate) mod runtime;

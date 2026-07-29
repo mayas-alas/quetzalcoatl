@@ -1,6 +1,6 @@
 # Delivery contract
 
-`.AGENTS` governs one active delivery: Quetzalcoatl 0.2.0 release hardening. It is
+`.AGENTS` governs one active delivery: Quetzalcoatl 0.2.1 installer recovery. It is
 not release history or a generic handbook.
 
 Read in order:

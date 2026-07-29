@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -25,10 +26,37 @@ def main() -> None:
     release = tomllib.loads((ROOT / "release" / "manifest.toml").read_text(encoding="utf-8"))
     workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
     version = release["version"]
-    if version != "0.2.0":
-        fail("release manifest must identify 0.2.0")
+    if version != "0.2.1":
+        fail("release manifest must identify 0.2.1")
     if workspace["workspace"]["package"]["version"] != version:
         fail("workspace package version differs from the release manifest")
+    identities = release["identities"]
+    guid = re.compile(
+        r"^\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-"
+        r"[0-9A-F]{4}-[0-9A-F]{12}\}$"
+    )
+    if any(not guid.fullmatch(value) for value in identities.values()):
+        fail("release identity is not an uppercase braced GUID")
+    if identities["upgrade_code"] != "{47D5BD44-D061-407B-913B-47D17EC3BEA9}":
+        fail("MSI upgrade family changed")
+    if identities["bundle_upgrade_code"] != "{10B764B2-36AE-4911-A8C8-2F1A2A963769}":
+        fail("Burn upgrade family changed")
+    for current, previous in (
+        ("product_code", "previous_product_code"),
+        ("package_code", "previous_package_code"),
+        ("bundle_id", "previous_bundle_id"),
+    ):
+        if identities[current] == identities[previous]:
+            fail(f"release reuses {current} from the previous package")
+    if (
+        identities["previous_product_code"]
+        != "{E6321F9B-7FB1-5A3F-BD46-603469B510BC}"
+        or identities["previous_package_code"]
+        != "{461DD952-DBD0-5692-9A05-FB0D3C8EFF55}"
+        or identities["previous_bundle_id"]
+        != "{45AD7469-2ABD-5807-86A8-D83A191E6A9A}"
+    ):
+        fail("0.2.1 does not identify the diagnosed 0.2.0 package")
     package = workspace["workspace"]["package"]
     if package.get("license") != "AGPL-3.0-only":
         fail("workspace product license must be AGPL-3.0-only")
@@ -109,6 +137,7 @@ def main() -> None:
             '"0.1.17"',
             'env!("CARGO_PKG_VERSION")',
             "migrates_a_previous_release_journal_into_upgrade_operation",
+            "migrates_the_incomplete_0_2_0_journal_into_upgrade_operation",
             "a_repair_request_is_explicit_and_keeps_the_current_checkpoint",
         ),
         "installer recovery contract",

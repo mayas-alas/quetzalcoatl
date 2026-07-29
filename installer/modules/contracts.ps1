@@ -119,6 +119,18 @@ function Test-ReleaseIdentityContract {
         $releaseBundleId -eq $previousBundleId) {
         throw "Release identity contract: $releaseVersion must not reuse the previous release identity."
     }
+    if (-not (Test-MsiIdentityCollision `
+        -CandidatePackageCode '{00000000-0000-0000-0000-000000000001}' `
+        -CandidateHash ('A' * 64) `
+        -InstalledPackageCode '{00000000-0000-0000-0000-000000000001}' `
+        -InstalledHash ('B' * 64)) -or
+        (Test-MsiIdentityCollision `
+            -CandidatePackageCode '{00000000-0000-0000-0000-000000000001}' `
+            -CandidateHash ('A' * 64) `
+            -InstalledPackageCode '{00000000-0000-0000-0000-000000000001}' `
+            -InstalledHash ('A' * 64))) {
+        throw "Release identity contract: MSI identity collision detection is not fail-closed."
+    }
     $majorUpgrade = @($packageNode.SelectNodes('./*[local-name()="MajorUpgrade"]'))
     if ($majorUpgrade.Count -ne 1 -or
         $majorUpgrade[0].GetAttribute('Schedule') -ne 'afterInstallInitialize' -or
@@ -362,5 +374,20 @@ function Test-MaintenanceContract {
         $serviceControls[0].GetAttribute('Stop') -ne 'both' -or
         $serviceControls[0].GetAttribute('Wait') -ne 'yes') {
         throw "Maintenance contract: upgrade and repair must stop and restart the service deterministically."
+    }
+    $payloadValidators = @($package.SelectNodes('//*[local-name()="CustomAction" and @Id="ValidateInstalledPayload"]'))
+    if ($payloadValidators.Count -ne 1 -or
+        $payloadValidators[0].GetAttribute('FileRef') -ne 'GnxService' -or
+        $payloadValidators[0].GetAttribute('ExeCommand') -ne '--validate-installation' -or
+        $payloadValidators[0].GetAttribute('Execute') -ne 'deferred' -or
+        $payloadValidators[0].GetAttribute('Impersonate') -ne 'no' -or
+        $payloadValidators[0].GetAttribute('Return') -ne 'check') {
+        throw "Maintenance contract: installed payload validation must be a checked elevated gnx-service operation."
+    }
+    $payloadValidatorSequence = @($package.SelectNodes('//*[local-name()="InstallExecuteSequence"]/*[local-name()="Custom" and @Action="ValidateInstalledPayload"]'))
+    if ($payloadValidatorSequence.Count -ne 1 -or
+        $payloadValidatorSequence[0].GetAttribute('After') -ne 'InstallFiles' -or
+        $payloadValidatorSequence[0].GetAttribute('Condition') -ne 'NOT (REMOVE = "ALL")') {
+        throw "Maintenance contract: installed payload validation must run after files and before service start."
     }
 }

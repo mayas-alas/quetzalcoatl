@@ -202,6 +202,7 @@ try {
         $actualPackageCode -ne $releasePackageCode) {
         throw "Built MSI identity mismatch: version=$actualProductVersion ProductCode=$actualProductCode UpgradeCode=$actualUpgradeCode PackageCode=$actualPackageCode"
     }
+    Test-InstalledMsiIdentity -MsiPath $productMsi -ProductCode $releaseProductCode
 
     Test-MsiPayloadCoherence `
         -MsiPath $productMsi `

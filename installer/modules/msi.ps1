@@ -109,8 +109,86 @@ function Test-MsiPayloadCoherence {
                 throw "MSI payload coherence: staged runtime file hash differs for $relative."
             }
         }
+
+        $stagedManifest = $stagedManifests[0].FullName
+        $missingManifest = "$stagedManifest.gnx-missing"
+        Move-Item -LiteralPath $stagedManifest -Destination $missingManifest
+        try {
+            $invalidValidation = Start-Process `
+                -FilePath $stagedServices[0].FullName `
+                -ArgumentList '--validate-installation' `
+                -Wait `
+                -PassThru `
+                -WindowStyle Hidden
+            if ($invalidValidation.ExitCode -eq 0) {
+                throw "MSI payload coherence: installed-payload validation accepted a missing runtime lock."
+            }
+        } finally {
+            Move-Item -LiteralPath $missingManifest -Destination $stagedManifest -ErrorAction SilentlyContinue
+        }
+
+        $validValidation = Start-Process `
+            -FilePath $stagedServices[0].FullName `
+            -ArgumentList '--validate-installation' `
+            -Wait `
+            -PassThru `
+            -WindowStyle Hidden
+        if ($validValidation.ExitCode -ne 0) {
+            throw "MSI payload coherence: extracted installed-payload validation failed with exit code $($validValidation.ExitCode)."
+        }
     } finally {
         Remove-Item -LiteralPath $verificationRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-MsiIdentityCollision {
+    param(
+        [Parameter(Mandatory)][string] $CandidatePackageCode,
+        [Parameter(Mandatory)][string] $CandidateHash,
+        [Parameter(Mandatory)][string] $InstalledPackageCode,
+        [Parameter(Mandatory)][string] $InstalledHash
+    )
+
+    return $CandidatePackageCode.Equals(
+        $InstalledPackageCode,
+        [StringComparison]::OrdinalIgnoreCase
+    ) -and -not $CandidateHash.Equals(
+        $InstalledHash,
+        [StringComparison]::OrdinalIgnoreCase
+    )
+}
+
+function Test-InstalledMsiIdentity {
+    param(
+        [Parameter(Mandatory)][string] $MsiPath,
+        [Parameter(Mandatory)][string] $ProductCode
+    )
+
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    try {
+        try {
+            $installedMsi = $installer.ProductInfo($ProductCode, 'LocalPackage')
+        } catch {
+            return
+        }
+        if (-not $installedMsi -or -not (Test-Path -LiteralPath $installedMsi -PathType Leaf)) {
+            throw "Installed MSI registration for $ProductCode has no readable LocalPackage."
+        }
+        $candidatePackageCode = Get-MsiSummaryProperty -Path $MsiPath -PropertyId 9
+        $installedPackageCode = Get-MsiSummaryProperty -Path $installedMsi -PropertyId 9
+        $candidateHash = (Get-FileHash -LiteralPath $MsiPath -Algorithm SHA256).Hash
+        $installedHash = (Get-FileHash -LiteralPath $installedMsi -Algorithm SHA256).Hash
+        if (Test-MsiIdentityCollision `
+            -CandidatePackageCode $candidatePackageCode `
+            -CandidateHash $candidateHash `
+            -InstalledPackageCode $installedPackageCode `
+            -InstalledHash $installedHash) {
+            throw "MSI identity collision: installed and candidate packages share PackageCode $candidatePackageCode but have different SHA-256 values. Increment the release version and identities."
+        }
+    } finally {
+        if ($installer -and [Runtime.InteropServices.Marshal]::IsComObject($installer)) {
+            $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($installer)
+        }
     }
 }
 

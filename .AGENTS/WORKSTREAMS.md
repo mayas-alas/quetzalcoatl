@@ -33,7 +33,7 @@ Owns:
 - `tools/**`
 - operational/validation documentation
 
-Delivers `BRD`, `DEL`, `DOC` and assurance portions of `REL`.
+Delivers `BRD`, `DEL`, `REC`, `DOC` and assurance portions of `REL`.
 
 ## Coordinator-only paths
 

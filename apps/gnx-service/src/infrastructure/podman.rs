@@ -305,7 +305,7 @@ pub(crate) fn verify_artifact(path: &Path, image: &MachineImage) -> Result<bool,
         )
     })?;
     let mut digest = Sha256::new();
-    let mut buffer = [0u8; 1024 * 1024];
+    let mut buffer = vec![0u8; 1024 * 1024];
     loop {
         let read = file.read(&mut buffer).map_err(|error| {
             GateError::new(

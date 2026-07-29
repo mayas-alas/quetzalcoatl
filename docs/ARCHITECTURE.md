@@ -8,6 +8,7 @@ tray are bounded Named Pipe clients.
 QuetzalcoatlSetup.exe
   +-- gnx-bootstrap       closed host preflight, pinned dependencies, recovery
   `-- Quetzalcoatl.msi    gnx, tray, service, runtime and machine image
+          `-- validate locked installation before StartServices
 
 gnx / tray -- Named Pipe schema 2 --> gnx-service
                                          +-- Windows profile/state/secrets

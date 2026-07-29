@@ -240,6 +240,26 @@ mod tests {
     }
 
     #[test]
+    fn migrates_the_incomplete_0_2_0_journal_into_upgrade_operation() {
+        let previous = br#"{
+            "schema_version": 2,
+            "product_version": "0.2.0",
+            "operation": "repair",
+            "phase": "PODMAN_INSTALLED",
+            "attempt": 1,
+            "last_error_code": "RUNTIME_PAYLOAD_INVALID",
+            "last_error_message": "runtime manifest is absent"
+        }"#;
+        let journal = InstallJournal::decode(previous, crate::RequestedOperation::Install).unwrap();
+        assert_eq!(journal.product_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(journal.previous_product_version.as_deref(), Some("0.2.0"));
+        assert_eq!(journal.operation, InstallOperation::Upgrade);
+        assert_eq!(journal.phase, "STARTED");
+        assert_eq!(journal.attempt, 0);
+        assert_eq!(journal.last_error_code, None);
+    }
+
+    #[test]
     fn a_repair_request_is_explicit_and_keeps_the_current_checkpoint() {
         let current = format!(
             r#"{{

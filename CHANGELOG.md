@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1
+
+- Gives the changed MSI and Burn bundle new product, package and bundle identities
+  while preserving both stable upgrade families.
+- Repairs incomplete 0.2.0 runtime installations through the normal Setup upgrade.
+- Validates the installed runtime lock, every locked payload file and the pinned
+  Podman Machine image before Windows Installer starts the service.
+- Rejects a locally installed package identity when its cached MSI has different
+  bytes, preventing another stale Windows Installer cache collision.
+
 ## 0.2.0
 
 - Reorganized the four-package workspace into `apps/` and `crates/` with one
@@ -27,6 +37,6 @@
 
 ## Compatibility baseline
 
-0.2.0 accepts the installed 0.1.17 state and installer recovery checkpoint. Protocol
+0.2.1 accepts installed 0.1.17 and 0.2.0 state and installer recovery checkpoints. Protocol
 schema 2, persisted-state schema 2, host-profile schema 1, runtime payload contract 5,
 the runtime generation and both stable installer upgrade families remain unchanged.

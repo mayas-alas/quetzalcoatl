@@ -98,6 +98,42 @@ def main() -> None:
         if len(files) != 1 or files[0].attrib.get("Id") != file_id or files[0].attrib.get("KeyPath") != "yes":
             fail(f"MSI key path differs for {component_id}")
 
+    payload_validator = next(
+        (
+            node
+            for node in product.iter()
+            if local_name(node) == "CustomAction"
+            and node.attrib.get("Id") == "ValidateInstalledPayload"
+        ),
+        None,
+    )
+    if payload_validator is None or {
+        key: payload_validator.attrib.get(key)
+        for key in ("FileRef", "ExeCommand", "Execute", "Impersonate", "Return")
+    } != {
+        "FileRef": "GnxService",
+        "ExeCommand": "--validate-installation",
+        "Execute": "deferred",
+        "Impersonate": "no",
+        "Return": "check",
+    }:
+        fail("MSI installed-payload validation action differs")
+    payload_sequence = next(
+        (
+            node
+            for node in product.iter()
+            if local_name(node) == "Custom"
+            and node.attrib.get("Action") == "ValidateInstalledPayload"
+        ),
+        None,
+    )
+    if (
+        payload_sequence is None
+        or payload_sequence.attrib.get("After") != "InstallFiles"
+        or payload_sequence.attrib.get("Condition") != 'NOT (REMOVE = "ALL")'
+    ):
+        fail("MSI payload validation is not sequenced before service start")
+
     build = (INSTALLER / "build.ps1").read_text(encoding="utf-8")
     rust_build = (INSTALLER / "modules" / "rust.ps1").read_text(encoding="utf-8")
     for marker in (
@@ -107,6 +143,7 @@ def main() -> None:
         "extensions\\deterministic-bundle",
         "Test-MaintenanceContract",
         "Test-MsiPayloadCoherence",
+        "Test-InstalledMsiIdentity",
         "SetLastWriteTimeUtc",
         "runtime-payload",
     ):
@@ -114,6 +151,18 @@ def main() -> None:
             fail(f"release entry point omits {marker!r}")
     if "link-arg=/Brepro" not in rust_build:
         fail("release Rust artifacts are not linked reproducibly")
+    service_main = (ROOT / "apps" / "gnx-service" / "src" / "main.rs").read_text(
+        encoding="utf-8"
+    )
+    service_installation = (
+        ROOT / "apps" / "gnx-service" / "src" / "application" / "installation.rs"
+    ).read_text(encoding="utf-8")
+    for marker in ("--validate-installation", "ValidateInstallation"):
+        if marker not in service_main:
+            fail(f"service installed-payload mode omits {marker!r}")
+    for marker in ("load_payload_files()", "load_machine_image()", "installed_machine_image"):
+        if marker not in service_installation:
+            fail(f"installed-payload validation omits {marker!r}")
     if "operations" in "\n".join(
         line for line in build.splitlines() if "Copy-Item" in line
     ):
