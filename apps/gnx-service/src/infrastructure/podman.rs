@@ -174,6 +174,7 @@ pub(crate) fn stop_managed_machine(podman: &Path) -> Result<(), GateError> {
 pub(crate) fn wait_for_machine_ssh(podman: &Path) -> Result<(), GateError> {
     let mut last_error = String::from("machine SSH is not ready");
     for attempt in 0..30 {
+        crate::infrastructure::service_shutdown::ensure_running()?;
         match machine_stdin(podman, ["true"], &[]) {
             Ok(_) => return Ok(()),
             Err(error) => last_error = error.message,
@@ -332,6 +333,7 @@ pub(crate) fn verify_artifact(path: &Path, image: &MachineImage) -> Result<bool,
     let mut digest = Sha256::new();
     let mut buffer = vec![0u8; 1024 * 1024];
     loop {
+        crate::infrastructure::service_shutdown::ensure_running()?;
         let read = file.read(&mut buffer).map_err(|error| {
             GateError::new(
                 "RUNTIME_PAYLOAD_INVALID",

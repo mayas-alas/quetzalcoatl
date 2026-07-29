@@ -14,6 +14,8 @@ use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, IsProcessorFeaturePresent, OpenProcessToken, PF_VIRT_FIRMWARE_ENABLED,
 };
 
+pub(crate) mod security;
+
 pub fn windows_11_x64() -> Result<bool, String> {
     // Safety: the initialized structures and pointers have the exact Win32 API sizes.
     unsafe {

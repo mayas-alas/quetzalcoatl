@@ -17,6 +17,7 @@ use crate::infrastructure::tailscale::{stabilize_host_inventory, wait_for_tailsc
 
 pub(crate) fn wait_for_configuration() -> Result<InstallerConfiguration, GateError> {
     loop {
+        crate::infrastructure::service_shutdown::ensure_running()?;
         match crate::infrastructure::secrets::load_optional() {
             Ok(Some(configuration)) => return Ok(configuration),
             Ok(None) => thread::sleep(Duration::from_millis(500)),

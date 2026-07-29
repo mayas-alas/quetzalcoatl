@@ -30,6 +30,7 @@ pub(crate) fn start_proxmox(podman: &Path) -> Result<(), GateError> {
 pub(crate) fn validate_proxmox_devices(podman: &Path) -> Result<(), GateError> {
     let mut last_error = String::from("Proxmox container did not become executable");
     for attempt in 0..30 {
+        crate::infrastructure::service_shutdown::ensure_running()?;
         match machine_stdin(
             podman,
             ["podman", "exec", "-i", "gnx-proxmox", "python3", "-"],
@@ -73,6 +74,7 @@ pub(crate) fn validate_proxmox_devices(podman: &Path) -> Result<(), GateError> {
 pub(crate) fn wait_for_proxmox(podman: &Path) -> Result<(), GateError> {
     let mut last_error = String::from("Proxmox services are not ready");
     for attempt in 0..120 {
+        crate::infrastructure::service_shutdown::ensure_running()?;
         match machine_stdin(podman, ["sh", "-s"], PVE_READY_PROBE.as_bytes()) {
             Ok(output)
                 if String::from_utf8_lossy(&output.stdout).trim()
@@ -159,6 +161,7 @@ pub(crate) fn verify_pve_identity(
     let input = format!("{self_ip}\n{hostname}\n");
     let mut last_error = String::from("PVE node identity is not coherent");
     for attempt in 0..60 {
+        crate::infrastructure::service_shutdown::ensure_running()?;
         match runtime_agent(
             podman,
             RuntimeOperation::PveClusterVerifyNode,

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.13
+
+- Protects elevated installer state and dependency staging with explicit ACLs,
+  complete reparse-point rejection and a locked MSI handle through execution.
+- Bounds local IPC with four overlapped instances and per-client timeouts, and
+  replaces abrupt service termination with cooperative cancellation and joining.
+- Adds pinned RustSec auditing, locked upstream Authenticode policy and mandatory
+  signed/timestamped Rust, MSI and Burn release artifacts.
+
 ## 0.2.12
 
 - Adds a service-private shutdown event so the WinSW stop helper terminates the

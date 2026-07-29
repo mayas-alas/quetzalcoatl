@@ -102,6 +102,16 @@ def main() -> None:
     if '"0.2.0"' in build_rs or 'VALUE "CompanyName", "Quetzalcoatl\\0"' in build_rs:
         fail("PE metadata contains duplicated version or company identity")
 
+    security_gate = (ROOT / "tools" / "security.ps1").read_text(encoding="utf-8")
+    for marker in ("cargo audit --version", "0.22.2", "cargo audit --deny warnings"):
+        if marker not in security_gate:
+            fail(f"security gate omits {marker!r}")
+    dependency_lock = (
+        ROOT / "installer" / "dependencies.lock.json"
+    ).read_text(encoding="utf-8")
+    if dependency_lock.count('"authenticode"') != 3:
+        fail("installer dependency Authenticode policy inventory differs")
+
     for path in (ROOT / "apps").rglob("*.rs"):
         source = path.read_text(encoding="utf-8")
         if "#[path" in source:

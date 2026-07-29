@@ -31,8 +31,8 @@ fn parse_mode(mut args: impl Iterator<Item = std::ffi::OsString>) -> Result<Mode
 fn run() -> Result<(), String> {
     match parse_mode(std::env::args_os().skip(1)).map_err(str::to_owned)? {
         Mode::Service => {
-            infrastructure::service_shutdown::arm()?;
-            application::pipe_service::run().map_err(|error| error.to_string())
+            let shutdown = infrastructure::service_shutdown::arm()?;
+            application::pipe_service::run(shutdown).map_err(|error| error.to_string())
         }
         Mode::ValidateInstallation => {
             application::installation::validate()

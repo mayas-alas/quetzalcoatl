@@ -17,7 +17,7 @@ report success or launch the tray.
 For upgrade, launch the newer Setup. Stable upgrade families locate the installed
 product; MSI stops service/tray, replaces keyed files and restarts them after commit.
 Schemas 2/2/1, payload contract 5, node identity, role and incomplete member
-checkpoints remain compatible. 0.2.12 uses new package identities to replace 0.2.11
+checkpoints remain compatible. 0.2.13 uses new package identities to replace 0.2.12
 while retaining recovery of earlier complete, incomplete and cached maintenance
 states. Repair recognizes enabled Windows features without requesting a redundant
 reboot. Never delete ProgramData state before an upgrade.
@@ -40,4 +40,7 @@ a validated `https://gnx-*.ts.net/` PVE URL; localhost, raw IP, alternate port a
 non-tailnet URLs are rejected.
 
 Source validation: `.\tools\check.ps1 -SourceOnly`.
-Release validation: `.\tools\check.ps1`.
+Release validation requires a trusted code-signing certificate:
+`$env:GNX_SIGNING_CERTIFICATE_THUMBPRINT='<thumbprint>'; .\tools\check.ps1`.
+`installer\build.ps1 -AllowUnsigned` is development-only and never produces an
+accepted release artifact.

@@ -1,11 +1,13 @@
 mod configuration;
 mod host_profile;
+mod identity;
 mod ipc;
 mod migration;
 mod status;
 
 pub use configuration::{InstallerConfiguration, TailnetName};
 pub use host_profile::{DetectedResources, HostProfile, MachineProfile};
+pub use identity::WINDOWS_SERVICE_SID;
 pub use ipc::{Command, MAX_MESSAGE_BYTES, OperationResponse, PIPE_NAME, Request};
 pub use migration::{
     HOST_PROFILE_SCHEMA_VERSION, PERSISTED_STATE_SCHEMA_VERSION, PROTOCOL_SCHEMA_VERSION,

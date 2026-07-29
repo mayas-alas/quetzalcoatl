@@ -4,26 +4,21 @@
 
 | Field | Value |
 |---|---|
-| Commit | `d84257a77ed74b5f4ea0951aca82083ff6ab3483` |
+| Commit | `63c2407be182c1ff78a2806f84bdf90b3c86f4e3` |
 | Branch | `master` |
-| Dirty baseline | Existing uncommitted MVP migration retained |
-| Delivery | Integrated 0.2.12 maintenance cycle |
+| Dirty baseline | Clean |
+| Delivery | Integrated 0.2.13 security cycle |
 | Coordinator | Codex |
 
 ## Board
 
 | ID | Owner | Status | Evidence |
 |---|---|---|---|
-| LEG | Agent A | done | license, notice and packaged legal inventory pass |
-| BRD | Agent C | done | one installer assets tree and G branding pass |
-| ARC | Agent A/B | done | four packages and one semantic implementation |
-| RUN | Agent B | done | closed argv/stdin and managed VM lifecycle pass |
-| REC | Agent B/C | done | payload validation and preserved-state reinstall reach READY |
-| RBT | Agent B/C | done | repair stop/restart returns 0 and reaches READY |
-| ARP | Agent C | done | one visible bundle plus one hidden internal MSI |
-| UNS | Agent B/C | done | physical uninstall leaves zero product residue |
-| REL | Coordinator | done | 0.2.12 gate, identities and hashes recorded |
-| INT | Coordinator | done | uninstall, reinstall and repair physically accepted |
+| STG | Coordinator | done | elevated upgrade protected ProgramData; standard token cannot inspect/traverse installer root |
+| IPC | Coordinator | done | stalled client left concurrent status at 25 ms and was disconnected after deadline |
+| SHD | Coordinator | done | stop two seconds into reconciliation returned 0 and recovered the same READY controller |
+| SUP | Coordinator | blocked | RustSec and upstream Authenticode pass; trusted product certificate absent |
+| REL | Coordinator | blocked | upgrade, repair and hostile lifecycle acceptance pass; signed production build pending |
 
 ## Resolved blockers
 
@@ -35,7 +30,8 @@
 | B11 | WinSW waited for the main service after the stop helper returned. | A service-private event terminates the main process after VM stop. |
 | B12 | Hosted Windows CI is unavailable. | Explicitly excluded; local integrated gate remains authoritative. |
 
-## Residual acceptance
+## Active blockers
 
-Direct upgrade from 0.1.17 and manual visual inspection of the tray menu remain
-outside this uninstall cycle. No known residual risk blocks 0.2.12 maintenance.
+| ID | Finding | Required resolution |
+|---|---|---|
+| B13 | No trusted code-signing certificate is installed on the build host. | Provision a production certificate; the release gate must reject unsigned output. |

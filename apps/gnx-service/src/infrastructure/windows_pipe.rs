@@ -2,13 +2,15 @@ use std::ffi::c_void;
 use std::mem::size_of;
 use std::ptr::null_mut;
 use std::sync::{Arc, RwLock};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use gnx_contracts::{
     Command, MAX_MESSAGE_BYTES, OperationResponse, PIPE_NAME, Request, StatusResponse,
 };
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_PIPE_CONNECTED, GetLastError, HANDLE,
-    INVALID_HANDLE_VALUE, LocalFree,
+    CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, GetLastError,
+    HANDLE, INVALID_HANDLE_VALUE, LocalFree, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -19,7 +21,10 @@ use windows_sys::Win32::Security::{
     TokenElevation, TokenUser, WinBuiltinAdministratorsSid,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_FLAG_FIRST_PIPE_INSTANCE, FlushFileBuffers, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
+    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
+};
+use windows_sys::Win32::System::IO::{
+    CancelIoEx, GetOverlappedResult, GetOverlappedResultEx, OVERLAPPED,
 };
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, ImpersonateNamedPipeClient,
@@ -28,25 +33,62 @@ use windows_sys::Win32::System::Pipes::{
 use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
 use zeroize::Zeroize;
 
-const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)";
+use super::service_shutdown::ShutdownToken;
 
-pub fn serve(status: Arc<RwLock<StatusResponse>>) -> Result<(), String> {
-    let pipe = create_pipe()?;
-    loop {
-        connect(pipe.0)?;
-        if let Err(error) = serve_client(pipe.0, &status) {
-            eprintln!("gnx-service: rejected pipe request: {error}");
-        }
-        // Safety: the handle is a connected named-pipe server instance.
-        unsafe {
-            FlushFileBuffers(pipe.0);
-            DisconnectNamedPipe(pipe.0);
-        }
+const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)";
+const PIPE_INSTANCES: usize = 4;
+const CLIENT_IO_TIMEOUT: Duration = Duration::from_secs(5);
+const IO_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+pub fn serve(status: Arc<RwLock<StatusResponse>>, shutdown: ShutdownToken) -> Result<(), String> {
+    let mut pipes = Vec::with_capacity(PIPE_INSTANCES);
+    pipes.push(create_pipe(true)?);
+    for _ in 1..PIPE_INSTANCES {
+        pipes.push(create_pipe(false)?);
     }
+    let workers: Vec<_> = pipes
+        .into_iter()
+        .map(|pipe| {
+            let status = Arc::clone(&status);
+            thread::spawn(move || serve_pipe_instance(pipe, status, shutdown))
+        })
+        .collect();
+    for worker in workers {
+        worker
+            .join()
+            .map_err(|_| "named-pipe worker panicked".to_string())??;
+    }
+    Ok(())
 }
 
-fn serve_client(pipe: HANDLE, status: &Arc<RwLock<StatusResponse>>) -> Result<(), String> {
-    let mut message = read_message(pipe)?;
+fn serve_pipe_instance(
+    pipe: OwnedHandle,
+    status: Arc<RwLock<StatusResponse>>,
+    shutdown: ShutdownToken,
+) -> Result<(), String> {
+    while !shutdown.is_requested() {
+        match connect(pipe.0, shutdown) {
+            Ok(()) => {}
+            Err(_) if shutdown.is_requested() => break,
+            Err(error) => return Err(error),
+        }
+        if let Err(error) = serve_client(pipe.0, &status, shutdown)
+            && !shutdown.is_requested()
+        {
+            eprintln!("gnx-service: rejected pipe request: {error}");
+        }
+        // Safety: pipe is either connected or has a canceled operation; disconnect resets it.
+        unsafe { DisconnectNamedPipe(pipe.0) };
+    }
+    Ok(())
+}
+
+fn serve_client(
+    pipe: HANDLE,
+    status: &Arc<RwLock<StatusResponse>>,
+    shutdown: ShutdownToken,
+) -> Result<(), String> {
+    let mut message = read_message(pipe, shutdown)?;
     let parsed = serde_json::from_slice(&message);
     message.zeroize();
     let request: Request =
@@ -88,10 +130,10 @@ fn serve_client(pipe: HANDLE, status: &Arc<RwLock<StatusResponse>>) -> Result<()
         }
     }
     .map_err(|e| format!("cannot serialize response: {e}"))?;
-    write_message(pipe, &response)
+    write_message(pipe, &response, shutdown)
 }
 
-fn create_pipe() -> Result<OwnedHandle, String> {
+fn create_pipe(first_instance: bool) -> Result<OwnedHandle, String> {
     let pipe_name = wide(PIPE_NAME);
     let sddl = wide(PIPE_SDDL);
     let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
@@ -112,13 +154,18 @@ fn create_pipe() -> Result<OwnedHandle, String> {
         lpSecurityDescriptor: descriptor,
         bInheritHandle: 0,
     };
+    let first_flag = if first_instance {
+        FILE_FLAG_FIRST_PIPE_INSTANCE
+    } else {
+        0
+    };
     // Safety: arguments describe a single local message-mode pipe and a valid security descriptor.
     let handle = unsafe {
         CreateNamedPipeW(
             pipe_name.as_ptr(),
-            PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | first_flag,
             PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-            1,
+            PIPE_INSTANCES as u32,
             MAX_MESSAGE_BYTES as u32,
             MAX_MESSAGE_BYTES as u32,
             0,
@@ -134,16 +181,24 @@ fn create_pipe() -> Result<OwnedHandle, String> {
     }
 }
 
-fn connect(pipe: HANDLE) -> Result<(), String> {
-    // Safety: pipe is a synchronous named-pipe server handle.
-    if unsafe { ConnectNamedPipe(pipe, null_mut()) } != 0 {
+fn connect(pipe: HANDLE, shutdown: ShutdownToken) -> Result<(), String> {
+    let mut overlapped = OVERLAPPED::default();
+    // Safety: pipe was opened for overlapped I/O and overlapped remains alive until completion.
+    if unsafe { ConnectNamedPipe(pipe, &mut overlapped) } != 0 {
         return Ok(());
     }
     // A client can connect between CreateNamedPipe and ConnectNamedPipe.
-    if unsafe { GetLastError() } == ERROR_PIPE_CONNECTED {
-        Ok(())
-    } else {
-        Err(last_error("cannot accept named-pipe client"))
+    match unsafe { GetLastError() } {
+        ERROR_PIPE_CONNECTED => Ok(()),
+        ERROR_IO_PENDING => wait_overlapped(
+            pipe,
+            &mut overlapped,
+            None,
+            shutdown,
+            "cannot accept named-pipe client",
+        )
+        .map(|_| ()),
+        _ => Err(last_error("cannot accept named-pipe client")),
     }
 }
 
@@ -236,46 +291,111 @@ fn read_thread_token(require_elevated_admin: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn read_message(pipe: HANDLE) -> Result<Vec<u8>, String> {
+fn read_message(pipe: HANDLE, shutdown: ShutdownToken) -> Result<Vec<u8>, String> {
     let mut buffer = vec![0u8; MAX_MESSAGE_BYTES];
     let mut read = 0u32;
-    // Safety: buffer is writable and pipe is a connected synchronous handle.
-    if unsafe {
+    let mut overlapped = OVERLAPPED::default();
+    // Safety: buffer is writable, pipe is connected/overlapped and all values live through wait.
+    let completed = unsafe {
         ReadFile(
             pipe,
             buffer.as_mut_ptr(),
             buffer.len() as u32,
             &mut read,
-            null_mut(),
+            &mut overlapped,
         )
-    } == 0
-    {
-        return Err(last_error("cannot read named-pipe request"));
+    };
+    if completed == 0 {
+        if unsafe { GetLastError() } != ERROR_IO_PENDING {
+            return Err(last_error("cannot read named-pipe request"));
+        }
+        read = wait_overlapped(
+            pipe,
+            &mut overlapped,
+            Some(CLIENT_IO_TIMEOUT),
+            shutdown,
+            "cannot read named-pipe request",
+        )?;
     }
     buffer.truncate(read as usize);
     Ok(buffer)
 }
 
-fn write_message(pipe: HANDLE, bytes: &[u8]) -> Result<(), String> {
+fn write_message(pipe: HANDLE, bytes: &[u8], shutdown: ShutdownToken) -> Result<(), String> {
     if bytes.len() > MAX_MESSAGE_BYTES {
         return Err("response exceeds protocol v2 message limit".into());
     }
     let mut written = 0u32;
-    // Safety: bytes is readable and pipe is a connected synchronous handle.
-    if unsafe {
+    let mut overlapped = OVERLAPPED::default();
+    // Safety: bytes is readable, pipe is connected/overlapped and all values live through wait.
+    let completed = unsafe {
         WriteFile(
             pipe,
             bytes.as_ptr(),
             bytes.len() as u32,
             &mut written,
-            null_mut(),
+            &mut overlapped,
         )
-    } == 0
-        || written as usize != bytes.len()
-    {
-        return Err(last_error("cannot write named-pipe response"));
+    };
+    if completed == 0 {
+        if unsafe { GetLastError() } != ERROR_IO_PENDING {
+            return Err(last_error("cannot write named-pipe response"));
+        }
+        written = wait_overlapped(
+            pipe,
+            &mut overlapped,
+            Some(CLIENT_IO_TIMEOUT),
+            shutdown,
+            "cannot write named-pipe response",
+        )?;
+    }
+    if written as usize != bytes.len() {
+        return Err("named-pipe response was only partially written".into());
     }
     Ok(())
+}
+
+fn wait_overlapped(
+    pipe: HANDLE,
+    overlapped: &mut OVERLAPPED,
+    timeout: Option<Duration>,
+    shutdown: ShutdownToken,
+    context: &str,
+) -> Result<u32, String> {
+    let started = Instant::now();
+    loop {
+        if shutdown.is_requested() {
+            cancel_overlapped(pipe, overlapped);
+            return Err("service shutdown requested".into());
+        }
+        let remaining = timeout.map(|limit| limit.saturating_sub(started.elapsed()));
+        if remaining.is_some_and(|duration| duration.is_zero()) {
+            cancel_overlapped(pipe, overlapped);
+            return Err(format!("{context}: client I/O timed out"));
+        }
+        let wait = remaining
+            .map(|duration| duration.min(IO_POLL_INTERVAL))
+            .unwrap_or(IO_POLL_INTERVAL);
+        let wait_ms = u32::try_from(wait.as_millis()).unwrap_or(u32::MAX).max(1);
+        let mut transferred = 0u32;
+        // Safety: the I/O and OVERLAPPED remain valid, and the bounded wait is non-alertable.
+        if unsafe { GetOverlappedResultEx(pipe, overlapped, &mut transferred, wait_ms, 0) } != 0 {
+            return Ok(transferred);
+        }
+        if unsafe { GetLastError() } != WAIT_TIMEOUT {
+            return Err(last_error(context));
+        }
+    }
+}
+
+fn cancel_overlapped(pipe: HANDLE, overlapped: &mut OVERLAPPED) {
+    // Safety: the OVERLAPPED belongs to a pending operation on pipe. Waiting reaps cancellation
+    // before its stack storage is released.
+    unsafe {
+        CancelIoEx(pipe, overlapped);
+        let mut transferred = 0u32;
+        GetOverlappedResult(pipe, overlapped, &mut transferred, 1);
+    }
 }
 
 fn wide(value: &str) -> Vec<u16> {
@@ -288,6 +408,10 @@ fn last_error(operation: &str) -> String {
 }
 
 struct OwnedHandle(HANDLE);
+
+// Safety: this wrapper uniquely owns a kernel handle. Named-pipe handles may be transferred
+// between threads and are closed exactly once by Drop.
+unsafe impl Send for OwnedHandle {}
 
 impl Drop for OwnedHandle {
     fn drop(&mut self) {

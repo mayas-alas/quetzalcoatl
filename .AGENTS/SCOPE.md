@@ -1,10 +1,10 @@
-# 0.2.12 maintenance scope
+# 0.2.13 security scope
 
 ## Outcome
 
-Deliver one coherent source tree and one `QuetzalcoatlSetup.exe` that owns fresh
-install, upgrade, repair and uninstall. Setup remains the only user-facing
-maintenance surface.
+Harden the privileged Windows maintenance and local-control surfaces without
+changing the product topology. Deliver one coherent source tree and one
+`QuetzalcoatlSetup.exe` that owns fresh install, upgrade, repair and uninstall.
 
 ## Included
 
@@ -18,7 +18,11 @@ maintenance surface.
 | RBT | Bounded restart | Feature detection and resume do not loop or request redundant restarts. |
 | ARP | Sole maintenance entry | One visible Setup registration; internal MSI remains hidden. |
 | UNS | Complete uninstall | Product files, root, service, tray, PATH, startup, registrations and caches are removed. WSL, Podman, managed VM data and durable GNX state remain. |
-| REL | Integrated release | Version, identities, build, tests, hashes and physical evidence agree on 0.2.12. |
+| STG | Protected privileged staging | Installer state/cache use protected ACLs, reject every reparse-point component and execute only a revalidated locked artifact. |
+| IPC | Bounded local control | Named Pipe remains local/authenticated and a stalled client cannot block subsequent clients indefinitely. |
+| SHD | Cooperative shutdown | Stop rejects event precreation, stops accepting IPC and joins reconciliation without `process::exit`. |
+| SUP | Verifiable supply chain | Dependency advisories and Authenticode policy are explicit release gates; unsigned production output fails closed. |
+| REL | Integrated release | Version, identities, build, tests, hashes and physical evidence agree on 0.2.13. |
 
 ## Preserved invariants
 
@@ -41,15 +45,15 @@ remains mandatory and CI-ready.
 
 | Risk | I | P | U | N | Score | Priority | Gate |
 |---|---:|---:|---:|---:|---:|---|---|
-| Inherited WSL process locks product root | 5 | 5 | 5 | 5 | 35 | P0 | UNS |
-| Service stop waits forever | 5 | 4 | 5 | 5 | 30 | P0 | UNS/RBT |
-| Internal MSI exposes a second uninstall | 5 | 4 | 5 | 5 | 30 | P0 | ARP |
-| Runtime payload starts incomplete | 5 | 4 | 4 | 5 | 29 | P0 | REC |
-| Identity/version drift | 4 | 4 | 3 | 5 | 24 | P1 | REL |
-| Documentation duplicates implementation | 3 | 3 | 2 | 4 | 15 | P2 | ARC |
+| Writable privileged installer staging | 5 | 5 | 5 | 5 | 35 | P0 | STG |
+| Unsigned release artifacts | 5 | 4 | 5 | 5 | 30 | P1 | SUP |
+| Single blocking Named Pipe client | 4 | 4 | 4 | 5 | 25 | P1 | IPC |
+| Abrupt service termination | 5 | 3 | 4 | 5 | 24 | P1 | SHD |
+| Dependency advisory status unknown | 4 | 3 | 4 | 5 | 21 | P1 | SUP |
 
 ## Definition of done
 
-All included rows are `done`; `tools/check.ps1` passes; final hashes are recorded;
-physical uninstall removes every product-owned surface; reinstall and repair
+All included rows are `done`; `tools/check.ps1` passes; production artifacts have
+valid Authenticode signatures; final hashes are recorded; hostile local staging
+tests pass; uninstall removes every product-owned surface; reinstall and repair
 recover the same READY controller and quorate cluster.

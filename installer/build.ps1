@@ -2,7 +2,10 @@
 param(
     [string] $RebootContractBundlePath,
     [string] $RebootContractBundleXml,
-    [switch] $TestRebootContractOnly
+    [switch] $TestRebootContractOnly,
+    [string] $SigningCertificateThumbprint = $env:GNX_SIGNING_CERTIFICATE_THUMBPRINT,
+    [string] $TimestampUrl = 'https://timestamp.digicert.com',
+    [switch] $AllowUnsigned
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,7 +46,7 @@ if ($dependencyLock.schema_version -ne 1) {
 }
 New-Item -ItemType Directory -Force -Path $cacheRoot, $outputRoot | Out-Null
 
-foreach ($module in @('dependencies.ps1', 'contracts.ps1', 'runtime.ps1', 'rust.ps1', 'msi.ps1', 'bundle.ps1')) {
+foreach ($module in @('dependencies.ps1', 'contracts.ps1', 'runtime.ps1', 'rust.ps1', 'msi.ps1', 'bundle.ps1', 'signing.ps1')) {
     . (Join-Path $moduleRoot $module)
 }
 
@@ -59,6 +62,15 @@ Test-ReleaseIdentityContract
 Test-DependencyStagingContract
 Test-MaintenanceContract
 Test-RuntimePayloadSource -RuntimePayload (Join-Path $repoRoot 'runtime') -ExpectedPayloadVersion $runtimePayloadContract
+$signingIdentity = $null
+if ([string]::IsNullOrWhiteSpace($SigningCertificateThumbprint)) {
+    if (-not $AllowUnsigned) {
+        throw 'Production release requires -SigningCertificateThumbprint or GNX_SIGNING_CERTIFICATE_THUMBPRINT.'
+    }
+    Write-Warning 'Building an unsigned development artifact; it is not releasable.'
+} else {
+    $signingIdentity = Resolve-CodeSigningCertificate -Thumbprint $SigningCertificateThumbprint
+}
 
 if (-not (Test-Path -LiteralPath $dotnetToolManifest -PathType Leaf)) {
     throw "Pinned .NET tool manifest is absent: $dotnetToolManifest"
@@ -80,6 +92,10 @@ $machineArtifact = [pscustomobject] @{
     size = $machineComponent[0].artifact_size
     sha256 = ([string] $machineComponent[0].layer_digest).Replace('sha256:', '').ToUpperInvariant()
     url = $machineComponent[0].artifact_url
+    authenticode = [pscustomobject] @{
+        status = 'not_applicable'
+        reason = 'Compressed Linux machine image; SHA-256 layer digest is authoritative.'
+    }
 }
 $artifacts.podman_machine = Get-LockedArtifact -Artifact $machineArtifact
 
@@ -156,6 +172,14 @@ try {
         @{ Name = 'gnx'; Path = $gnxCli },
         @{ Name = 'gnx-tray'; Path = $gnxTray }
     )
+    if ($signingIdentity) {
+        foreach ($releaseBinary in $releaseBinaries) {
+            Invoke-AuthenticodeSign `
+                -Path $releaseBinary `
+                -SigningIdentity $signingIdentity `
+                -TimestampUrl $TimestampUrl
+        }
+    }
     $generatedInputs = @($releaseBinaries) + @(
         Get-ChildItem -LiteralPath $runtimePackage -Recurse -File |
             ForEach-Object FullName
@@ -202,8 +226,6 @@ try {
         $actualPackageCode -ne $releasePackageCode) {
         throw "Built MSI identity mismatch: version=$actualProductVersion ProductCode=$actualProductCode UpgradeCode=$actualUpgradeCode PackageCode=$actualPackageCode"
     }
-    Test-InstalledMsiIdentity -MsiPath $productMsi -ProductCode $releaseProductCode
-
     Test-MsiPayloadCoherence `
         -MsiPath $productMsi `
         -ServiceBinary $gnxService `
@@ -211,6 +233,13 @@ try {
         -TrayBinary $gnxTray `
         -MachineImage $artifacts.podman_machine `
         -RuntimePayload $runtimePackage
+    if ($signingIdentity) {
+        Invoke-AuthenticodeSign `
+            -Path $productMsi `
+            -SigningIdentity $signingIdentity `
+            -TimestampUrl $TimestampUrl
+    }
+    Test-InstalledMsiIdentity -MsiPath $productMsi -ProductCode $releaseProductCode
 
     & dotnet tool run wix -- build `
         (Join-Path $installerRoot "source\bundle.wxs") `
@@ -236,6 +265,18 @@ try {
         -ProductMsiPath $productMsi `
         -WslMsiPath $artifacts.wsl `
         -PodmanMsiPath $artifacts.podman
+    if ($signingIdentity) {
+        Invoke-BurnAuthenticodeSign `
+            -BundlePath $setupExe `
+            -SigningIdentity $signingIdentity `
+            -TimestampUrl $TimestampUrl `
+            -WorkingDirectory $outputRoot
+        Test-BundleIdentityAndPayload `
+            -BundlePath $setupExe `
+            -ProductMsiPath $productMsi `
+            -WslMsiPath $artifacts.wsl `
+            -PodmanMsiPath $artifacts.podman
+    }
 
     Get-FileHash -Algorithm SHA256 -LiteralPath $productMsi, $setupExe
  } finally {

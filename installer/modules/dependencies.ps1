@@ -17,6 +17,33 @@ function Get-LockedArtifact {
     if ($file.Length -ne $Artifact.size -or $hash -ne $Artifact.sha256) {
         throw "Locked artifact mismatch for $($Artifact.id): $destination"
     }
+    if (-not $Artifact.authenticode) {
+        throw "Locked artifact $($Artifact.id) omits Authenticode policy."
+    }
+    switch ([string] $Artifact.authenticode.status) {
+        'valid' {
+            $signature = Get-AuthenticodeSignature -LiteralPath $destination
+            if ($signature.Status -ne 'Valid' -or
+                $signature.SignerCertificate.Thumbprint -ne $Artifact.authenticode.thumbprint) {
+                throw "Authenticode identity mismatch for locked artifact $($Artifact.id): status=$($signature.Status)."
+            }
+        }
+        'not_signed' {
+            $signature = Get-AuthenticodeSignature -LiteralPath $destination
+            if ($signature.Status -ne 'NotSigned' -or
+                [string]::IsNullOrWhiteSpace([string] $Artifact.authenticode.reason)) {
+                throw "Unsigned exception is invalid for locked artifact $($Artifact.id)."
+            }
+        }
+        'not_applicable' {
+            if ([string]::IsNullOrWhiteSpace([string] $Artifact.authenticode.reason)) {
+                throw "Non-Authenticode exception is invalid for locked artifact $($Artifact.id)."
+            }
+        }
+        default {
+            throw "Unsupported Authenticode policy for locked artifact $($Artifact.id)."
+        }
+    }
     return $destination
 }
 

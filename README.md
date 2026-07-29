@@ -1,4 +1,4 @@
-# Quetzalcoatl 0.2.12
+# Quetzalcoatl 0.2.13
 
 Quetzalcoatl is a Windows-managed MVP that installs and reconciles a Fedora Podman
 Machine containing the Tailscale and Proxmox runtime for controller and member nodes.
@@ -49,12 +49,15 @@ contracts and migration tests, never in filenames or parallel implementations.
 ## Build and validation
 
 ```powershell
+$env:GNX_SIGNING_CERTIFICATE_THUMBPRINT = '<production certificate thumbprint>'
 .\tools\check.ps1
 ```
 
 This validates repository taxonomy, contracts, remote execution, runtime and
-installer sources; runs format, lint and tests; then builds and inspects the MSI and
-`QuetzalcoatlSetup.exe`. Use `-SourceOnly` while iterating when physical installer
-artifacts are not required.
+installer sources; runs the pinned RustSec audit, format, lint and tests; then
+builds, signs and inspects the MSI and `QuetzalcoatlSetup.exe`. Use `-SourceOnly`
+while iterating when physical installer artifacts are not required. An unsigned QA
+build requires the explicit `installer\build.ps1 -AllowUnsigned` switch and is not
+releasable.
 
 Start with [docs/README.md](docs/README.md).

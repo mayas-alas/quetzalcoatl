@@ -8,7 +8,7 @@ use std::process::Command;
 use winreg::RegKey;
 use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};
 
-use self::staging::{StageError, StageRequest};
+use self::staging::{StageError, StageRequest, StagedArtifact};
 use crate::exit_codes::{
     INSTALL_MSI_FAILED, INSTALL_PAYLOAD_INVALID, INSTALL_PAYLOAD_MISSING, INSTALL_RESUME_LIMIT,
     INSTALL_STAGING_FAILED, OPERATIONAL_ERROR, PODMAN_INCOMPATIBLE, WSL_UNAVAILABLE,
@@ -223,11 +223,11 @@ fn registry_value<T: winreg::types::FromRegValue>(
     })
 }
 
-fn run_msi(msi: &Path, log: &Path) -> Result<i32, InstallFailure> {
+fn run_msi(msi: &StagedArtifact, log: &Path) -> Result<i32, InstallFailure> {
     let msiexec = windows::system32_file("msiexec.exe").map_err(operational)?;
     let status = Command::new(msiexec)
         .arg("/i")
-        .arg(msi)
+        .arg(msi.path())
         .arg("ALLUSERS=1")
         .arg("REBOOT=ReallySuppress")
         .arg("/qn")
@@ -239,7 +239,7 @@ fn run_msi(msi: &Path, log: &Path) -> Result<i32, InstallFailure> {
             exit_code: INSTALL_MSI_FAILED,
             message: format!(
                 "cannot launch Windows Installer for {}: {error}",
-                msi.display()
+                msi.path().display()
             ),
         })?;
     let code = status.code().ok_or_else(|| InstallFailure {
@@ -247,7 +247,7 @@ fn run_msi(msi: &Path, log: &Path) -> Result<i32, InstallFailure> {
         exit_code: INSTALL_MSI_FAILED,
         message: format!(
             "Windows Installer terminated while installing {}",
-            msi.display()
+            msi.path().display()
         ),
     })?;
     if matches!(code, 0 | 1641 | 3010) {
@@ -258,7 +258,7 @@ fn run_msi(msi: &Path, log: &Path) -> Result<i32, InstallFailure> {
             exit_code: INSTALL_MSI_FAILED,
             message: format!(
                 "Windows Installer returned {code} for {}; log: {}",
-                msi.display(),
+                msi.path().display(),
                 log.display()
             ),
         })

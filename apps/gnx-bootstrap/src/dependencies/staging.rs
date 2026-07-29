@@ -1,9 +1,15 @@
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+};
+
+use crate::windows::security;
 
 pub struct StageRequest<'a> {
     pub dependency_id: &'a str,
@@ -20,6 +26,17 @@ pub enum StageError {
     Io(String),
 }
 
+pub struct StagedArtifact {
+    path: PathBuf,
+    _lock: File,
+}
+
+impl StagedArtifact {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
 impl StageError {
     pub fn message(&self) -> &str {
         match self {
@@ -29,16 +46,12 @@ impl StageError {
 }
 
 pub fn installer_root() -> Result<PathBuf, StageError> {
-    let program_data = env::var_os("ProgramData")
-        .map(PathBuf::from)
-        .ok_or_else(|| StageError::Io("ProgramData is unavailable".into()))?;
-    if !program_data.is_absolute() {
-        return Err(StageError::Io("ProgramData is not an absolute path".into()));
-    }
-    Ok(program_data.join("Quetzalcoatl").join("Installer"))
+    let program_data = security::program_data().map_err(StageError::Io)?;
+    security::secure_owned_tree(&program_data, &["Quetzalcoatl", "Installer"])
+        .map_err(StageError::Io)
 }
 
-pub fn stage(request: &StageRequest<'_>) -> Result<PathBuf, StageError> {
+pub fn stage(request: &StageRequest<'_>) -> Result<StagedArtifact, StageError> {
     validate_fixed_name(request.file_name)?;
     let executable = env::current_exe()
         .map_err(|error| StageError::Io(format!("cannot resolve helper executable: {error}")))?;
@@ -48,22 +61,19 @@ pub fn stage(request: &StageRequest<'_>) -> Result<PathBuf, StageError> {
     let source = source_root.join(request.file_name);
     validate_file(&source, request)?;
 
-    let destination_root = installer_root()?
-        .join("cache")
-        .join(request.dependency_id)
-        .join(request.version);
-    fs::create_dir_all(&destination_root).map_err(|error| {
-        StageError::Io(format!(
-            "cannot create stable dependency cache {}: {error}",
-            destination_root.display()
-        ))
-    })?;
-    reject_symlink(&destination_root)?;
+    validate_fixed_name(request.dependency_id)?;
+    validate_fixed_name(request.version)?;
+    let installer_root = installer_root()?;
+    let destination_root = security::secure_owned_tree(
+        &installer_root,
+        &["cache", request.dependency_id, request.version],
+    )
+    .map_err(StageError::Io)?;
 
     let destination = destination_root.join(request.file_name);
     if destination.is_file() {
-        if validate_file(&destination, request).is_ok() {
-            return Ok(destination);
+        if let Ok(locked) = open_validated_locked(&destination, request) {
+            return Ok(locked);
         }
         let invalid = destination.with_extension("msi.invalid");
         let _ = fs::remove_file(&invalid);
@@ -85,8 +95,8 @@ pub fn stage(request: &StageRequest<'_>) -> Result<PathBuf, StageError> {
             destination.display()
         ))
     })?;
-    validate_file(&destination, request)?;
-    Ok(destination)
+    security::apply_protected_acl(&destination).map_err(StageError::Io)?;
+    open_validated_locked(&destination, request)
 }
 
 fn validate_fixed_name(value: &str) -> Result<(), StageError> {
@@ -97,18 +107,6 @@ fn validate_fixed_name(value: &str) -> Result<(), StageError> {
         return Err(StageError::Invalid(
             "dependency payload name is not a fixed file name".into(),
         ));
-    }
-    Ok(())
-}
-
-fn reject_symlink(path: &Path) -> Result<(), StageError> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| StageError::Io(format!("cannot inspect {}: {error}", path.display())))?;
-    if metadata.file_type().is_symlink() {
-        return Err(StageError::Invalid(format!(
-            "stable dependency cache is a symbolic link: {}",
-            path.display()
-        )));
     }
     Ok(())
 }
@@ -146,7 +144,8 @@ fn copy_exclusive(source: &Path, destination: &Path) -> Result<(), StageError> {
 }
 
 fn validate_file(path: &Path, request: &StageRequest<'_>) -> Result<(), StageError> {
-    let metadata = fs::metadata(path).map_err(|error| {
+    security::verify_real_file(path).map_err(StageError::Invalid)?;
+    let mut file = File::open(path).map_err(|error| {
         let message = format!(
             "dependency payload is unavailable at {}: {error}",
             path.display()
@@ -157,13 +156,61 @@ fn validate_file(path: &Path, request: &StageRequest<'_>) -> Result<(), StageErr
             StageError::Io(message)
         }
     })?;
+    validate_open_file(path, &mut file, request)
+}
+
+fn open_validated_locked(
+    path: &Path,
+    request: &StageRequest<'_>,
+) -> Result<StagedArtifact, StageError> {
+    let mut file = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .map_err(|error| {
+            StageError::Io(format!(
+                "cannot lock staged dependency {}: {error}",
+                path.display()
+            ))
+        })?;
+    validate_open_file(path, &mut file, request)?;
+    Ok(StagedArtifact {
+        path: path.to_path_buf(),
+        _lock: file,
+    })
+}
+
+fn validate_open_file(
+    path: &Path,
+    file: &mut File,
+    request: &StageRequest<'_>,
+) -> Result<(), StageError> {
+    let metadata = file.metadata().map_err(|error| {
+        StageError::Io(format!(
+            "cannot inspect dependency payload {}: {error}",
+            path.display()
+        ))
+    })?;
+    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(StageError::Invalid(format!(
+            "dependency payload is a reparse point at {}",
+            path.display()
+        )));
+    }
     if !metadata.is_file() || metadata.len() != request.expected_size {
         return Err(StageError::Invalid(format!(
             "dependency payload size differs at {}",
             path.display()
         )));
     }
-    let actual = sha256(path)?;
+    file.seek(SeekFrom::Start(0)).map_err(|error| {
+        StageError::Io(format!(
+            "cannot seek dependency payload {}: {error}",
+            path.display()
+        ))
+    })?;
+    let actual = sha256(file, path)?;
     if !actual.eq_ignore_ascii_case(request.expected_sha256) {
         return Err(StageError::Invalid(format!(
             "dependency payload SHA-256 differs at {}",
@@ -173,9 +220,7 @@ fn validate_file(path: &Path, request: &StageRequest<'_>) -> Result<(), StageErr
     Ok(())
 }
 
-fn sha256(path: &Path) -> Result<String, StageError> {
-    let mut file = File::open(path)
-        .map_err(|error| StageError::Io(format!("cannot hash {}: {error}", path.display())))?;
+fn sha256(file: &mut File, path: &Path) -> Result<String, StageError> {
     let mut digest = Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
     loop {

@@ -117,6 +117,7 @@ pub(crate) fn wait_for_tailscale(
 ) -> Result<TailscaleIdentity, GateError> {
     let mut last_error = String::from("Tailscale sidecar is not ready");
     for attempt in 0..90 {
+        crate::infrastructure::service_shutdown::ensure_running()?;
         match read_tailscale_status(podman, hostname, tailnet) {
             Ok(identity) => return Ok(identity),
             Err(error) => last_error = error,
@@ -145,6 +146,7 @@ pub(crate) fn stabilize_host_inventory(
     let mut previous = Some(initial);
     let mut last_error = String::from("Tailscale host inventory has not stabilized");
     for attempt in 0..30 {
+        crate::infrastructure::service_shutdown::ensure_running()?;
         thread::sleep(Duration::from_secs(2));
         match read_tailscale_status(podman, &hostname, tailnet) {
             Ok(current) => {
@@ -373,6 +375,7 @@ pub(crate) fn wait_for_tailscale_serve(
     let host_port = format!("{domain}:443");
     let mut last_error = String::from("Tailscale Serve config is not ready");
     for attempt in 0..60 {
+        crate::infrastructure::service_shutdown::ensure_running()?;
         match machine_stdin(
             podman,
             [

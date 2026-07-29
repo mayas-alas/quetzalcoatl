@@ -11,7 +11,11 @@
       "file_name": "WinSW-x64.exe",
       "size": 18243033,
       "sha256": "05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA",
-      "url": "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
+      "url": "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe",
+      "authenticode": {
+        "status": "not_signed",
+        "reason": "Upstream WinSW 2.12.0 artifact is unsigned; exact size and SHA-256 are mandatory and the signed product MSI protects installation integrity."
+      }
     },
     {
       "id": "wsl",
@@ -19,7 +23,11 @@
       "file_name": "wsl.2.7.10.0.x64.msi",
       "size": 258605056,
       "sha256": "1A62F90A43C03CC5BDA47DFD0B6FAF496AC70FD4389190518120A4F84FC895CF",
-      "url": "https://github.com/microsoft/WSL/releases/download/2.7.10/wsl.2.7.10.0.x64.msi"
+      "url": "https://github.com/microsoft/WSL/releases/download/2.7.10/wsl.2.7.10.0.x64.msi",
+      "authenticode": {
+        "status": "valid",
+        "thumbprint": "AB172913A2960A224809EE8A0C371CD47A079B72"
+      }
     },
     {
       "id": "podman",
@@ -27,7 +35,11 @@
       "file_name": "podman-installer-windows-amd64.msi",
       "size": 27414528,
       "sha256": "3B65848F2D9AE652A15C35F2496A9ECE2E07F28746FA651415D519AE7C5902AD",
-      "url": "https://github.com/podman-container-tools/podman/releases/download/v6.0.1/podman-installer-windows-amd64.msi"
+      "url": "https://github.com/podman-container-tools/podman/releases/download/v6.0.1/podman-installer-windows-amd64.msi",
+      "authenticode": {
+        "status": "valid",
+        "thumbprint": "F08C4BA9A87010AA82689532B648EF0B9E7101EE"
+      }
     }
   ]
 }

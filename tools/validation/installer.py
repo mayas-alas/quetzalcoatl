@@ -198,11 +198,16 @@ def main() -> None:
         "Test-MaintenanceContract",
         "Test-MsiPayloadCoherence",
         "Test-InstalledMsiIdentity",
+        "Invoke-AuthenticodeSign",
+        "Invoke-BurnAuthenticodeSign",
+        "SigningCertificateThumbprint",
         "SetLastWriteTimeUtc",
         "runtime-payload",
     ):
         if marker not in build:
             fail(f"release entry point omits {marker!r}")
+    if build.find("-Path $productMsi") > build.find("Test-InstalledMsiIdentity"):
+        fail("installed MSI collision check must inspect the final signed package bytes")
     if "link-arg=/Brepro" not in rust_build:
         fail("release Rust artifacts are not linked reproducibly")
     service_main = (ROOT / "apps" / "gnx-service" / "src" / "main.rs").read_text(
@@ -230,9 +235,69 @@ def main() -> None:
         / "infrastructure"
         / "service_shutdown.rs"
     ).read_text(encoding="utf-8")
-    for marker in ("CreateEventW", "WaitForSingleObject", "OpenEventW", "SetEvent"):
+    for marker in (
+        "CreateEventW",
+        "WaitForSingleObject",
+        "OpenEventW",
+        "SetEvent",
+        "ConvertStringSecurityDescriptorToSecurityDescriptorW",
+        "ERROR_ALREADY_EXISTS",
+        "SHUTDOWN_REQUESTED",
+    ):
         if marker not in service_shutdown:
             fail(f"bounded service shutdown omits {marker!r}")
+    if "process::exit" in service_shutdown:
+        fail("service shutdown still terminates the process abruptly")
+    pipe = (
+        ROOT
+        / "apps"
+        / "gnx-service"
+        / "src"
+        / "infrastructure"
+        / "windows_pipe.rs"
+    ).read_text(encoding="utf-8")
+    for marker in (
+        "PIPE_INSTANCES: usize = 4",
+        "CLIENT_IO_TIMEOUT",
+        "FILE_FLAG_OVERLAPPED",
+        "GetOverlappedResultEx",
+        "CancelIoEx",
+    ):
+        if marker not in pipe:
+            fail(f"bounded local IPC omits {marker!r}")
+    staging = (
+        ROOT
+        / "apps"
+        / "gnx-bootstrap"
+        / "src"
+        / "dependencies"
+        / "staging.rs"
+    ).read_text(encoding="utf-8")
+    staging_security = (
+        ROOT
+        / "apps"
+        / "gnx-bootstrap"
+        / "src"
+        / "windows"
+        / "security.rs"
+    ).read_text(encoding="utf-8")
+    for marker in (
+        "secure_owned_tree",
+        "open_validated_locked",
+        "share_mode(FILE_SHARE_READ)",
+        "FILE_FLAG_OPEN_REPARSE_POINT",
+    ):
+        if marker not in staging:
+            fail(f"privileged dependency staging omits {marker!r}")
+    for marker in (
+        "HKEY_LOCAL_MACHINE",
+        "Common AppData",
+        "PROTECTED_DACL_SECURITY_INFORMATION",
+        "FILE_ATTRIBUTE_REPARSE_POINT",
+        "WINDOWS_SERVICE_SID",
+    ):
+        if marker not in staging_security:
+            fail(f"protected installer root omits {marker!r}")
     for marker in ("load_payload_files()", "load_machine_image()", "installed_machine_image"):
         if marker not in service_installation:
             fail(f"installed-payload validation omits {marker!r}")

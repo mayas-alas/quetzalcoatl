@@ -1,7 +1,6 @@
 use crate::infrastructure::models::PayloadSpec;
 
-pub(crate) const EXPECTED_SERVICE_SID: &str =
-    "S-1-5-80-1414281857-1943412974-186110390-2486725240-2230548587";
+pub(crate) const EXPECTED_SERVICE_SID: &str = gnx_contracts::WINDOWS_SERVICE_SID;
 pub(crate) const MACHINE_NAME: &str = "quetzalcoatl";
 pub(crate) const MACHINE_NETWORK_MTU: u32 = 1500;
 pub(crate) const RUNTIME_GENERATION: &str = gnx_contracts::RUNTIME_GENERATION;

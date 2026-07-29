@@ -7,7 +7,7 @@ use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 
-use gnx_contracts::InstallerConfiguration;
+use gnx_contracts::{InstallerConfiguration, WINDOWS_SERVICE_SID};
 use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -25,7 +25,6 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use zeroize::Zeroize;
 
-const SERVICE_SID: &str = "S-1-5-80-1414281857-1943412974-186110390-2486725240-2230548587";
 const PRODUCT_DATA_DIRECTORY: &str = "Quetzalcoatl.Runtime";
 const BLOB_NAME: &str = "installer-inputs.bin";
 const DPAPI_ENTROPY: &[u8] = b"Quetzalcoatl/installer-inputs/v1";
@@ -346,7 +345,9 @@ struct SecurityDescriptor(PSECURITY_DESCRIPTOR);
 
 impl SecurityDescriptor {
     fn new() -> Result<Self, ConfigurationError> {
-        let sddl = wide(&format!("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;{SERVICE_SID})"));
+        let sddl = wide(&format!(
+            "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;{WINDOWS_SERVICE_SID})"
+        ));
         let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
         // Safety: sddl is NUL-terminated and descriptor receives LocalAlloc-owned memory.
         if unsafe {

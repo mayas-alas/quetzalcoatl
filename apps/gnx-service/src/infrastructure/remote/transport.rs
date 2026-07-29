@@ -36,6 +36,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    crate::infrastructure::service_shutdown::ensure_running()?;
     if input.len() > MAX_REMOTE_INPUT_BYTES {
         return Err(GateError::command(format!(
             "remote stdin exceeds the {} byte contract",
@@ -81,6 +82,18 @@ where
 
     let started = Instant::now();
     let status = loop {
+        if crate::infrastructure::service_shutdown::requested() {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdin_worker.join();
+            let _ = stdout_worker.join();
+            let _ = stderr_worker.join();
+            return Err(GateError::new(
+                "SERVICE_STOPPING",
+                Component::None,
+                "service shutdown canceled a Podman Machine operation",
+            ));
+        }
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if started.elapsed() < REMOTE_COMMAND_TIMEOUT => {
@@ -181,16 +194,78 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = Command::new(program)
+    crate::infrastructure::service_shutdown::ensure_running()?;
+    let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .creation_flags(CREATE_NO_WINDOW)
-        .output()
+        .spawn()
         .map_err(|error| {
             GateError::command(format!("cannot execute {}: {error}", program.display()))
         })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| GateError::command("local command stdout is unavailable"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| GateError::command("local command stderr is unavailable"))?;
+    let stdout_worker = thread::spawn(move || read_limited(stdout, "stdout"));
+    let stderr_worker = thread::spawn(move || read_limited(stderr, "stderr"));
+    let started = Instant::now();
+    let status = loop {
+        if crate::infrastructure::service_shutdown::requested() {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_worker.join();
+            let _ = stderr_worker.join();
+            return Err(GateError::new(
+                "SERVICE_STOPPING",
+                Component::None,
+                format!(
+                    "service shutdown canceled local command {}",
+                    program.display()
+                ),
+            ));
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() < REMOTE_COMMAND_TIMEOUT => {
+                thread::sleep(REMOTE_POLL_INTERVAL);
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_worker.join();
+                let _ = stderr_worker.join();
+                return Err(GateError::command(format!(
+                    "{} exceeded {} seconds",
+                    program.display(),
+                    REMOTE_COMMAND_TIMEOUT.as_secs()
+                )));
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_worker.join();
+                let _ = stderr_worker.join();
+                return Err(GateError::command(format!(
+                    "cannot poll {}: {error}",
+                    program.display()
+                )));
+            }
+        }
+    };
+    let stdout = join_worker(stdout_worker, "stdout")?;
+    let stderr = join_worker(stderr_worker, "stderr")?;
+    let output = Output {
+        status,
+        stdout,
+        stderr,
+    };
     check_output(output, &program.display().to_string())
 }
 

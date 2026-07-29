@@ -22,6 +22,9 @@ try {
         }
     }
 
+    & (Join-Path $PSScriptRoot 'security.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Security gate failed.' }
+
     & cargo fmt --all --check
     if ($LASTEXITCODE -ne 0) { throw 'cargo fmt failed.' }
 
@@ -38,4 +41,3 @@ try {
 } finally {
     Pop-Location
 }
-

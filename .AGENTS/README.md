@@ -1,6 +1,6 @@
 # Delivery contract
 
-`.AGENTS` governs the active Quetzalcoatl 0.2.12 delivery. It is not release
+`.AGENTS` governs the active Quetzalcoatl 0.2.13 delivery. It is not release
 history; completed historical changes belong in `CHANGELOG.md`.
 
 Read in order:
@@ -13,7 +13,8 @@ Read in order:
 ## Protocol
 
 1. Preserve the recorded dirty baseline and never revert unrelated user work.
-2. Claim only paths assigned to one workstream.
+2. Claim only paths assigned to one workstream. The coordinator may execute
+   workstreams sequentially when the delivery is explicitly assigned to one agent.
 3. Record cross-workstream requirements in `TRACKER.md`.
 4. Use one semantic name and one implementation; transitional copies are forbidden.
 5. A workstream reaches `review` only after its checks pass.
