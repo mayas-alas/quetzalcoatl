@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.14
+
+- Establishes GNX Labs as the product manufacturer and credits GNX Labs with
+  Hector AB in the product copyright.
+- Exposes License Agreement and Privacy Policy links on the initial Setup page;
+  both resolve to the repository's canonical AGPL-3.0-only `LICENSE`.
+- Adds a fail-closed self-signed Authenticode path for local QA while preserving
+  the requirement for a publicly trusted certificate in production.
+- Supports explicit public-certificate trust on a controlled QA machine so UAC
+  can resolve the self-signed GNX Labs publisher without exposing the private key.
+- Adds a reusable elevated QA lifecycle that proves repair, complete uninstall,
+  fresh install, ARP shape, tray launch and recovery of the same READY controller.
+- Supersedes the unsigned 0.2.13 QA candidate under fresh MSI and Burn identities.
+
 ## 0.2.13
 
 - Protects elevated installer state and dependency staging with explicit ACLs,

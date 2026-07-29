@@ -14,15 +14,15 @@ Delivers `LEG`, product `ARC`/`REL` and CLI/tray contracts.
 Owns `apps/gnx-service/**`, `runtime/**` and runtime compatibility tests.
 
 Delivers `RUN`, `REC` and the service half of `UNS`/`RBT`.
-For 0.2.13 this lane also delivers `IPC` and `SHD`.
+For 0.2.14 this lane preserves the completed `IPC` and `SHD` contracts.
 
 ## Agent C — delivery assurance
 
 Owns `apps/gnx-bootstrap/**`, `installer/**`, `tools/**` and operational/validation
 documentation.
 
-Delivers `BRD`, `ARP`, installer `REL`, and end-to-end `UNS`/`RBT`.
-For 0.2.13 this lane also delivers `STG` and `SUP`.
+Delivers `BRD`, `LNK`, `ARP`, installer `REL`, and end-to-end `UNS`/`RBT`.
+For 0.2.14 this lane preserves `STG` and completes `SUP` when signing is available.
 
 ## Coordinator-only
 

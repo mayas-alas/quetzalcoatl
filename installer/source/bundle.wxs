@@ -3,7 +3,8 @@
   xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
   <Bundle
     Name="Quetzalcoatl"
-    Manufacturer="Hector AB"
+    Manufacturer="GNX Labs"
+    Copyright="Copyright (c) 2008-2020 GNX Labs, Hector AB and other contributors"
     Version="$(var.ProductVersion)"
     IconSourceFile="$(var.BrandIcon)"
     ProviderKey="$(var.BundleUpgradeCode)"
@@ -13,7 +14,7 @@
       <bal:WixStandardBootstrapperApplication
         Theme="hyperlinkSidebarLicense"
         ThemeFile="$(var.BrandTheme)"
-        LicenseUrl="https://www.gnu.org/licenses/agpl-3.0.html"
+        LicenseUrl="https://github.com/mayas-alas/quetzalcoatl/blob/main/LICENSE"
         LogoFile="$(var.BrandLogo)"
         LogoSideFile="$(var.BrandSide)"
         ShowVersion="yes" />

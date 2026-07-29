@@ -1,16 +1,17 @@
-# 0.2.13 security scope
+# 0.2.14 legal identity scope
 
 ## Outcome
 
-Harden the privileged Windows maintenance and local-control surfaces without
-changing the product topology. Deliver one coherent source tree and one
-`QuetzalcoatlSetup.exe` that owns fresh install, upgrade, repair and uninstall.
+Complete the security cycle without changing the product topology, and establish
+one legal identity across source, binaries, MSI and Burn. Deliver one coherent
+source tree and one `QuetzalcoatlSetup.exe` that owns fresh install, upgrade,
+repair and uninstall.
 
 ## Included
 
 | ID | Outcome | Acceptance |
 |---|---|---|
-| LEG | Correct product licensing | AGPL-3.0-only, Hector AB notice and separate third-party notices. |
+| LEG | Correct product licensing | AGPL-3.0-only; GNX Labs manufacturer; GNX Labs and Hector AB copyright; separate third-party notices. |
 | BRD | Canonical branding | One `installer/assets` tree supplies MSI, Burn, tray and executable branding. |
 | ARC | Clear module boundaries | Four Cargo packages; no parallel or version-suffixed implementations. |
 | RUN | Closed runtime operations | Typed local/remote operations, bounded stdin/output/time and atomic durable files. |
@@ -22,7 +23,8 @@ changing the product topology. Deliver one coherent source tree and one
 | IPC | Bounded local control | Named Pipe remains local/authenticated and a stalled client cannot block subsequent clients indefinitely. |
 | SHD | Cooperative shutdown | Stop rejects event precreation, stops accepting IPC and joins reconciliation without `process::exit`. |
 | SUP | Verifiable supply chain | Dependency advisories and Authenticode policy are explicit release gates; unsigned production output fails closed. |
-| REL | Integrated release | Version, identities, build, tests, hashes and physical evidence agree on 0.2.13. |
+| REL | Integrated release | Version, identities, build, tests, hashes and physical evidence agree on 0.2.14. |
+| LNK | Initial legal disclosure | Setup initially shows License Agreement and Privacy Policy links; both open the canonical repository `LICENSE` over HTTPS. |
 
 ## Preserved invariants
 

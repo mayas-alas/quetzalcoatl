@@ -34,7 +34,11 @@ function Resolve-CodeSigningCertificate {
     if (-not ($certificate.EnhancedKeyUsageList.ObjectId -contains '1.3.6.1.5.5.7.3.3')) {
         throw "Certificate $normalized is not authorized for code signing."
     }
-    $match
+    [pscustomobject]@{
+        Certificate = $certificate
+        MachineStore = $match.MachineStore
+        SelfSigned = $certificate.Subject -eq $certificate.Issuer
+    }
 }
 
 function Get-SignToolPath {
@@ -63,8 +67,9 @@ function Invoke-AuthenticodeSign {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "Cannot sign absent artifact: $Path"
     }
-    if ($TimestampUrl -notmatch '^https://') {
-        throw 'The Authenticode timestamp URL must use HTTPS.'
+    if ($TimestampUrl -ne 'http://timestamp.digicert.com' -and
+        $TimestampUrl -notmatch '^https://') {
+        throw 'The Authenticode timestamp URL must use HTTPS or the pinned DigiCert RFC 3161 endpoint.'
     }
     $signTool = Get-SignToolPath
     $arguments = @(

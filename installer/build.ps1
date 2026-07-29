@@ -4,8 +4,9 @@ param(
     [string] $RebootContractBundleXml,
     [switch] $TestRebootContractOnly,
     [string] $SigningCertificateThumbprint = $env:GNX_SIGNING_CERTIFICATE_THUMBPRINT,
-    [string] $TimestampUrl = 'https://timestamp.digicert.com',
-    [switch] $AllowUnsigned
+    [string] $TimestampUrl = 'http://timestamp.digicert.com',
+    [switch] $AllowUnsigned,
+    [switch] $AllowSelfSigned
 )
 
 $ErrorActionPreference = "Stop"
@@ -63,13 +64,30 @@ Test-DependencyStagingContract
 Test-MaintenanceContract
 Test-RuntimePayloadSource -RuntimePayload (Join-Path $repoRoot 'runtime') -ExpectedPayloadVersion $runtimePayloadContract
 $signingIdentity = $null
+if ($AllowUnsigned -and $AllowSelfSigned) {
+    throw 'AllowUnsigned and AllowSelfSigned are mutually exclusive.'
+}
 if ([string]::IsNullOrWhiteSpace($SigningCertificateThumbprint)) {
+    if ($AllowSelfSigned) {
+        throw 'AllowSelfSigned requires an explicit SigningCertificateThumbprint.'
+    }
     if (-not $AllowUnsigned) {
         throw 'Production release requires -SigningCertificateThumbprint or GNX_SIGNING_CERTIFICATE_THUMBPRINT.'
     }
     Write-Warning 'Building an unsigned development artifact; it is not releasable.'
 } else {
+    if ($AllowUnsigned) {
+        throw 'AllowUnsigned must not be combined with a signing certificate.'
+    }
     $signingIdentity = Resolve-CodeSigningCertificate -Thumbprint $SigningCertificateThumbprint
+    if ($signingIdentity.SelfSigned) {
+        if (-not $AllowSelfSigned) {
+            throw 'Production release rejects self-signed certificates. Use -AllowSelfSigned only for local QA.'
+        }
+        Write-Warning 'Building a self-signed development artifact; it is trusted only by explicitly configured test machines and is not releasable.'
+    } elseif ($AllowSelfSigned) {
+        throw 'AllowSelfSigned is valid only for a self-signed development certificate.'
+    }
 }
 
 if (-not (Test-Path -LiteralPath $dotnetToolManifest -PathType Leaf)) {

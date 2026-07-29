@@ -7,7 +7,7 @@
 | Commit | `63c2407be182c1ff78a2806f84bdf90b3c86f4e3` |
 | Branch | `master` |
 | Dirty baseline | Clean |
-| Delivery | Integrated 0.2.13 security cycle |
+| Delivery | Integrated 0.2.14 legal identity cycle |
 | Coordinator | Codex |
 
 ## Board
@@ -17,8 +17,10 @@
 | STG | Coordinator | done | elevated upgrade protected ProgramData; standard token cannot inspect/traverse installer root |
 | IPC | Coordinator | done | stalled client left concurrent status at 25 ms and was disconnected after deadline |
 | SHD | Coordinator | done | stop two seconds into reconciliation returned 0 and recovered the same READY controller |
-| SUP | Coordinator | blocked | RustSec and upstream Authenticode pass; trusted product certificate absent |
-| REL | Coordinator | blocked | upgrade, repair and hostile lifecycle acceptance pass; signed production build pending |
+| LEG | Coordinator | done | GNX Labs manufacturer and joint GNX Labs/Hector AB copyright verified across all product PE files and Setup |
+| LNK | Coordinator | done | initial Setup page visibly exposes both links through the canonical repository LICENSE control |
+| SUP | Coordinator | blocked | RustSec passes; self-signed/timestamped QA path passes and is rejected by production mode; publicly trusted certificate absent |
+| REL | Coordinator | blocked | 0.2.14 source/build, exact-MSI upgrade state, repair, uninstall and fresh-install lifecycle pass; publicly trusted production build remains |
 
 ## Resolved blockers
 

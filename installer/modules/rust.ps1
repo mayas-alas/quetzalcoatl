@@ -5,7 +5,11 @@ function Build-RustReleaseArtifacts {
     )
 
     Remove-Item -LiteralPath $ReleaseBinaries -Force -ErrorAction SilentlyContinue
-    $rustBuildStarted = [DateTime]::UtcNow
+    foreach ($releaseBinary in $ReleaseBinaries) {
+        if (Test-Path -LiteralPath $releaseBinary) {
+            throw "Rust release binary could not be cleared before rebuild: $releaseBinary"
+        }
+    }
 
     foreach ($rustPackage in $Packages) {
         & cargo clean -p $rustPackage
@@ -34,9 +38,6 @@ function Build-RustReleaseArtifacts {
     foreach ($releaseBinary in $ReleaseBinaries) {
         if (-not (Test-Path -LiteralPath $releaseBinary)) {
             throw "Fresh Rust release binary is absent: $releaseBinary"
-        }
-        if ((Get-Item -LiteralPath $releaseBinary).LastWriteTimeUtc -lt $rustBuildStarted.AddSeconds(-2)) {
-            throw "Rust release binary was not freshly produced by this build: $releaseBinary"
         }
     }
 

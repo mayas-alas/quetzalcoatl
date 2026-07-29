@@ -1,6 +1,6 @@
 # Delivery contract
 
-`.AGENTS` governs the active Quetzalcoatl 0.2.13 delivery. It is not release
+`.AGENTS` governs the active Quetzalcoatl 0.2.14 delivery. It is not release
 history; completed historical changes belong in `CHANGELOG.md`.
 
 Read in order:

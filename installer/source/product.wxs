@@ -2,7 +2,7 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package
     Name="Quetzalcoatl"
-    Manufacturer="Hector AB"
+    Manufacturer="GNX Labs"
     Version="$(var.ProductVersion)"
     ProductCode="$(var.ProductCode)"
     UpgradeCode="$(var.UpgradeCode)"

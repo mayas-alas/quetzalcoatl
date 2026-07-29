@@ -201,6 +201,9 @@ def main() -> None:
         "Invoke-AuthenticodeSign",
         "Invoke-BurnAuthenticodeSign",
         "SigningCertificateThumbprint",
+        "AllowSelfSigned",
+        "Production release rejects self-signed certificates",
+        "http://timestamp.digicert.com",
         "SetLastWriteTimeUtc",
         "runtime-payload",
     ):
@@ -208,6 +211,38 @@ def main() -> None:
             fail(f"release entry point omits {marker!r}")
     if build.find("-Path $productMsi") > build.find("Test-InstalledMsiIdentity"):
         fail("installed MSI collision check must inspect the final signed package bytes")
+    development_certificate = (
+        INSTALLER / "create-development-certificate.ps1"
+    ).read_text(encoding="utf-8")
+    for marker in (
+        "CN=GNX Labs",
+        "CodeSigningCert",
+        "KeyExportPolicy NonExportable",
+        "Cert:\\CurrentUser\\My",
+        "StoreLocation]::CurrentUser",
+        "TrustForLocalMachine",
+        "StoreLocation]::LocalMachine",
+        "'Root', 'TrustedPublisher'",
+        "$certificate.RawData",
+        "$installed[0].HasPrivateKey",
+        "Purpose = 'DevelopmentOnly'",
+    ):
+        if marker not in development_certificate:
+            fail(f"development certificate contract omits {marker!r}")
+    lifecycle = (ROOT / "tools" / "qa-lifecycle.ps1").read_text(encoding="utf-8")
+    for marker in (
+        "Assert-Administrator",
+        "Get-AuthenticodeSignature",
+        "CN=GNX Labs",
+        "Invoke-SetupOperation -Stage 'repair' -Action '/repair'",
+        "Invoke-SetupOperation -Stage 'uninstall' -Action '/uninstall'",
+        "Invoke-SetupOperation -Stage 'fresh-install' -Action '/install'",
+        "Wait-Ready",
+        "Expected one visible Setup and one hidden MSI registration",
+        "Expected one tray process after fresh install",
+    ):
+        if marker not in lifecycle:
+            fail(f"QA lifecycle contract omits {marker!r}")
     if "link-arg=/Brepro" not in rust_build:
         fail("release Rust artifacts are not linked reproducibly")
     service_main = (ROOT / "apps" / "gnx-service" / "src" / "main.rs").read_text(
@@ -375,10 +410,15 @@ def main() -> None:
         node for node in product.iter() if local_name(node) == "Package"
     )
     burn_bundle = next(node for node in bundle.iter() if local_name(node) == "Bundle")
-    if product_package.attrib.get("Manufacturer") != "Hector AB":
-        fail("MSI manufacturer differs from the product copyright owner")
-    if burn_bundle.attrib.get("Manufacturer") != "Hector AB":
-        fail("Burn manufacturer differs from the product copyright owner")
+    if product_package.attrib.get("Manufacturer") != "GNX Labs":
+        fail("MSI manufacturer must identify GNX Labs")
+    if burn_bundle.attrib.get("Manufacturer") != "GNX Labs":
+        fail("Burn manufacturer must identify GNX Labs")
+    if (
+        burn_bundle.attrib.get("Copyright")
+        != "Copyright (c) 2008-2020 GNX Labs, Hector AB and other contributors"
+    ):
+        fail("Burn copyright must credit GNX Labs and Hector AB")
     license_owner = next(
         (
             node
@@ -390,9 +430,34 @@ def main() -> None:
     if (
         license_owner is None
         or license_owner.attrib.get("LicenseUrl")
-        != "https://www.gnu.org/licenses/agpl-3.0.html"
+        != "https://github.com/mayas-alas/quetzalcoatl/blob/main/LICENSE"
     ):
-        fail("Burn does not expose the AGPLv3 license")
+        fail("Burn does not expose the canonical repository LICENSE")
+    eula_links = [
+        node
+        for node in theme.iter()
+        if local_name(node) == "Hypertext"
+        and node.attrib.get("Name") == "EulaHyperlink"
+    ]
+    if len(eula_links) != 1:
+        fail("Burn must expose exactly one functional legal hyperlink control")
+    legal_text = eula_links[0].text or ""
+    for legal_link in ("License Agreement", "Privacy Policy"):
+        if legal_link not in legal_text:
+            fail(f"Burn initial page omits the {legal_link} link")
+    if legal_text.count('<a href="#">') != 2:
+        fail("Burn legal control must expose two links to the canonical LICENSE")
+    accept_boxes = [
+        node
+        for node in theme.iter()
+        if local_name(node) == "Checkbox"
+        and node.attrib.get("Name") == "EulaAcceptCheckbox"
+    ]
+    if (
+        len(accept_boxes) != 1
+        or "License Agreement and Privacy Policy" not in (accept_boxes[0].text or "")
+    ):
+        fail("Burn acceptance text must cover both legal links")
     license_names = {
         node.attrib.get("Name")
         for node in product.iter()

@@ -1,7 +1,8 @@
-# Quetzalcoatl 0.2.13
+# Quetzalcoatl 0.2.14
 
 Quetzalcoatl is a Windows-managed MVP that installs and reconciles a Fedora Podman
 Machine containing the Tailscale and Proxmox runtime for controller and member nodes.
+It is developed by GNX Labs, with copyright held jointly by GNX Labs and Hector AB.
 
 `QuetzalcoatlSetup.exe` is the sole installation and maintenance interface. The MSI,
 bootstrap helper, Windows service, CLI and tray are internal components managed by
@@ -59,5 +60,10 @@ builds, signs and inspects the MSI and `QuetzalcoatlSetup.exe`. Use `-SourceOnly
 while iterating when physical installer artifacts are not required. An unsigned QA
 build requires the explicit `installer\build.ps1 -AllowUnsigned` switch and is not
 releasable.
+
+A locally trusted self-signed build uses
+`installer\create-development-certificate.ps1` and the explicit
+`-AllowSelfSigned` switch. It validates Authenticode plumbing only and is not a
+publicly trusted release.
 
 Start with [docs/README.md](docs/README.md).

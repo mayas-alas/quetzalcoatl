@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "gnx"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "gnx-contracts",
  "serde_json",
@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "gnx-bootstrap"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "gnx-contracts",
  "serde",
@@ -80,7 +80,7 @@ dependencies = [
 
 [[package]]
 name = "gnx-contracts"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "serde",
  "serde_json",
@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "gnx-service"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "gnx-contracts",
  "serde",

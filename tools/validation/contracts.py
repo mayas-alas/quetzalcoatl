@@ -26,8 +26,8 @@ def main() -> None:
     release = tomllib.loads((ROOT / "release" / "manifest.toml").read_text(encoding="utf-8"))
     workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
     version = release["version"]
-    if version != "0.2.13":
-        fail("release manifest must identify 0.2.13")
+    if version != "0.2.14":
+        fail("release manifest must identify 0.2.14")
     if workspace["workspace"]["package"]["version"] != version:
         fail("workspace package version differs from the release manifest")
     identities = release["identities"]
@@ -50,24 +50,54 @@ def main() -> None:
             fail(f"release reuses {current} from the previous package")
     if (
         identities["previous_product_code"]
-        != "{EA65FB51-701D-49AD-B248-A148E42B3404}"
+        != "{8044A98C-6132-401C-8012-71FF9B96F4C5}"
         or identities["previous_package_code"]
-        != "{A8838902-2C26-461B-AB85-6EF4DD6DE55B}"
+        != "{968B4172-8E6A-4702-B2F5-32854E857FCF}"
         or identities["previous_bundle_id"]
-        != "{8AD7A06A-8895-4033-B45B-51B8C500F593}"
+        != "{7FEAF333-9C20-4BC3-BD60-6E5AE6BE2B91}"
     ):
-        fail("0.2.13 does not identify the accepted 0.2.12 package")
+        fail("0.2.14 does not identify the superseded 0.2.13 QA package")
     package = workspace["workspace"]["package"]
     if package.get("license") != "AGPL-3.0-only":
         fail("workspace product license must be AGPL-3.0-only")
-    if package.get("authors") != ["Hector AB and other contributors"]:
+    if package.get("authors") != ["GNX Labs, Hector AB and other contributors"]:
         fail("workspace author metadata differs from the product notice")
     license_hash = hashlib.sha256((ROOT / "LICENSE").read_bytes()).hexdigest().upper()
     if license_hash != "D8A6CC31ABC16B6748C7A21F21611F5A1EC33F67D22CA23D7DA1C19B95496BEE":
         fail("root LICENSE differs from the canonical AGPL-3.0-only text")
     notice = (ROOT / "NOTICE").read_text(encoding="utf-8")
-    if "Copyright (c) 2008-2020 Hector AB and other contributors" not in notice:
+    if (
+        "Copyright (c) 2008-2020 GNX Labs, Hector AB and other contributors"
+        not in notice
+    ):
         fail("root NOTICE omits the exact product copyright")
+    windows_resource = (ROOT / "tools" / "windows_resource.rs").read_text(
+        encoding="utf-8"
+    )
+    require(
+        windows_resource,
+        (
+            'VALUE "CompanyName", "GNX Labs\\0"',
+            'VALUE "LegalCopyright", "Copyright (c) 2008-2020 GNX Labs, Hector AB and other contributors\\0"',
+            'VALUE "ProductName", "Quetzalcoatl\\0"',
+        ),
+        "Windows product resources",
+    )
+    for build_script, binaries in (
+        ("apps/gnx/build.rs", ('stem: "gnx"', 'stem: "gnx-tray"')),
+        ("apps/gnx-service/build.rs", ('stem: "gnx-service"',)),
+        ("apps/gnx-bootstrap/build.rs", ('stem: "gnx-bootstrap"',)),
+    ):
+        source = (ROOT / build_script).read_text(encoding="utf-8")
+        require(
+            source,
+            (
+                'include!("../../tools/windows_resource.rs");',
+                "compile_product_resources",
+                *binaries,
+            ),
+            build_script,
+        )
 
     expected_contracts = {
         "protocol_schema": 2,

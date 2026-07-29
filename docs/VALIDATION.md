@@ -39,3 +39,42 @@ signed before MSI packaging; MSI is signed before Burn packaging; the detached B
 engine and final bundle are signed and timestamped. `-AllowUnsigned` exists only for
 local installer QA and its artifacts must never be recorded as accepted release
 evidence.
+
+For local Authenticode QA, create or reuse the non-exportable GNX Labs development
+certificate and pass its thumbprint explicitly. The script trusts only its public
+certificate for the current Windows user. `-AllowSelfSigned` remains non-releasable,
+and the default production path rejects self-signed certificates:
+
+```powershell
+$certificate = .\installer\create-development-certificate.ps1
+.\installer\build.ps1 `
+    -SigningCertificateThumbprint $certificate.Thumbprint `
+    -AllowSelfSigned
+```
+
+The default RFC 3161 endpoint is DigiCert's official
+`http://timestamp.digicert.com`. RFC 3161 signs the timestamp response itself;
+the signing gate requires a trusted timestamper certificate and accepts no other
+plain-HTTP endpoint.
+
+On a dedicated QA machine, an administrator may additionally trust the public
+certificate for all local users so UAC can resolve the publisher as GNX Labs:
+
+```powershell
+Start-Process powershell -Verb RunAs -Wait -ArgumentList @(
+    '-NoProfile',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', (Resolve-Path '.\installer\create-development-certificate.ps1'),
+    '-TrustForLocalMachine'
+)
+```
+
+This adds only the public certificate to `LocalMachine\Root` and
+`LocalMachine\TrustedPublisher`. It is appropriate only for controlled QA
+machines and does not create public trust on other computers.
+
+After trust is established, `tools\qa-lifecycle.ps1` performs the reusable
+physical QA sequence: repair, complete uninstall and fresh install. It requires
+the expected version/controller, validates the timestamped GNX Labs signer, checks
+one visible Setup plus one hidden MSI registration, and requires the same READY
+controller after maintenance.
