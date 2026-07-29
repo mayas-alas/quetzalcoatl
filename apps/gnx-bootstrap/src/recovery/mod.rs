@@ -260,6 +260,44 @@ mod tests {
     }
 
     #[test]
+    fn migrates_the_0_2_1_journal_into_upgrade_operation() {
+        let previous = br#"{
+            "schema_version": 2,
+            "product_version": "0.2.1",
+            "operation": "repair",
+            "phase": "PODMAN_INSTALLED",
+            "attempt": 1,
+            "last_error_code": null,
+            "last_error_message": null
+        }"#;
+        let journal = InstallJournal::decode(previous, crate::RequestedOperation::Install).unwrap();
+        assert_eq!(journal.product_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(journal.previous_product_version.as_deref(), Some("0.2.1"));
+        assert_eq!(journal.operation, InstallOperation::Upgrade);
+        assert_eq!(journal.phase, "STARTED");
+        assert_eq!(journal.attempt, 0);
+    }
+
+    #[test]
+    fn migrates_the_0_2_4_journal_into_upgrade_operation() {
+        let previous = br#"{
+            "schema_version": 2,
+            "product_version": "0.2.4",
+            "operation": "repair",
+            "phase": "PODMAN_INSTALLED",
+            "attempt": 0,
+            "last_error_code": null,
+            "last_error_message": null
+        }"#;
+        let journal = InstallJournal::decode(previous, crate::RequestedOperation::Install).unwrap();
+        assert_eq!(journal.product_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(journal.previous_product_version.as_deref(), Some("0.2.4"));
+        assert_eq!(journal.operation, InstallOperation::Upgrade);
+        assert_eq!(journal.phase, "STARTED");
+        assert_eq!(journal.attempt, 0);
+    }
+
+    #[test]
     fn a_repair_request_is_explicit_and_keeps_the_current_checkpoint() {
         let current = format!(
             r#"{{

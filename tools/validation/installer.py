@@ -73,8 +73,16 @@ def main() -> None:
         ):
             fail(f"closed maintenance operation differs for {package_id}")
 
-    if sum(local_name(node) == "MsiPackage" for node in bundle.iter()) != 1:
+    msi_packages = [
+        node for node in bundle.iter() if local_name(node) == "MsiPackage"
+    ]
+    if len(msi_packages) != 1:
         fail("bundle must contain one internal product MSI")
+    if (
+        msi_packages[0].attrib.get("Id") != "QuetzalcoatlProduct"
+        or msi_packages[0].attrib.get("Visible") != "no"
+    ):
+        fail("internal product MSI must be hidden behind the sole Setup ARP entry")
     if not any(
         local_name(node) == "Button" and node.attrib.get("Name") == "RepairButton"
         for node in theme.iter()
@@ -97,6 +105,52 @@ def main() -> None:
         ]
         if len(files) != 1 or files[0].attrib.get("Id") != file_id or files[0].attrib.get("KeyPath") != "yes":
             fail(f"MSI key path differs for {component_id}")
+
+    tray_launch = next(
+        (
+            node
+            for node in product.iter()
+            if local_name(node) == "CustomAction"
+            and node.attrib.get("Id") == "LaunchQuetzalcoatlTray"
+        ),
+        None,
+    )
+    if (
+        tray_launch is None
+        or tray_launch.attrib.get("FileRef") != "GnxTray"
+        or tray_launch.attrib.get("ExeCommand") != "--launch-detached"
+        or tray_launch.attrib.get("Execute") != "immediate"
+        or tray_launch.attrib.get("Impersonate") != "yes"
+        or tray_launch.attrib.get("Return") != "check"
+        or "Directory" in tray_launch.attrib
+    ):
+        fail("tray launch must use the checked detached-launch contract")
+    tray_shortcut = next(
+        (
+            node
+            for node in product.iter()
+            if local_name(node) == "Shortcut"
+            and node.attrib.get("Id") == "TrayStartupShortcut"
+        ),
+        None,
+    )
+    if (
+        tray_shortcut is None
+        or tray_shortcut.attrib.get("WorkingDirectory") != "SystemFolder"
+    ):
+        fail("startup tray must not use the MSI-owned product directory as cwd")
+    service_config = ET.parse(
+        INSTALLER / "source" / "Quetzalcoatl.Service.xml"
+    ).getroot()
+    service_working_directory = service_config.findtext("workingdirectory")
+    if service_working_directory != r"%ProgramData%\Quetzalcoatl\Installer":
+        fail("service working directory must stay outside the MSI-owned product tree")
+    if (
+        service_config.findtext("stopexecutable") != r"%BASE%\gnx-service.exe"
+        or service_config.findtext("stoparguments") != "--stop-managed-machine"
+        or service_config.find("startarguments") is None
+    ):
+        fail("service stop must release the managed Podman machine without deleting it")
 
     payload_validator = next(
         (
@@ -157,12 +211,41 @@ def main() -> None:
     service_installation = (
         ROOT / "apps" / "gnx-service" / "src" / "application" / "installation.rs"
     ).read_text(encoding="utf-8")
-    for marker in ("--validate-installation", "ValidateInstallation"):
+    bootstrap_checks = (
+        ROOT / "apps" / "gnx-bootstrap" / "src" / "host" / "checks.rs"
+    ).read_text(encoding="utf-8")
+    for marker in (
+        "--validate-installation",
+        "ValidateInstallation",
+        "--stop-managed-machine",
+        "service_shutdown::signal()",
+    ):
         if marker not in service_main:
             fail(f"service installed-payload mode omits {marker!r}")
+    service_shutdown = (
+        ROOT
+        / "apps"
+        / "gnx-service"
+        / "src"
+        / "infrastructure"
+        / "service_shutdown.rs"
+    ).read_text(encoding="utf-8")
+    for marker in ("CreateEventW", "WaitForSingleObject", "OpenEventW", "SetEvent"):
+        if marker not in service_shutdown:
+            fail(f"bounded service shutdown omits {marker!r}")
     for marker in ("load_payload_files()", "load_machine_image()", "installed_machine_image"):
         if marker not in service_installation:
             fail(f"installed-payload validation omits {marker!r}")
+    for marker in (
+        "feature_output_is_enabled",
+        "decode_windows_text",
+        "dism_enabled_state_accepts_utf16le_and_utf8",
+        "dism_enabled_state_accepts_an_oem_banner",
+        "pending_temp_deletions_do_not_force_a_reboot",
+        "pending_file_replacements_still_require_a_reboot",
+    ):
+        if marker not in bootstrap_checks:
+            fail(f"Windows feature-state decoding omits {marker!r}")
     if "operations" in "\n".join(
         line for line in build.splitlines() if "Copy-Item" in line
     ):

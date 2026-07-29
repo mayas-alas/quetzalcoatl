@@ -1,50 +1,33 @@
 # Workstreams
 
-The coordinator integrates three disjoint lanes into one delivery.
+Three lanes may work concurrently; one path has one writer.
 
 ## Agent A — product foundation
 
-Owns:
+Owns root Cargo/release/legal metadata, `apps/gnx/**`,
+`crates/gnx-contracts/**`, `README.md` and architecture/contracts documentation.
 
-- root Cargo/release metadata
-- `LICENSE`, `NOTICE`, third-party notices
-- `apps/gnx/**`
-- `crates/gnx-contracts/**`
-- architecture and contract documentation
+Delivers `LEG`, product `ARC`/`REL` and CLI/tray contracts.
 
-Delivers `LEG`, `TYP` and the metadata portion of `REL`.
+## Agent B — runtime lifecycle
 
-## Agent B — runtime architecture
+Owns `apps/gnx-service/**`, `runtime/**` and runtime compatibility tests.
 
-Owns:
-
-- `apps/gnx-service/**`
-- `runtime/**`
-- runtime compatibility tests
-
-Delivers `ARC`, `RUN` and runtime portions of `TYP`.
+Delivers `RUN`, `REC` and the service half of `UNS`/`RBT`.
 
 ## Agent C — delivery assurance
 
-Owns:
+Owns `apps/gnx-bootstrap/**`, `installer/**`, `tools/**` and operational/validation
+documentation.
 
-- `apps/gnx-bootstrap/**`
-- `installer/**`
-- `tools/**`
-- operational/validation documentation
+Delivers `BRD`, `ARP`, installer `REL`, and end-to-end `UNS`/`RBT`.
 
-Delivers `BRD`, `DEL`, `REC`, `DOC` and assurance portions of `REL`.
+## Coordinator-only
 
-## Coordinator-only paths
+Owns `.AGENTS/**`, `AGENTS.md`, `Cargo.lock`, `CHANGELOG.md`, cross-lane
+integration, physical host mutations and final evidence.
 
-- `.AGENTS/**`
-- `AGENTS.md`
-- `Cargo.lock`
-- `CHANGELOG.md`
-- integration edits crossing two lanes
-- final build and evidence
-
-## Handoff
+## Handoff template
 
 ```text
 Workstream:
@@ -55,6 +38,3 @@ Known failures:
 Residual risk:
 Next dependency:
 ```
-
-One path has one writer. Cross-lane requirements are handed off; they are not
-implemented opportunistically by another owner.

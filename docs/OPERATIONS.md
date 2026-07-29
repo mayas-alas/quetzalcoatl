@@ -5,6 +5,10 @@ installation, upgrade and repair. It validates the host, verifies pinned
 dependencies, handles bounded reboot/resume, installs all internal components and
 starts the service and tray.
 
+Setup is the sole Programs and Features entry. The chained MSI is an internal
+implementation detail and remains hidden; users must not install, repair or remove
+it independently.
+
 Before Windows Installer starts the service, the installed `gnx-service.exe`
 validates the runtime lock, every locked runtime file and the pinned Podman Machine
 image. A missing or mismatched artifact fails the MSI transaction; Setup must not
@@ -13,9 +17,10 @@ report success or launch the tray.
 For upgrade, launch the newer Setup. Stable upgrade families locate the installed
 product; MSI stops service/tray, replaces keyed files and restarts them after commit.
 Schemas 2/2/1, payload contract 5, node identity, role and incomplete member
-checkpoints remain compatible. 0.2.1 uses new package identities to replace both
-complete and incomplete 0.2.0 installations. Never delete ProgramData state before
-an upgrade.
+checkpoints remain compatible. 0.2.12 uses new package identities to replace 0.2.11
+while retaining recovery of earlier complete, incomplete and cached maintenance
+states. Repair recognizes enabled Windows features without requesting a redundant
+reboot. Never delete ProgramData state before an upgrade.
 
 For recovery, use Setup Repair. It repeats closed host/dependency operations and
 repairs MSI key paths. A service-only continuation is:

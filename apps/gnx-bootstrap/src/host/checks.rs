@@ -157,11 +157,7 @@ fn feature_enabled(feature: &str) -> Result<bool, String> {
     if !output.status.success() {
         return Err(format!("DISM could not query {feature}"));
     }
-    // DISM writes human-readable text using the active Windows OEM code page. The
-    // `/English` state marker is ASCII, so lossy decoding preserves the contract
-    // while avoiding locale-specific failures on otherwise compatible hosts.
-    let text = String::from_utf8_lossy(&output.stdout);
-    Ok(text.lines().any(|line| line.trim() == "State : Enabled"))
+    feature_output_is_enabled(&output.stdout)
 }
 
 fn enable_feature(feature: &str) -> Result<(), String> {
@@ -192,12 +188,30 @@ fn run_text(path: &std::path::Path, args: &[&str]) -> Result<std::process::Outpu
         .map_err(|e| format!("cannot execute {}: {e}", path.display()))
 }
 
+fn feature_output_is_enabled(bytes: &[u8]) -> Result<bool, String> {
+    let text = decode_dism(bytes)?;
+    Ok(text.lines().any(|line| line.trim() == "State : Enabled"))
+}
+
+fn decode_dism(bytes: &[u8]) -> Result<String, String> {
+    if looks_utf16le(bytes) {
+        decode_windows_text(bytes, "DISM")
+    } else {
+        // DISM uses the active Windows OEM code page on some hosts even with
+        // `/English`. The state marker is ASCII, so lossy decoding preserves
+        // the closed value while ignoring unrelated banner glyphs.
+        Ok(String::from_utf8_lossy(bytes).into_owned())
+    }
+}
+
 fn decode_wsl(bytes: &[u8]) -> Result<String, String> {
-    let pairs_look_utf16le = bytes.len() >= 2 && bytes.chunks_exact(2).all(|pair| pair[1] == 0);
-    let utf16le = bytes.starts_with(&[0xff, 0xfe]) || pairs_look_utf16le;
-    if utf16le {
+    decode_windows_text(bytes, "wsl")
+}
+
+fn decode_windows_text(bytes: &[u8], source: &str) -> Result<String, String> {
+    if looks_utf16le(bytes) {
         if !bytes.len().is_multiple_of(2) {
-            return Err("wsl returned malformed UTF-16LE output".into());
+            return Err(format!("{source} returned malformed UTF-16LE output"));
         }
         let content = if bytes.starts_with(&[0xff, 0xfe]) {
             &bytes[2..]
@@ -208,10 +222,15 @@ fn decode_wsl(bytes: &[u8]) -> Result<String, String> {
             .chunks_exact(2)
             .map(|b| u16::from_le_bytes([b[0], b[1]]))
             .collect();
-        String::from_utf16(&units).map_err(|_| "wsl returned invalid UTF-16LE output".into())
+        String::from_utf16(&units).map_err(|_| format!("{source} returned invalid UTF-16LE output"))
     } else {
-        String::from_utf8(bytes.to_vec()).map_err(|_| "wsl returned non-UTF-8 output".into())
+        String::from_utf8(bytes.to_vec()).map_err(|_| format!("{source} returned non-UTF-8 output"))
     }
+}
+
+fn looks_utf16le(bytes: &[u8]) -> bool {
+    let pairs_look_utf16le = bytes.len() >= 2 && bytes.chunks_exact(2).all(|pair| pair[1] == 0);
+    bytes.starts_with(&[0xff, 0xfe]) || pairs_look_utf16le
 }
 
 fn root() -> RegKey {
@@ -252,7 +271,7 @@ fn reboot_pending() -> Result<Option<&'static str>, String> {
                     .collect::<Vec<_>>(),
             )
             .map_err(|_| "PendingFileRenameOperations is not valid UTF-16LE".to_string())?;
-            if values.split('\0').any(|item| !item.is_empty()) {
+            if pending_file_rename_requires_reboot(&values)? {
                 Ok(Some("PendingFileRenameOperations"))
             } else {
                 Ok(None)
@@ -261,6 +280,33 @@ fn reboot_pending() -> Result<Option<&'static str>, String> {
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
         Err(e) => Err(format!("cannot query PendingFileRenameOperations: {e}")),
     }
+}
+
+fn pending_file_rename_requires_reboot(values: &str) -> Result<bool, String> {
+    let mut entries = values.split('\0').collect::<Vec<_>>();
+    let Some(last_nonempty) = entries.iter().rposition(|entry| !entry.is_empty()) else {
+        return Ok(false);
+    };
+    let required_len = if last_nonempty.is_multiple_of(2) {
+        last_nonempty + 2
+    } else {
+        last_nonempty + 1
+    };
+    if entries.len() < required_len {
+        return Err("PendingFileRenameOperations has an incomplete pair".into());
+    }
+    entries.truncate(required_len);
+    if !entries.len().is_multiple_of(2) {
+        return Err("PendingFileRenameOperations has an incomplete pair".into());
+    }
+    let mut replacement_pending = false;
+    for pair in entries.chunks_exact(2) {
+        if pair[0].is_empty() {
+            return Err("PendingFileRenameOperations has an empty source".into());
+        }
+        replacement_pending |= !pair[1].is_empty();
+    }
+    Ok(replacement_pending)
 }
 
 fn podman_installed() -> Result<bool, String> {
@@ -285,4 +331,63 @@ fn podman_installed() -> Result<bool, String> {
         Err(e) => return Err(format!("cannot query Podman DisplayVersion: {e}")),
     };
     Ok(installer == 1 && name == PODMAN_NAME && version == PODMAN_VERSION)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        decode_windows_text, feature_output_is_enabled, pending_file_rename_requires_reboot,
+    };
+
+    fn utf16le(value: &str) -> Vec<u8> {
+        value
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn dism_enabled_state_accepts_utf16le_and_utf8() {
+        assert!(feature_output_is_enabled(&utf16le("State : Enabled\r\n")).unwrap());
+        assert!(feature_output_is_enabled(b"State : Enabled\r\n").unwrap());
+        assert!(!feature_output_is_enabled(&utf16le("State : Disabled\r\n")).unwrap());
+    }
+
+    #[test]
+    fn dism_enabled_state_accepts_an_oem_banner() {
+        let output = b"\xa9 banner\r\nState : Enabled\r\n";
+        assert!(feature_output_is_enabled(output).unwrap());
+    }
+
+    #[test]
+    fn windows_text_decoder_rejects_malformed_utf16le() {
+        assert!(decode_windows_text(&[0xff, 0xfe, 0x41], "test").is_err());
+    }
+
+    #[test]
+    fn pending_temp_deletions_do_not_force_a_reboot() {
+        let pending = concat!(
+            r"*1\??\C:\Users\user\AppData\Local\Temp\DEL0001.tmp",
+            "\0\0",
+            r"*1\??\C:\Users\user\AppData\Local\Temp\DEL0002.tmp",
+            "\0\0\0",
+        );
+        assert!(!pending_file_rename_requires_reboot(pending).unwrap());
+    }
+
+    #[test]
+    fn pending_file_replacements_still_require_a_reboot() {
+        let pending = concat!(
+            r"\??\C:\Windows\System32\driver.next",
+            "\0",
+            r"\??\C:\Windows\System32\driver.sys",
+            "\0\0",
+        );
+        assert!(pending_file_rename_requires_reboot(pending).unwrap());
+    }
+
+    #[test]
+    fn malformed_pending_file_pairs_fail_closed() {
+        assert!(pending_file_rename_requires_reboot("\0destination\0\0").is_err());
+    }
 }

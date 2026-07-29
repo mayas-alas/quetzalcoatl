@@ -26,10 +26,10 @@
     <CustomAction
       Id="LaunchQuetzalcoatlTray"
       FileRef="GnxTray"
-      ExeCommand=""
+      ExeCommand="--launch-detached"
       Execute="immediate"
       Impersonate="yes"
-      Return="asyncNoWait" />
+      Return="check" />
     <CustomAction
       Id="ValidateInstalledPayload"
       FileRef="GnxService"
@@ -38,6 +38,13 @@
       Impersonate="no"
       Return="check" />
     <InstallExecuteSequence>
+      <!-- WiX schedules its elevated fallback before InstallFiles by default.
+           On uninstall that is after RemoveFiles/RemoveFolders, so a tray that
+           needs forced termination can retain the empty install directory.
+           Close it before any product file or directory removal instead. -->
+      <Custom
+        Action="override Wix4CloseApplications_X64"
+        Before="RemoveFiles" />
       <Custom
         Action="ValidateInstalledPayload"
         After="InstallFiles"
@@ -55,6 +62,7 @@
         <Directory Id="LicensesFolder" Name="licenses" />
       </Directory>
     </StandardDirectory>
+    <StandardDirectory Id="SystemFolder" />
     <StandardDirectory Id="StartupFolder" />
 
     <Feature Id="ProductFeature" Title="Quetzalcoatl" Level="1">
@@ -93,7 +101,7 @@
           Directory="StartupFolder"
           Name="Quetzalcoatl"
           Target="[#GnxTray]"
-          WorkingDirectory="INSTALLFOLDER" />
+          WorkingDirectory="SystemFolder" />
       </Component>
 
       <Component Id="ServiceComponent" Guid="*">

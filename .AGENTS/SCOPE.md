@@ -1,60 +1,55 @@
-# 0.2.1 installer-recovery scope
+# 0.2.12 maintenance scope
 
 ## Outcome
 
-Deliver one coherent 0.2.1 source tree and one validated
-`QuetzalcoatlSetup.exe`. Setup remains the sole user-facing installation, upgrade
-and repair interface.
+Deliver one coherent source tree and one `QuetzalcoatlSetup.exe` that owns fresh
+install, upgrade, repair and uninstall. Setup remains the only user-facing
+maintenance surface.
 
 ## Included
 
-| ID | Remediation | Acceptance |
+| ID | Outcome | Acceptance |
 |---|---|---|
-| LEG | Product licensing and notices | Root AGPLv3 license, Hector AB copyright, Cargo/PE/MSI metadata and separate third-party notices. |
-| BRD | Canonical branding assets | One `installer/assets` tree contains canonical branding sources and installer-specific derivatives. |
-| ARC | Real module boundaries | No `#[path]` cross-layer wiring or broad production glob imports; domain and infrastructure are crate modules. |
-| TYP | Contract typing | Lifecycle, health and PVE URL validation use closed types at boundaries; invalid values fail closed. |
-| RUN | Runtime taxonomy and locks | Installed files and orchestration operations are distinct; one authoritative machine-image fact set; LF policy covers all runtime sources. |
-| REL | Release-source consolidation | Version/copyright metadata is derived where possible; redundant `VERSION` and static fixtures are removed or consumed directly. |
-| DOC | Documentation reduction | Minimal authoritative architecture, contracts, operations and validation documents. |
-| DEL | Delivery assurance | Source gates, MSI extraction, Burn identity, branding, install/upgrade/repair/restart contracts and final hashes pass. |
-| REC | Installed-payload recovery | New MSI/Burn identities replace broken 0.2.0 installs; locked runtime and machine image validate before service start. |
+| LEG | Correct product licensing | AGPL-3.0-only, Hector AB notice and separate third-party notices. |
+| BRD | Canonical branding | One `installer/assets` tree supplies MSI, Burn, tray and executable branding. |
+| ARC | Clear module boundaries | Four Cargo packages; no parallel or version-suffixed implementations. |
+| RUN | Closed runtime operations | Typed local/remote operations, bounded stdin/output/time and atomic durable files. |
+| REC | Safe recovery | Runtime lock and machine image validate before service start; compatible state survives maintenance. |
+| RBT | Bounded restart | Feature detection and resume do not loop or request redundant restarts. |
+| ARP | Sole maintenance entry | One visible Setup registration; internal MSI remains hidden. |
+| UNS | Complete uninstall | Product files, root, service, tray, PATH, startup, registrations and caches are removed. WSL, Podman, managed VM data and durable GNX state remain. |
+| REL | Integrated release | Version, identities, build, tests, hashes and physical evidence agree on 0.2.12. |
 
 ## Preserved invariants
 
-- Exactly four Cargo packages.
-- Protocol schema 2, Named Pipe command set and persisted-state schema 2.
-- Host-profile schema 1, runtime generation `proxmox-cluster-v2` and payload contract 5.
-- Closed remote argv, bounded stdin/output/time and atomic durable state.
-- New-node role from online controller presence only.
-- PVE readiness before Tailscale Serve.
-- Bounded installer resume and member-join recovery.
+- Protocol schema 2, persisted-state schema 2 and host-profile schema 1.
+- Runtime generation `proxmox-cluster-v2` and payload contract 5.
+- Closed remote argv; variable data uses bounded stdin.
+- Controller/member role derives only from validated online topology.
+- PVE readiness precedes Tailscale Serve.
 - No localhost UI, listener, new product port or Tauri runtime.
 - `installer/build.ps1` remains the release entry point.
 
-## Explicit exclusion
+## Exclusion
 
-Hosted CI on another Windows host is not part of this delivery. The local
-`tools/check.ps1` gate remains mandatory and suitable for future CI adoption.
+Hosted CI on another Windows host is excluded. The local `tools/check.ps1` gate
+remains mandatory and CI-ready.
 
-## Risk matrix
+## Priority matrix
 
 `score = impact × probability + urgency + necessity`, each factor 1–5.
 
 | Risk | I | P | U | N | Score | Priority | Gate |
 |---|---:|---:|---:|---:|---:|---|---|
-| Incorrect product/third-party licensing | 5 | 5 | 5 | 5 | 35 | P0 | LEG |
-| CRLF corrupts Linux runtime programs | 5 | 4 | 5 | 5 | 30 | P0 | RUN |
-| Cosmetic folders hide coupled Rust modules | 5 | 4 | 4 | 5 | 29 | P0 | ARC |
-| Upgrade/repair replaces an incomplete product | 5 | 4 | 4 | 5 | 29 | P0 | DEL |
-| Reused MSI identity mixes a stale database with a changed cabinet | 5 | 5 | 5 | 5 | 35 | P0 | REC |
-| Invalid string state crosses a contract boundary | 4 | 4 | 3 | 5 | 24 | P1 | TYP |
-| Branding/version facts drift between tools | 4 | 4 | 3 | 5 | 24 | P1 | BRD/REL |
-| Runtime facts are duplicated in lock and source | 4 | 3 | 3 | 5 | 20 | P1 | RUN |
-| Documentation and fixtures duplicate behavior | 3 | 4 | 2 | 4 | 18 | P2 | DOC/REL |
+| Inherited WSL process locks product root | 5 | 5 | 5 | 5 | 35 | P0 | UNS |
+| Service stop waits forever | 5 | 4 | 5 | 5 | 30 | P0 | UNS/RBT |
+| Internal MSI exposes a second uninstall | 5 | 4 | 5 | 5 | 30 | P0 | ARP |
+| Runtime payload starts incomplete | 5 | 4 | 4 | 5 | 29 | P0 | REC |
+| Identity/version drift | 4 | 4 | 3 | 5 | 24 | P1 | REL |
+| Documentation duplicates implementation | 3 | 3 | 2 | 4 | 15 | P2 | ARC |
 
 ## Definition of done
 
-All included rows are `done`; `tools/check.ps1` passes; final MSI and Setup hashes
-are recorded; physical fresh-install, upgrade, repair, reboot and tray checks are
-reported as executed or explicitly pending, never inferred from source tests.
+All included rows are `done`; `tools/check.ps1` passes; final hashes are recorded;
+physical uninstall removes every product-owned surface; reinstall and repair
+recover the same READY controller and quorate cluster.

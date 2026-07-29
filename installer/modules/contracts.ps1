@@ -317,9 +317,11 @@ function Test-MaintenanceContract {
     $bundlePath = Join-Path $installerRoot "source\bundle.wxs"
     $packagePath = Join-Path $installerRoot "source\product.wxs"
     $themePath = Join-Path $installerRoot "assets\wixstdba-theme.xml"
+    $serviceConfigPath = Join-Path $installerRoot "source\Quetzalcoatl.Service.xml"
     $bundle = [xml] (Get-Content -LiteralPath $bundlePath -Raw -Encoding utf8)
     $package = [xml] (Get-Content -LiteralPath $packagePath -Raw -Encoding utf8)
     $theme = [xml] (Get-Content -LiteralPath $themePath -Raw -Encoding utf8)
+    $serviceConfig = [xml] (Get-Content -LiteralPath $serviceConfigPath -Raw -Encoding utf8)
 
     $expected = @{
         PrepareWsl = @{
@@ -359,6 +361,9 @@ function Test-MaintenanceContract {
     if ($msiPackages.Count -ne 1) {
         throw "Maintenance contract: the product MSI must remain in the bundle chain."
     }
+    if ($msiPackages[0].GetAttribute('Visible') -ne 'no') {
+        throw "Maintenance contract: Setup must be the sole Programs and Features entry."
+    }
     $repairButtons = @($theme.SelectNodes('//*[local-name()="Button" and @Name="RepairButton"]'))
     if ($repairButtons.Count -ne 1) {
         throw "Maintenance contract: the bootstrapper theme must expose exactly one repair action."
@@ -372,8 +377,38 @@ function Test-MaintenanceContract {
     if ($serviceControls.Count -ne 1 -or
         $serviceControls[0].GetAttribute('Start') -ne 'install' -or
         $serviceControls[0].GetAttribute('Stop') -ne 'both' -or
+        $serviceControls[0].GetAttribute('Remove') -ne 'uninstall' -or
         $serviceControls[0].GetAttribute('Wait') -ne 'yes') {
         throw "Maintenance contract: upgrade and repair must stop and restart the service deterministically."
+    }
+    if ($serviceConfig.service.stopexecutable -ne '%BASE%\gnx-service.exe' -or
+        $serviceConfig.service.stoparguments -ne '--stop-managed-machine' -or
+        $null -eq $serviceConfig.service.startarguments) {
+        throw "Maintenance contract: service stop must preserve but release the managed Podman machine."
+    }
+    $closeApplications = @($package.SelectNodes('//*[local-name()="CloseApplication" and @Id="CloseQuetzalcoatlTray"]'))
+    if ($closeApplications.Count -ne 1 -or
+        $closeApplications[0].GetAttribute('Target') -ne 'gnx-tray.exe' -or
+        $closeApplications[0].GetAttribute('CloseMessage') -ne 'yes' -or
+        $closeApplications[0].GetAttribute('ElevatedCloseMessage') -ne 'yes' -or
+        $closeApplications[0].GetAttribute('TerminateProcess') -ne '0' -or
+        $closeApplications[0].GetAttribute('RebootPrompt') -ne 'no') {
+        throw "Maintenance contract: uninstall must close and, when required, terminate the tray without a reboot prompt."
+    }
+    $closeApplicationSequence = @($package.SelectNodes('//*[local-name()="InstallExecuteSequence"]/*[local-name()="Custom" and @Action="override Wix4CloseApplications_X64"]'))
+    if ($closeApplicationSequence.Count -ne 1 -or
+        $closeApplicationSequence[0].GetAttribute('Before') -ne 'RemoveFiles') {
+        throw "Maintenance contract: elevated tray shutdown must precede product file and directory removal."
+    }
+    $trayLaunchers = @($package.SelectNodes('//*[local-name()="CustomAction" and @Id="LaunchQuetzalcoatlTray"]'))
+    if ($trayLaunchers.Count -ne 1 -or
+        $trayLaunchers[0].GetAttribute('FileRef') -ne 'GnxTray' -or
+        $trayLaunchers[0].GetAttribute('ExeCommand') -ne '--launch-detached' -or
+        $trayLaunchers[0].GetAttribute('Execute') -ne 'immediate' -or
+        $trayLaunchers[0].GetAttribute('Impersonate') -ne 'yes' -or
+        $trayLaunchers[0].GetAttribute('Return') -ne 'check' -or
+        $trayLaunchers[0].HasAttribute('Directory')) {
+        throw "Maintenance contract: tray launch must be a checked short-lived detached operation."
     }
     $payloadValidators = @($package.SelectNodes('//*[local-name()="CustomAction" and @Id="ValidateInstalledPayload"]'))
     if ($payloadValidators.Count -ne 1 -or

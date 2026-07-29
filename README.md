@@ -1,4 +1,4 @@
-# Quetzalcoatl 0.2.1
+# Quetzalcoatl 0.2.12
 
 Quetzalcoatl is a Windows-managed MVP that installs and reconciles a Fedora Podman
 Machine containing the Tailscale and Proxmox runtime for controller and member nodes.

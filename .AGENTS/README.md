@@ -1,27 +1,23 @@
 # Delivery contract
 
-`.AGENTS` governs one active delivery: Quetzalcoatl 0.2.1 installer recovery. It is
-not release history or a generic handbook.
+`.AGENTS` governs the active Quetzalcoatl 0.2.12 delivery. It is not release
+history; completed historical changes belong in `CHANGELOG.md`.
 
 Read in order:
 
-1. `SCOPE.md` — outcomes, risks and exclusions.
+1. `SCOPE.md` — outcomes, invariants and exclusions.
 2. `WORKSTREAMS.md` — three non-overlapping ownership lanes.
-3. `TRACKER.md` — live status, dependencies and handoffs.
-4. `EVIDENCE.md` — executable gates and physical acceptance.
+3. `TRACKER.md` — current status, dependencies and blockers.
+4. `EVIDENCE.md` — executable and physical acceptance.
 
 ## Protocol
 
-1. Preserve the recorded dirty baseline; never revert unrelated user work.
+1. Preserve the recorded dirty baseline and never revert unrelated user work.
 2. Claim only paths assigned to one workstream.
 3. Record cross-workstream requirements in `TRACKER.md`.
-4. Use one semantic name and one source of truth.
+4. Use one semantic name and one implementation; transitional copies are forbidden.
 5. A workstream reaches `review` only after its checks pass.
-6. The coordinator integrates all workstreams into one Setup artifact.
-7. `done` requires the complete source/build gate and explicit residual risks.
+6. The coordinator integrates one Setup artifact and records exact evidence.
+7. `done` requires source gates plus physical acceptance; neither implies the other.
 
 Statuses are exactly `ready`, `active`, `blocked`, `review`, `done`.
-
-Product behavior belongs in code and contract tests. Architecture and operations
-belong in `docs/`. Release history belongs in `CHANGELOG.md`. `.AGENTS` is deleted or
-reset after the delivery is committed.

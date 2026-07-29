@@ -10,6 +10,7 @@ mod infrastructure;
 enum Mode {
     Service,
     ValidateInstallation,
+    StopManagedMachine,
 }
 
 #[cfg(windows)]
@@ -19,19 +20,32 @@ fn parse_mode(mut args: impl Iterator<Item = std::ffi::OsString>) -> Result<Mode
         (Some(argument), None) if argument == "--validate-installation" => {
             Ok(Mode::ValidateInstallation)
         }
-        _ => Err("usage: gnx-service [--validate-installation]"),
+        (Some(argument), None) if argument == "--stop-managed-machine" => {
+            Ok(Mode::StopManagedMachine)
+        }
+        _ => Err("usage: gnx-service [--validate-installation|--stop-managed-machine]"),
     }
 }
 
 #[cfg(windows)]
 fn run() -> Result<(), String> {
     match parse_mode(std::env::args_os().skip(1)).map_err(str::to_owned)? {
-        Mode::Service => application::pipe_service::run().map_err(|error| error.to_string()),
+        Mode::Service => {
+            infrastructure::service_shutdown::arm()?;
+            application::pipe_service::run().map_err(|error| error.to_string())
+        }
         Mode::ValidateInstallation => {
             application::installation::validate()
                 .map_err(|error| format!("{}: {}", error.code, error.message))?;
             println!("installation-validation: ok");
             Ok(())
+        }
+        Mode::StopManagedMachine => {
+            infrastructure::host::validate_identity().map_err(|error| error.message)?;
+            let podman = infrastructure::remote::podman_binary().map_err(|error| error.message)?;
+            infrastructure::podman::stop_managed_machine(&podman)
+                .map_err(|error| format!("{}: {}", error.code, error.message))?;
+            infrastructure::service_shutdown::signal()
         }
     }
 }
@@ -56,12 +70,16 @@ mod tests {
     use std::ffi::OsString;
 
     #[test]
-    fn installation_validation_is_a_closed_local_mode() {
+    fn service_maintenance_modes_are_closed_and_local() {
         assert_eq!(
             parse_mode([OsString::from("--validate-installation")].into_iter()),
             Ok(Mode::ValidateInstallation)
         );
         assert_eq!(parse_mode(std::iter::empty()), Ok(Mode::Service));
+        assert_eq!(
+            parse_mode([OsString::from("--stop-managed-machine")].into_iter()),
+            Ok(Mode::StopManagedMachine)
+        );
         assert!(parse_mode([OsString::from("--other")].into_iter()).is_err());
         assert!(
             parse_mode(

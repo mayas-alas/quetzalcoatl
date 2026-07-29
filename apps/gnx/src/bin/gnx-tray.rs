@@ -5,7 +5,12 @@ fn main() {}
 
 #[cfg(windows)]
 mod windows_tray {
+    use std::ffi::OsString;
+    use std::io;
     use std::mem::{size_of, zeroed};
+    use std::os::windows::process::CommandExt;
+    use std::path::PathBuf;
+    use std::process::{Command, Stdio};
     use std::ptr::{null, null_mut};
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Mutex, OnceLock};
@@ -19,7 +24,9 @@ mod windows_tray {
         WPARAM,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows_sys::Win32::System::Threading::CreateMutexW;
+    use windows_sys::Win32::System::Threading::{
+        CREATE_NEW_PROCESS_GROUP, CreateMutexW, DETACHED_PROCESS,
+    };
     use windows_sys::Win32::UI::Shell::{
         NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
         Shell_NotifyIconW, ShellExecuteW,
@@ -73,15 +80,53 @@ mod windows_tray {
         }
     }
 
-    pub fn entry() {
-        if std::env::args_os()
-            .skip(1)
-            .any(|value| value.to_string_lossy() == "--shutdown")
-        {
-            request_shutdown();
-            return;
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum Mode {
+        Run,
+        Shutdown,
+        LaunchDetached,
+    }
+
+    pub fn entry() -> i32 {
+        match parse_mode(std::env::args_os().skip(1)) {
+            Ok(Mode::Run) => {
+                run();
+                0
+            }
+            Ok(Mode::Shutdown) => {
+                request_shutdown();
+                0
+            }
+            Ok(Mode::LaunchDetached) => match launch_detached() {
+                Ok(()) => 0,
+                Err(_) => 1,
+            },
+            Err(()) => 64,
         }
-        run();
+    }
+
+    fn parse_mode(args: impl Iterator<Item = OsString>) -> Result<Mode, ()> {
+        let args: Vec<_> = args.collect();
+        match args.as_slice() {
+            [] => Ok(Mode::Run),
+            [argument] if argument == "--shutdown" => Ok(Mode::Shutdown),
+            [argument] if argument == "--launch-detached" => Ok(Mode::LaunchDetached),
+            _ => Err(()),
+        }
+    }
+
+    fn launch_detached() -> io::Result<()> {
+        let system_root = std::env::var_os("SystemRoot")
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "SystemRoot is not set"))?;
+        let working_directory = PathBuf::from(system_root).join("System32");
+        Command::new(std::env::current_exe()?)
+            .current_dir(working_directory)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+            .spawn()?;
+        Ok(())
     }
 
     fn request_shutdown() {
@@ -399,9 +444,27 @@ mod windows_tray {
     fn wide(value: &str) -> Vec<u16> {
         value.encode_utf16().chain([0]).collect()
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn parse(values: &[&str]) -> Result<Mode, ()> {
+            parse_mode(values.iter().map(OsString::from))
+        }
+
+        #[test]
+        fn accepts_only_closed_tray_operations() {
+            assert_eq!(parse(&[]), Ok(Mode::Run));
+            assert_eq!(parse(&["--shutdown"]), Ok(Mode::Shutdown));
+            assert_eq!(parse(&["--launch-detached"]), Ok(Mode::LaunchDetached));
+            assert!(parse(&["--shutdown", "extra"]).is_err());
+            assert!(parse(&["--unknown"]).is_err());
+        }
+    }
 }
 
 #[cfg(windows)]
 fn main() {
-    windows_tray::entry();
+    std::process::exit(windows_tray::entry());
 }

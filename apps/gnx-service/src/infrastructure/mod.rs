@@ -7,6 +7,7 @@ pub(crate) mod proxmox;
 pub(crate) mod remote;
 pub(crate) mod runtime_assets;
 pub(crate) mod secrets;
+pub(crate) mod service_shutdown;
 pub(crate) mod state;
 pub(crate) mod tailscale;
 pub(crate) mod windows_pipe;

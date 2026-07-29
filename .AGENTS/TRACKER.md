@@ -6,43 +6,36 @@
 |---|---|
 | Commit | `d84257a77ed74b5f4ea0951aca82083ff6ab3483` |
 | Branch | `master` |
-| Dirty baseline | Existing uncommitted 0.2.0 migration explicitly retained |
-| Delivery | One integrated 0.2.1 installer-recovery cycle |
+| Dirty baseline | Existing uncommitted MVP migration retained |
+| Delivery | Integrated 0.2.12 maintenance cycle |
 | Coordinator | Codex |
 
 ## Board
 
-| ID | Owner | Status | Depends on | Next gate |
-|---|---|---|---|---|
-| LEG | Agent A | done | baseline | AGPL, notices and packaged legal inventory pass |
-| BRD | Agent C | done | LEG | canonical G icon and 165x312 Burn derivative pass |
-| TYP | Agent A/B | done | ARC boundary | closed health/stage/PVE URL tests pass |
-| ARC | Agent B | done | baseline | real modules compile without path wiring or production globs |
-| RUN | Agent B | done | ARC | installed payload and embedded operations are disjoint |
-| REL | Agent A/C | done | REC | 0.2.1 identities and artifact hashes pass |
-| DOC | Agent C | done | final taxonomy | five-file documentation inventory passes |
-| DEL | Agent C | review | REC | MSI extraction and deterministic Setup build pass |
-| REC | Agent C | active | 0.2.0 incident | physical recovery is waiting on the required Windows restart |
-| INT | Coordinator | review | all rows | integrated gate passed; physical resume pending |
-
-## Blockers
-
-| ID | Dependency | Owner | Status |
+| ID | Owner | Status | Evidence |
 |---|---|---|---|
-| B01 | Choose AGPL expression: this cycle uses `AGPL-3.0-only` from the user's “AGPL 3.0” instruction. | Coordinator | resolved |
-| B02 | Hosted Windows CI is excluded by user instruction. | Coordinator | resolved |
-| B03 | 0.2.0 reused ProductCode/PackageCode across different MSI bytes; Windows Installer repaired from stale inventory and left runtime empty. | Coordinator | resolved by 0.2.1 scope |
+| LEG | Agent A | done | license, notice and packaged legal inventory pass |
+| BRD | Agent C | done | one installer assets tree and G branding pass |
+| ARC | Agent A/B | done | four packages and one semantic implementation |
+| RUN | Agent B | done | closed argv/stdin and managed VM lifecycle pass |
+| REC | Agent B/C | done | payload validation and preserved-state reinstall reach READY |
+| RBT | Agent B/C | done | repair stop/restart returns 0 and reaches READY |
+| ARP | Agent C | done | one visible bundle plus one hidden internal MSI |
+| UNS | Agent B/C | done | physical uninstall leaves zero product residue |
+| REL | Coordinator | done | 0.2.12 gate, identities and hashes recorded |
+| INT | Coordinator | done | uninstall, reinstall and repair physically accepted |
 
-## Handoffs
+## Resolved blockers
 
-| From | To | Requirement | Status |
-|---|---|---|---|
-| A | C | Product license and copyright must be packaged by MSI/Burn. | done |
-| B | C | Installer must stage the final runtime taxonomy and lock exactly. | done |
-| A/B/C | Coordinator | One source/build gate and artifact inventory. | done |
+| ID | Finding | Resolution |
+|---|---|---|
+| B08 | Tray close originally ran after file removal. | CloseApplications is sequenced before `RemoveFiles`. |
+| B09 | Burn cleanup could not remove the locked empty root. | Transitional cleanup package and helper were deleted. |
+| B10 | Old Podman WSL processes inherited the product root as CWD. | WinSW stop runs a closed managed-machine stop under the service identity. |
+| B11 | WinSW waited for the main service after the stop helper returned. | A service-private event terminates the main process after VM stop. |
+| B12 | Hosted Windows CI is unavailable. | Explicitly excluded; local integrated gate remains authoritative. |
 
 ## Residual acceptance
 
-Hosted Windows CI remains intentionally excluded. The current host contains the
-reproducible broken 0.2.0 runtime and is the required 0.2.1 recovery fixture. The
-0.2.1 bundle is cached and registered `Reboot Pending`; its MSI has not run yet.
+Direct upgrade from 0.1.17 and manual visual inspection of the tray menu remain
+outside this uninstall cycle. No known residual risk blocks 0.2.12 maintenance.

@@ -34,6 +34,7 @@ enum RequestedOperation {
     Repair,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Mode {
     Validate,
     PrepareWsl,
@@ -444,6 +445,7 @@ mod tests {
             .is_ok()
         );
         assert!(parse(&["install-wsl", "--operation", "upgrade"]).is_err());
+        assert!(parse(&["install-wsl", "--operation", "uninstall"]).is_err());
         assert!(
             parse(&[
                 "install-wsl",

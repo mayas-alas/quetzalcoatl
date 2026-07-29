@@ -141,6 +141,36 @@ pub(crate) fn ensure_machine_running(podman: &Path) -> Result<(), GateError> {
     Ok(())
 }
 
+pub(crate) fn stop_managed_machine(podman: &Path) -> Result<(), GateError> {
+    let list = run_command(podman, ["machine", "list", "--format", "json"])
+        .map_err(|error| error.with_code("MACHINE_STOP_FAILED", Component::PodmanMachine))?;
+    let machines: Vec<MachineListEntry> =
+        serde_json::from_slice(&list.stdout).map_err(|error| {
+            GateError::new(
+                "MACHINE_STOP_FAILED",
+                Component::PodmanMachine,
+                format!("podman machine list returned invalid JSON: {error}"),
+            )
+        })?;
+    if machines.iter().any(|machine| machine.name != MACHINE_NAME) {
+        return Err(GateError::new(
+            "MACHINE_STOP_FAILED",
+            Component::PodmanMachine,
+            "dedicated runtime identity owns an unexpected Podman machine",
+        ));
+    }
+    if machines.iter().all(|machine| machine.name != MACHINE_NAME) {
+        return Ok(());
+    }
+    let inspect = inspect_machine(podman)
+        .map_err(|error| error.with_code("MACHINE_STOP_FAILED", Component::PodmanMachine))?;
+    if inspect.state == "running" {
+        run_command(podman, ["machine", "stop", MACHINE_NAME])
+            .map_err(|error| error.with_code("MACHINE_STOP_FAILED", Component::PodmanMachine))?;
+    }
+    Ok(())
+}
+
 pub(crate) fn wait_for_machine_ssh(podman: &Path) -> Result<(), GateError> {
     let mut last_error = String::from("machine SSH is not ready");
     for attempt in 0..30 {
@@ -246,12 +276,7 @@ pub(crate) fn restore_managed_tailscale_state(
 }
 
 pub(crate) fn remove_managed_machine(podman: &Path) -> Result<(), GateError> {
-    let inspect = inspect_machine(podman)?;
-    if inspect.state == "running" {
-        run_command(podman, ["machine", "stop", MACHINE_NAME]).map_err(|error| {
-            error.with_code("MACHINE_GENERATION_FAILED", Component::PodmanMachine)
-        })?;
-    }
+    stop_managed_machine(podman)?;
     run_command(podman, ["machine", "rm", "--force", MACHINE_NAME])
         .map(|_| ())
         .map_err(|error| error.with_code("MACHINE_GENERATION_FAILED", Component::PodmanMachine))

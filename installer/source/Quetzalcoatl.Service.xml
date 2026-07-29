@@ -3,7 +3,10 @@
   <name>Quetzalcoatl</name>
   <description>Supervises the Quetzalcoatl managed runtime.</description>
   <executable>%BASE%\gnx-service.exe</executable>
-  <workingdirectory>%BASE%</workingdirectory>
+  <startarguments />
+  <stopexecutable>%BASE%\gnx-service.exe</stopexecutable>
+  <stoparguments>--stop-managed-machine</stoparguments>
+  <workingdirectory>%ProgramData%\Quetzalcoatl\Installer</workingdirectory>
   <stoptimeout>15sec</stoptimeout>
   <log mode="none" />
 </service>

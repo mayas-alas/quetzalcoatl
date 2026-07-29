@@ -1,5 +1,88 @@
 # Changelog
 
+## 0.2.12
+
+- Adds a service-private shutdown event so the WinSW stop helper terminates the
+  main service after preserving and stopping its managed Podman Machine.
+- Bounds MSI service shutdown instead of leaving WinSW in `StopPending`.
+- Supersedes the physically rejected 0.2.11 candidate under fresh identities.
+
+## 0.2.11
+
+- Stops only the dedicated `quetzalcoatl` Podman Machine when the Windows service
+  stops, preserving its data while releasing inherited WSL directory handles.
+- Runs that closed stop operation under the service identity through WinSW before
+  MSI removes product files.
+- Supersedes the physically rejected 0.2.10 candidate under fresh identities.
+
+## 0.2.10
+
+- Launches the tray through a checked, short-lived detached operation so Windows
+  Installer no longer retains the product directory after installation.
+- Removes the unsuccessful post-MSI directory-cleanup package and its transitional
+  bootstrap mode.
+- Supersedes 0.2.9 under fresh MSI and Burn identities.
+
+## 0.2.9
+
+- Makes cleanup upgrade-aware by retaining a non-empty product tree only when its
+  installed `gnx.exe` PE version is newer than the cleanup helper.
+- Keeps same-version or unreadable residual payloads fail-closed.
+- Supersedes 0.2.8 under fresh identities after physical upgrade analysis.
+
+## 0.2.8
+
+- Runs the tray and supervised service outside the MSI-owned Program Files tree,
+  eliminating process current-directory locks during removal.
+- Retains the post-MSI empty-directory guard introduced in 0.2.7.
+- Supersedes the safely rolled-back 0.2.7 candidate under fresh identities.
+
+## 0.2.7
+
+- Adds a closed Burn cleanup package that runs after MSI uninstall and removes
+  only the now-empty product directory.
+- Preserves WSL, Podman and durable GNX state while removing every product-owned
+  executable, registration, shortcut, PATH entry and package cache.
+- Supersedes the physically rejected 0.2.6 candidate under fresh identities.
+
+## 0.2.6
+
+- Closes the tray before MSI file and directory removal, preventing an empty
+  `Program Files\Quetzalcoatl` directory after uninstall.
+- Adds source enforcement for tray shutdown ordering and complete service removal.
+- Supersedes 0.2.5 under fresh MSI product/package and Burn bundle identities.
+
+## 0.2.5
+
+- Makes Setup the sole Programs and Features entry by hiding the chained product
+  MSI from ARP.
+- Adds source and build regressions that reject any visible internal MSI.
+- Preserves 0.2.4 state through the stable MSI and Burn upgrade families under
+  fresh product, package and bundle identities.
+
+## 0.2.4
+
+- Recognizes DISM's OEM-code-page output while preserving strict UTF-16LE
+  handling and the closed ASCII feature-state marker.
+- Supersedes the fully rolled-back 0.2.3 candidate with fresh MSI, package and
+  Burn bundle identities.
+
+## 0.2.3
+
+- Ignores pending delete-only temporary-file cleanup while still blocking on
+  pending file replacements, CBS servicing and Windows Update reboot markers.
+- Supersedes the cached 0.2.2 candidate and the installed 0.2.1 product through
+  the stable MSI and Burn upgrade families.
+
+## 0.2.2
+
+- Decodes DISM output as UTF-16LE or UTF-8 before evaluating optional-feature
+  state.
+- Prevents Setup Repair from requesting another reboot when WSL and Virtual
+  Machine Platform are already enabled.
+- Retains the 0.2.1 installed-payload validation and recovery contract under new
+  MSI package, product and Burn bundle identities.
+
 ## 0.2.1
 
 - Gives the changed MSI and Burn bundle new product, package and bundle identities
@@ -37,6 +120,7 @@
 
 ## Compatibility baseline
 
-0.2.1 accepts installed 0.1.17 and 0.2.0 state and installer recovery checkpoints. Protocol
-schema 2, persisted-state schema 2, host-profile schema 1, runtime payload contract 5,
-the runtime generation and both stable installer upgrade families remain unchanged.
+0.2.5 accepts installed 0.1.17, 0.2.0, 0.2.1, 0.2.4 and cached candidate state and installer recovery
+checkpoints. Protocol schema 2, persisted-state schema 2, host-profile schema 1,
+runtime payload contract 5, the runtime generation and both stable installer
+upgrade families remain unchanged.

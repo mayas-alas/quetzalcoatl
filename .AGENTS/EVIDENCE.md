@@ -1,56 +1,51 @@
-# 0.2.1 delivery evidence
+# 0.2.12 delivery evidence
 
 ## Executable gates
 
-| Gate | Command | Status | Evidence |
-|---|---|---|---|
-| Taxonomy/contracts | five `tools/validation/*.py` validators | passed | repository, contracts, remote execution, runtime and installer all `ok` |
-| Format | `cargo fmt --all --check` | passed | integrated gate |
-| Lint | `cargo clippy --workspace --all-targets --locked -- -D warnings` | passed | zero warnings |
-| Tests | `cargo test --workspace --all-targets --locked` | passed | 52 tests |
-| Installer | `installer/build.ps1` | passed | extraction rejects missing lock and accepts complete payload/image |
-| Reproducibility | two consecutive installer builds | passed | MSI and Setup hashes identical |
-| Integrated | `powershell -NoProfile -ExecutionPolicy Bypass -File tools/check.ps1` | passed | exit code 0 |
-
-## Artifact evidence
-
-| Artifact | Version | SHA-256 | Status |
-|---|---|---|---|
-| `target/installer/Quetzalcoatl.msi` | 0.2.1 | `8588B39950E00725C706F891EDC7E33EA3A8A8E87474829F25AB54B870F32ED2` | passed |
-| `target/installer/QuetzalcoatlSetup.exe` | 0.2.1 | `82B86A21F8DE89002E9E893F174CBCACF02C5F0D435158E47E988633A88C1D04` | passed |
-
-## Physical acceptance
-
-| Scenario | Status | Required observation |
+| Gate | Command | Result |
 |---|---|---|
-| Fresh installation | pending | one Setup completes; service and tray start |
-| Upgrade from 0.1.17 | pending | identity/state retained and binaries replaced |
-| Recovery from broken 0.2.0 | pending reboot | Setup detected 0.2.0, cached 0.2.1 and registered RunOnce; MSI resumes after Windows restart |
-| Repair | pending | prerequisites revalidated and MSI key paths restored |
-| Reboot/resume | pending | Burn resumes within bounded journal |
-| Service restart | pending | role/controller/member checkpoint retained |
-| Tray | pending | G icon; status/version/connect only; validated PVE HTTPS URL |
+| Integrated source/build | `powershell -NoProfile -ExecutionPolicy Bypass -File tools/check.ps1` | passed, exit 0 |
+| Repository validators | five `tools/validation/*.py` validators | all `ok` |
+| Rust tests | `cargo test --workspace --all-targets --locked` | 61 passed |
+| Installer build | `installer/build.ps1` via integrated gate | passed |
+| Installed payload | administrative MSI extraction and validation | passed |
 
-Source/build evidence must not mark physical scenarios complete.
+## Artifacts
 
-## Taxonomy adjustment
+| Artifact | Version | SHA-256 |
+|---|---|---|
+| `target/installer/Quetzalcoatl.msi` | 0.2.12 | `C790EFCFB435964692D0FCB1D11C279695CD275D3B13CECE0E7B5AD226BC9083` |
+| `target/installer/QuetzalcoatlSetup.exe` | 0.2.12 | `77DE894BFAAA4F4ECE6DBCE9FB82E59F85B10782F3B1567F19602E70BEB7F93F` |
 
-Canonical branding and WiX/Burn derivatives share the single
-`installer/assets` ownership tree. No root `assets` directory remains.
+## Physical cycle
 
-## 0.2.0 incident
+| Scenario | Result | Observation |
+|---|---|---|
+| Upgrade to 0.2.12 | passed | Setup returned 0; one visible bundle and one hidden MSI |
+| Healthy precondition | passed | controller `gnx-controller-nytqmmgwwi11cntrl`, all components READY, joined and quorate |
+| Uninstall | passed | Setup returned 0 in 22 seconds |
+| Product root | passed | `C:\Program Files\Quetzalcoatl` absent |
+| Process/service | passed | zero service and tray processes |
+| Shell/startup | passed | no product PATH entry or startup shortcut |
+| Registration/cache | passed | zero ARP entries and zero matching Burn/MSI caches |
+| Preserved dependencies | passed | WSL and Podman executables remain installed |
+| Preserved state | passed | ProgramData and service profile remain |
+| Reinstall | passed | Setup returned 0 and recovered the same READY controller/quorum |
+| Repair | passed | Setup returned 0 and reconverged to the same READY controller/quorum |
 
-- Installed MSI cache: `C:\Windows\Installer\7ecc1f.msi`.
-- Cached and rebuilt MSI shared PackageCode
-  `{461DD952-DBD0-5692-9A05-FB0D3C8EFF55}` but had different SHA-256 values.
-- MSI repair log reported errors 1334/2350 for legacy `runtime/probes` cabinet
-  members, returned success and started the service with an empty runtime tree.
-- `gnx status` failed closed with `RUNTIME_PAYLOAD_INVALID`.
+## Root-cause evidence
 
-## Physical recovery progress
+Microsoft Sysinternals Handle identified exact root-directory handles in
+`wslhost.exe` and `win-sshproxy.exe` created by the dedicated Podman Machine under
+an older working directory. Moving only the service/tray CWD and adding post-MSI
+cleanup did not release those persistent processes.
 
-`QuetzalcoatlSetup.exe /quiet /norestart` started against the installed broken
-0.2.0 fixture. Burn detected the old bundle and MSI as related upgrades, cached all
-0.2.1 packages, then stopped at `PrepareWsl` with exit 1641. The new MSI was not
-executed. HKLM RunOnce contains the 0.2.1 cached bundle, so completion and runtime
-verification require the pending Windows restart.
+0.2.12 stops only the managed `quetzalcoatl` machine under the service identity,
+preserves its data, signals the main Rust service through a private local event,
+and lets MSI remove the now-unlocked root. The accepted uninstall log contains no
+rollback and the strict postcondition reports:
+
+```text
+ArpCount=0 RootExists=False ServiceCount=0 TrayCount=0
+PathContainsProduct=False StartupCount=0 BundleCache=False MsiCacheMatches=0
+```

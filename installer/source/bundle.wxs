@@ -113,7 +113,7 @@
         Id="QuetzalcoatlProduct"
         SourceFile="$(var.ProductMsi)"
         Compressed="yes"
-        Visible="yes"
+        Visible="no"
         Vital="yes" />
     </Chain>
   </Bundle>
