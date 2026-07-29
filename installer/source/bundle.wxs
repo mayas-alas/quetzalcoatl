@@ -1,0 +1,120 @@
+<Wix
+  xmlns="http://wixtoolset.org/schemas/v4/wxs"
+  xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle
+    Name="Quetzalcoatl"
+    Manufacturer="Hector AB"
+    Version="$(var.ProductVersion)"
+    IconSourceFile="$(var.BrandIcon)"
+    ProviderKey="$(var.BundleUpgradeCode)"
+    UpgradeCode="$(var.BundleUpgradeCode)">
+
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+        Theme="hyperlinkSidebarLicense"
+        ThemeFile="$(var.BrandTheme)"
+        LicenseUrl="https://www.gnu.org/licenses/agpl-3.0.html"
+        LogoFile="$(var.BrandLogo)"
+        LogoSideFile="$(var.BrandSide)"
+        ShowVersion="yes" />
+      <Payload
+        Id="BrandWindowIcon"
+        Name="icon.ico"
+        SourceFile="$(var.BrandIcon)"
+        Compressed="yes" />
+    </BootstrapperApplication>
+
+    <Chain>
+      <ExePackage
+        Id="PrepareWsl"
+        SourceFile="$(var.GnxBootstrap)"
+        Name="gnx-bootstrap-prepare.exe"
+        CacheId="gnx-bootstrap-prepare-$(var.ProductVersion)"
+        DetectCondition="0"
+        InstallArguments="prepare-wsl --operation install --format json"
+        RepairArguments="prepare-wsl --operation repair --format json"
+        RepairCondition="1"
+        PerMachine="yes"
+        Permanent="yes"
+        Vital="yes">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="14" Behavior="forceReboot" />
+        <ExitCode Value="3010" Behavior="forceReboot" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
+      <!-- WSL and Podman are ancillary payloads of typed helpers. The helpers
+           copy them into the GNX-owned ProgramData cache, validate size and
+           SHA-256, and only then invoke msiexec from the stable path. -->
+      <ExePackage
+        Id="InstallWsl"
+        SourceFile="$(var.GnxBootstrap)"
+        Name="gnx-bootstrap-install-wsl.exe"
+        CacheId="gnx-bootstrap-install-wsl-$(var.ProductVersion)"
+        DetectCondition="0"
+        InstallArguments="install-wsl --operation install --format json"
+        RepairArguments="install-wsl --operation repair --format json"
+        RepairCondition="1"
+        PerMachine="yes"
+        Permanent="yes"
+        Vital="yes">
+        <Payload
+          Id="WslMsiPayload"
+          SourceFile="$(var.WslMsi)"
+          Name="wsl.2.7.10.0.x64.msi"
+          Compressed="yes" />
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="1641" Behavior="forceReboot" />
+        <ExitCode Value="3010" Behavior="forceReboot" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
+      <ExePackage
+        Id="InstallPodman"
+        SourceFile="$(var.GnxBootstrap)"
+        Name="gnx-bootstrap-install-podman.exe"
+        CacheId="gnx-bootstrap-install-podman-$(var.ProductVersion)"
+        DetectCondition="0"
+        InstallArguments="install-podman --operation install --format json"
+        RepairArguments="install-podman --operation repair --format json"
+        RepairCondition="1"
+        PerMachine="yes"
+        Permanent="yes"
+        Vital="yes">
+        <Payload
+          Id="PodmanMsiPayload"
+          SourceFile="$(var.PodmanMsi)"
+          Name="podman-installer-windows-amd64.msi"
+          Compressed="yes" />
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="1641" Behavior="forceReboot" />
+        <ExitCode Value="3010" Behavior="forceReboot" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
+      <ExePackage
+        Id="ValidateHost"
+        SourceFile="$(var.GnxBootstrap)"
+        Name="gnx-bootstrap-validate.exe"
+        CacheId="gnx-bootstrap-validate-$(var.ProductVersion)"
+        DetectCondition="0"
+        InstallArguments="--operation install --format json"
+        RepairArguments="--operation repair --format json"
+        RepairCondition="1"
+        PerMachine="yes"
+        Permanent="yes"
+        Vital="yes">
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="14" Behavior="forceReboot" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+
+      <MsiPackage
+        Id="QuetzalcoatlProduct"
+        SourceFile="$(var.ProductMsi)"
+        Compressed="yes"
+        Visible="yes"
+        Vital="yes" />
+    </Chain>
+  </Bundle>
+</Wix>

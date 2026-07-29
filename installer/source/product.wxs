@@ -1,0 +1,157 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package
+    Name="Quetzalcoatl"
+    Manufacturer="Hector AB"
+    Version="$(var.ProductVersion)"
+    ProductCode="$(var.ProductCode)"
+    UpgradeCode="$(var.UpgradeCode)"
+    Scope="perMachine">
+
+    <MajorUpgrade
+      Schedule="afterInstallInitialize"
+      AllowSameVersionUpgrades="yes"
+      DowngradeErrorMessage="A newer Quetzalcoatl version is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="none" />
+    <Icon Id="QuetzalcoatlIcon" SourceFile="$(var.BrandIcon)" />
+    <Property Id="ARPPRODUCTICON" Value="QuetzalcoatlIcon" />
+    <util:CloseApplication
+      Id="CloseQuetzalcoatlTray"
+      Target="gnx-tray.exe"
+      CloseMessage="yes"
+      ElevatedCloseMessage="yes"
+      Timeout="5"
+      TerminateProcess="0"
+      RebootPrompt="no" />
+    <CustomAction
+      Id="LaunchQuetzalcoatlTray"
+      FileRef="GnxTray"
+      ExeCommand=""
+      Execute="immediate"
+      Impersonate="yes"
+      Return="asyncNoWait" />
+    <InstallExecuteSequence>
+      <Custom
+        Action="LaunchQuetzalcoatlTray"
+        After="InstallFinalize"
+        Condition="NOT (REMOVE = &quot;ALL&quot;)" />
+    </InstallExecuteSequence>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Quetzalcoatl">
+        <Directory Id="RuntimePayloadFolder" Name="runtime" />
+        <Directory Id="MachineImagesFolder" Name="machine-images" />
+        <Directory Id="LicensesFolder" Name="licenses" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="StartupFolder" />
+
+    <Feature Id="ProductFeature" Title="Quetzalcoatl" Level="1">
+      <ComponentRef Id="CliComponent" />
+      <ComponentRef Id="TrayComponent" />
+      <ComponentRef Id="ServiceComponent" />
+      <ComponentRef Id="GnxServiceBinaryComponent" />
+      <ComponentRef Id="MachineImageComponent" />
+      <ComponentRef Id="LicensesComponent" />
+      <ComponentRef Id="ProductNoticeComponent" />
+      <ComponentRef Id="ThirdPartyNoticesComponent" />
+      <ComponentRef Id="WinSWLicenseComponent" />
+      <ComponentRef Id="WiXLicenseComponent" />
+      <Files Include="$(var.RuntimePayload)\**" Directory="RuntimePayloadFolder" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="CliComponent" Guid="*">
+        <File Id="GnxCli" Source="$(var.GnxCli)" Name="gnx.exe" KeyPath="yes" />
+        <Environment
+          Id="SystemPath"
+          Name="PATH"
+          Value="[INSTALLFOLDER]"
+          Action="set"
+          Part="last"
+          Permanent="no"
+          System="yes" />
+      </Component>
+
+      <Component Id="TrayComponent" Guid="*">
+        <File Id="GnxTray" Source="$(var.GnxTray)" Name="gnx-tray.exe" KeyPath="yes" />
+        <Shortcut
+          Id="TrayStartupShortcut"
+          Directory="StartupFolder"
+          Name="Quetzalcoatl"
+          Target="[#GnxTray]"
+          WorkingDirectory="INSTALLFOLDER" />
+      </Component>
+
+      <Component Id="ServiceComponent" Guid="*">
+        <File
+          Id="WinSW"
+          Source="$(var.WinSW)"
+          Name="Quetzalcoatl.Service.exe"
+          KeyPath="yes" />
+        <File
+          Id="WinSWConfig"
+          Source="$(var.ServiceConfig)"
+          Name="Quetzalcoatl.Service.xml" />
+        <ServiceInstall
+          Id="QuetzalcoatlService"
+          Name="Quetzalcoatl"
+          DisplayName="Quetzalcoatl"
+          Description="Supervises the Quetzalcoatl managed runtime."
+          Type="ownProcess"
+          Start="auto"
+          ErrorControl="normal"
+          Account="NT SERVICE\Quetzalcoatl"
+          Vital="yes" />
+        <ServiceControl
+          Id="QuetzalcoatlServiceControl"
+          Name="Quetzalcoatl"
+          Start="install"
+          Stop="both"
+          Remove="uninstall"
+          Wait="yes" />
+      </Component>
+
+      <!-- Keep the supervised Rust service in its own keyed component.
+           Earlier packages grouped it behind the unchanged WinSW key path, which
+           allowed Windows Installer repair/upgrade paths to retain a stale binary. -->
+      <Component Id="GnxServiceBinaryComponent" Guid="*">
+        <File
+          Id="GnxService"
+          Source="$(var.GnxService)"
+          Name="gnx-service.exe"
+          KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="MachineImagesFolder">
+      <Component Id="MachineImageComponent" Guid="*">
+        <File
+          Id="PodmanMachineImage"
+          Source="$(var.PodmanMachineImage)"
+          Name="$(var.PodmanMachineImageName)"
+          KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="LicensesFolder">
+      <Component Id="LicensesComponent" Guid="*">
+        <File Id="ProductLicense" Source="$(var.ProductLicense)" Name="AGPL-3.0.txt" KeyPath="yes" />
+      </Component>
+      <Component Id="ProductNoticeComponent" Guid="*">
+        <File Id="ProductNotice" Source="$(var.ProductNotice)" Name="NOTICE.txt" />
+      </Component>
+      <Component Id="ThirdPartyNoticesComponent" Guid="*">
+        <File Id="ThirdPartyNotices" Source="$(var.ThirdPartyNotices)" Name="THIRD_PARTY_NOTICES.md" />
+      </Component>
+      <Component Id="WinSWLicenseComponent" Guid="*">
+        <File Id="WinSWLicense" Source="$(var.WinSWLicense)" Name="WinSW.txt" />
+      </Component>
+      <Component Id="WiXLicenseComponent" Guid="*">
+        <File Id="WiXLicense" Source="$(var.WiXLicense)" Name="WiX.txt" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

@@ -1,0 +1,11 @@
+schema_version = 1
+generation = "proxmox-cluster-v2"
+payload_contract = 5
+payload_lock = "payload.lock.json"
+
+[layout]
+commands = "commands"
+operations = "operations"
+containers = "containers"
+services = "services"
+configuration = "configuration"

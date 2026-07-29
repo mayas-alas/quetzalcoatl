@@ -3,6 +3,8 @@ function Test-MsiPayloadCoherence {
         [Parameter(Mandatory)][string] $MsiPath,
         [Parameter(Mandatory)][string] $ServiceBinary,
         [Parameter(Mandatory)][string] $CliBinary,
+        [Parameter(Mandatory)][string] $TrayBinary,
+        [Parameter(Mandatory)][string] $MachineImage,
         [Parameter(Mandatory)][string] $RuntimePayload
     )
 
@@ -46,11 +48,40 @@ function Test-MsiPayloadCoherence {
             throw "MSI payload coherence: staged gnx.exe differs from the freshly built binary."
         }
 
-        $stagedManifests = @(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File -Filter "manifest.json" | Where-Object {
+        $stagedTrays = @(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File -Filter "gnx-tray.exe")
+        if ($stagedTrays.Count -ne 1) {
+            throw "MSI payload coherence: expected exactly one staged gnx-tray.exe; found $($stagedTrays.Count)."
+        }
+        if ((Get-FileHash -LiteralPath $TrayBinary -Algorithm SHA256).Hash -ne
+            (Get-FileHash -LiteralPath $stagedTrays[0].FullName -Algorithm SHA256).Hash) {
+            throw "MSI payload coherence: staged gnx-tray.exe differs from the freshly built binary."
+        }
+
+        $machineImageName = Split-Path -Leaf $MachineImage
+        $stagedImages = @(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File -Filter $machineImageName)
+        if ($stagedImages.Count -ne 1 -or
+            (Get-FileHash -LiteralPath $MachineImage -Algorithm SHA256).Hash -ne
+            (Get-FileHash -LiteralPath $stagedImages[0].FullName -Algorithm SHA256).Hash) {
+            throw "MSI payload coherence: staged Podman Machine image differs from the runtime lock artifact."
+        }
+
+        foreach ($legalName in @(
+            'AGPL-3.0.txt',
+            'NOTICE.txt',
+            'THIRD_PARTY_NOTICES.md',
+            'WinSW.txt',
+            'WiX.txt'
+        )) {
+            if (@(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File -Filter $legalName).Count -ne 1) {
+                throw "MSI payload coherence: legal file is absent or duplicated: $legalName"
+            }
+        }
+
+        $stagedManifests = @(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File -Filter "payload.lock.json" | Where-Object {
             $_.Directory.Name -eq 'runtime'
         })
         if ($stagedManifests.Count -ne 1) {
-            throw "MSI payload coherence: expected exactly one staged runtime manifest; found $($stagedManifests.Count)."
+            throw "MSI payload coherence: expected exactly one staged runtime lock; found $($stagedManifests.Count)."
         }
         $stagedRuntime = $stagedManifests[0].Directory.FullName
 

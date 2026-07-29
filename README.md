@@ -1,74 +1,60 @@
-# Quetzalcoatl 0.1.17
+# Quetzalcoatl 0.2.0
 
-Quetzalcoatl is a Windows-managed MVP that provisions and reconciles a Fedora Podman Machine containing the Tailscale and Proxmox runtime used by controller/member nodes.
+Quetzalcoatl is a Windows-managed MVP that installs and reconciles a Fedora Podman
+Machine containing the Tailscale and Proxmox runtime for controller and member nodes.
 
-Version 0.1.17 combines three installed-MVP corrections:
+`QuetzalcoatlSetup.exe` is the sole installation and maintenance interface. The MSI,
+bootstrap helper, Windows service, CLI and tray are internal components managed by
+Setup; users do not install or coordinate them separately.
 
-- dynamic host CPU, RAM and disk selection shared by `.wslconfig` and Podman Machine;
-- lean role discovery based only on online controller presence;
-- PVE-before-Serve ordering with structured Serve JSON delivered through stdin.
+## Product surface
 
-The workspace remains at four Cargo packages. Protocol schema 2, persisted-state schema 2, runtime payload 5 and runtime generation `proxmox-cluster-v2` are unchanged.
+- `gnx status [--json]` reads current service state.
+- `gnx configure` submits protected setup inputs.
+- `gnx restart` restarts the Windows service; persisted identity and member
+  checkpoints survive.
+- `gnx version`, `gnx --version` and `gnx -V` print the local version.
+- The tray menu contains only status, version and **Conectar**. Connect opens only
+  the validated PVE HTTPS URL under the configured tailnet.
 
-## Host profile
+No localhost UI, listener or additional product port is introduced.
 
-The installer records detected and selected resources at:
-
-```text
-C:\ProgramData\Quetzalcoatl\Installer\host-profile.json
-```
-
-A host with approximately 6 GiB visible RAM is intentionally classified as a laboratory profile. It may exercise installation and runtime creation, but it is not certified as a complete Proxmox cluster member.
-
-## Lean topology
-
-```text
-zero online gnx-controller-* peers → controller
-one or more online controllers     → member
-existing member count              → ignored
-```
-
-Upgrades with valid persisted state preserve their existing role.
-
-## Remote execution
-
-Quetzalcoatl treats remote argv, stdin and files as separate contracts:
+## Source taxonomy
 
 ```text
-argv  = closed operation
-stdin = bounded variable data
-file  = durable GNX-owned state
+quetzalcoatl/
+|-- apps/
+|   |-- gnx/                 # CLI and native Windows tray
+|   |-- gnx-service/         # reconciliation service
+|   `-- gnx-bootstrap/       # host preflight and dependency recovery
+|-- crates/
+|   `-- gnx-contracts/       # shared typed contracts; not vendor code
+|-- runtime/
+|   |-- commands/            # installed locked commands
+|   |-- configuration/
+|   |-- containers/
+|   |-- services/
+|   `-- operations/          # embedded stdin programs; not installed
+|-- installer/               # WiX sources, canonical/derived assets and build modules
+|-- release/                 # authoritative release manifest
+|-- tests/                   # wire compatibility fixtures
+|-- tools/                   # single validation entry point
+|-- docs/                    # four authoritative product documents
+`-- .AGENTS/                 # one active delivery contract
 ```
 
-Dynamic shell execution, redirection and arbitrary remote commands are prohibited. See `docs/REMOTE_EXECUTION.md`.
-
-## CLI
-
-```powershell
-gnx -v
-gnx --version
-gnx status
-gnx status --json
-gnx configure
-gnx restart
-```
+The workspace has exactly four Cargo packages. Schema versions belong in serialized
+contracts and migration tests, never in filenames or parallel implementations.
 
 ## Build and validation
 
 ```powershell
-python .\ci\validate_repository.py
-python .\ci\validate_runtime.py
-python .\ci\validate_remote_execution.py
-python .\ci\validate_cli_contract.py
-python .\ci\validate_release_contract.py
-python .\ci\validate_installer_resume.py
-python .\ci\validate_cluster_contract.py
-python .\ci\validate_host_profile.py
-
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --all-targets --locked
-.\installer\build.ps1
+.\tools\check.ps1
 ```
 
-Start with `docs/README.md`, `docs/RUNTIME_LIFECYCLE.md`, `docs/REMOTE_EXECUTION.md` and `docs/VALIDATION.md`.
+This validates repository taxonomy, contracts, remote execution, runtime and
+installer sources; runs format, lint and tests; then builds and inspects the MSI and
+`QuetzalcoatlSetup.exe`. Use `-SourceOnly` while iterating when physical installer
+artifacts are not required.
+
+Start with [docs/README.md](docs/README.md).

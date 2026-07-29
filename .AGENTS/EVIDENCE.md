@@ -1,24 +1,38 @@
-# Evidence — 0.1.17
+# Delivery evidence
 
-## Source evidence
+## Executable gates
 
-- `crates/gnx-host-preflight/src/host_profile.rs` owns inventory, policy and persistence.
-- `crates/gnx-service/src/runtime/profile.rs` owns service-side loading and validation.
-- `runtime/host.rs` generates `.wslconfig`; `runtime/machine.rs` applies the same profile to Podman.
-- `runtime/tailscale.rs` parses online controllers, generates the fixed Serve JSON and sends it through stdin to `tailscale serve set-raw`.
-- `runtime/topology.rs` resolves controller/member state without a member-count limit.
-- `runtime/reconciler.rs` starts PVE before applying and validating Serve.
-- `runtime/remote/operation.rs` contains the closed Fedora-agent operation map.
-- `runtime/remote/transport.rs` enforces bounded stdin/output, timeout, cancellation and zeroization.
-- `ci/validate_remote_execution.py` rejects shell-string execution and shell-control syntax in direct remote argv arrays.
-- `docs/REMOTE_EXECUTION.md` and `docs/REMOTE_EXECUTION_REVIEW.md` define the normative policy and review evidence.
+| Gate | Command | Status | Evidence |
+|---|---|---|---|
+| Taxonomy/contracts | five `tools/validation/*.py` validators | passed | repository, contracts, remote execution, runtime and installer all `ok` |
+| Format | `cargo fmt --all --check` | passed | integrated gate |
+| Lint | `cargo clippy --workspace --all-targets --locked -- -D warnings` | passed | zero warnings |
+| Tests | `cargo test --workspace --all-targets --locked` | passed | 50 tests |
+| Installer | `installer/build.ps1` | passed | WiX build, MSI extraction, binary/image/legal/runtime comparison and Burn inspection |
+| Reproducibility | two consecutive `installer/build.ps1` runs | passed | four EXE, MSI and Setup hashes identical |
+| Integrated | `powershell -NoProfile -ExecutionPolicy Bypass -File tools/check.ps1` | passed | exit code 0 |
 
-## Required Windows evidence
+## Artifact evidence
 
-- `cargo fmt --all --check`.
-- `cargo clippy --workspace --all-targets --locked -- -D warnings`.
-- `cargo test --workspace --all-targets --locked`.
-- `installer/build.ps1 -TestRebootContractOnly`.
-- `installer/build.ps1`.
-- Clean Dockur install showing the selected host profile, controller readiness and functional Tailscale HTTPS to PVE.
-- A later Dockur node selecting member when an online controller exists.
+| Artifact | Version | SHA-256 | Status |
+|---|---|---|---|
+| `target/installer/Quetzalcoatl.msi` | 0.2.0 | `592AC630DFA1D27CAD89A786644A71470D39CEDF068285CCD0C194B7C8C940AB` | passed |
+| `target/installer/QuetzalcoatlSetup.exe` | 0.2.0 | `B810FB309CED873EFE56924A7935B3BBC32A4E88AD774E5FEC5255F0895C0944` | passed |
+
+## Physical acceptance
+
+| Scenario | Status | Required observation |
+|---|---|---|
+| Fresh installation | pending | one Setup completes; service and tray start |
+| Upgrade from 0.1.17 | pending | identity/state retained and binaries replaced |
+| Repair | pending | prerequisites revalidated and MSI key paths restored |
+| Reboot/resume | pending | Burn resumes within bounded journal |
+| Service restart | pending | role/controller/member checkpoint retained |
+| Tray | pending | G icon; status/version/connect only; validated PVE HTTPS URL |
+
+Source/build evidence must not mark physical scenarios complete.
+
+## Taxonomy adjustment
+
+Canonical branding and WiX/Burn derivatives share the single
+`installer/assets` ownership tree. No root `assets` directory remains.

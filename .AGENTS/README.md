@@ -1,7 +1,27 @@
-# Agent execution contract — 0.1.17
+# Delivery contract
 
-The active mission is to stabilize the installed MVP without expanding its public surface. Work may harden host sizing, installer recovery, lean controller/member discovery, PVE readiness, Tailscale Serve activation and the closed remote-execution boundary.
+`.AGENTS` governs one active delivery: Quetzalcoatl 0.2.0 release hardening. It is
+not release history or a generic handbook.
 
-Agents must preserve the four-package workspace, protocol schema 2, persisted-state schema 2, runtime generation `proxmox-cluster-v2`, payload contract 5 and the existing Named Pipe command set.
+Read in order:
 
-Before changing any command that crosses into Podman Machine or a managed container, read `docs/REMOTE_EXECUTION.md` and complete `docs/REMOTE_EXECUTION_REVIEW.md`. Dynamic shell commands and arbitrary remote argv are not permitted.
+1. `SCOPE.md` — outcomes, risks and exclusions.
+2. `WORKSTREAMS.md` — three non-overlapping ownership lanes.
+3. `TRACKER.md` — live status, dependencies and handoffs.
+4. `EVIDENCE.md` — executable gates and physical acceptance.
+
+## Protocol
+
+1. Preserve the recorded dirty baseline; never revert unrelated user work.
+2. Claim only paths assigned to one workstream.
+3. Record cross-workstream requirements in `TRACKER.md`.
+4. Use one semantic name and one source of truth.
+5. A workstream reaches `review` only after its checks pass.
+6. The coordinator integrates all workstreams into one Setup artifact.
+7. `done` requires the complete source/build gate and explicit residual risks.
+
+Statuses are exactly `ready`, `active`, `blocked`, `review`, `done`.
+
+Product behavior belongs in code and contract tests. Architecture and operations
+belong in `docs/`. Release history belongs in `CHANGELOG.md`. `.AGENTS` is deleted or
+reset after the delivery is committed.

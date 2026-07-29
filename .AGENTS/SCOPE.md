@@ -1,33 +1,58 @@
-# Scope and definition of done — 0.1.17
+# 0.2.0 release-hardening scope
 
-## In scope
+## Outcome
 
-- Inventory logical CPU, visible RAM and system-disk capacity during host preflight.
-- Persist and validate one bounded host profile for `.wslconfig` and Podman Machine creation.
-- Preserve installer dependency staging, reboot recovery and bounded retry behavior.
-- Resolve a new node from online controller presence only: zero means controller; one or more means member.
-- Allow any number of existing members without using member count as a decision input.
-- Commit the final role only after Tailscale confirms the renamed local identity.
-- Start and validate PVE before applying Tailscale Serve.
-- Apply structured Serve configuration through bounded stdin rather than shell redirection.
-- Harden validators, tests and documentation around the closed remote-execution contract.
+Deliver one coherent 0.2.0 source tree and one validated
+`QuetzalcoatlSetup.exe`. Setup remains the sole user-facing installation, upgrade
+and repair interface.
 
-## Out of scope
+## Included
 
-- A custom Bootstrapper Application or new installer UI.
-- Free-form user resource overrides.
-- New crates, applications, services, listeners or ports.
-- New IPC commands, persisted-state schema or runtime payload version.
-- Multi-cluster identity within one tailnet, controller failover, HA or QDevice.
-- Controller-side enrollment API, arbitrary remote execution or generic repair commands.
-- Renaming the transport API in 0.1.17; explicit `machine_exec*` primitives remain a later refactor.
+| ID | Remediation | Acceptance |
+|---|---|---|
+| LEG | Product licensing and notices | Root AGPLv3 license, Hector AB copyright, Cargo/PE/MSI metadata and separate third-party notices. |
+| BRD | Canonical branding assets | One `installer/assets` tree contains canonical branding sources and installer-specific derivatives. |
+| ARC | Real module boundaries | No `#[path]` cross-layer wiring or broad production glob imports; domain and infrastructure are crate modules. |
+| TYP | Contract typing | Lifecycle, health and PVE URL validation use closed types at boundaries; invalid values fail closed. |
+| RUN | Runtime taxonomy and locks | Installed files and orchestration operations are distinct; one authoritative machine-image fact set; LF policy covers all runtime sources. |
+| REL | Release-source consolidation | Version/copyright metadata is derived where possible; redundant `VERSION` and static fixtures are removed or consumed directly. |
+| DOC | Documentation reduction | Minimal authoritative architecture, contracts, operations and validation documents. |
+| DEL | Delivery assurance | Source gates, MSI extraction, Burn identity, branding, install/upgrade/repair/restart contracts and final hashes pass. |
+
+## Preserved invariants
+
+- Exactly four Cargo packages.
+- Protocol schema 2, Named Pipe command set and persisted-state schema 2.
+- Host-profile schema 1, runtime generation `proxmox-cluster-v2` and payload contract 5.
+- Closed remote argv, bounded stdin/output/time and atomic durable state.
+- New-node role from online controller presence only.
+- PVE readiness before Tailscale Serve.
+- Bounded installer resume and member-join recovery.
+- No localhost UI, listener, new product port or Tauri runtime.
+- `installer/build.ps1` remains the release entry point.
+
+## Explicit exclusion
+
+Hosted CI on another Windows host is not part of this delivery. The local
+`tools/check.ps1` gate remains mandatory and suitable for future CI adoption.
+
+## Risk matrix
+
+`score = impact × probability + urgency + necessity`, each factor 1–5.
+
+| Risk | I | P | U | N | Score | Priority | Gate |
+|---|---:|---:|---:|---:|---:|---|---|
+| Incorrect product/third-party licensing | 5 | 5 | 5 | 5 | 35 | P0 | LEG |
+| CRLF corrupts Linux runtime programs | 5 | 4 | 5 | 5 | 30 | P0 | RUN |
+| Cosmetic folders hide coupled Rust modules | 5 | 4 | 4 | 5 | 29 | P0 | ARC |
+| Upgrade/repair replaces an incomplete product | 5 | 4 | 4 | 5 | 29 | P0 | DEL |
+| Invalid string state crosses a contract boundary | 4 | 4 | 3 | 5 | 24 | P1 | TYP |
+| Branding/version facts drift between tools | 4 | 4 | 3 | 5 | 24 | P1 | BRD/REL |
+| Runtime facts are duplicated in lock and source | 4 | 3 | 3 | 5 | 20 | P1 | RUN |
+| Documentation and fixtures duplicate behavior | 3 | 4 | 2 | 4 | 18 | P2 | DOC/REL |
 
 ## Definition of done
 
-- Source validators pass from a clean extraction.
-- Rust formatting, Clippy and workspace tests pass on the Windows build host.
-- The observed 5864 MiB host selects a bounded laboratory profile without fixed 8192 MiB assumptions.
-- A clean first node reaches controller readiness.
-- A later node observes at least one online controller and enters the member path regardless of existing member count.
-- Tailscale Serve is absent before PVE readiness and is successfully applied through stdin afterward.
-- No direct remote argv contains shell-control syntax.
+All included rows are `done`; `tools/check.ps1` passes; final MSI and Setup hashes
+are recorded; physical fresh-install, upgrade, repair, reboot and tray checks are
+reported as executed or explicitly pending, never inferred from source tests.

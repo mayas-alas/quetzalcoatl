@@ -1,10 +1,10 @@
 function Test-RebootContract {
     param(
-        [string] $BundlePath = (Join-Path $installerRoot "bundle.wxs"),
+        [string] $BundlePath = (Join-Path $installerRoot "source\bundle.wxs"),
         [string] $BundleXml
     )
 
-    $exitCodesPath = Join-Path $repoRoot "crates\gnx-host-preflight\src\exit_codes.rs"
+    $exitCodesPath = Join-Path $repoRoot "apps\gnx-bootstrap\src\exit_codes.rs"
     $exitCodes = Get-Content -LiteralPath $exitCodesPath -Raw -Encoding utf8
     $rebootValues = @{}
     foreach ($constantName in @('REBOOT_PENDING', 'REBOOT_REQUIRED')) {
@@ -94,8 +94,8 @@ function Test-RebootContract {
 }
 
 function Test-ReleaseIdentityContract {
-    $packagePath = Join-Path $installerRoot "package.wxs"
-    $bundlePath = Join-Path $installerRoot "bundle.wxs"
+    $packagePath = Join-Path $installerRoot "source\product.wxs"
+    $bundlePath = Join-Path $installerRoot "source\bundle.wxs"
     $package = [xml] (Get-Content -LiteralPath $packagePath -Raw -Encoding utf8)
     $bundle = [xml] (Get-Content -LiteralPath $bundlePath -Raw -Encoding utf8)
     $packageNode = $package.SelectSingleNode('/*[local-name()="Wix"]/*[local-name()="Package"]')
@@ -104,14 +104,15 @@ function Test-ReleaseIdentityContract {
     if (-not $packageNode -or -not $bundleNode) {
         throw "Release identity contract: package or bundle root is missing."
     }
-    if ($packageNode.GetAttribute('Version') -ne $releaseVersion -or $bundleNode.GetAttribute('Version') -ne $releaseVersion) {
-        throw "Release identity contract: package and bundle must both use version $releaseVersion."
+    if ($packageNode.GetAttribute('Version') -ne '$(var.ProductVersion)' -or
+        $bundleNode.GetAttribute('Version') -ne '$(var.ProductVersion)') {
+        throw "Release identity contract: package and bundle must both consume ProductVersion."
     }
-    if ($packageNode.GetAttribute('ProductCode') -ne $releaseProductCode) {
-        throw "Release identity contract: package ProductCode must be the explicit $releaseVersion identity $releaseProductCode."
+    if ($packageNode.GetAttribute('ProductCode') -ne '$(var.ProductCode)') {
+        throw "Release identity contract: package must consume the release ProductCode."
     }
-    if ($packageNode.GetAttribute('UpgradeCode') -ne $releaseUpgradeCode) {
-        throw "Release identity contract: package UpgradeCode must remain $releaseUpgradeCode."
+    if ($packageNode.GetAttribute('UpgradeCode') -ne '$(var.UpgradeCode)') {
+        throw "Release identity contract: package must consume the stable UpgradeCode."
     }
     if ($releaseProductCode -eq $previousProductCode -or
         $releasePackageCode -eq $previousPackageCode -or
@@ -120,8 +121,9 @@ function Test-ReleaseIdentityContract {
     }
     $majorUpgrade = @($packageNode.SelectNodes('./*[local-name()="MajorUpgrade"]'))
     if ($majorUpgrade.Count -ne 1 -or
-        $majorUpgrade[0].GetAttribute('Schedule') -ne 'afterInstallInitialize') {
-        throw "Release identity contract: MSI major upgrade must preserve rollback-safe scheduling."
+        $majorUpgrade[0].GetAttribute('Schedule') -ne 'afterInstallInitialize' -or
+        $majorUpgrade[0].GetAttribute('AllowSameVersionUpgrades') -ne 'yes') {
+        throw "Release identity contract: MSI must preserve rollback-safe same-version major upgrades."
     }
     $serviceBinaryComponents = @($package.SelectNodes('//*[local-name()="Component" and @Id="GnxServiceBinaryComponent"]'))
     if ($serviceBinaryComponents.Count -ne 1) {
@@ -133,8 +135,8 @@ function Test-ReleaseIdentityContract {
         $serviceBinaryFiles[0].GetAttribute('Name') -ne 'gnx-service.exe') {
         throw "Release identity contract: gnx-service.exe must be the key path of GnxServiceBinaryComponent."
     }
-    $legacyGroupedServiceFiles = @($package.SelectNodes('//*[local-name()="Component" and @Id="ServiceComponent"]/*[local-name()="File" and @Id="GnxService"]'))
-    if ($legacyGroupedServiceFiles.Count -ne 0) {
+    $groupedServiceFiles = @($package.SelectNodes('//*[local-name()="Component" and @Id="ServiceComponent"]/*[local-name()="File" and @Id="GnxService"]'))
+    if ($groupedServiceFiles.Count -ne 0) {
         throw "Release identity contract: gnx-service.exe must not remain grouped behind the WinSW key path."
     }
     $serviceBinaryRefs = @($package.SelectNodes('//*[local-name()="Feature"]/*[local-name()="ComponentRef" and @Id="GnxServiceBinaryComponent"]'))
@@ -165,18 +167,19 @@ function Test-ReleaseIdentityContract {
     if ($cliRefs.Count -ne 1) {
         throw "Release identity contract: ProductFeature must install CliComponent exactly once."
     }
-    if ($bundleNode.GetAttribute('ProviderKey') -ne $bundleUpgradeCode -or
-        $bundleNode.GetAttribute('UpgradeCode') -ne $bundleUpgradeCode) {
-        throw "Release identity contract: Burn ProviderKey and UpgradeCode must preserve $bundleUpgradeCode."
+    if ($bundleNode.GetAttribute('ProviderKey') -ne '$(var.BundleUpgradeCode)' -or
+        $bundleNode.GetAttribute('UpgradeCode') -ne '$(var.BundleUpgradeCode)') {
+        throw "Release identity contract: Burn ProviderKey and UpgradeCode must consume the stable bundle upgrade code."
     }
 
-    $extensionRoot = Join-Path $installerRoot "wixext\Gnx.DeterministicBundle.wixext"
+    $extensionRoot = Join-Path $installerRoot "extensions\deterministic-bundle"
     $extensionSourcePath = Join-Path $extensionRoot "DeterministicBundleExtension.cs"
-    $extensionProjectPath = Join-Path $extensionRoot "Gnx.DeterministicBundle.wixext.csproj"
+    $extensionProjectPath = Join-Path $extensionRoot "DeterministicBundle.wixext.csproj"
     $extensionLockPath = Join-Path $extensionRoot "packages.lock.json"
     $extensionSource = Get-Content -LiteralPath $extensionSourcePath -Raw -Encoding utf8
-    if ($extensionSource -notmatch "public\s+const\s+string\s+BundleId\s*=\s*`"$([regex]::Escape($releaseBundleId))`"\s*;") {
-        throw "Release identity contract: deterministic binder BundleId must remain $releaseBundleId."
+    if ($extensionSource -notmatch 'Environment\.GetEnvironmentVariable\("GNX_RELEASE_BUNDLE_ID"\)' -or
+        $extensionSource -notmatch 'bundle\.BundleId\s*=\s*BundleId\s*;') {
+        throw "Release identity contract: deterministic binder must consume the release BundleId from GNX_RELEASE_BUNDLE_ID."
     }
 
     $extensionProject = [xml] (Get-Content -LiteralPath $extensionProjectPath -Raw -Encoding utf8)
@@ -198,29 +201,33 @@ function Test-ReleaseIdentityContract {
         $exePackage = @($bundle.SelectNodes('//*[local-name()="ExePackage"]') | Where-Object {
             $_.GetAttribute('Id') -eq $packageId
         })
-        if ($exePackage.Count -ne 1 -or $exePackage[0].GetAttribute('CacheId') -notmatch "-$([regex]::Escape($releaseVersion))$") {
-            throw "Release identity contract: ExePackage Id=$packageId must have a CacheId ending in -$releaseVersion."
+        if ($exePackage.Count -ne 1 -or $exePackage[0].GetAttribute('CacheId') -notmatch '-\$\(var\.ProductVersion\)$') {
+            throw "Release identity contract: ExePackage Id=$packageId must bind CacheId to ProductVersion."
         }
     }
 
+    $workspaceManifest = Get-Content -LiteralPath (Join-Path $repoRoot 'Cargo.toml') -Raw -Encoding utf8
+    if ($workspaceManifest -notmatch "(?ms)\[workspace\.package\].*?^version\s*=\s*`"$([regex]::Escape($releaseVersion))`"\s*$") {
+        throw "Release identity contract: workspace package version must be $releaseVersion."
+    }
     foreach ($manifestPath in @(
-        'crates\gnx-cli\Cargo.toml',
-        'crates\gnx-protocol\Cargo.toml',
-        'crates\gnx-service\Cargo.toml',
-        'crates\gnx-host-preflight\Cargo.toml'
+        'apps\gnx\Cargo.toml',
+        'apps\gnx-service\Cargo.toml',
+        'apps\gnx-bootstrap\Cargo.toml',
+        'crates\gnx-contracts\Cargo.toml'
     )) {
         $manifest = Get-Content -LiteralPath (Join-Path $repoRoot $manifestPath) -Raw -Encoding utf8
-        if ($manifest -notmatch "(?m)^version\s*=\s*`"$([regex]::Escape($releaseVersion))`"\s*$") {
-            throw "Release identity contract: $manifestPath must use version $releaseVersion."
+        if ($manifest -notmatch '(?m)^version\.workspace\s*=\s*true\s*$') {
+            throw "Release identity contract: $manifestPath must inherit the workspace version."
         }
     }
 }
 
 
 function Test-DependencyStagingContract {
-    $bundlePath = Join-Path $installerRoot "bundle.wxs"
+    $bundlePath = Join-Path $installerRoot "source\bundle.wxs"
     $bundle = [xml] (Get-Content -LiteralPath $bundlePath -Raw -Encoding utf8)
-    $dependencySourcePath = Join-Path $repoRoot "crates\gnx-host-preflight\src\dependency.rs"
+    $dependencySourcePath = Join-Path $repoRoot "apps\gnx-bootstrap\src\dependencies\mod.rs"
     $dependencySource = Get-Content -LiteralPath $dependencySourcePath -Raw -Encoding utf8
     $normalizedDependencySource = $dependencySource -replace '_', ''
 
@@ -230,14 +237,16 @@ function Test-DependencyStagingContract {
             PackageId = 'InstallWsl'
             PayloadId = 'WslMsiPayload'
             SourceVariable = '$(var.WslMsi)'
-            InstallArguments = 'install-wsl --format json'
+            InstallArguments = 'install-wsl --operation install --format json'
+            RepairArguments = 'install-wsl --operation repair --format json'
         },
         @{
             ArtifactId = 'podman'
             PackageId = 'InstallPodman'
             PayloadId = 'PodmanMsiPayload'
             SourceVariable = '$(var.PodmanMsi)'
-            InstallArguments = 'install-podman --format json'
+            InstallArguments = 'install-podman --operation install --format json'
+            RepairArguments = 'install-podman --operation repair --format json'
         }
     )
 
@@ -272,8 +281,10 @@ function Test-DependencyStagingContract {
             throw "Dependency staging contract: expected exactly one $($contract.PackageId) helper."
         }
         $package = $packages[0]
-        if ($package.GetAttribute('SourceFile') -ne '$(var.HostPreflight)' -or
+        if ($package.GetAttribute('SourceFile') -ne '$(var.GnxBootstrap)' -or
             $package.GetAttribute('InstallArguments') -ne $contract.InstallArguments -or
+            $package.GetAttribute('RepairArguments') -ne $contract.RepairArguments -or
+            $package.GetAttribute('RepairCondition') -ne '1' -or
             $package.GetAttribute('PerMachine') -ne 'yes' -or
             $package.GetAttribute('Vital') -ne 'yes') {
             throw "Dependency staging contract: $($contract.PackageId) execution policy differs."
@@ -287,5 +298,69 @@ function Test-DependencyStagingContract {
             $payloads[0].GetAttribute('Compressed') -ne 'yes') {
             throw "Dependency staging contract: $($contract.PackageId) payload differs from the lock."
         }
+    }
+}
+
+function Test-MaintenanceContract {
+    $bundlePath = Join-Path $installerRoot "source\bundle.wxs"
+    $packagePath = Join-Path $installerRoot "source\product.wxs"
+    $themePath = Join-Path $installerRoot "assets\wixstdba-theme.xml"
+    $bundle = [xml] (Get-Content -LiteralPath $bundlePath -Raw -Encoding utf8)
+    $package = [xml] (Get-Content -LiteralPath $packagePath -Raw -Encoding utf8)
+    $theme = [xml] (Get-Content -LiteralPath $themePath -Raw -Encoding utf8)
+
+    $expected = @{
+        PrepareWsl = @{
+            Install = 'prepare-wsl --operation install --format json'
+            Repair = 'prepare-wsl --operation repair --format json'
+        }
+        InstallWsl = @{
+            Install = 'install-wsl --operation install --format json'
+            Repair = 'install-wsl --operation repair --format json'
+        }
+        InstallPodman = @{
+            Install = 'install-podman --operation install --format json'
+            Repair = 'install-podman --operation repair --format json'
+        }
+        ValidateHost = @{
+            Install = '--operation install --format json'
+            Repair = '--operation repair --format json'
+        }
+    }
+
+    foreach ($packageId in $expected.Keys) {
+        $nodes = @($bundle.SelectNodes('//*[local-name()="ExePackage"]') | Where-Object {
+            $_.GetAttribute('Id') -eq $packageId
+        })
+        if ($nodes.Count -ne 1) {
+            throw "Maintenance contract: expected exactly one ExePackage Id=$packageId."
+        }
+        $node = $nodes[0]
+        if ($node.GetAttribute('InstallArguments') -ne $expected[$packageId].Install -or
+            $node.GetAttribute('RepairArguments') -ne $expected[$packageId].Repair -or
+            $node.GetAttribute('RepairCondition') -ne '1') {
+            throw "Maintenance contract: $packageId must expose closed install and repair operations."
+        }
+    }
+
+    $msiPackages = @($bundle.SelectNodes('//*[local-name()="MsiPackage" and @Id="QuetzalcoatlProduct"]'))
+    if ($msiPackages.Count -ne 1) {
+        throw "Maintenance contract: the product MSI must remain in the bundle chain."
+    }
+    $repairButtons = @($theme.SelectNodes('//*[local-name()="Button" and @Name="RepairButton"]'))
+    if ($repairButtons.Count -ne 1) {
+        throw "Maintenance contract: the bootstrapper theme must expose exactly one repair action."
+    }
+    $majorUpgrade = @($package.SelectNodes('//*[local-name()="MajorUpgrade"]'))
+    if ($majorUpgrade.Count -ne 1 -or
+        $majorUpgrade[0].GetAttribute('Schedule') -ne 'afterInstallInitialize') {
+        throw "Maintenance contract: MSI upgrade scheduling must preserve rollback-safe replacement."
+    }
+    $serviceControls = @($package.SelectNodes('//*[local-name()="ServiceControl" and @Id="QuetzalcoatlServiceControl"]'))
+    if ($serviceControls.Count -ne 1 -or
+        $serviceControls[0].GetAttribute('Start') -ne 'install' -or
+        $serviceControls[0].GetAttribute('Stop') -ne 'both' -or
+        $serviceControls[0].GetAttribute('Wait') -ne 'yes') {
+        throw "Maintenance contract: upgrade and repair must stop and restart the service deterministically."
     }
 }

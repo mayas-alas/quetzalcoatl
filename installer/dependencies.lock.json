@@ -28,14 +28,6 @@
       "size": 27414528,
       "sha256": "3B65848F2D9AE652A15C35F2496A9ECE2E07F28746FA651415D519AE7C5902AD",
       "url": "https://github.com/podman-container-tools/podman/releases/download/v6.0.1/podman-installer-windows-amd64.msi"
-    },
-    {
-      "id": "podman_machine",
-      "version": "6.0.1",
-      "file_name": "podman-machine.x86_64.wsl.tar.zst",
-      "size": 249510008,
-      "sha256": "0D828BEEF16A031A50A7CEE594FD79ADE36C3D3972B590CB01C32A987BD88BC3",
-      "url": "https://github.com/podman-container-tools/podman-machine-os/releases/download/v6.0.1/podman-machine.x86_64.wsl.tar.zst"
     }
   ]
 }

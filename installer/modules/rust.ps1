@@ -8,9 +8,26 @@ function Build-RustReleaseArtifacts {
     $rustBuildStarted = [DateTime]::UtcNow
 
     foreach ($rustPackage in $Packages) {
-        & cargo rustc --locked --release -p $rustPackage -- -C target-feature=+crt-static
+        & cargo clean -p $rustPackage
         if ($LASTEXITCODE -ne 0) {
-            throw "Static-CRT Rust release build failed for $rustPackage."
+            throw "Rust artifact cleanup failed for $rustPackage."
+        }
+        if ($rustPackage -eq 'gnx') {
+            foreach ($rustTarget in @('gnx', 'gnx-tray')) {
+                & cargo rustc --locked --release -p $rustPackage --bin $rustTarget -- `
+                    -C target-feature=+crt-static `
+                    -C link-arg=/Brepro
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Static-CRT Rust release build failed for $rustPackage target $rustTarget."
+                }
+            }
+        } else {
+            & cargo rustc --locked --release -p $rustPackage -- `
+                -C target-feature=+crt-static `
+                -C link-arg=/Brepro
+            if ($LASTEXITCODE -ne 0) {
+                throw "Static-CRT Rust release build failed for $rustPackage."
+            }
         }
     }
 

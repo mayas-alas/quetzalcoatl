@@ -57,19 +57,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "gnx-cli"
-version = "0.1.17"
+name = "gnx"
+version = "0.2.0"
 dependencies = [
- "gnx-protocol",
+ "gnx-contracts",
  "serde_json",
  "windows-sys 0.61.2",
  "zeroize",
 ]
 
 [[package]]
-name = "gnx-host-preflight"
-version = "0.1.17"
+name = "gnx-bootstrap"
+version = "0.2.0"
 dependencies = [
+ "gnx-contracts",
  "serde",
  "serde_json",
  "sha2",
@@ -78,8 +79,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "gnx-protocol"
-version = "0.1.17"
+name = "gnx-contracts"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -88,9 +89,9 @@ dependencies = [
 
 [[package]]
 name = "gnx-service"
-version = "0.1.17"
+version = "0.2.0"
 dependencies = [
- "gnx-protocol",
+ "gnx-contracts",
  "serde",
  "serde_json",
  "sha2",
