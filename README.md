@@ -1,4 +1,4 @@
-# Quetzalcoatl 0.2.14
+# Quetzalcoatl 0.2.40
 
 Quetzalcoatl is a Windows-managed MVP that installs and reconciles a Fedora Podman
 Machine containing the Tailscale and Proxmox runtime for controller and member nodes.
@@ -12,6 +12,11 @@ Setup; users do not install or coordinate them separately.
 
 - `gnx status [--json]` reads current service state.
 - `gnx configure` submits protected setup inputs.
+- `gnx configure platform` separately stores the protected, tag-restricted
+  Tailscale enrollment input used by platform LXC workloads.
+- `gnx forgejo admin show` verifies and displays the bootstrap administrator
+  credential to an elevated local administrator.
+- `gnx forgejo admin reset --confirm` atomically rotates that credential.
 - `gnx restart` restarts the Windows service; persisted identity and member
   checkpoints survive.
 - `gnx version`, `gnx --version` and `gnx -V` print the local version.

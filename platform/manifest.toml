@@ -1,0 +1,13 @@
+schema_version = 1
+bundle_contract = 1
+lock = "platform.lock.json"
+
+[runners]
+opentofu = "ghcr.io/opentofu/opentofu@sha256:6b66d996afc7f043154e33a0420285d0d58c165305ac8f36d32df213a3c4bbd4"
+forgejo_runner = "code.forgejo.org/forgejo/runner@sha256:eb6e7bc21973382d261e6eb883dbd27b8cb56939d33a3bfd79a1352b7f9a33a0"
+tailscale = "docker.io/tailscale/tailscale@sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e"
+
+[policy]
+tailscale_tag = "tag:quetzalcoatl-service"
+public_exposure = false
+repository_commands = false

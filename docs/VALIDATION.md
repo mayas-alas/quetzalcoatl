@@ -34,11 +34,14 @@ different bytes. Any material package change requires a new version and release
 identity.
 
 A release build requires `GNX_SIGNING_CERTIFICATE_THUMBPRINT` to identify one
-currently valid certificate with a private code-signing key. Rust executables are
-signed before MSI packaging; MSI is signed before Burn packaging; the detached Burn
-engine and final bundle are signed and timestamped. `-AllowUnsigned` exists only for
-local installer QA and its artifacts must never be recorded as accepted release
-evidence.
+currently valid RSA certificate with a private code-signing key whose chain ends in
+the Windows `AuthRoot` store. The closed first-party inventory is `gnx-bootstrap`,
+`gnx-service`, `gnx`, `gnx-tray` and the WinSW service wrapper. Their signatures and
+the 0.2 product versions are verified both before packaging and after extraction
+from MSI/Burn. MSI, the detached Burn engine and final Setup are then signed and
+timestamped. Burn validation also verifies the signed WiX bootstrapper application
+and the pinned WSL/Podman payloads. `-AllowUnsigned` exists only for local installer
+QA and its artifacts must never be recorded as accepted release evidence.
 
 For local Authenticode QA, create or reuse the non-exportable GNX Labs development
 certificate and pass its thumbprint explicitly. The script trusts only its public
@@ -71,7 +74,10 @@ Start-Process powershell -Verb RunAs -Wait -ArgumentList @(
 
 This adds only the public certificate to `LocalMachine\Root` and
 `LocalMachine\TrustedPublisher`. It is appropriate only for controlled QA
-machines and does not create public trust on other computers.
+machines and does not create public trust on other computers. In particular,
+locally trusting an Authenticode certificate does not make it acceptable to Smart
+App Control in enforcement mode; that release path requires a CA represented by
+Windows `AuthRoot` (or Microsoft Trusted Signing) and physical enforcement tests.
 
 After trust is established, `tools\qa-lifecycle.ps1` performs the reusable
 physical QA sequence: repair, complete uninstall and fresh install. It requires

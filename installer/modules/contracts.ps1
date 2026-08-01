@@ -406,9 +406,9 @@ function Test-MaintenanceContract {
         $trayLaunchers[0].GetAttribute('ExeCommand') -ne '--launch-detached' -or
         $trayLaunchers[0].GetAttribute('Execute') -ne 'immediate' -or
         $trayLaunchers[0].GetAttribute('Impersonate') -ne 'yes' -or
-        $trayLaunchers[0].GetAttribute('Return') -ne 'check' -or
+        $trayLaunchers[0].GetAttribute('Return') -ne 'ignore' -or
         $trayLaunchers[0].HasAttribute('Directory')) {
-        throw "Maintenance contract: tray launch must be a checked short-lived detached operation."
+        throw "Maintenance contract: tray launch must be detached and non-vital to installation."
     }
     $payloadValidators = @($package.SelectNodes('//*[local-name()="CustomAction" and @Id="ValidateInstalledPayload"]'))
     if ($payloadValidators.Count -ne 1 -or

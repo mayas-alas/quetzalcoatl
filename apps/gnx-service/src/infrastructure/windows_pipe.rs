@@ -1,16 +1,18 @@
 use std::ffi::c_void;
 use std::mem::size_of;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr::null_mut;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use gnx_contracts::{
-    Command, MAX_MESSAGE_BYTES, OperationResponse, PIPE_NAME, Request, StatusResponse,
+    Command, ForgejoAdminResponse, MAX_MESSAGE_BYTES, OperationResponse, OperationStage, PIPE_NAME,
+    Request, StatusResponse,
 };
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, GetLastError,
-    HANDLE, INVALID_HANDLE_VALUE, LocalFree, WAIT_TIMEOUT,
+    CloseHandle, ERROR_BROKEN_PIPE, ERROR_INSUFFICIENT_BUFFER, ERROR_IO_PENDING,
+    ERROR_PIPE_CONNECTED, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -28,7 +30,7 @@ use windows_sys::Win32::System::IO::{
 };
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, ImpersonateNamedPipeClient,
-    PIPE_READMODE_MESSAGE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_WAIT,
+    PIPE_READMODE_MESSAGE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_WAIT, PeekNamedPipe,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
 use zeroize::Zeroize;
@@ -72,10 +74,14 @@ fn serve_pipe_instance(
             Err(_) if shutdown.is_requested() => break,
             Err(error) => return Err(error),
         }
-        if let Err(error) = serve_client(pipe.0, &status, shutdown)
-            && !shutdown.is_requested()
-        {
-            eprintln!("gnx-service: rejected pipe request: {error}");
+        match catch_unwind(AssertUnwindSafe(|| serve_client(pipe.0, &status, shutdown))) {
+            Ok(Err(error)) if !shutdown.is_requested() => {
+                eprintln!("gnx-service: rejected pipe request: {error}");
+            }
+            Err(_) if !shutdown.is_requested() => {
+                eprintln!("gnx-service: isolated a panicking pipe request");
+            }
+            _ => {}
         }
         // Safety: pipe is either connected or has a canceled operation; disconnect resets it.
         unsafe { DisconnectNamedPipe(pipe.0) };
@@ -96,7 +102,7 @@ fn serve_client(
     let response = match request.command {
         Command::Status => {
             authorize_client(pipe, false)?;
-            if request.configuration.is_some() {
+            if request.configuration.is_some() || request.platform_configuration.is_some() {
                 return Err("status request cannot contain configuration".into());
             }
             let snapshot = status
@@ -111,6 +117,10 @@ fn serve_client(
                     "CONFIGURATION_UNAUTHORIZED",
                     "configuration requires an elevated local administrator",
                 ),
+                Ok(()) if request.platform_configuration.is_some() => OperationResponse::rejected(
+                    "CONFIGURATION_INVALID",
+                    "configure request contains platform configuration",
+                ),
                 Ok(()) => match request.configuration.as_ref() {
                     None => OperationResponse::rejected(
                         "CONFIGURATION_INVALID",
@@ -118,7 +128,9 @@ fn serve_client(
                     ),
                     Some(configuration) => {
                         match crate::infrastructure::secrets::store(configuration) {
-                            Ok(()) => OperationResponse::accepted("CONFIGURATION_STORED"),
+                            Ok(()) => {
+                                OperationResponse::accepted(OperationStage::ConfigurationStored)
+                            }
                             Err(error) => {
                                 OperationResponse::rejected(error.code(), error.message())
                             }
@@ -128,9 +140,65 @@ fn serve_client(
             };
             serde_json::to_vec(&operation)
         }
+        Command::ConfigurePlatform => {
+            let operation = match authorize_client(pipe, true) {
+                Err(_) => OperationResponse::rejected(
+                    "PLATFORM_CONFIGURATION_UNAUTHORIZED",
+                    "platform configuration requires an elevated local administrator",
+                ),
+                Ok(()) if request.configuration.is_some() => OperationResponse::rejected(
+                    "PLATFORM_CONFIGURATION_INVALID",
+                    "platform configure request contains installer configuration",
+                ),
+                Ok(()) => match request.platform_configuration.as_ref() {
+                    None => OperationResponse::rejected(
+                        "PLATFORM_CONFIGURATION_INVALID",
+                        "platform configure request is missing configuration",
+                    ),
+                    Some(configuration) => {
+                        match crate::infrastructure::secrets::store_platform(configuration) {
+                            Ok(()) => OperationResponse::accepted(
+                                OperationStage::PlatformConfigurationStored,
+                            ),
+                            Err(error) => {
+                                OperationResponse::rejected(error.code(), error.message())
+                            }
+                        }
+                    }
+                },
+            };
+            serde_json::to_vec(&operation)
+        }
+        command @ (Command::ForgejoAdminShow | Command::ForgejoAdminReset) => {
+            let reset = matches!(command, Command::ForgejoAdminReset);
+            let operation = match authorize_client(pipe, true) {
+                Err(_) => ForgejoAdminResponse::rejected(
+                    "FORGEJO_ADMIN_UNAUTHORIZED",
+                    "Forgejo administration requires an elevated local administrator",
+                ),
+                Ok(())
+                    if request.configuration.is_some()
+                        || request.platform_configuration.is_some() =>
+                {
+                    ForgejoAdminResponse::rejected(
+                        "FORGEJO_ADMIN_INVALID",
+                        "Forgejo admin request cannot contain configuration",
+                    )
+                }
+                Ok(()) => match crate::application::platform::forgejo_admin(status, reset) {
+                    Ok(response) => response,
+                    Err(error) => ForgejoAdminResponse::rejected(error.code, &error.message),
+                },
+            };
+            serde_json::to_vec(&operation)
+        }
     }
     .map_err(|e| format!("cannot serialize response: {e}"))?;
-    write_message(pipe, &response, shutdown)
+    let mut response = response;
+    let write_result = write_message(pipe, &response, shutdown);
+    response.zeroize();
+    write_result?;
+    wait_for_client_close(pipe, shutdown)
 }
 
 fn create_pipe(first_instance: bool) -> Result<OwnedHandle, String> {
@@ -353,6 +421,30 @@ fn write_message(pipe: HANDLE, bytes: &[u8], shutdown: ShutdownToken) -> Result<
         return Err("named-pipe response was only partially written".into());
     }
     Ok(())
+}
+
+fn wait_for_client_close(pipe: HANDLE, shutdown: ShutdownToken) -> Result<(), String> {
+    let started = Instant::now();
+    loop {
+        if shutdown.is_requested() {
+            return Err("service shutdown requested".into());
+        }
+        let mut available = 0u32;
+        // Safety: PeekNamedPipe is nonblocking and available points to initialized storage.
+        if unsafe { PeekNamedPipe(pipe, null_mut(), 0, null_mut(), &mut available, null_mut()) }
+            == 0
+        {
+            return if unsafe { GetLastError() } == ERROR_BROKEN_PIPE {
+                Ok(())
+            } else {
+                Err(last_error("cannot confirm named-pipe client completion"))
+            };
+        }
+        if started.elapsed() >= CLIENT_IO_TIMEOUT {
+            return Err("named-pipe client did not close after reading the response".into());
+        }
+        thread::sleep(IO_POLL_INTERVAL);
+    }
 }
 
 fn wait_overlapped(

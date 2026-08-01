@@ -38,10 +38,10 @@ function Test-RuntimePayloadSource {
     }
 
     if ($manifestFacts.schema_version -ne 1 -or
-        $manifestFacts.generation -ne 'proxmox-cluster-v2' -or
+        $manifestFacts.generation -ne 'proxmox-platform' -or
         $manifestFacts.payload_contract -ne $ExpectedPayloadVersion -or
         $manifestFacts.payload_lock -ne 'payload.lock.json') {
-        throw "Runtime manifest differs from generation proxmox-cluster-v2 payload contract $ExpectedPayloadVersion."
+        throw "Runtime manifest differs from generation proxmox-platform payload contract $ExpectedPayloadVersion."
     }
     foreach ($layout in @('commands', 'operations', 'containers', 'services', 'configuration')) {
         if ($manifestFacts["layout.$layout"] -ne $layout -or

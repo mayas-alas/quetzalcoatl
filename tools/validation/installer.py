@@ -38,6 +38,21 @@ def main() -> None:
     if dependency_ids != ["winsw", "wsl", "podman"]:
         fail(f"installer dependency inventory differs: {dependency_ids!r}")
 
+    build_script = (INSTALLER / "build.ps1").read_text(encoding="utf-8")
+    for wrapper_contract in (
+        '$serviceWrapper = Join-Path $outputRoot "Quetzalcoatl.Service.exe"',
+        "Copy-Item -LiteralPath $artifacts.winsw -Destination $serviceWrapper -Force",
+        "Invoke-AuthenticodeSign `\n            -Path $serviceWrapper",
+        '-d "WinSW=$serviceWrapper"',
+        "-ServiceWrapper $serviceWrapper",
+    ):
+        if wrapper_contract not in build_script:
+            fail(f"service wrapper release contract omits {wrapper_contract!r}")
+    if "Copy-PlatformPayload `" not in build_script:
+        fail("installer must stage the platform exclusively from its lock")
+    if "Copy-Item -LiteralPath (Join-Path $repoRoot 'platform')" in build_script:
+        fail("installer must not copy the unlocked platform tree")
+
     exe_packages = {
         node.attrib["Id"]: node
         for node in bundle.iter()
@@ -83,6 +98,17 @@ def main() -> None:
         or msi_packages[0].attrib.get("Visible") != "no"
     ):
         fail("internal product MSI must be hidden behind the sole Setup ARP entry")
+    arp_system_component = next(
+        (
+            node
+            for node in product.iter()
+            if local_name(node) == "Property"
+            and node.attrib.get("Id") == "ARPSYSTEMCOMPONENT"
+        ),
+        None,
+    )
+    if arp_system_component is None or arp_system_component.attrib.get("Value") != "1":
+        fail("internal MSI must independently suppress its Programs and Features entry")
     if not any(
         local_name(node) == "Button" and node.attrib.get("Name") == "RepairButton"
         for node in theme.iter()
@@ -121,10 +147,10 @@ def main() -> None:
         or tray_launch.attrib.get("ExeCommand") != "--launch-detached"
         or tray_launch.attrib.get("Execute") != "immediate"
         or tray_launch.attrib.get("Impersonate") != "yes"
-        or tray_launch.attrib.get("Return") != "check"
+        or tray_launch.attrib.get("Return") != "ignore"
         or "Directory" in tray_launch.attrib
     ):
-        fail("tray launch must use the checked detached-launch contract")
+        fail("tray launch must be detached and non-vital to installation")
     tray_shortcut = next(
         (
             node
@@ -190,6 +216,13 @@ def main() -> None:
 
     build = (INSTALLER / "build.ps1").read_text(encoding="utf-8")
     rust_build = (INSTALLER / "modules" / "rust.ps1").read_text(encoding="utf-8")
+    signing = (INSTALLER / "modules" / "signing.ps1").read_text(encoding="utf-8")
+    msi_validation = (INSTALLER / "modules" / "msi.ps1").read_text(
+        encoding="utf-8"
+    )
+    bundle_validation = (INSTALLER / "modules" / "bundle.ps1").read_text(
+        encoding="utf-8"
+    )
     for marker in (
         "release\\manifest.toml",
         "source\\product.wxs",
@@ -209,6 +242,46 @@ def main() -> None:
     ):
         if marker not in build:
             fail(f"release entry point omits {marker!r}")
+    for artifact_name in (
+        "gnx-bootstrap",
+        "gnx-service",
+        "gnx",
+        "gnx-tray",
+        "service-wrapper",
+    ):
+        if f"Name = '{artifact_name}'" not in build:
+            fail(f"first-party signature inventory omits {artifact_name!r}")
+    for marker in (
+        "Test-CodeSigningCertificateTrust",
+        "RequireAuthRoot $true",
+        "Test-ReleaseArtifactSet",
+        "ExpectedVersion",
+        "Release artifact signature inventory must not be empty",
+        "Smart App Control release signing requires an RSA certificate",
+        "Windows AuthRoot store",
+    ):
+        if marker not in signing and marker not in build:
+            fail(f"release signature coverage omits {marker!r}")
+    for marker in (
+        "installed-gnx-service",
+        "installed-service-wrapper",
+        "installed-gnx",
+        "installed-gnx-tray",
+        "Test-ReleaseArtifactSet",
+    ):
+        if marker not in msi_validation:
+            fail(f"MSI signature/version coverage omits {marker!r}")
+    for marker in (
+        "gnx-bootstrap-install-podman.exe",
+        "gnx-bootstrap-install-wsl.exe",
+        "gnx-bootstrap-prepare.exe",
+        "gnx-bootstrap-validate.exe",
+        "wixstdba.exe",
+        "Test-TrustedAuthenticodeArtifact",
+        "Test-ReleaseArtifactSet",
+    ):
+        if marker not in bundle_validation:
+            fail(f"Burn signature/version coverage omits {marker!r}")
     if build.find("-Path $productMsi") > build.find("Test-InstalledMsiIdentity"):
         fail("installed MSI collision check must inspect the final signed package bytes")
     development_certificate = (

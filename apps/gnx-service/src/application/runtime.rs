@@ -9,5 +9,7 @@ pub(crate) fn run(status: Arc<RwLock<StatusResponse>>) {
     set_stage(&status, "RUNTIME_IDENTITY");
     if let Err(error) = reconciler::run(&status) {
         fail(&status, error);
+        return;
     }
+    super::platform::run(&status);
 }

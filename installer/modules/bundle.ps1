@@ -59,8 +59,12 @@ function Test-BundleIdentityAndPayload {
     param(
         [Parameter(Mandatory)][string] $BundlePath,
         [Parameter(Mandatory)][string] $ProductMsiPath,
+        [Parameter(Mandatory)][string] $BootstrapPath,
         [Parameter(Mandatory)][string] $WslMsiPath,
-        [Parameter(Mandatory)][string] $PodmanMsiPath
+        [Parameter(Mandatory)][string] $PodmanMsiPath,
+        [Parameter(Mandatory)][string] $ExpectedProductVersion,
+        [Parameter(Mandatory)][bool] $ExpectSigned,
+        [AllowNull()][string] $ExpectedSignerThumbprint
     )
 
     $verificationRoot = Join-Path $outputRoot ("verify-" + [guid]::NewGuid().ToString('N'))
@@ -104,6 +108,40 @@ function Test-BundleIdentityAndPayload {
         if ($sourceHash -ne $embeddedHash) {
             throw "Embedded MSI does not match the deterministic product MSI."
         }
+        Test-ReleaseArtifactSet `
+            -Artifacts @(@{ Name = 'embedded-product-msi'; Path = $embeddedProduct[0].FullName }) `
+            -ExpectSigned $ExpectSigned `
+            -ExpectedThumbprint $ExpectedSignerThumbprint
+
+        $expectedBootstrapNames = @(
+            'gnx-bootstrap-install-podman.exe',
+            'gnx-bootstrap-install-wsl.exe',
+            'gnx-bootstrap-prepare.exe',
+            'gnx-bootstrap-validate.exe'
+        )
+        $embeddedBootstraps = @(Get-ChildItem -LiteralPath $payloadRoot -Recurse -File -Filter 'gnx-bootstrap-*.exe')
+        $actualBootstrapNames = @($embeddedBootstraps | ForEach-Object Name | Sort-Object)
+        if (($actualBootstrapNames -join "`n") -ne ($expectedBootstrapNames -join "`n")) {
+            throw "Bundle bootstrap executable inventory differs: $($actualBootstrapNames -join ', ')"
+        }
+        $bootstrapHash = (Get-FileHash -LiteralPath $BootstrapPath -Algorithm SHA256).Hash
+        foreach ($embeddedBootstrap in $embeddedBootstraps) {
+            if ((Get-FileHash -LiteralPath $embeddedBootstrap.FullName -Algorithm SHA256).Hash -ne $bootstrapHash) {
+                throw "Embedded bootstrap payload differs from the signed release input: $($embeddedBootstrap.Name)"
+            }
+        }
+        Test-ReleaseArtifactSet `
+            -Artifacts @($embeddedBootstraps | ForEach-Object {
+                @{ Name = $_.BaseName; Path = $_.FullName; ExpectedVersion = $ExpectedProductVersion }
+            }) `
+            -ExpectSigned $ExpectSigned `
+            -ExpectedThumbprint $ExpectedSignerThumbprint
+
+        $bootstrapperApplication = @(Get-ChildItem -LiteralPath $baRoot -Recurse -File -Filter 'wixstdba.exe')
+        if ($bootstrapperApplication.Count -ne 1) {
+            throw "Bundle must contain exactly one WiX bootstrapper application; found $($bootstrapperApplication.Count)."
+        }
+        Test-TrustedAuthenticodeArtifact -Path $bootstrapperApplication[0].FullName
 
         foreach ($dependency in @(
             @{ Name = 'wsl.2.7.10.0.x64.msi'; Source = $WslMsiPath },
@@ -118,6 +156,7 @@ function Test-BundleIdentityAndPayload {
             if ($expectedDependencyHash -ne $embeddedDependencyHash) {
                 throw "Embedded dependency payload does not match its pinned source: $($dependency.Name)"
             }
+            Test-TrustedAuthenticodeArtifact -Path $embeddedDependency[0].FullName
         }
     } finally {
         if (Test-Path -LiteralPath $resolvedVerificationRoot) {

@@ -28,6 +28,15 @@ pub(crate) fn format_human(status: &StatusResponse) -> String {
     if let Some(error) = &status.last_error {
         lines.push(format!("last_error: {error}"));
     }
+    if let Some(platform) = &status.platform {
+        lines.push(format!("platform: {}", platform.health));
+        if let Some(url) = &platform.forgejo_url {
+            lines.push(format!("forgejo_url: {url}"));
+        }
+        if let Some(error) = &platform.last_error {
+            lines.push(format!("platform_error: {error}"));
+        }
+    }
     lines.join("\n")
 }
 

@@ -2,10 +2,15 @@ function Test-MsiPayloadCoherence {
     param(
         [Parameter(Mandatory)][string] $MsiPath,
         [Parameter(Mandatory)][string] $ServiceBinary,
+        [Parameter(Mandatory)][string] $ServiceWrapper,
         [Parameter(Mandatory)][string] $CliBinary,
         [Parameter(Mandatory)][string] $TrayBinary,
         [Parameter(Mandatory)][string] $MachineImage,
-        [Parameter(Mandatory)][string] $RuntimePayload
+        [Parameter(Mandatory)][string] $RuntimePayload,
+        [Parameter(Mandatory)][string] $PlatformPayload,
+        [Parameter(Mandatory)][string] $ExpectedProductVersion,
+        [Parameter(Mandatory)][bool] $ExpectSigned,
+        [AllowNull()][string] $ExpectedSignerThumbprint
     )
 
     $verificationRoot = Join-Path $outputRoot "msi-payload-verification"
@@ -38,6 +43,15 @@ function Test-MsiPayloadCoherence {
             throw "MSI payload coherence: staged gnx-service.exe differs from the freshly built binary."
         }
 
+        $stagedWrappers = @(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File -Filter "Quetzalcoatl.Service.exe")
+        if ($stagedWrappers.Count -ne 1) {
+            throw "MSI payload coherence: expected exactly one staged Quetzalcoatl.Service.exe; found $($stagedWrappers.Count)."
+        }
+        if ((Get-FileHash -LiteralPath $ServiceWrapper -Algorithm SHA256).Hash -ne
+            (Get-FileHash -LiteralPath $stagedWrappers[0].FullName -Algorithm SHA256).Hash) {
+            throw "MSI payload coherence: staged service wrapper differs from the release input."
+        }
+
         $stagedClis = @(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File -Filter "gnx.exe")
         if ($stagedClis.Count -ne 1) {
             throw "MSI payload coherence: expected exactly one staged gnx.exe; found $($stagedClis.Count)."
@@ -56,6 +70,15 @@ function Test-MsiPayloadCoherence {
             (Get-FileHash -LiteralPath $stagedTrays[0].FullName -Algorithm SHA256).Hash) {
             throw "MSI payload coherence: staged gnx-tray.exe differs from the freshly built binary."
         }
+        Test-ReleaseArtifactSet `
+            -Artifacts @(
+                @{ Name = 'installed-gnx-service'; Path = $stagedServices[0].FullName; ExpectedVersion = $ExpectedProductVersion },
+                @{ Name = 'installed-service-wrapper'; Path = $stagedWrappers[0].FullName },
+                @{ Name = 'installed-gnx'; Path = $stagedClis[0].FullName; ExpectedVersion = $ExpectedProductVersion },
+                @{ Name = 'installed-gnx-tray'; Path = $stagedTrays[0].FullName; ExpectedVersion = $ExpectedProductVersion }
+            ) `
+            -ExpectSigned $ExpectSigned `
+            -ExpectedThumbprint $ExpectedSignerThumbprint
 
         $machineImageName = Split-Path -Leaf $MachineImage
         $stagedImages = @(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File -Filter $machineImageName)
@@ -107,6 +130,25 @@ function Test-MsiPayloadCoherence {
         foreach ($relative in $sourcePaths) {
             if ($sourceRuntimeHashes[$relative] -ne $stagedRuntimeHashes[$relative]) {
                 throw "MSI payload coherence: staged runtime file hash differs for $relative."
+            }
+        }
+
+        $stagedPlatformLocks = @(Get-ChildItem -LiteralPath $verificationRoot -Recurse -File -Filter "platform.lock.json" | Where-Object {
+            $_.Directory.Name -eq 'platform'
+        })
+        if ($stagedPlatformLocks.Count -ne 1) {
+            throw "MSI payload coherence: expected exactly one staged platform lock; found $($stagedPlatformLocks.Count)."
+        }
+        $sourcePlatformHashes = Get-TreeHashes $PlatformPayload
+        $stagedPlatformHashes = Get-TreeHashes $stagedPlatformLocks[0].Directory.FullName
+        $sourcePlatformPaths = @($sourcePlatformHashes.Keys | Sort-Object)
+        $stagedPlatformPaths = @($stagedPlatformHashes.Keys | Sort-Object)
+        if (($sourcePlatformPaths -join "`n") -ne ($stagedPlatformPaths -join "`n")) {
+            throw 'MSI payload coherence: platform file set differs.'
+        }
+        foreach ($relative in $sourcePlatformPaths) {
+            if ($sourcePlatformHashes[$relative] -ne $stagedPlatformHashes[$relative]) {
+                throw "MSI payload coherence: staged platform file hash differs for $relative."
             }
         }
 

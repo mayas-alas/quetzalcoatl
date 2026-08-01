@@ -1,8 +1,9 @@
 use std::ptr::{null, null_mut};
 
 use gnx_contracts::{
-    Command, InstallerConfiguration, MAX_MESSAGE_BYTES, OperationResponse, PIPE_NAME,
-    PROTOCOL_SCHEMA_VERSION, Request, StatusResponse,
+    Command, FORGEJO_ADMIN_USERNAME, ForgejoAdminResponse, InstallerConfiguration,
+    MAX_MESSAGE_BYTES, OperationResponse, PIPE_NAME, PROTOCOL_SCHEMA_VERSION,
+    PlatformConfiguration, Request, StatusResponse,
 };
 use windows_sys::Win32::Foundation::{
     CloseHandle, GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
@@ -20,6 +21,7 @@ pub fn status() -> Result<StatusResponse, String> {
     let request = serde_json::to_vec(&Request {
         command: Command::Status,
         configuration: None,
+        platform_configuration: None,
     })
     .map_err(|e| format!("cannot encode request: {e}"))?;
     write_message(pipe.0, &request)?;
@@ -31,6 +33,7 @@ pub fn configure(configuration: InstallerConfiguration) -> Result<OperationRespo
     let request = Request {
         command: Command::Configure,
         configuration: Some(configuration),
+        platform_configuration: None,
     };
     let mut bytes = serde_json::to_vec(&request)
         .map_err(|e| format!("cannot encode configure request: {e}"))?;
@@ -39,6 +42,50 @@ pub fn configure(configuration: InstallerConfiguration) -> Result<OperationRespo
     bytes.zeroize();
     write_result?;
     decode_operation_response(&read_message(pipe.0)?)
+}
+
+pub fn configure_platform(
+    configuration: PlatformConfiguration,
+) -> Result<OperationResponse, String> {
+    let pipe = connect()?;
+    let request = Request {
+        command: Command::ConfigurePlatform,
+        configuration: None,
+        platform_configuration: Some(configuration),
+    };
+    let mut bytes = serde_json::to_vec(&request)
+        .map_err(|e| format!("cannot encode platform configuration request: {e}"))?;
+    drop(request);
+    let write_result = write_message(pipe.0, &bytes);
+    bytes.zeroize();
+    write_result?;
+    decode_operation_response(&read_message(pipe.0)?)
+}
+
+pub fn forgejo_admin_show() -> Result<ForgejoAdminResponse, String> {
+    forgejo_admin(Command::ForgejoAdminShow)
+}
+
+pub fn forgejo_admin_reset() -> Result<ForgejoAdminResponse, String> {
+    forgejo_admin(Command::ForgejoAdminReset)
+}
+
+fn forgejo_admin(command: Command) -> Result<ForgejoAdminResponse, String> {
+    let pipe = connect()?;
+    let request = Request {
+        command,
+        configuration: None,
+        platform_configuration: None,
+    };
+    let mut encoded = serde_json::to_vec(&request)
+        .map_err(|e| format!("cannot encode Forgejo admin request: {e}"))?;
+    let write_result = write_message(pipe.0, &encoded);
+    encoded.zeroize();
+    write_result?;
+    let mut bytes = read_message(pipe.0)?;
+    let response = decode_forgejo_admin_response(&bytes);
+    bytes.zeroize();
+    response
 }
 
 fn decode_status_response(bytes: &[u8]) -> Result<StatusResponse, String> {
@@ -61,6 +108,32 @@ fn decode_operation_response(bytes: &[u8]) -> Result<OperationResponse, String> 
             "service protocol schema mismatch: expected {}, received {}",
             PROTOCOL_SCHEMA_VERSION, response.schema_version
         ));
+    }
+    Ok(response)
+}
+
+fn decode_forgejo_admin_response(bytes: &[u8]) -> Result<ForgejoAdminResponse, String> {
+    let response: ForgejoAdminResponse = serde_json::from_slice(bytes)
+        .map_err(|e| format!("service returned invalid Forgejo admin JSON: {e}"))?;
+    if response.schema_version != PROTOCOL_SCHEMA_VERSION {
+        return Err(format!(
+            "service protocol schema mismatch: expected {}, received {}",
+            PROTOCOL_SCHEMA_VERSION, response.schema_version
+        ));
+    }
+    if response.accepted {
+        let valid_username = response.username.as_deref() == Some(FORGEJO_ADMIN_USERNAME);
+        let valid_password = response.password.as_deref().is_some_and(|password| {
+            password.len() == 48
+                && password
+                    .bytes()
+                    .all(|value| value.is_ascii_digit() || (b'a'..=b'f').contains(&value))
+        });
+        if !valid_username || !valid_password {
+            return Err("service returned an invalid Forgejo admin credential".into());
+        }
+    } else if response.username.is_some() || response.password.is_some() {
+        return Err("rejected Forgejo admin response contains a credential".into());
     }
     Ok(response)
 }

@@ -47,6 +47,25 @@ case "$operation" in
     [ "$#" -eq 0 ] || fail_usage
     exec "$LIBEXEC/gnx-tailscale-rename"
     ;;
+  platform-reconcile)
+    [ "$#" -eq 0 ] || fail_usage
+    exec /usr/share/quetzalcoatl/platform/operations/reconcile
+    ;;
+  platform-deploy)
+    [ "$#" -eq 0 ] || fail_usage
+    exec /usr/share/quetzalcoatl/platform/operations/deploy
+    ;;
+  forgejo-admin)
+    [ "$#" -eq 1 ] || fail_usage
+    case "$1" in
+      show|reset)
+        exec /usr/share/quetzalcoatl/platform/operations/forgejo-admin "$1"
+        ;;
+      *)
+        fail_usage
+        ;;
+    esac
+    ;;
   *)
     fail_usage
     ;;

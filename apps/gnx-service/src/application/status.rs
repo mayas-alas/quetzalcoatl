@@ -1,6 +1,8 @@
 use std::sync::{Arc, RwLock};
 
-use gnx_contracts::{ComponentHealth, NodeRole, PveUrl, StatusResponse};
+use gnx_contracts::{
+    ComponentHealth, NodeRole, PlatformHealth, PlatformStatus, PlatformUrl, PveUrl, StatusResponse,
+};
 
 use crate::domain::errors::GateError;
 use crate::domain::lifecycle::Component;
@@ -85,5 +87,41 @@ pub(crate) fn fail(status: &Arc<RwLock<StatusResponse>>, error: GateError) {
         status.stage = "FAILED".into();
         error.component.set(&mut status, ComponentHealth::Failed);
         status.last_error = Some(format!("{}: {}", error.code, error.message));
+    }
+}
+
+pub(crate) fn set_platform_waiting(status: &Arc<RwLock<StatusResponse>>) {
+    if let Ok(mut status) = status.write() {
+        status.platform = Some(PlatformStatus::waiting_configuration());
+    }
+}
+
+pub(crate) fn set_platform_reconciling(status: &Arc<RwLock<StatusResponse>>) {
+    if let Ok(mut status) = status.write() {
+        status.platform = Some(PlatformStatus {
+            health: PlatformHealth::Reconciling,
+            forgejo_url: None,
+            last_error: None,
+        });
+    }
+}
+
+pub(crate) fn set_platform_ready(status: &Arc<RwLock<StatusResponse>>, forgejo_url: PlatformUrl) {
+    if let Ok(mut status) = status.write() {
+        status.platform = Some(PlatformStatus {
+            health: PlatformHealth::Ready,
+            forgejo_url: Some(forgejo_url),
+            last_error: None,
+        });
+    }
+}
+
+pub(crate) fn set_platform_failed(status: &Arc<RwLock<StatusResponse>>, error: &GateError) {
+    if let Ok(mut status) = status.write() {
+        status.platform = Some(PlatformStatus {
+            health: PlatformHealth::Failed,
+            forgejo_url: None,
+            last_error: Some(format!("{}: {}", error.code, error.message)),
+        });
     }
 }

@@ -1,6 +1,6 @@
 schema_version = 1
-generation = "proxmox-cluster-v2"
-payload_contract = 5
+generation = "proxmox-platform"
+payload_contract = 6
 payload_lock = "payload.lock.json"
 
 [layout]

@@ -615,4 +615,12 @@ fn runtime_agent_operations_have_fixed_argument_vectors() {
         RuntimeOperation::TailscaleRename.argv(),
         &["tailscale-rename"]
     );
+    assert_eq!(
+        RuntimeOperation::PlatformReconcile.argv(),
+        &["platform-reconcile"]
+    );
+    assert_eq!(
+        RuntimeOperation::PlatformDeploy.argv(),
+        &["platform-deploy"]
+    );
 }

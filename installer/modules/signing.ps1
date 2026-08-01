@@ -41,6 +41,109 @@ function Resolve-CodeSigningCertificate {
     }
 }
 
+function Test-CodeSigningCertificateTrust {
+    param(
+        [Parameter(Mandatory)] $Certificate,
+        [Parameter(Mandatory)][bool] $RequireAuthRoot
+    )
+
+    if ($Certificate.PublicKey.Oid.Value -ne '1.2.840.113549.1.1.1') {
+        throw "Smart App Control release signing requires an RSA certificate: $($Certificate.Subject)"
+    }
+
+    $chain = [Security.Cryptography.X509Certificates.X509Chain]::new()
+    try {
+        $chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+        # Authenticode's Valid status already evaluates the RFC 3161 timestamp.
+        # Build only the publisher chain here, including timestamp-valid artifacts
+        # whose leaf certificate has since expired.
+        $chain.ChainPolicy.VerificationFlags = [Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreNotTimeValid
+        if (-not $chain.Build($Certificate)) {
+            $failures = @($chain.ChainStatus | ForEach-Object Status) -join ', '
+            throw "Signing certificate does not build a trusted Windows chain: $failures"
+        }
+        $elements = @($chain.ChainElements | ForEach-Object Certificate)
+        if ($elements.Count -lt 2) {
+            throw 'Smart App Control release signing rejects a self-signed certificate chain.'
+        }
+        $root = $elements[-1]
+        $trustedProgramRoots = @(
+            Get-ChildItem -LiteralPath 'Cert:\LocalMachine\AuthRoot' -ErrorAction SilentlyContinue
+            Get-ChildItem -LiteralPath 'Cert:\CurrentUser\AuthRoot' -ErrorAction SilentlyContinue
+        )
+        if ($RequireAuthRoot -and
+            -not ($trustedProgramRoots | Where-Object Thumbprint -eq $root.Thumbprint)) {
+            throw "Signing chain root is not present in the Windows AuthRoot store: $($root.Subject)"
+        }
+    } finally {
+        $chain.Dispose()
+    }
+}
+
+function Test-TrustedAuthenticodeArtifact {
+    param([Parameter(Mandatory)][string] $Path)
+
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) {
+        throw "Trusted Authenticode verification failed for ${Path}: status=$($signature.Status)."
+    }
+    if (-not $signature.TimeStamperCertificate) {
+        throw "Trusted Authenticode artifact has no timestamp: $Path"
+    }
+    Test-CodeSigningCertificateTrust `
+        -Certificate $signature.SignerCertificate `
+        -RequireAuthRoot $false
+}
+
+function Test-ReleaseArtifactSet {
+    param(
+        [Parameter(Mandatory)][hashtable[]] $Artifacts,
+        [Parameter(Mandatory)][bool] $ExpectSigned,
+        [AllowNull()][string] $ExpectedThumbprint
+    )
+
+    if ($Artifacts.Count -eq 0) {
+        throw 'Release artifact signature inventory must not be empty.'
+    }
+    if ($ExpectSigned -and $ExpectedThumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
+        throw 'Signed release artifact inventory requires one signer thumbprint.'
+    }
+
+    $names = @($Artifacts | ForEach-Object { [string] $_.Name })
+    if ($names -contains '' -or @($names | Sort-Object -Unique).Count -ne $names.Count) {
+        throw 'Release artifact signature inventory contains an absent or duplicate semantic name.'
+    }
+    $paths = @($Artifacts | ForEach-Object { [IO.Path]::GetFullPath([string] $_.Path) })
+    if (@($paths | Sort-Object -Unique).Count -ne $paths.Count) {
+        throw 'Release artifact signature inventory contains a duplicate path.'
+    }
+
+    foreach ($artifact in $Artifacts) {
+        $name = [string] $artifact.Name
+        $path = [IO.Path]::GetFullPath([string] $artifact.Path)
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Release artifact is absent: $name ($path)"
+        }
+        if ($artifact.ContainsKey('ExpectedVersion')) {
+            $expectedVersion = [string] $artifact.ExpectedVersion
+            $version = (Get-Item -LiteralPath $path).VersionInfo
+            if ($version.FileVersion -ne $expectedVersion -or
+                $version.ProductVersion -ne $expectedVersion) {
+                throw "Release artifact version mismatch for ${name}: file=$($version.FileVersion) product=$($version.ProductVersion) expected=$expectedVersion"
+            }
+        }
+
+        if ($ExpectSigned) {
+            Test-AuthenticodeArtifact -Path $path -ExpectedThumbprint $ExpectedThumbprint
+        } else {
+            $signature = Get-AuthenticodeSignature -LiteralPath $path
+            if ($signature.Status -ne 'NotSigned') {
+                throw "Unsigned QA artifact inventory unexpectedly contains a signature for ${name}: status=$($signature.Status)."
+            }
+        }
+    }
+}
+
 function Get-SignToolPath {
     $command = Get-Command signtool.exe -ErrorAction SilentlyContinue
     if ($command) {

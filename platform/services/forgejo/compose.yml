@@ -1,0 +1,49 @@
+services:
+  tailscale:
+    image: docker.io/tailscale/tailscale@sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e
+    container_name: gnx-forgejo-tailscale
+    hostname: ${TS_HOSTNAME:?TS_HOSTNAME is required}
+    environment:
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "false"
+      TS_AUTH_ONCE: "true"
+      TS_ACCEPT_DNS: "true"
+      TS_ENABLE_HEALTH_CHECK: "true"
+      TS_LOCAL_ADDR_PORT: 127.0.0.1:41234
+      TS_DEBUG_FIREWALL_MODE: nftables
+    volumes:
+      - /var/lib/quetzalcoatl/tailscale/forgejo:/var/lib/tailscale
+      - ./serve:/config:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add: [NET_ADMIN, NET_RAW]
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:2222:22"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:41234/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
+
+  forgejo:
+    image: codeberg.org/forgejo/forgejo@sha256:49b5cdd63e2eaab3e3484ffb21a3317e0b782633a2f29672ca295e2c001e6edf
+    container_name: gnx-forgejo
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+    volumes:
+      - /var/lib/quetzalcoatl/forgejo/data:/data
+      - /var/lib/quetzalcoatl/secrets/forgejo:/run/secrets/forgejo:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped

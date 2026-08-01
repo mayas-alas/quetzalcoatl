@@ -153,8 +153,12 @@ fn emit(format: &Format, report: &Report) {
 }
 
 #[cfg(windows)]
-fn append_host_profile(format: &Format, report: &mut Report) -> Result<(), i32> {
-    match host::profile::detect_and_store() {
+fn append_host_profile(
+    format: &Format,
+    report: &mut Report,
+    operation: RequestedOperation,
+) -> Result<(), i32> {
+    match host::profile::detect_and_store(operation == RequestedOperation::Repair) {
         Ok(profile) => {
             let supported = profile.supported;
             let message = host::profile::summary(&profile);
@@ -245,7 +249,7 @@ fn run(format: &Format) -> i32 {
             return code;
         }
     }
-    if let Err(code) = append_host_profile(format, &mut report) {
+    if let Err(code) = append_host_profile(format, &mut report, RequestedOperation::Install) {
         return code;
     }
     emit(format, &report);
@@ -253,7 +257,7 @@ fn run(format: &Format) -> i32 {
 }
 
 #[cfg(windows)]
-fn prepare_wsl(format: &Format) -> i32 {
+fn prepare_wsl(format: &Format, operation: RequestedOperation) -> i32 {
     let mut report = Report::new();
     let checks: [CheckSpec; 4] = [
         (
@@ -296,7 +300,7 @@ fn prepare_wsl(format: &Format) -> i32 {
         }
     }
 
-    if let Err(code) = append_host_profile(format, &mut report) {
+    if let Err(code) = append_host_profile(format, &mut report, operation) {
         return code;
     }
 
@@ -368,7 +372,7 @@ fn install_dependency(
 }
 
 #[cfg(not(windows))]
-fn prepare_wsl(format: &Format) -> i32 {
+fn prepare_wsl(format: &Format, _operation: RequestedOperation) -> i32 {
     run(format)
 }
 
@@ -401,7 +405,7 @@ fn main() {
     };
     let code = match options.mode {
         Mode::Validate => run(&options.format),
-        Mode::PrepareWsl => prepare_wsl(&options.format),
+        Mode::PrepareWsl => prepare_wsl(&options.format, options.operation),
         #[cfg(windows)]
         Mode::InstallWsl => install_dependency(
             &options.format,

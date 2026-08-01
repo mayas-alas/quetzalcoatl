@@ -18,6 +18,10 @@ EXPECTED = {
     "PveConfigure": ("pve-configure",),
     "TailscalePrepare": ("tailscale-prepare",),
     "TailscaleRename": ("tailscale-rename",),
+    "PlatformReconcile": ("platform-reconcile",),
+    "PlatformDeploy": ("platform-deploy",),
+    "ForgejoAdminShow": ("forgejo-admin", "show"),
+    "ForgejoAdminReset": ("forgejo-admin", "reset"),
 }
 
 
@@ -76,4 +80,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -2,27 +2,31 @@
 
 Three lanes may work concurrently; one path has one writer.
 
-## Agent A — product foundation
+## Agent A — product contract
 
-Owns root Cargo/release/legal metadata, `apps/gnx/**`,
-`crates/gnx-contracts/**`, `README.md` and architecture/contracts documentation.
+Owns root Cargo/release metadata, `apps/gnx/**`, `crates/gnx-contracts/**`,
+`README.md` and product architecture/contracts documentation.
 
-Delivers `LEG`, product `ARC`/`REL` and CLI/tray contracts.
+Delivers `PCT`, `ADM`, product `SUP`/`REL` and CLI/tray platform status. Rust may
+name only the scoped `gnx-admin` bootstrap contract; it must not introduce other
+service identities or IaC resources.
 
-## Agent B — runtime lifecycle
+## Agent B — platform runtime
 
-Owns `apps/gnx-service/**`, `runtime/**` and runtime compatibility tests.
+Owns `apps/gnx-service/**`, `runtime/**`, platform bundle source and runtime
+compatibility tests.
 
-Delivers `RUN`, `REC` and the service half of `UNS`/`RBT`.
-For 0.2.14 this lane preserves the completed `IPC` and `SHD` contracts.
+Delivers `BND`, `RUN`, `FND`, `STO`, `FRG`, `OCI`, `SVC`, `NET` and the runtime
+half of `REC`. The bundle is one semantic implementation; no copied historical
+payload or transitional service path is permitted.
 
 ## Agent C — delivery assurance
 
-Owns `apps/gnx-bootstrap/**`, `installer/**`, `tools/**` and operational/validation
-documentation.
+Owns `apps/gnx-bootstrap/**`, `installer/**`, `tools/**` and
+operational/validation documentation.
 
-Delivers `BRD`, `LNK`, `ARP`, installer `REL`, and end-to-end `UNS`/`RBT`.
-For 0.2.14 this lane preserves `STG` and completes `SUP` when signing is available.
+Delivers installer `REC`, `ARP`, `SUP`, `REL`, bundle validation and the physical
+upgrade/repair/restart acceptance.
 
 ## Coordinator-only
 

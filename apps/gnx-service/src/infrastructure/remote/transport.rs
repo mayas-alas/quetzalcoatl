@@ -287,9 +287,36 @@ pub(crate) fn check_output(output: Output, operation: &str) -> Result<Output, Ga
 
 pub(crate) fn bounded_text(bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes).replace(['\r', '\n'], " ");
-    text.chars()
-        .take(1600)
-        .collect::<String>()
-        .trim()
-        .to_owned()
+    let text = text.trim();
+    const MAX_CHARS: usize = 1600;
+    const HEAD_CHARS: usize = 512;
+    const SEPARATOR: &str = " ... ";
+    let char_count = text.chars().count();
+    if char_count <= MAX_CHARS {
+        return text.to_owned();
+    }
+
+    let tail_chars = MAX_CHARS - HEAD_CHARS - SEPARATOR.chars().count();
+    let head = text.chars().take(HEAD_CHARS).collect::<String>();
+    let tail = text
+        .chars()
+        .skip(char_count - tail_chars)
+        .collect::<String>();
+    format!("{head}{SEPARATOR}{tail}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bounded_text;
+
+    #[test]
+    fn bounded_text_preserves_the_error_tail() {
+        let input = format!("{}FINAL_DIAGNOSTIC", "x".repeat(2000));
+        let output = bounded_text(input.as_bytes());
+
+        assert_eq!(output.chars().count(), 1600);
+        assert!(output.starts_with(&"x".repeat(512)));
+        assert!(output.contains(" ... "));
+        assert!(output.ends_with("FINAL_DIAGNOSTIC"));
+    }
 }

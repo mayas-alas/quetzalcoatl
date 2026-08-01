@@ -1,0 +1,793 @@
+#!/bin/sh
+set -eu
+umask 077
+export LC_ALL=C
+export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+input='/run/gnx/platform-input'
+tailscale_image='docker.io/tailscale/tailscale@sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e'
+auth_file='/run/gnx/tailscale-auth-key'
+config_file='/run/gnx/tailscaled.json'
+status_file='/run/gnx/tailscale-status.json'
+stage='validate-input'
+
+cleanup() {
+  result=$?
+  trap - EXIT HUP INT TERM
+  if [ "$result" -ne 0 ]; then
+    printf 'LXC_SERVICE_FAILED=%s:%s\n' "${kind:-unknown}" "$stage" >&2
+  fi
+  rm -f -- "$auth_file" "$config_file" "$status_file" \
+    "$status_file.gnx-new" "$input"
+  exit "$result"
+}
+trap cleanup EXIT HUP INT TERM
+
+[ "$(id -u)" -eq 0 ]
+test -s "$input"
+[ "$(stat -c '%u:%g:%a' "$input")" = '0:0:400' ]
+exec 3< "$input"
+IFS= read -r schema <&3 || exit 64
+IFS= read -r kind <&3 || exit 64
+IFS= read -r hostname <&3 || exit 64
+IFS= read -r tailnet <&3 || exit 64
+IFS= read -r auth_key <&3 || exit 64
+
+[ "$schema" = 1 ]
+case "$kind:$hostname" in
+  garage:gnx-garage|forgejo:gnx-forgejo|runner:gnx-runner|service:gnx-svc-*) ;;
+  *) exit 64 ;;
+esac
+case "$hostname" in *[!a-z0-9-]*|*-|'') exit 64 ;; esac
+case "$tailnet" in *.ts.net) ;; *) exit 64 ;; esac
+case "$tailnet" in *[!a-z0-9.-]*|.*|*.|*..*) exit 64 ;; esac
+case "$auth_key" in tskey-auth-*) ;; *) exit 64 ;; esac
+[ "${#auth_key}" -ge 20 ] && [ "${#auth_key}" -le 512 ]
+command -v docker >/dev/null
+systemctl is-active --quiet docker.service
+
+valid_hex() {
+  value=$1
+  length=$2
+  [ "${#value}" -eq "$length" ]
+  case "$value" in *[!0-9a-f]*) return 1 ;; esac
+}
+
+valid_access_key() {
+  value=$1
+  case "$value" in GK????????????????????????) ;; *) return 1 ;; esac
+  case "${value#GK}" in *[!0-9a-f]*) return 1 ;; esac
+}
+
+valid_base64url_32() {
+  value=$1
+  [ "${#value}" -eq 43 ]
+  decoded_length=$(printf '%s=' "$value" | tr '_-' '/+' | base64 -d 2>/dev/null | wc -c | tr -d ' ')
+  [ "$decoded_length" -eq 32 ]
+}
+
+write_atomic() {
+  target=$1
+  mode=$2
+  temporary="$target.gnx-new"
+  cat > "$temporary"
+  chmod "$mode" "$temporary"
+  mv -f "$temporary" "$target"
+}
+
+wait_http() {
+  url=$1
+  attempt=0
+  while [ "$attempt" -lt 90 ]; do
+    attempt=$((attempt + 1))
+    if curl --fail --silent --show-error --max-time 5 "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+constrain_tailscale_mtu() {
+  container=$1
+  stage="tailscale-$kind-mtu"
+  attempt=0
+  while [ "$attempt" -lt 30 ]; do
+    attempt=$((attempt + 1))
+    if docker exec "$container" ip link set dev tailscale0 mtu 1100 >/dev/null 2>&1 &&
+       [ "$(docker exec "$container" cat /sys/class/net/tailscale0/mtu 2>/dev/null)" = 1100 ]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+enroll_tailscale() {
+  scope=$1
+  permanent="gnx-$scope-tailscale"
+  state_dir="/var/lib/quetzalcoatl/tailscale/$scope"
+  temporary="gnx-$scope-enroll"
+
+  stage="tailscale-$scope-state"
+  install -d -m 0700 "$state_dir" /run/gnx
+  if [ ! -s "$state_dir/tailscaled.state" ] &&
+     [ -s /var/lib/tailscale/tailscaled.state ]; then
+    systemctl stop tailscaled.service >/dev/null 2>&1 || true
+    install -m 0600 /var/lib/tailscale/tailscaled.state \
+      "$state_dir/tailscaled.state.gnx-new"
+    mv -f "$state_dir/tailscaled.state.gnx-new" "$state_dir/tailscaled.state"
+  fi
+  systemctl disable --now tailscaled.service >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/tailscaled.service
+  rm -rf /run/systemd/system/tailscaled.service.d
+  systemctl daemon-reload
+
+  if docker inspect "$permanent" >/dev/null 2>&1 &&
+     docker exec "$permanent" tailscale status --json > "$status_file.gnx-new" 2>/dev/null &&
+     jq -e --arg host "$hostname" '
+       .BackendState == "Running" and
+       .Self.HostName == $host and
+       (.Self.Tags | index("tag:quetzalcoatl-service") != null)
+     ' "$status_file.gnx-new" >/dev/null; then
+    mv -f "$status_file.gnx-new" "$status_file"
+    return 0
+  fi
+
+  docker rm -f "$permanent" "$temporary" >/dev/null 2>&1 || true
+  printf '%s' "$auth_key" > "$auth_file"
+  chmod 0400 "$auth_file"
+  {
+    printf '%s\n' \
+      '{' \
+      '  "version": "alpha0",' \
+      '  "authKey": "file:/run/secrets/authkey",' \
+      '  "locked": true,' \
+      '  "enabled": true,'
+    printf '  "hostname": "%s",\n' "$hostname"
+    printf '%s\n' \
+      '  "acceptDNS": true,' \
+      '  "netfilterMode": "on"' \
+      '}'
+  } | write_atomic "$config_file" 0400
+  stage="tailscale-$scope-image"
+  docker pull --quiet "$tailscale_image" >/dev/null
+
+  stage="tailscale-$scope-enrollment"
+  docker run --detach \
+    --pull never \
+    --name "$temporary" \
+    --hostname "$hostname" \
+    --device /dev/net/tun \
+    --cap-add NET_ADMIN \
+    --cap-add NET_RAW \
+    --volume "$state_dir:/var/lib/tailscale" \
+    --volume "$auth_file:/run/secrets/authkey:ro" \
+    --volume "$config_file:/run/gnx/tailscaled.json:ro" \
+    --entrypoint /usr/local/bin/tailscaled \
+    "$tailscale_image" \
+    --config=/run/gnx/tailscaled.json \
+    --statedir=/var/lib/tailscale >/dev/null
+
+  attempt=0
+  while [ "$attempt" -lt 90 ]; do
+    attempt=$((attempt + 1))
+    if docker exec "$temporary" tailscale status --json \
+         > "$status_file.gnx-new" 2>/dev/null &&
+       jq -e --arg host "$hostname" '
+         .BackendState == "Running" and
+         .Self.HostName == $host and
+         (.Self.Tags | index("tag:quetzalcoatl-service") != null)
+       ' "$status_file.gnx-new" >/dev/null; then
+      mv -f "$status_file.gnx-new" "$status_file"
+      docker rm -f "$temporary" >/dev/null
+      rm -f "$auth_file" "$config_file"
+      rm -f /usr/local/sbin/tailscale /usr/local/sbin/tailscaled
+      rm -rf /var/lib/tailscale /var/cache/tailscale_*
+      return 0
+    fi
+    sleep 2
+  done
+  docker logs --tail 40 "$temporary" >&2 || true
+  docker rm -f "$temporary" >/dev/null 2>&1 || true
+  return 1
+}
+
+write_public_environment() {
+  directory=$1
+  {
+    printf 'TS_HOSTNAME=%s\n' "$hostname"
+    printf 'TS_CERT_DOMAIN=%s.%s\n' "$hostname" "$tailnet"
+  } | write_atomic "$directory/.env" 0600
+}
+
+configure_garage() {
+  stage='garage-input'
+  IFS= read -r garage_rpc_secret <&3 || exit 64
+  IFS= read -r garage_admin_token <&3 || exit 64
+  IFS= read -r tofu_access_key <&3 || exit 64
+  IFS= read -r tofu_secret_key <&3 || exit 64
+  IFS= read -r forgejo_access_key <&3 || exit 64
+  IFS= read -r forgejo_secret_key <&3 || exit 64
+  if IFS= read -r extra <&3; then exit 64; fi
+  valid_hex "$garage_rpc_secret" 64
+  valid_hex "$garage_admin_token" 64
+  valid_access_key "$tofu_access_key"
+  valid_hex "$tofu_secret_key" 64
+  valid_access_key "$forgejo_access_key"
+  valid_hex "$forgejo_secret_key" 64
+
+  stage='garage-assets'
+  app_dir='/opt/quetzalcoatl/garage'
+  install -d -m 0755 "$app_dir" "$app_dir/serve" \
+    /var/lib/quetzalcoatl/garage/data /var/lib/quetzalcoatl/garage/meta
+  install -d -m 0700 /var/lib/quetzalcoatl/secrets
+  {
+    printf '%s\n' \
+      'metadata_dir = "/var/lib/garage/meta"' \
+      'data_dir = "/var/lib/garage/data"' \
+      'db_engine = "sqlite"' \
+      'replication_factor = 1' \
+      'consistency_mode = "consistent"'
+    printf 'rpc_secret = "%s"\n' "$garage_rpc_secret"
+    printf '%s\n' \
+      'rpc_bind_addr = "127.0.0.1:3901"' \
+      'rpc_public_addr = "127.0.0.1:3901"' \
+      '' \
+      '[s3_api]' \
+      's3_region = "garage"' \
+      'api_bind_addr = "0.0.0.0:3900"' \
+      '' \
+      '[admin]' \
+      'api_bind_addr = "127.0.0.1:3903"'
+    printf 'admin_token = "%s"\n' "$garage_admin_token"
+  } | write_atomic /var/lib/quetzalcoatl/secrets/garage.toml 0600
+  write_public_environment "$app_dir"
+  enroll_tailscale garage
+  stage='garage-compose'
+  docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \
+    -f "$app_dir/compose.yml" config --quiet
+  docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \
+    -f "$app_dir/compose.yml" up --detach --pull missing --wait --wait-timeout 300
+  constrain_tailscale_mtu gnx-garage-tailscale
+
+  stage='garage-buckets'
+  import_tofu=$(printf \
+    '{"accessKeyId":"%s","secretAccessKey":"%s","name":"gnx-tofu"}' \
+    "$tofu_access_key" "$tofu_secret_key")
+  printf '%s' "$import_tofu" |
+    docker exec -i gnx-garage /garage json-api ImportKey - >/dev/null 2>&1 || true
+  printf '%s' '{"globalAlias":"gnx-tofu-state","localAlias":null}' |
+    docker exec -i gnx-garage /garage json-api CreateBucket - >/dev/null 2>&1 || true
+  tofu_bucket=$(printf '%s' \
+    '{"id":null,"globalAlias":"gnx-tofu-state","search":null}' |
+    docker exec -i gnx-garage /garage json-api GetBucketInfo -)
+  tofu_bucket_id=$(printf '%s' "$tofu_bucket" |
+    jq -er '.id | select(test("^[0-9a-f]{64}$"))')
+  allow_tofu=$(printf \
+    '{"bucketId":"%s","accessKeyId":"%s","permissions":{"read":true,"write":true,"owner":true}}' \
+    "$tofu_bucket_id" "$tofu_access_key")
+  printf '%s' "$allow_tofu" |
+    docker exec -i gnx-garage /garage json-api AllowBucketKey - >/dev/null
+
+  import_forgejo=$(printf \
+    '{"accessKeyId":"%s","secretAccessKey":"%s","name":"gnx-forgejo"}' \
+    "$forgejo_access_key" "$forgejo_secret_key")
+  printf '%s' "$import_forgejo" |
+    docker exec -i gnx-garage /garage json-api ImportKey - >/dev/null 2>&1 || true
+  printf '%s' '{"globalAlias":"gnx-forgejo","localAlias":null}' |
+    docker exec -i gnx-garage /garage json-api CreateBucket - >/dev/null 2>&1 || true
+  forgejo_bucket=$(printf '%s' \
+    '{"id":null,"globalAlias":"gnx-forgejo","search":null}' |
+    docker exec -i gnx-garage /garage json-api GetBucketInfo -)
+  forgejo_bucket_id=$(printf '%s' "$forgejo_bucket" |
+    jq -er '.id | select(test("^[0-9a-f]{64}$"))')
+  allow_forgejo=$(printf \
+    '{"bucketId":"%s","accessKeyId":"%s","permissions":{"read":true,"write":true,"owner":true}}' \
+    "$forgejo_bucket_id" "$forgejo_access_key")
+  printf '%s' "$allow_forgejo" |
+    docker exec -i gnx-garage /garage json-api AllowBucketKey - >/dev/null
+
+  unset garage_rpc_secret garage_admin_token tofu_secret_key forgejo_secret_key
+  unset import_tofu import_forgejo allow_tofu allow_forgejo
+  printf '%s\n' 'GARAGE=ready'
+}
+
+write_forgejo_configuration() {
+  install_lock=$1
+  {
+    printf '%s\n' \
+      'APP_NAME = GNX Forgejo' \
+      'RUN_USER = git' \
+      '' \
+      '[database]' \
+      'DB_TYPE = sqlite3' \
+      'PATH = /data/gitea/forgejo.db' \
+      '' \
+      '[server]'
+    printf 'DOMAIN = %s.%s\n' "$hostname" "$tailnet"
+    printf 'ROOT_URL = https://%s.%s/\n' "$hostname" "$tailnet"
+    printf 'HTTP_PORT = 3000\nSSH_DOMAIN = %s.%s\nSSH_PORT = 2222\n' \
+      "$hostname" "$tailnet"
+    printf '%s\n' \
+      '' \
+      '[security]'
+    printf 'INSTALL_LOCK = %s\n' "$install_lock"
+    printf '%s\n' \
+      'SECRET_KEY_URI = file:/run/secrets/forgejo/secret_key' \
+      'INTERNAL_TOKEN_URI = file:/run/secrets/forgejo/internal_token' \
+      '' \
+      '[oauth2]' \
+      'JWT_SECRET_URI = file:/run/secrets/forgejo/jwt_secret' \
+      '' \
+      '[service]' \
+      'DISABLE_REGISTRATION = true' \
+      '' \
+      '[actions]' \
+      'ENABLED = true' \
+      'DEFAULT_ACTIONS_URL = https://data.forgejo.org/' \
+      '' \
+      '[storage]' \
+      'STORAGE_TYPE = minio'
+    printf 'MINIO_ENDPOINT = gnx-garage.%s\n' "$tailnet"
+    printf 'MINIO_ACCESS_KEY_ID = %s\n' "$forgejo_s3_access"
+    printf 'MINIO_SECRET_ACCESS_KEY = %s\n' "$forgejo_s3_secret"
+    printf '%s\n' \
+      'MINIO_BUCKET = gnx-forgejo' \
+      'MINIO_LOCATION = garage' \
+      'MINIO_USE_SSL = true' \
+      'MINIO_BUCKET_LOOKUP = path' \
+      'MINIO_CHECKSUM_ALGORITHM = default'
+  } | write_atomic /var/lib/quetzalcoatl/forgejo/data/gitea/conf/app.ini 0600
+  chown 1000:1000 /var/lib/quetzalcoatl/forgejo/data/gitea/conf/app.ini
+}
+
+configure_forgejo_api() {
+  python3 - <<'PY'
+import base64
+import json
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+lines = Path("/run/gnx/platform-input").read_text(encoding="utf-8").splitlines()
+tailnet, admin_password = lines[3], lines[10]
+token = Path("/run/gnx/forgejo-api-token").read_text(encoding="utf-8").strip()
+base = "http://127.0.0.1:3000"
+
+def request(path, method="GET", body=None, accepted=(200,)):
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        base + path,
+        data=data,
+        method=method,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"token {token}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            if response.status not in accepted:
+                raise RuntimeError(f"{path} returned HTTP {response.status}")
+            encoded = response.read()
+            return response.status, json.loads(encoded) if encoded else None
+    except urllib.error.HTTPError as error:
+        if error.code in accepted:
+            return error.code, None
+        raise
+
+status, _ = request("/api/v1/orgs/gnx-labs", accepted=(200, 404))
+if status == 404:
+    request(
+        "/api/v1/orgs",
+        "POST",
+        {
+            "username": "gnx-labs",
+            "full_name": "GNX Labs",
+            "description": "Sovereign GNX service repositories",
+            "visibility": "private",
+            "repo_admin_change_team_access": False,
+        },
+        (201,),
+    )
+
+status, _ = request(
+    "/api/v1/repos/gnx-labs/gnx-service-template", accepted=(200, 404)
+)
+if status == 404:
+    request(
+        "/api/v1/orgs/gnx-labs/repos",
+        "POST",
+        {
+            "name": "gnx-service-template",
+            "description": "Reproducible private GNX service template",
+            "private": True,
+            "template": True,
+            "auto_init": True,
+            "default_branch": "main",
+        },
+        (201,),
+    )
+
+files = {
+    "Dockerfile": """FROM docker.io/library/nginx@sha256:d67ea0d64d518b1bb04acde3b00f722ac3e9764b3209a9b0a98924ba35e4b779
+COPY index.html /usr/share/nginx/html/index.html
+""",
+    "index.html": """<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>GNX service</title></head>
+  <body><main><h1>GNX service is ready</h1></main></body>
+</html>
+""",
+    "compose.yml": """services:
+  app:
+    image: ${GNX_IMAGE:?GNX_IMAGE is required}
+    ports:
+      - "127.0.0.1:8080:80"
+    restart: unless-stopped
+""",
+    "gnx.service.yml": """schema: 1
+port: 8080
+exposure: private
+health_path: /
+""",
+    ".forgejo/workflows/build.yml": f"""name: Build OCI image
+on:
+  push:
+    branches: [main]
+    paths-ignore: [gnx.release.json]
+permissions:
+  contents: write
+  packages: write
+env:
+  GNX_REGISTRY: gnx-forgejo.{tailnet}
+jobs:
+  build:
+    runs-on: docker
+    steps:
+      - name: Checkout
+        uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Authenticate to the sovereign registry
+        uses: https://github.com/docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ${{{{ env.GNX_REGISTRY }}}}
+          username: ${{{{ github.actor }}}}
+          password: ${{{{ secrets.GITHUB_TOKEN }}}}
+      - name: Build and publish by commit
+        id: build
+        uses: https://github.com/docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          push: true
+          tags: ${{{{ env.GNX_REGISTRY }}}}/${{{{ github.repository }}}}:${{{{ github.sha }}}}
+      - name: Publish the bounded release declaration
+        run: |
+          set -eu
+          printf '{{"schema":1,"source":"%s","commit":"%s","image":"%s/%s@%s","port":8080,"health_path":"/"}}\\n' \\
+            "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GNX_REGISTRY" \\
+            "$GITHUB_REPOSITORY" "${{{{ steps.build.outputs.digest }}}}" \\
+            > gnx.release.json
+          git config user.name "GNX Release"
+          git config user.email "release@gnx.invalid"
+          git add gnx.release.json
+          git diff --cached --quiet || git commit -m "chore: publish $GITHUB_SHA [skip ci]"
+          git push
+""",
+}
+
+for path, content in files.items():
+    quoted = urllib.parse.quote(path, safe="/")
+    status, _ = request(
+        f"/api/v1/repos/gnx-labs/gnx-service-template/contents/{quoted}",
+        accepted=(200, 404),
+    )
+    if status == 404:
+        request(
+            f"/api/v1/repos/gnx-labs/gnx-service-template/contents/{quoted}",
+            "POST",
+            {
+                "branch": "main",
+                "message": f"Initialize {path}",
+                "content": base64.b64encode(content.encode()).decode(),
+            },
+            (201,),
+        )
+PY
+}
+
+reconcile_forgejo_tokens() {
+  python3 - <<'PY'
+import base64
+import json
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+lines = Path("/run/gnx/platform-input").read_text(encoding="utf-8").splitlines()
+password = lines[10]
+authorization = base64.b64encode(f"gnx-admin:{password}".encode("utf-8")).decode("ascii")
+base = "http://127.0.0.1:3000/api/v1"
+
+def request(path, method="GET", body=None, accepted=(200,)):
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        base + path,
+        data=data,
+        method=method,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Basic {authorization}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            if response.status not in accepted:
+                raise RuntimeError(f"{path} returned HTTP {response.status}")
+            encoded = response.read()
+            return json.loads(encoded) if encoded else None
+    except urllib.error.HTTPError as error:
+        if error.code in accepted:
+            return None
+        raise
+
+tokens = request("/users/gnx-admin/tokens?limit=100")
+for token in tokens:
+    name = token.get("name", "")
+    if name.startswith(("gnx-platform-reconciler", "gnx-registry-reader")):
+        token_id = urllib.parse.quote(str(token["id"]), safe="")
+        request(f"/users/gnx-admin/tokens/{token_id}", "DELETE", accepted=(204,))
+
+def create(name, scopes):
+    token = request(
+        "/users/gnx-admin/tokens",
+        "POST",
+        {"name": name, "scopes": scopes},
+        accepted=(201,),
+    )
+    value = token.get("sha1", "")
+    if re.fullmatch(r"[0-9a-f]{40}", value) is None:
+        raise RuntimeError("Forgejo returned an invalid access token")
+    return value
+
+print(create("gnx-platform-reconciler", ["all"]))
+print(create("gnx-registry-reader", ["read:package"]))
+PY
+}
+
+configure_forgejo() {
+  stage='forgejo-input'
+  IFS= read -r forgejo_s3_access <&3 || exit 64
+  IFS= read -r forgejo_s3_secret <&3 || exit 64
+  IFS= read -r forgejo_secret_key <&3 || exit 64
+  IFS= read -r forgejo_internal_token <&3 || exit 64
+  IFS= read -r forgejo_jwt_secret <&3 || exit 64
+  IFS= read -r forgejo_admin_password <&3 || exit 64
+  IFS= read -r forgejo_runner_secret <&3 || exit 64
+  IFS= read -r platform_api_token <&3 || exit 64
+  IFS= read -r registry_reader_token <&3 || exit 64
+  IFS= read -r runner_uuid <&3 || exit 64
+  if IFS= read -r extra <&3; then exit 64; fi
+  valid_access_key "$forgejo_s3_access"
+  valid_hex "$forgejo_s3_secret" 64
+  valid_hex "$forgejo_secret_key" 64
+  valid_hex "$forgejo_internal_token" 64
+  valid_base64url_32 "$forgejo_jwt_secret"
+  valid_hex "$forgejo_admin_password" 48
+  valid_hex "$forgejo_runner_secret" 40
+
+  stage='forgejo-assets'
+  app_dir='/opt/quetzalcoatl/forgejo'
+  install -d -m 0755 "$app_dir" "$app_dir/serve"
+  install -d -o 1000 -g 1000 -m 0755 \
+    /var/lib/quetzalcoatl/forgejo/data \
+    /var/lib/quetzalcoatl/forgejo/data/gitea/conf
+  install -d -o 1000 -g 1000 -m 0700 /var/lib/quetzalcoatl/secrets/forgejo
+  if [ ! -s /var/lib/quetzalcoatl/secrets/forgejo/secret_key ]; then
+    printf '%s\n' "$forgejo_secret_key" |
+      write_atomic /var/lib/quetzalcoatl/secrets/forgejo/secret_key 0400
+  fi
+  if [ ! -s /var/lib/quetzalcoatl/secrets/forgejo/internal_token ]; then
+    printf '%s\n' "$forgejo_internal_token" |
+      write_atomic /var/lib/quetzalcoatl/secrets/forgejo/internal_token 0400
+  fi
+  printf '%s' "$forgejo_jwt_secret" |
+    write_atomic /var/lib/quetzalcoatl/secrets/forgejo/jwt_secret 0400
+  printf '%s' "$forgejo_runner_secret" |
+    write_atomic /var/lib/quetzalcoatl/secrets/forgejo/runner_secret 0400
+  chown -R 1000:1000 /var/lib/quetzalcoatl/secrets/forgejo
+
+  install_lock=true
+  if [ ! -s /var/lib/quetzalcoatl/forgejo/data/gitea/forgejo.db ]; then
+    install_lock=false
+  fi
+  write_forgejo_configuration "$install_lock"
+  write_public_environment "$app_dir"
+  enroll_tailscale forgejo
+  stage='forgejo-compose'
+  docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \
+    -f "$app_dir/compose.yml" config --quiet
+  docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \
+    -f "$app_dir/compose.yml" up --detach --pull missing
+  constrain_tailscale_mtu gnx-forgejo-tailscale
+  if [ "$install_lock" = false ]; then
+    wait_http http://127.0.0.1:3000/
+  fi
+
+  if [ "$install_lock" = false ]; then
+    stage='forgejo-install'
+    python3 - <<'PY'
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+lines = Path("/run/gnx/platform-input").read_text(encoding="utf-8").splitlines()
+tailnet, password = lines[3], lines[10]
+body = urllib.parse.urlencode({
+    "db_type": "sqlite3",
+    "db_path": "/data/gitea/forgejo.db",
+    "app_name": "GNX Forgejo",
+    "repo_root_path": "/data/git/repositories",
+    "lfs_root_path": "/data/gitea/lfs",
+    "run_user": "git",
+    "domain": f"gnx-forgejo.{tailnet}",
+    "ssh_port": "2222",
+    "http_port": "3000",
+    "app_url": f"https://gnx-forgejo.{tailnet}/",
+    "log_root_path": "/data/gitea/log",
+    "disable_registration": "on",
+    "offline_mode": "on",
+    "disable_gravatar": "on",
+    "admin_name": "gnx-admin",
+    "admin_passwd": password,
+    "admin_confirm_passwd": password,
+    "admin_email": "gnx-admin@example.invalid",
+}).encode()
+request = urllib.request.Request(
+    "http://127.0.0.1:3000/", data=body, method="POST",
+    headers={"Content-Type": "application/x-www-form-urlencoded"},
+)
+with urllib.request.urlopen(request, timeout=30) as response:
+    if response.status not in (200, 302):
+        raise RuntimeError(f"Forgejo installer returned HTTP {response.status}")
+PY
+    write_forgejo_configuration true
+    docker restart gnx-forgejo >/dev/null
+  else
+    docker restart gnx-forgejo >/dev/null
+  fi
+  stage='forgejo-health'
+  wait_http http://127.0.0.1:3000/api/healthz
+
+  stage='forgejo-api-token'
+  if [ -z "$platform_api_token" ] || [ -z "$registry_reader_token" ]; then
+    generated_tokens=$(reconcile_forgejo_tokens)
+    [ "$(printf '%s\n' "$generated_tokens" | wc -l)" -eq 2 ]
+    platform_api_token=$(printf '%s\n' "$generated_tokens" | sed -n '1p')
+    registry_reader_token=$(printf '%s\n' "$generated_tokens" | sed -n '2p')
+    unset generated_tokens
+  fi
+  valid_hex "$platform_api_token" 40
+  valid_hex "$registry_reader_token" 40
+  printf 'FORGEJO_API_TOKEN=%s\n' "$platform_api_token"
+  printf 'FORGEJO_REGISTRY_TOKEN=%s\n' "$registry_reader_token"
+  printf '%s\n' "$platform_api_token" > /run/gnx/forgejo-api-token
+  chmod 0400 /run/gnx/forgejo-api-token
+  stage='forgejo-api-bootstrap'
+  configure_forgejo_api
+  rm -f /run/gnx/forgejo-api-token
+
+  stage='forgejo-runner-registration'
+  if [ -z "$runner_uuid" ]; then
+    runner_output=$(docker exec --user git gnx-forgejo \
+      forgejo forgejo-cli actions register \
+      --secret-file /run/secrets/forgejo/runner_secret \
+      --name gnx-runner \
+      --labels docker,ubuntu-latest:docker://data.forgejo.org/oci/node:24-trixie)
+    runner_uuid=$(printf '%s\n' "$runner_output" | tail -n 1)
+    unset runner_output
+  fi
+  printf '%s\n' "$runner_uuid" |
+    grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+  printf 'FORGEJO_RUNNER_UUID=%s\n' "$runner_uuid"
+  printf '%s\n' 'FORGEJO=ready'
+}
+
+configure_runner() {
+  stage='runner-input'
+  IFS= read -r runner_uuid <&3 || exit 64
+  IFS= read -r runner_secret <&3 || exit 64
+  if IFS= read -r extra <&3; then exit 64; fi
+  case "$runner_uuid" in ''|*[!A-Za-z0-9._-]*) exit 64 ;; esac
+  valid_hex "$runner_secret" 40
+
+  stage='runner-assets'
+  app_dir='/opt/quetzalcoatl/runner'
+  install -d -m 0700 "$app_dir" /var/lib/quetzalcoatl/runner
+  write_public_environment "$app_dir"
+  {
+    printf '%s\n' \
+      'log:' \
+      '  level: info' \
+      'runner:' \
+      '  file: /data/.runner' \
+      '  capacity: 1' \
+      '  timeout: 3h' \
+      '  labels:' \
+      '    - docker' \
+      '    - ubuntu-latest:docker://data.forgejo.org/oci/node:24-trixie' \
+      'container:' \
+      '  network: container:gnx-runner-tailscale' \
+      '  docker_host: unix:///var/run/docker.sock' \
+      'cache:' \
+      '  enabled: true' \
+      '  dir: /data/cache' \
+      'server:' \
+      '  connections:' \
+      '    forgejo:'
+    printf '      url: https://gnx-forgejo.%s/\n' "$tailnet"
+    printf '      uuid: %s\n' "$runner_uuid"
+    printf '      token: %s\n' "$runner_secret"
+  } | write_atomic /var/lib/quetzalcoatl/runner/runner-config.yml 0600
+  enroll_tailscale runner
+  stage='runner-compose'
+  docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \
+    -f "$app_dir/compose.yml" config --quiet
+  docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \
+    -f "$app_dir/compose.yml" up --detach --pull missing --wait --wait-timeout 300
+  constrain_tailscale_mtu gnx-runner-tailscale
+  test "$(docker inspect --format '{{.State.Running}}' gnx-runner)" = true
+  printf '%s\n' 'RUNNER=ready'
+}
+
+configure_service() {
+  IFS= read -r slug <&3 || exit 64
+  IFS= read -r image <&3 || exit 64
+  IFS= read -r registry_token <&3 || exit 64
+  if IFS= read -r extra <&3; then exit 64; fi
+  case "$slug" in ''|*[!a-z0-9-]*|*-*) exit 64 ;; esac
+  [ "${#slug}" -le 32 ]
+  case "$image" in
+    "gnx-forgejo.$tailnet/gnx-labs/"*"@sha256:"????????????????????????????????????????????????????????????????) ;;
+    *) exit 64 ;;
+  esac
+  [ "${#registry_token}" -ge 20 ] && [ "${#registry_token}" -le 512 ]
+
+  app_dir="/opt/quetzalcoatl/services/$slug"
+  install -d -m 0755 "$app_dir" "$app_dir/serve"
+  write_public_environment "$app_dir"
+  {
+    printf 'GNX_CONTAINER_PREFIX=gnx-service-%s\n' "$slug"
+    printf 'GNX_IMAGE=%s\n' "$image"
+  } >> "$app_dir/.env"
+  chmod 0600 "$app_dir/.env"
+  printf '%s' "$registry_token" |
+    docker login "gnx-forgejo.$tailnet" \
+      --username gnx-admin --password-stdin >/dev/null
+  enroll_tailscale service
+  docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \
+    -f "$app_dir/compose.yml" config --quiet
+  docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \
+    -f "$app_dir/compose.yml" up --detach --pull missing --wait --wait-timeout 300
+  constrain_tailscale_mtu "gnx-service-$slug-tailscale"
+  printf '%s\n' 'SERVICE=ready'
+}
+
+case "$kind" in
+  garage) configure_garage ;;
+  forgejo) configure_forgejo ;;
+  runner) configure_runner ;;
+  service) configure_service ;;
+  *) exit 64 ;;
+esac
+
+stage='ready'
+exec 3<&-
+unset auth_key
+trap - EXIT HUP INT TERM
+rm -f -- "$auth_file" "$status_file" "$status_file.gnx-new" "$input"

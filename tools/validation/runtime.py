@@ -27,10 +27,10 @@ def main() -> None:
     lock = json.loads((RUNTIME / "payload.lock.json").read_text(encoding="utf-8"))
     if (
         manifest.get("schema_version") != 1
-        or manifest.get("generation") != "proxmox-cluster-v2"
-        or manifest.get("payload_contract") != 5
+        or manifest.get("generation") != "proxmox-platform"
+        or manifest.get("payload_contract") != 6
         or lock.get("schema_version") != 1
-        or lock.get("payload_version") != 5
+        or lock.get("payload_version") != 6
     ):
         fail("runtime manifest and payload lock contract differ")
     if manifest.get("layout") != {

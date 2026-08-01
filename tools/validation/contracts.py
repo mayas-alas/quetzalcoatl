@@ -26,8 +26,8 @@ def main() -> None:
     release = tomllib.loads((ROOT / "release" / "manifest.toml").read_text(encoding="utf-8"))
     workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
     version = release["version"]
-    if version != "0.2.14":
-        fail("release manifest must identify 0.2.14")
+    if version != "0.2.40":
+        fail("release manifest must identify 0.2.40")
     if workspace["workspace"]["package"]["version"] != version:
         fail("workspace package version differs from the release manifest")
     identities = release["identities"]
@@ -50,13 +50,13 @@ def main() -> None:
             fail(f"release reuses {current} from the previous package")
     if (
         identities["previous_product_code"]
-        != "{8044A98C-6132-401C-8012-71FF9B96F4C5}"
+        != "{7692C53E-4F85-46E1-876D-F27F0F3855BC}"
         or identities["previous_package_code"]
-        != "{968B4172-8E6A-4702-B2F5-32854E857FCF}"
+        != "{3C902500-6B30-424D-99B7-FFAE50C90740}"
         or identities["previous_bundle_id"]
-        != "{7FEAF333-9C20-4BC3-BD60-6E5AE6BE2B91}"
+        != "{51EA756C-14F9-4376-8131-DB834D41BE5E}"
     ):
-        fail("0.2.14 does not identify the superseded 0.2.13 QA package")
+        fail("0.2.40 does not identify the superseded 0.2.39 QA package")
     package = workspace["workspace"]["package"]
     if package.get("license") != "AGPL-3.0-only":
         fail("workspace product license must be AGPL-3.0-only")
@@ -99,12 +99,44 @@ def main() -> None:
             build_script,
         )
 
+    cli_commands = (ROOT / "apps" / "gnx" / "src" / "commands" / "mod.rs").read_text(
+        encoding="utf-8"
+    )
+    require(
+        cli_commands,
+        (
+            'gnx forgejo admin show',
+            'gnx forgejo admin reset --confirm',
+            'parse(&["credentials", "forgejo"]).is_err()',
+            'parse(&["reset", "forgejo-admin"]).is_err()',
+        ),
+        "Forgejo admin CLI taxonomy",
+    )
+    pipe = (
+        ROOT
+        / "apps"
+        / "gnx-service"
+        / "src"
+        / "infrastructure"
+        / "windows_pipe.rs"
+    ).read_text(encoding="utf-8")
+    require(
+        pipe,
+        (
+            "Command::ForgejoAdminShow",
+            "Command::ForgejoAdminReset",
+            "authorize_client(pipe, true)",
+            "response.zeroize()",
+        ),
+        "Forgejo admin IPC authorization",
+    )
+
     expected_contracts = {
         "protocol_schema": 2,
         "persisted_state_schema": 2,
         "host_profile_schema": 1,
-        "payload_contract": 5,
-        "runtime_generation": "proxmox-cluster-v2",
+        "payload_contract": 6,
+        "runtime_generation": "proxmox-platform",
     }
     if release["contracts"] != expected_contracts:
         fail(f"release contracts differ: {release['contracts']!r}")
@@ -130,8 +162,8 @@ def main() -> None:
             "PROTOCOL_SCHEMA_VERSION: u8 = 2",
             "PERSISTED_STATE_SCHEMA_VERSION: u8 = 2",
             "HOST_PROFILE_SCHEMA_VERSION: u8 = 1",
-            "RUNTIME_PAYLOAD_CONTRACT: u8 = 5",
-            'RUNTIME_GENERATION: &str = "proxmox-cluster-v2"',
+            "RUNTIME_PAYLOAD_CONTRACT: u8 = 6",
+            'RUNTIME_GENERATION: &str = "proxmox-platform"',
         ),
         "shared migration contract",
     )

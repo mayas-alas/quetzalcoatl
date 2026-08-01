@@ -1,0 +1,215 @@
+#!/bin/sh
+set -eu
+umask 077
+export LC_ALL=C
+export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+bundle='/usr/share/quetzalcoatl/platform'
+state_root='/var/lib/quetzalcoatl/platform'
+secret_root="$state_root/secrets"
+runtime='/run/gnx/platform-deploy'
+records="$runtime/records"
+pve_password="$runtime/pve-password"
+tailscale_key="$runtime/tailscale-auth-key"
+run_log="$state_root/deploy.log.gnx-new"
+operation_lock="$state_root/operation.lock"
+
+cleanup() {
+  result=$?
+  trap - EXIT HUP INT TERM
+  rm -rf -- "$runtime"
+  if [ "$result" -ne 0 ] && [ -s "$run_log" ]; then
+    tail -c 2000 "$run_log" >&2 || true
+  fi
+  exit "$result"
+}
+trap cleanup EXIT HUP INT TERM
+
+[ "$(id -u)" -eq 0 ]
+test -x "$bundle/operations/discover-releases.py"
+test -x "$bundle/operations/verify-release.py"
+test -x "$bundle/operations/lxc-host"
+test -x "$bundle/operations/lxc-service"
+test -x "$bundle/tofu/service/entrypoint"
+test -f "$bundle/services/service/compose.yml"
+test -f "$bundle/services/service/serve.json"
+test -s "$secret_root/forgejo-api-token"
+test -s "$secret_root/forgejo-registry-token"
+test -s "$secret_root/release-signing-key"
+install -d -m 0700 "$runtime" "$state_root/tofu/services"
+exec 9> "$operation_lock"
+flock -x 9
+: > "$run_log"
+chmod 0600 "$run_log"
+
+IFS= read -r schema || exit 64
+IFS= read -r node_name || exit 64
+IFS= read -r tailnet || exit 64
+IFS= read -r password || exit 64
+IFS= read -r auth_key || exit 64
+if IFS= read -r extra; then exit 64; fi
+
+[ "$schema" = 1 ]
+case "$node_name" in gnx-controller-*) ;; *) exit 64 ;; esac
+case "$node_name" in *[!a-z0-9-]*|*-|'') exit 64 ;; esac
+case "$tailnet" in *.ts.net) ;; *) exit 64 ;; esac
+case "$tailnet" in *[!a-z0-9.-]*|.*|*.|*..*) exit 64 ;; esac
+case "$auth_key" in tskey-auth-*) ;; *) exit 64 ;; esac
+[ "${#auth_key}" -ge 20 ] && [ "${#auth_key}" -le 512 ]
+[ "${#password}" -ge 12 ] && [ "${#password}" -le 256 ]
+
+printf '%s' "$password" > "$pve_password"
+printf '%s' "$auth_key" > "$tailscale_key"
+chmod 0400 "$pve_password" "$tailscale_key"
+unset password auth_key
+
+export GNX_TAILNET="$tailnet"
+python3 "$bundle/operations/discover-releases.py" > "$records"
+chmod 0400 "$records"
+tofu_image='ghcr.io/opentofu/opentofu@sha256:6b66d996afc7f043154e33a0420285d0d58c165305ac8f36d32df213a3c4bbd4'
+
+guest_script() (
+  vmid=$1
+  script=$2
+  podman exec -i gnx-proxmox pct exec "$vmid" -- /bin/sh -s < "$script"
+)
+
+guest_directory() (
+  vmid=$1
+  directory=$2
+  mode=$3
+  podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/install -d -o 0 -g 0 -m "$mode" "$directory"
+)
+
+guest_put() (
+  vmid=$1
+  source=$2
+  target=$3
+  mode=$4
+  temporary="$target.gnx-new"
+  expected=$(sha256sum "$source" | cut -d ' ' -f 1)
+  podman exec -i gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/tee "$temporary" < "$source" >/dev/null
+  podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/chmod "$mode" "$temporary"
+  actual=$(podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/sha256sum "$temporary" | cut -d ' ' -f 1)
+  [ "$actual" = "$expected" ]
+  podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/mv -f "$temporary" "$target"
+)
+
+guest_input() (
+  vmid=$1
+  source=$2
+  podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/install -d -o 0 -g 0 -m 0700 /run/gnx
+  podman exec -i gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/tee /run/gnx/platform-input.gnx-new < "$source" >/dev/null
+  podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/chmod 0400 /run/gnx/platform-input.gnx-new
+  podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/mv -f /run/gnx/platform-input.gnx-new /run/gnx/platform-input
+)
+
+while IFS= read -r record || [ -n "$record" ]; do
+  [ -n "$record" ] || continue
+  case "$record" in "$state_root"/releases/*.json) ;; *) exit 65 ;; esac
+  release=$(python3 "$bundle/operations/verify-release.py" < "$record")
+  old_ifs=$IFS
+  IFS='|'
+  set -- $release
+  IFS=$old_ifs
+  [ "$#" -eq 7 ] || exit 65
+  slug=$1
+  hostname=$2
+  vmid=$3
+  source=$4
+  image=$5
+  port=$6
+  health_path=$7
+  unset release
+  [ "$port" = 8080 ] && [ "$health_path" = / ]
+
+  service_state="$state_root/tofu/services/$slug"
+  import_vmid="$runtime/import-$slug"
+  tofu_environment="$runtime/tofu-environment-$slug"
+  install -d -m 0700 "$service_state"
+  install -m 0644 "$bundle/tofu/service/main.tf" "$service_state/main.tf"
+  install -m 0644 "$bundle/tofu/service/versions.tf" "$service_state/versions.tf"
+  install -m 0644 "$bundle/tofu/service/.terraform.lock.hcl" "$service_state/.terraform.lock.hcl"
+  install -m 0755 "$bundle/tofu/service/entrypoint" "$service_state/entrypoint"
+
+  : > "$import_vmid"
+  if podman exec gnx-proxmox pct config "$vmid" > "$runtime/pct-$vmid" 2>/dev/null; then
+    actual=$(sed -n 's/^hostname: //p' "$runtime/pct-$vmid")
+    [ "$actual" = "$hostname" ] || {
+      printf 'VMID %s belongs to %s, expected %s\n' "$vmid" "$actual" "$hostname" >&2
+      exit 66
+    }
+    printf '%s\n' "$vmid" > "$import_vmid"
+  fi
+  chmod 0400 "$import_vmid"
+
+  printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_REGION=garage\nAWS_ENDPOINT_URL_S3=https://gnx-garage.%s\n' \
+    "$(cat "$secret_root/tofu-s3-access-key")" \
+    "$(cat "$secret_root/tofu-s3-secret-key")" \
+    "$tailnet" > "$tofu_environment"
+  chmod 0400 "$tofu_environment"
+
+  if ! podman run --rm \
+    --pod gnx-node \
+    --security-opt label=disable \
+    --volume "$service_state:/workspace" \
+    --volume "$pve_password:/run/secrets/pve-password:ro" \
+    --volume "$import_vmid:/run/config/import-vmid:ro" \
+    --workdir /workspace \
+    --env-file "$tofu_environment" \
+    --env TF_REGISTRY_DISCOVERY_RETRY=5 \
+    --env TF_PROVIDER_DOWNLOAD_RETRY=5 \
+    --env TF_REGISTRY_CLIENT_TIMEOUT=20 \
+    --env "TF_VAR_node_name=$node_name" \
+    --env "TF_VAR_service_slug=$slug" \
+    --env "TF_VAR_service_hostname=$hostname" \
+    --env "TF_VAR_service_vmid=$vmid" \
+    --env "GNX_TAILNET=$tailnet" \
+    --entrypoint /workspace/entrypoint \
+    "$tofu_image" >> "$run_log" 2>&1; then
+    exit 67
+  fi
+
+  if ! guest_script "$vmid" "$bundle/operations/lxc-host" >> "$run_log" 2>&1; then
+    exit 68
+  fi
+  app_dir="/opt/quetzalcoatl/services/$slug"
+  guest_directory "$vmid" "$app_dir" 0755
+  guest_directory "$vmid" "$app_dir/serve" 0755
+  guest_put "$vmid" "$bundle/services/service/compose.yml" "$app_dir/compose.yml" 0644
+  guest_put "$vmid" "$bundle/services/service/serve.json" "$app_dir/serve/serve.json" 0644
+
+  service_input="$runtime/service-$slug.input"
+  {
+    printf '%s\n' 1 service "$hostname" "$tailnet"
+    cat "$tailscale_key"
+    printf '\n%s\n%s\n' "$slug" "$image"
+    cat "$secret_root/forgejo-registry-token"
+    printf '\n'
+  } > "$service_input"
+  chmod 0400 "$service_input"
+  guest_input "$vmid" "$service_input"
+  if ! guest_script "$vmid" "$bundle/operations/lxc-service" >> "$run_log" 2>&1; then
+    exit 69
+  fi
+
+  curl --fail --silent --show-error --max-time 20 \
+    "https://$hostname.$tailnet/" >/dev/null
+  printf 'SERVICE_RELEASE=ready;SOURCE=%s;VMID=%s;URL=https://%s.%s/\n' \
+    "$source" "$vmid" "$hostname" "$tailnet" >> "$run_log"
+done < "$records"
+
+rm -f -- "$pve_password" "$tailscale_key"
+mv -f "$run_log" "$state_root/deploy.log"
+trap - EXIT HUP INT TERM
+rm -rf -- "$runtime"
+printf '%s\n' 'PLATFORM_DEPLOY=ready'

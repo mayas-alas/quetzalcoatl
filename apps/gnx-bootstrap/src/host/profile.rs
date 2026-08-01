@@ -1,4 +1,6 @@
 #[cfg(windows)]
+use std::env;
+#[cfg(windows)]
 use std::fs::{self, OpenOptions};
 #[cfg(windows)]
 use std::io::Write;
@@ -41,9 +43,10 @@ impl ProfileError {
 }
 
 #[cfg(windows)]
-pub fn detect_and_store() -> Result<HostProfile, ProfileError> {
+pub fn detect_and_store(maintenance_requested: bool) -> Result<HostProfile, ProfileError> {
     let raw = detect_resources()?;
-    let profile = calculate(raw);
+    let maintenance = maintenance_requested || installed_product_exists()?;
+    let profile = calculate(raw, maintenance);
     store(&profile)?;
     Ok(profile)
 }
@@ -100,7 +103,7 @@ fn detect_resources() -> Result<RawResources, ProfileError> {
     })
 }
 
-fn calculate(raw: RawResources) -> HostProfile {
+fn calculate(raw: RawResources, maintenance: bool) -> HostProfile {
     let detected = DetectedResources {
         logical_cpus: raw.logical_cpus,
         total_memory_mib: raw.total_memory_bytes / MIB,
@@ -124,12 +127,22 @@ fn calculate(raw: RawResources) -> HostProfile {
     let available_disk = detected
         .system_disk_free_gib
         .saturating_sub(WINDOWS_DISK_RESERVE_GIB);
-    let machine_disk_gib = round_down(available_disk.min(MAX_MACHINE_DISK_GIB), 5);
+    let fresh_machine_disk_gib = round_down(available_disk.min(MAX_MACHINE_DISK_GIB), 5);
+    let machine_disk_gib = if maintenance {
+        fresh_machine_disk_gib.max(MIN_MACHINE_DISK_GIB)
+    } else {
+        fresh_machine_disk_gib
+    };
 
     let memory_supported = detected.total_memory_mib >= MIN_HOST_MEMORY_MIB
         && machine_memory_mib >= MIN_MACHINE_MEMORY_MIB;
     let cpu_supported = detected.logical_cpus >= MIN_LOGICAL_CPUS && machine_cpus >= 2;
-    let disk_supported = machine_disk_gib >= MIN_MACHINE_DISK_GIB;
+    let disk_supported = if maintenance {
+        detected.system_disk_total_gib
+            >= WINDOWS_DISK_RESERVE_GIB.saturating_add(MIN_MACHINE_DISK_GIB)
+    } else {
+        machine_disk_gib >= MIN_MACHINE_DISK_GIB
+    };
     let supported = memory_supported && cpu_supported && disk_supported;
     let cluster_member_supported = supported
         && detected.total_memory_mib >= 12 * 1024
@@ -165,6 +178,14 @@ fn calculate(raw: RawResources) -> HostProfile {
             detected.system_disk_free_gib,
             WINDOWS_DISK_RESERVE_GIB + MIN_MACHINE_DISK_GIB
         ));
+    } else if maintenance
+        && detected.system_disk_free_gib < WINDOWS_DISK_RESERVE_GIB + MIN_MACHINE_DISK_GIB
+    {
+        warnings.push(format!(
+            "disk has {} GiB free, below the {} GiB required for a fresh managed-machine allocation; maintenance reuses the existing allocation",
+            detected.system_disk_free_gib,
+            WINDOWS_DISK_RESERVE_GIB + MIN_MACHINE_DISK_GIB
+        ));
     }
     if supported && !cluster_member_supported {
         warnings.push(
@@ -187,6 +208,22 @@ fn calculate(raw: RawResources) -> HostProfile {
         supported,
         cluster_member_supported,
         warnings,
+    }
+}
+
+#[cfg(windows)]
+fn installed_product_exists() -> Result<bool, ProfileError> {
+    let program_files = env::var_os("ProgramFiles")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| error("ProgramFiles is unavailable"))?;
+    let service = program_files.join("Quetzalcoatl").join("gnx-service.exe");
+    match fs::metadata(service) {
+        Ok(metadata) => Ok(metadata.is_file()),
+        Err(io_error) if io_error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(io_error) => Err(error(format!(
+            "cannot inspect the installed Quetzalcoatl service: {io_error}"
+        ))),
     }
 }
 
@@ -265,7 +302,7 @@ mod tests {
 
     #[test]
     fn six_gib_host_gets_a_bounded_lab_profile() {
-        let profile = calculate(raw(4, 5864, 100, 80));
+        let profile = calculate(raw(4, 5864, 100, 80), false);
         assert!(profile.supported);
         assert!(!profile.cluster_member_supported);
         assert_eq!(profile.selected.capability, "lab");
@@ -276,7 +313,7 @@ mod tests {
 
     #[test]
     fn twelve_gib_host_gets_the_cluster_profile() {
-        let profile = calculate(raw(8, 12 * 1024, 160, 130));
+        let profile = calculate(raw(8, 12 * 1024, 160, 130), false);
         assert!(profile.supported);
         assert!(profile.cluster_member_supported);
         assert_eq!(profile.selected.capability, "cluster-member");
@@ -287,8 +324,21 @@ mod tests {
 
     #[test]
     fn small_host_is_install_only() {
-        let profile = calculate(raw(2, 4091, 64, 50));
+        let profile = calculate(raw(2, 4091, 64, 50), false);
         assert!(!profile.supported);
         assert_eq!(profile.selected.capability, "install-only");
+    }
+
+    #[test]
+    fn maintenance_reuses_the_existing_disk_allocation() {
+        let profile = calculate(raw(12, 16 * 1024, 475, 59), true);
+        assert!(profile.supported);
+        assert_eq!(profile.selected.machine_disk_gib, MIN_MACHINE_DISK_GIB);
+        assert!(
+            profile
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("maintenance reuses the existing allocation"))
+        );
     }
 }

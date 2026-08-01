@@ -47,7 +47,7 @@ if ($dependencyLock.schema_version -ne 1) {
 }
 New-Item -ItemType Directory -Force -Path $cacheRoot, $outputRoot | Out-Null
 
-foreach ($module in @('dependencies.ps1', 'contracts.ps1', 'runtime.ps1', 'rust.ps1', 'msi.ps1', 'bundle.ps1', 'signing.ps1')) {
+foreach ($module in @('dependencies.ps1', 'contracts.ps1', 'runtime.ps1', 'platform.ps1', 'rust.ps1', 'msi.ps1', 'bundle.ps1', 'signing.ps1')) {
     . (Join-Path $moduleRoot $module)
 }
 
@@ -63,6 +63,7 @@ Test-ReleaseIdentityContract
 Test-DependencyStagingContract
 Test-MaintenanceContract
 Test-RuntimePayloadSource -RuntimePayload (Join-Path $repoRoot 'runtime') -ExpectedPayloadVersion $runtimePayloadContract
+Test-PlatformPayloadSource -PlatformPayload (Join-Path $repoRoot 'platform')
 $signingIdentity = $null
 if ($AllowUnsigned -and $AllowSelfSigned) {
     throw 'AllowUnsigned and AllowSelfSigned are mutually exclusive.'
@@ -87,7 +88,17 @@ if ([string]::IsNullOrWhiteSpace($SigningCertificateThumbprint)) {
         Write-Warning 'Building a self-signed development artifact; it is trusted only by explicitly configured test machines and is not releasable.'
     } elseif ($AllowSelfSigned) {
         throw 'AllowSelfSigned is valid only for a self-signed development certificate.'
+    } else {
+        Test-CodeSigningCertificateTrust `
+            -Certificate $signingIdentity.Certificate `
+            -RequireAuthRoot $true
     }
+}
+$expectSignedArtifacts = $null -ne $signingIdentity
+$expectedSignerThumbprint = if ($signingIdentity) {
+    $signingIdentity.Certificate.Thumbprint
+} else {
+    $null
 }
 
 if (-not (Test-Path -LiteralPath $dotnetToolManifest -PathType Leaf)) {
@@ -126,6 +137,11 @@ Copy-Item -LiteralPath $runtimeLockPath -Destination $runtimePackage
 foreach ($directory in @('commands', 'configuration', 'containers', 'services')) {
     Copy-Item -LiteralPath (Join-Path $repoRoot "runtime\$directory") -Destination $runtimePackage -Recurse
 }
+
+$platformPackage = Join-Path $outputRoot 'platform-payload'
+Copy-PlatformPayload `
+    -SourceRoot (Join-Path $repoRoot 'platform') `
+    -DestinationRoot $platformPackage
 
 $previousBundleIdEnvironment = $env:GNX_RELEASE_BUNDLE_ID
 $env:GNX_RELEASE_BUNDLE_ID = $releaseBundleId
@@ -178,6 +194,7 @@ try {
     $gnxService = Join-Path $repoRoot "target\release\gnx-service.exe"
     $gnxCli = Join-Path $repoRoot "target\release\gnx.exe"
     $gnxTray = Join-Path $repoRoot "target\release\gnx-tray.exe"
+    $serviceWrapper = Join-Path $outputRoot "Quetzalcoatl.Service.exe"
     $releaseBinaries = @($gnxBootstrap, $gnxService, $gnxCli, $gnxTray)
 
     Build-RustReleaseArtifacts `
@@ -198,8 +215,30 @@ try {
                 -TimestampUrl $TimestampUrl
         }
     }
-    $generatedInputs = @($releaseBinaries) + @(
+    Copy-Item -LiteralPath $artifacts.winsw -Destination $serviceWrapper -Force
+    if ($signingIdentity) {
+        Invoke-AuthenticodeSign `
+            -Path $serviceWrapper `
+            -SigningIdentity $signingIdentity `
+            -TimestampUrl $TimestampUrl
+    }
+    $firstPartyExecutables = @(
+        @{ Name = 'gnx-bootstrap'; Path = $gnxBootstrap; ExpectedVersion = $releaseVersion },
+        @{ Name = 'gnx-service'; Path = $gnxService; ExpectedVersion = $releaseVersion },
+        @{ Name = 'gnx'; Path = $gnxCli; ExpectedVersion = $releaseVersion },
+        @{ Name = 'gnx-tray'; Path = $gnxTray; ExpectedVersion = $releaseVersion },
+        @{ Name = 'service-wrapper'; Path = $serviceWrapper }
+    )
+    Test-ReleaseArtifactSet `
+        -Artifacts $firstPartyExecutables `
+        -ExpectSigned $expectSignedArtifacts `
+        -ExpectedThumbprint $expectedSignerThumbprint
+
+    $generatedInputs = @($firstPartyExecutables | ForEach-Object Path) + @(
         Get-ChildItem -LiteralPath $runtimePackage -Recurse -File |
+            ForEach-Object FullName
+    ) + @(
+        Get-ChildItem -LiteralPath $platformPackage -Recurse -Force -File |
             ForEach-Object FullName
     )
     foreach ($generatedInput in $generatedInputs) {
@@ -220,7 +259,7 @@ try {
         -d "GnxTray=$gnxTray" `
         -d "GnxService=$gnxService" `
         -d "BrandIcon=$(Join-Path $installerRoot 'assets\branding\icon.ico')" `
-        -d "WinSW=$($artifacts.winsw)" `
+        -d "WinSW=$serviceWrapper" `
         -d "ServiceConfig=$(Join-Path $installerRoot 'source\Quetzalcoatl.Service.xml')" `
         -d "WinSWLicense=$(Join-Path $installerRoot 'assets\licenses\WinSW.txt')" `
         -d "WiXLicense=$(Join-Path $installerRoot 'assets\licenses\WiX.txt')" `
@@ -230,6 +269,7 @@ try {
         -d "PodmanMachineImage=$($artifacts.podman_machine)" `
         -d "PodmanMachineImageName=$($machineArtifact.file_name)" `
         -d "RuntimePayload=$runtimePackage" `
+        -d "PlatformPayload=$platformPackage" `
         -out $productMsi
     if ($LASTEXITCODE -ne 0) { throw "MSI build failed." }
     Set-MsiDeterministicMetadata -Path $productMsi
@@ -247,16 +287,25 @@ try {
     Test-MsiPayloadCoherence `
         -MsiPath $productMsi `
         -ServiceBinary $gnxService `
+        -ServiceWrapper $serviceWrapper `
         -CliBinary $gnxCli `
         -TrayBinary $gnxTray `
         -MachineImage $artifacts.podman_machine `
-        -RuntimePayload $runtimePackage
+        -RuntimePayload $runtimePackage `
+        -PlatformPayload $platformPackage `
+        -ExpectedProductVersion $releaseVersion `
+        -ExpectSigned $expectSignedArtifacts `
+        -ExpectedSignerThumbprint $expectedSignerThumbprint
     if ($signingIdentity) {
         Invoke-AuthenticodeSign `
             -Path $productMsi `
             -SigningIdentity $signingIdentity `
             -TimestampUrl $TimestampUrl
     }
+    Test-ReleaseArtifactSet `
+        -Artifacts @(@{ Name = 'product-msi'; Path = $productMsi }) `
+        -ExpectSigned $expectSignedArtifacts `
+        -ExpectedThumbprint $expectedSignerThumbprint
     Test-InstalledMsiIdentity -MsiPath $productMsi -ProductCode $releaseProductCode
 
     & dotnet tool run wix -- build `
@@ -281,8 +330,12 @@ try {
     Test-BundleIdentityAndPayload `
         -BundlePath $setupExe `
         -ProductMsiPath $productMsi `
+        -BootstrapPath $gnxBootstrap `
         -WslMsiPath $artifacts.wsl `
-        -PodmanMsiPath $artifacts.podman
+        -PodmanMsiPath $artifacts.podman `
+        -ExpectedProductVersion $releaseVersion `
+        -ExpectSigned $expectSignedArtifacts `
+        -ExpectedSignerThumbprint $expectedSignerThumbprint
     if ($signingIdentity) {
         Invoke-BurnAuthenticodeSign `
             -BundlePath $setupExe `
@@ -292,9 +345,17 @@ try {
         Test-BundleIdentityAndPayload `
             -BundlePath $setupExe `
             -ProductMsiPath $productMsi `
+            -BootstrapPath $gnxBootstrap `
             -WslMsiPath $artifacts.wsl `
-            -PodmanMsiPath $artifacts.podman
+            -PodmanMsiPath $artifacts.podman `
+            -ExpectedProductVersion $releaseVersion `
+            -ExpectSigned $expectSignedArtifacts `
+            -ExpectedSignerThumbprint $expectedSignerThumbprint
     }
+    Test-ReleaseArtifactSet `
+        -Artifacts @(@{ Name = 'setup'; Path = $setupExe; ExpectedVersion = $releaseVersion }) `
+        -ExpectSigned $expectSignedArtifacts `
+        -ExpectedThumbprint $expectedSignerThumbprint
 
     Get-FileHash -Algorithm SHA256 -LiteralPath $productMsi, $setupExe
  } finally {

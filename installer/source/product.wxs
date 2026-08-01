@@ -15,6 +15,7 @@
     <MediaTemplate EmbedCab="yes" CompressionLevel="none" />
     <Icon Id="QuetzalcoatlIcon" SourceFile="$(var.BrandIcon)" />
     <Property Id="ARPPRODUCTICON" Value="QuetzalcoatlIcon" />
+    <Property Id="ARPSYSTEMCOMPONENT" Value="1" />
     <util:CloseApplication
       Id="CloseQuetzalcoatlTray"
       Target="gnx-tray.exe"
@@ -29,7 +30,7 @@
       ExeCommand="--launch-detached"
       Execute="immediate"
       Impersonate="yes"
-      Return="check" />
+      Return="ignore" />
     <CustomAction
       Id="ValidateInstalledPayload"
       FileRef="GnxService"
@@ -58,6 +59,7 @@
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Quetzalcoatl">
         <Directory Id="RuntimePayloadFolder" Name="runtime" />
+        <Directory Id="PlatformPayloadFolder" Name="platform" />
         <Directory Id="MachineImagesFolder" Name="machine-images" />
         <Directory Id="LicensesFolder" Name="licenses" />
       </Directory>
@@ -77,6 +79,7 @@
       <ComponentRef Id="WinSWLicenseComponent" />
       <ComponentRef Id="WiXLicenseComponent" />
       <Files Include="$(var.RuntimePayload)\**" Directory="RuntimePayloadFolder" />
+      <Files Include="$(var.PlatformPayload)\**" Directory="PlatformPayloadFolder" />
     </Feature>
   </Package>
 

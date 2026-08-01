@@ -10,6 +10,10 @@ pub(crate) enum RuntimeOperation {
     PveConfigure,
     TailscalePrepare,
     TailscaleRename,
+    PlatformReconcile,
+    PlatformDeploy,
+    ForgejoAdminShow,
+    ForgejoAdminReset,
 }
 
 impl RuntimeOperation {
@@ -25,6 +29,10 @@ impl RuntimeOperation {
             Self::PveConfigure => &["pve-configure"],
             Self::TailscalePrepare => &["tailscale-prepare"],
             Self::TailscaleRename => &["tailscale-rename"],
+            Self::PlatformReconcile => &["platform-reconcile"],
+            Self::PlatformDeploy => &["platform-deploy"],
+            Self::ForgejoAdminShow => &["forgejo-admin", "show"],
+            Self::ForgejoAdminReset => &["forgejo-admin", "reset"],
         }
     }
 }

@@ -1,7 +1,8 @@
 # Delivery contract
 
-`.AGENTS` governs the active Quetzalcoatl 0.2.14 delivery. It is not release
-history; completed historical changes belong in `CHANGELOG.md`.
+`.AGENTS` governs the active Quetzalcoatl 0.2 platform-foundation stabilization.
+It is not release history; completed historical changes belong in
+`CHANGELOG.md`.
 
 Read in order:
 
@@ -12,13 +13,17 @@ Read in order:
 
 ## Protocol
 
-1. Preserve the recorded dirty baseline and never revert unrelated user work.
+1. Preserve the recorded clean baseline and never revert unrelated user work.
 2. Claim only paths assigned to one workstream. The coordinator may execute
-   workstreams sequentially when the delivery is explicitly assigned to one agent.
+   workstreams sequentially when the delivery is assigned to one agent.
 3. Record cross-workstream requirements in `TRACKER.md`.
-4. Use one semantic name and one implementation; transitional copies are forbidden.
-5. A workstream reaches `review` only after its checks pass.
-6. The coordinator integrates one Setup artifact and records exact evidence.
-7. `done` requires source gates plus physical acceptance; neither implies the other.
+4. Use one semantic name and one implementation; transitional copies are
+   prohibited.
+5. Foundation source remains outside the Rust domain and is integrated as one
+   signed, locked platform bundle.
+6. A workstream reaches `review` only after its checks pass.
+7. The coordinator integrates one Setup artifact and records exact evidence.
+8. `done` requires source gates plus physical acceptance; neither implies the
+   other.
 
 Statuses are exactly `ready`, `active`, `blocked`, `review`, `done`.

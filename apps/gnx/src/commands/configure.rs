@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use gnx_contracts::InstallerConfiguration;
+use gnx_contracts::{InstallerConfiguration, PlatformConfiguration};
 use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Console::{
     ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode,
@@ -27,6 +27,26 @@ pub(crate) fn run() -> CliResult<()> {
         ));
     }
     println!("configuration accepted: {}", response.stage);
+    Ok(())
+}
+
+pub(crate) fn run_platform() -> CliResult<()> {
+    let auth_key = read_secret("Tailscale service enrollment auth key: ")?;
+    let response = client::configure_platform(PlatformConfiguration::new(auth_key.into_inner()))?;
+    if !response.accepted {
+        return Err(format!(
+            "{}: {}",
+            response
+                .error_code
+                .as_deref()
+                .unwrap_or("PLATFORM_CONFIGURATION_REJECTED"),
+            response
+                .message
+                .as_deref()
+                .unwrap_or("platform configuration was rejected")
+        ));
+    }
+    println!("platform configuration accepted: {}", response.stage);
     Ok(())
 }
 

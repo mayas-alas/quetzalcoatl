@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "payload_version": 5,
+  "payload_version": 6,
   "target": {
     "os": "linux",
     "architecture": "amd64"
@@ -60,9 +60,9 @@
     {
       "path": "commands/gnx-runtime-agent",
       "source": "quetzalcoatl",
-      "version": 5,
+      "version": 7,
       "mode": "0755",
-      "sha256": "ca3f0ed53c1d8aecb798a0b72ff6cf59f907c05a1035e9b90584129af83dfdd7"
+      "sha256": "cc74acec64bb9cc962c3f1caaed810dccad69dd621abcdfa5b992887525242fd"
     },
     {
       "path": "commands/gnx-proxmox-entrypoint",

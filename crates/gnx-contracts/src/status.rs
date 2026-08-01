@@ -115,6 +115,32 @@ impl PartialEq<&str> for OverallHealth {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlatformHealth {
+    WaitingConfiguration,
+    Reconciling,
+    Ready,
+    Failed,
+}
+
+impl PlatformHealth {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::WaitingConfiguration => "waiting_configuration",
+            Self::Reconciling => "reconciling",
+            Self::Ready => "ready",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl std::fmt::Display for PlatformHealth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct LifecycleStage(pub String);
@@ -252,6 +278,51 @@ impl std::fmt::Display for PveUrl {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct PlatformUrl(pub String);
+
+impl PlatformUrl {
+    pub fn parse(value: impl Into<String>) -> Result<Self, &'static str> {
+        let value = value.into();
+        let host = value
+            .strip_prefix("https://")
+            .and_then(|value| value.strip_suffix('/'))
+            .ok_or("platform URL must use HTTPS and end with a slash")?;
+        if host.is_empty()
+            || host.contains(['/', '\\', '@', ':', '[', ']'])
+            || !host.ends_with(".ts.net")
+            || !host.split('.').all(valid_dns_label)
+        {
+            return Err("platform URL host is not an allowed tailnet DNS name");
+        }
+        let local = host
+            .split('.')
+            .next()
+            .ok_or("platform URL host is absent")?;
+        if !local.starts_with("gnx-") || local.len() <= 4 {
+            return Err("platform URL host is not a GNX service");
+        }
+        Ok(Self(value))
+    }
+}
+
+impl<'de> Deserialize<'de> for PlatformUrl {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(value).map_err(serde::de::Error::custom)
+    }
+}
+
+impl std::fmt::Display for PlatformUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 pub struct StatusResponse {
     pub schema_version: u8,
@@ -264,6 +335,8 @@ pub struct StatusResponse {
     pub components: Components,
     pub cluster: Cluster,
     pub last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<PlatformStatus>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -281,6 +354,25 @@ pub struct Components {
 pub struct Cluster {
     pub joined: bool,
     pub quorate: bool,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct PlatformStatus {
+    pub health: PlatformHealth,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forgejo_url: Option<PlatformUrl>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+impl PlatformStatus {
+    pub fn waiting_configuration() -> Self {
+        Self {
+            health: PlatformHealth::WaitingConfiguration,
+            forgejo_url: None,
+            last_error: None,
+        }
+    }
 }
 
 impl StatusResponse {
@@ -306,6 +398,7 @@ impl StatusResponse {
                 quorate: false,
             },
             last_error: None,
+            platform: None,
         }
     }
 

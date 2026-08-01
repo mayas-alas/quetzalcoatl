@@ -84,7 +84,7 @@ fn validate_host_profile(profile: &HostProfile) -> Result<(), GateError> {
                 .machine_memory_mib
                 .saturating_add(selected.windows_memory_reserve_mib)
         || profile.detected.system_disk_total_gib < profile.detected.system_disk_free_gib
-        || profile.detected.system_disk_free_gib < selected.machine_disk_gib.saturating_add(20)
+        || profile.detected.system_disk_total_gib < selected.machine_disk_gib.saturating_add(20)
     {
         return Err(GateError::new(
             "HOST_PROFILE_INVALID",
@@ -150,5 +150,12 @@ mod tests {
     #[test]
     fn accepts_the_bounded_lab_profile() {
         validate_host_profile(&profile()).expect("valid profile");
+    }
+
+    #[test]
+    fn accepts_maintenance_after_the_managed_disk_was_allocated() {
+        let mut value = profile();
+        value.detected.system_disk_free_gib = 21;
+        validate_host_profile(&value).expect("maintenance profile");
     }
 }

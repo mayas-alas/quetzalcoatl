@@ -1,0 +1,129 @@
+#!/bin/sh
+set -eu
+umask 077
+export LC_ALL=C
+export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+state_root='/var/lib/quetzalcoatl/platform'
+secret_root="$state_root/secrets"
+password_file="$secret_root/forgejo-admin-password"
+token_file="$secret_root/forgejo-api-token"
+runtime='/run/gnx/forgejo-admin'
+guest_input='/run/gnx/forgejo-admin-input'
+mode=${1-}
+
+case "$mode" in show|reset) ;; *) exit 64 ;; esac
+[ "$#" -eq 1 ]
+command -v flock >/dev/null
+command -v podman >/dev/null
+test -s "$password_file"
+test -s "$token_file"
+install -d -m 0700 "$runtime"
+exec 9> "$state_root/operation.lock"
+flock -x 9
+
+cleanup() {
+  result=$?
+  trap - EXIT HUP INT TERM
+  rm -f -- "$password_file.gnx-new"
+  rm -rf -- "$runtime"
+  podman exec gnx-proxmox pct exec 201 -- \
+    /usr/bin/rm -f "$guest_input" "$guest_input.gnx-new" >/dev/null 2>&1 || true
+  exit "$result"
+}
+trap cleanup EXIT HUP INT TERM
+
+valid_hex() {
+  value=$1
+  length=$2
+  [ "${#value}" -eq "$length" ]
+  case "$value" in *[!0-9a-f]*) return 1 ;; esac
+}
+
+current_password=$(cat "$password_file")
+api_token=$(cat "$token_file")
+valid_hex "$current_password" 48
+valid_hex "$api_token" 40
+
+password=$current_password
+if [ "$mode" = reset ]; then
+  password=$(od -An -N 24 -tx1 /dev/urandom | tr -d ' \n')
+  valid_hex "$password" 48
+  printf '%s' "$password" > "$password_file.gnx-new"
+  chmod 0400 "$password_file.gnx-new"
+fi
+
+hostname=$(podman exec gnx-proxmox pct config 201 | sed -n 's/^hostname: //p')
+[ "$hostname" = gnx-forgejo ]
+
+{
+  printf '%s\n' "$mode"
+  printf '%s\n' "$api_token"
+  printf '%s\n' "$password"
+} > "$runtime/input"
+chmod 0400 "$runtime/input"
+
+podman exec gnx-proxmox pct exec 201 -- \
+  /usr/bin/install -d -o 0 -g 0 -m 0700 /run/gnx
+podman exec -i gnx-proxmox pct exec 201 -- \
+  /usr/bin/tee "$guest_input.gnx-new" < "$runtime/input" >/dev/null
+podman exec gnx-proxmox pct exec 201 -- \
+  /usr/bin/chmod 0400 "$guest_input.gnx-new"
+podman exec gnx-proxmox pct exec 201 -- \
+  /usr/bin/mv -f "$guest_input.gnx-new" "$guest_input"
+
+podman exec -i gnx-proxmox pct exec 201 -- /usr/bin/python3 - <<'PY'
+import base64
+import json
+import urllib.request
+from pathlib import Path
+
+mode, api_token, password = Path(
+    "/run/gnx/forgejo-admin-input"
+).read_text(encoding="utf-8").splitlines()
+base = "http://127.0.0.1:3000/api/v1"
+
+if mode == "reset":
+    body = json.dumps(
+        {"password": password, "must_change_password": False}
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        base + "/admin/users/gnx-admin",
+        data=body,
+        method="PATCH",
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"token {api_token}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        if response.status != 200:
+            raise RuntimeError(f"Forgejo password reset returned HTTP {response.status}")
+
+authorization = base64.b64encode(
+    f"gnx-admin:{password}".encode("utf-8")
+).decode("ascii")
+request = urllib.request.Request(
+    base + "/user",
+    headers={
+        "Accept": "application/json",
+        "Authorization": f"Basic {authorization}",
+    },
+)
+with urllib.request.urlopen(request, timeout=20) as response:
+    user = json.load(response)
+    if response.status != 200 or user.get("login") != "gnx-admin":
+        raise RuntimeError("Forgejo rejected the persisted administrator credential")
+PY
+
+if [ "$mode" = reset ]; then
+  mv -f "$password_file.gnx-new" "$password_file"
+fi
+
+printf '%s\n' 'FORGEJO_ADMIN_USERNAME=gnx-admin'
+printf 'FORGEJO_ADMIN_PASSWORD=%s\n' "$password"
+
+unset api_token current_password password
+trap - EXIT HUP INT TERM
+cleanup

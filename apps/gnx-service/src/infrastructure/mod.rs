@@ -2,6 +2,7 @@ pub(crate) mod host;
 pub(crate) mod host_profile;
 pub(crate) mod models;
 pub(crate) mod payload;
+pub(crate) mod platform_bundle;
 pub(crate) mod podman;
 pub(crate) mod proxmox;
 pub(crate) mod remote;

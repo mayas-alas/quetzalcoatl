@@ -7,7 +7,10 @@ use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 
-use gnx_contracts::{InstallerConfiguration, WINDOWS_SERVICE_SID};
+use gnx_contracts::{
+    InstallerConfiguration, PLATFORM_CONFIGURATION_SCHEMA_VERSION, PlatformConfiguration,
+    WINDOWS_SERVICE_SID,
+};
 use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -26,8 +29,10 @@ use windows_sys::Win32::Storage::FileSystem::{
 use zeroize::Zeroize;
 
 const PRODUCT_DATA_DIRECTORY: &str = "Quetzalcoatl.Runtime";
-const BLOB_NAME: &str = "installer-inputs.bin";
-const DPAPI_ENTROPY: &[u8] = b"Quetzalcoatl/installer-inputs/v1";
+const INSTALLER_BLOB_NAME: &str = "installer-inputs.bin";
+const INSTALLER_DPAPI_ENTROPY: &[u8] = b"Quetzalcoatl/installer-inputs/v1";
+const PLATFORM_BLOB_NAME: &str = "platform-inputs.bin";
+const PLATFORM_DPAPI_ENTROPY: &[u8] = b"Quetzalcoatl/platform-inputs/v1";
 
 pub fn store(configuration: &InstallerConfiguration) -> Result<(), ConfigurationError> {
     validate(configuration)?;
@@ -36,17 +41,45 @@ pub fn store(configuration: &InstallerConfiguration) -> Result<(), Configuration
 
     let mut plaintext = serde_json::to_vec(configuration)
         .map_err(|_| ConfigurationError::storage("cannot encode installer configuration"))?;
-    let encrypted = protect(&plaintext);
+    let encrypted = protect_with(&plaintext, INSTALLER_DPAPI_ENTROPY);
     plaintext.zeroize();
     let encrypted = encrypted?;
 
-    let path = directory.join(BLOB_NAME);
+    let path = directory.join(INSTALLER_BLOB_NAME);
     atomic_write(&path, &encrypted)?;
 
     let verified = load_from(&path)?;
     if &verified != configuration {
         return Err(ConfigurationError::storage(
             "DPAPI read-after-write verification failed",
+        ));
+    }
+    Ok(())
+}
+
+pub fn store_platform(configuration: &PlatformConfiguration) -> Result<(), ConfigurationError> {
+    validate_platform(configuration)?;
+    if load_optional()?.is_none() {
+        return Err(ConfigurationError::invalid(
+            "node configuration must exist before platform configuration",
+        ));
+    }
+    let directory = secrets_directory()?;
+    secure_directory(&directory)?;
+
+    let mut plaintext = serde_json::to_vec(configuration)
+        .map_err(|_| ConfigurationError::storage("cannot encode platform configuration"))?;
+    let encrypted = protect_with(&plaintext, PLATFORM_DPAPI_ENTROPY);
+    plaintext.zeroize();
+    let encrypted = encrypted?;
+
+    let path = directory.join(PLATFORM_BLOB_NAME);
+    atomic_write(&path, &encrypted)?;
+
+    let verified = load_platform_from(&path)?;
+    if &verified != configuration {
+        return Err(ConfigurationError::storage(
+            "platform DPAPI read-after-write verification failed",
         ));
     }
     Ok(())
@@ -61,6 +94,18 @@ pub fn load_optional() -> Result<Option<InstallerConfiguration>, ConfigurationEr
     }
 }
 
+pub fn load_platform_optional() -> Result<Option<PlatformConfiguration>, ConfigurationError> {
+    let path = product_root()?.join("secrets").join(PLATFORM_BLOB_NAME);
+    match fs::read(&path) {
+        Ok(encrypted) => load_platform_encrypted(&encrypted).map(Some),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(ConfigurationError::io(
+            "cannot read platform DPAPI blob",
+            &error,
+        )),
+    }
+}
+
 fn load_from(path: &Path) -> Result<InstallerConfiguration, ConfigurationError> {
     let encrypted =
         fs::read(path).map_err(|error| ConfigurationError::io("cannot read DPAPI blob", &error))?;
@@ -68,7 +113,7 @@ fn load_from(path: &Path) -> Result<InstallerConfiguration, ConfigurationError> 
 }
 
 fn load_encrypted(encrypted: &[u8]) -> Result<InstallerConfiguration, ConfigurationError> {
-    let mut plaintext = unprotect(encrypted)?;
+    let mut plaintext = unprotect_with(encrypted, INSTALLER_DPAPI_ENTROPY)?;
     let parsed = serde_json::from_slice(&plaintext)
         .map_err(|_| ConfigurationError::storage("DPAPI blob has invalid configuration data"));
     plaintext.zeroize();
@@ -77,11 +122,37 @@ fn load_encrypted(encrypted: &[u8]) -> Result<InstallerConfiguration, Configurat
     Ok(configuration)
 }
 
+fn load_platform_from(path: &Path) -> Result<PlatformConfiguration, ConfigurationError> {
+    let encrypted = fs::read(path)
+        .map_err(|error| ConfigurationError::io("cannot read platform DPAPI blob", &error))?;
+    load_platform_encrypted(&encrypted)
+}
+
+fn load_platform_encrypted(encrypted: &[u8]) -> Result<PlatformConfiguration, ConfigurationError> {
+    let mut plaintext = unprotect_with(encrypted, PLATFORM_DPAPI_ENTROPY)?;
+    let parsed = serde_json::from_slice(&plaintext).map_err(|_| {
+        ConfigurationError::storage("platform DPAPI blob has invalid configuration data")
+    });
+    plaintext.zeroize();
+    let configuration = parsed?;
+    validate_platform(&configuration)?;
+    Ok(configuration)
+}
+
 fn validate(configuration: &InstallerConfiguration) -> Result<(), ConfigurationError> {
     validate_tailnet(&configuration.tailnet)?;
     validate_auth_key(&configuration.auth_key)?;
     validate_password(&configuration.pve_root_password)?;
     Ok(())
+}
+
+fn validate_platform(configuration: &PlatformConfiguration) -> Result<(), ConfigurationError> {
+    if configuration.schema_version != PLATFORM_CONFIGURATION_SCHEMA_VERSION {
+        return Err(ConfigurationError::invalid(
+            "platform configuration schema is unsupported",
+        ));
+    }
+    validate_auth_key(&configuration.tailscale_auth_key)
 }
 
 fn validate_tailnet(value: &str) -> Result<(), ConfigurationError> {
@@ -135,7 +206,7 @@ fn secrets_directory() -> Result<PathBuf, ConfigurationError> {
 }
 
 fn configuration_path() -> Result<PathBuf, ConfigurationError> {
-    Ok(product_root()?.join("secrets").join(BLOB_NAME))
+    Ok(product_root()?.join("secrets").join(INSTALLER_BLOB_NAME))
 }
 
 pub(crate) fn product_root() -> Result<PathBuf, ConfigurationError> {
@@ -257,12 +328,12 @@ pub(crate) fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), Configura
     apply_acl(&target_wide, descriptor.0)
 }
 
-fn protect(plaintext: &[u8]) -> Result<Vec<u8>, ConfigurationError> {
-    crypt(plaintext, DPAPI_ENTROPY, true)
+fn protect_with(plaintext: &[u8], entropy: &[u8]) -> Result<Vec<u8>, ConfigurationError> {
+    crypt(plaintext, entropy, true)
 }
 
-fn unprotect(ciphertext: &[u8]) -> Result<Vec<u8>, ConfigurationError> {
-    crypt(ciphertext, DPAPI_ENTROPY, false)
+fn unprotect_with(ciphertext: &[u8], entropy: &[u8]) -> Result<Vec<u8>, ConfigurationError> {
+    crypt(ciphertext, entropy, false)
 }
 
 fn crypt(input: &[u8], entropy: &[u8], protect_data: bool) -> Result<Vec<u8>, ConfigurationError> {
@@ -460,11 +531,35 @@ mod tests {
     #[test]
     fn dpapi_round_trip_uses_the_current_windows_identity() {
         let mut plaintext = b"not-a-real-secret".to_vec();
-        let encrypted = protect(&plaintext).expect("protect with DPAPI");
+        let encrypted =
+            protect_with(&plaintext, INSTALLER_DPAPI_ENTROPY).expect("protect with DPAPI");
         assert_ne!(encrypted, plaintext);
-        let mut recovered = unprotect(&encrypted).expect("unprotect with DPAPI");
+        let mut recovered =
+            unprotect_with(&encrypted, INSTALLER_DPAPI_ENTROPY).expect("unprotect with DPAPI");
         assert_eq!(recovered, plaintext);
         plaintext.zeroize();
         recovered.zeroize();
+    }
+
+    #[test]
+    fn platform_configuration_accepts_only_current_schema_and_auth_keys() {
+        let mut configuration =
+            PlatformConfiguration::new("tskey-auth-k-example-not-a-real-key".into());
+        assert!(validate_platform(&configuration).is_ok());
+        configuration.schema_version = 2;
+        assert_eq!(
+            validate_platform(&configuration)
+                .expect_err("unsupported platform schema")
+                .code(),
+            "CONFIGURATION_INVALID"
+        );
+        configuration.schema_version = PLATFORM_CONFIGURATION_SCHEMA_VERSION;
+        configuration.tailscale_auth_key = "not-an-auth-key".into();
+        assert_eq!(
+            validate_platform(&configuration)
+                .expect_err("invalid platform auth key")
+                .code(),
+            "CONFIGURATION_INVALID"
+        );
     }
 }

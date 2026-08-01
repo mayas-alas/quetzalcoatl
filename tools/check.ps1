@@ -14,6 +14,7 @@ try {
         'contracts.py',
         'remote_execution.py',
         'runtime.py',
+        'platform.py',
         'installer.py'
     )) {
         & python (Join-Path $validationRoot $validator)
