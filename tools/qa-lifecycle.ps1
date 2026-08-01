@@ -142,7 +142,7 @@ function Invoke-SetupOperation {
 Assert-Administrator
 $signature = Get-AuthenticodeSignature -LiteralPath $setup
 if ($signature.Status -ne 'Valid' -or
-    $signature.SignerCertificate.Subject -ne 'CN=GNX Labs' -or
+    $signature.SignerCertificate.Subject -ne 'CN=GNX Labs QA Publisher' -or
     -not $signature.TimeStamperCertificate) {
     throw 'QA lifecycle requires the valid timestamped GNX Labs Setup.'
 }

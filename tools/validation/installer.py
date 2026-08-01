@@ -59,6 +59,10 @@ def main() -> None:
         if local_name(node) == "ExePackage"
     }
     expected = {
+        "PrepareQaTrust": (
+            'prepare-qa-trust --root-certificate "[WixBundleExecutePackageCacheFolder]\\gnx-qa-root.cer" --root-sha256 $(var.QaRootSha256) --publisher-certificate "[WixBundleExecutePackageCacheFolder]\\gnx-qa-publisher.cer" --publisher-sha256 $(var.QaPublisherSha256) --operation install --format json',
+            'prepare-qa-trust --root-certificate "[WixBundleExecutePackageCacheFolder]\\gnx-qa-root.cer" --root-sha256 $(var.QaRootSha256) --publisher-certificate "[WixBundleExecutePackageCacheFolder]\\gnx-qa-publisher.cer" --publisher-sha256 $(var.QaPublisherSha256) --operation repair --format json',
+        ),
         "PrepareWsl": (
             "prepare-wsl --operation install --format json",
             "prepare-wsl --operation repair --format json",
@@ -87,6 +91,38 @@ def main() -> None:
             or node.attrib.get("RepairCondition") != "1"
         ):
             fail(f"closed maintenance operation differs for {package_id}")
+
+    qa_package = exe_packages["PrepareQaTrust"]
+    qa_payloads = {
+        node.attrib.get("Id"): node
+        for node in qa_package
+        if local_name(node) == "Payload"
+    }
+    expected_qa_payloads = {
+        "QaRootCertificatePayload": ("$(var.QaRootCertificate)", "gnx-qa-root.cer"),
+        "QaPublisherCertificatePayload": (
+            "$(var.QaPublisherCertificate)",
+            "gnx-qa-publisher.cer",
+        ),
+    }
+    if set(qa_payloads) != set(expected_qa_payloads):
+        fail(f"QA trust payload inventory differs: {sorted(qa_payloads)!r}")
+    for payload_id, (source, name) in expected_qa_payloads.items():
+        payload = qa_payloads[payload_id]
+        if (
+            payload.attrib.get("SourceFile") != source
+            or payload.attrib.get("Name") != name
+            or payload.attrib.get("Compressed") != "yes"
+        ):
+            fail(f"QA trust payload differs for {payload_id}")
+    bundle_text = (INSTALLER / "source" / "bundle.wxs").read_text(encoding="utf-8")
+    for marker in (
+        "<?if $(var.QaTrustEnabled) = 1 ?>",
+        "<?endif?>",
+        "Production preprocessing removes this",
+    ):
+        if marker not in bundle_text:
+            fail(f"QA-only Bundle preprocessing contract omits {marker!r}")
 
     msi_packages = [
         node for node in bundle.iter() if local_name(node) == "MsiPackage"
@@ -234,8 +270,10 @@ def main() -> None:
         "Invoke-AuthenticodeSign",
         "Invoke-BurnAuthenticodeSign",
         "SigningCertificateThumbprint",
-        "AllowSelfSigned",
-        "Production release rejects self-signed certificates",
+        "QaSigning",
+        "Release and QA signing reject self-signed publisher certificates",
+        "create-qa-signing-certificate.ps1",
+        "QaTrustEnabled",
         "http://timestamp.digicert.com",
         "SetLastWriteTimeUtc",
         "runtime-payload",
@@ -259,6 +297,9 @@ def main() -> None:
         "Release artifact signature inventory must not be empty",
         "Smart App Control release signing requires an RSA certificate",
         "Windows AuthRoot store",
+        "Test-QaCodeSigningCertificateTrust",
+        "GNX Labs QA Root",
+        "GNX Labs QA Publisher",
     ):
         if marker not in signing and marker not in build:
             fail(f"release signature coverage omits {marker!r}")
@@ -274,8 +315,10 @@ def main() -> None:
     for marker in (
         "gnx-bootstrap-install-podman.exe",
         "gnx-bootstrap-install-wsl.exe",
+        "gnx-bootstrap-prepare-qa-trust.exe",
         "gnx-bootstrap-prepare.exe",
         "gnx-bootstrap-validate.exe",
+        "Production Bundle must not contain QA trust certificates",
         "wixstdba.exe",
         "Test-TrustedAuthenticodeArtifact",
         "Test-ReleaseArtifactSet",
@@ -284,29 +327,32 @@ def main() -> None:
             fail(f"Burn signature/version coverage omits {marker!r}")
     if build.find("-Path $productMsi") > build.find("Test-InstalledMsiIdentity"):
         fail("installed MSI collision check must inspect the final signed package bytes")
-    development_certificate = (
-        INSTALLER / "create-development-certificate.ps1"
+    qa_certificate = (
+        INSTALLER / "create-qa-signing-certificate.ps1"
     ).read_text(encoding="utf-8")
     for marker in (
-        "CN=GNX Labs",
-        "CodeSigningCert",
+        "CN=GNX Labs QA Root",
+        "CN=GNX Labs QA Publisher",
+        "AddYears(10)",
+        "AddYears(2)",
+        "pathlength=0",
+        "1.3.6.1.5.5.7.3.3",
         "KeyExportPolicy NonExportable",
         "Cert:\\CurrentUser\\My",
         "StoreLocation]::CurrentUser",
-        "TrustForLocalMachine",
-        "StoreLocation]::LocalMachine",
-        "'Root', 'TrustedPublisher'",
-        "$certificate.RawData",
-        "$installed[0].HasPrivateKey",
-        "Purpose = 'DevelopmentOnly'",
+        "gnx-qa-root.cer",
+        "gnx-qa-publisher.cer",
+        "HasPrivateKey",
+        "Purpose = 'QaOnly'",
+        "Exportable = $false",
     ):
-        if marker not in development_certificate:
-            fail(f"development certificate contract omits {marker!r}")
+        if marker not in qa_certificate:
+            fail(f"QA certificate contract omits {marker!r}")
     lifecycle = (ROOT / "tools" / "qa-lifecycle.ps1").read_text(encoding="utf-8")
     for marker in (
         "Assert-Administrator",
         "Get-AuthenticodeSignature",
-        "CN=GNX Labs",
+        "CN=GNX Labs QA Publisher",
         "Invoke-SetupOperation -Stage 'repair' -Action '/repair'",
         "Invoke-SetupOperation -Stage 'uninstall' -Action '/uninstall'",
         "Invoke-SetupOperation -Stage 'fresh-install' -Action '/install'",
@@ -327,6 +373,32 @@ def main() -> None:
     bootstrap_checks = (
         ROOT / "apps" / "gnx-bootstrap" / "src" / "host" / "checks.rs"
     ).read_text(encoding="utf-8")
+    bootstrap_main = (
+        ROOT / "apps" / "gnx-bootstrap" / "src" / "main.rs"
+    ).read_text(encoding="utf-8")
+    qa_trust = (
+        ROOT / "apps" / "gnx-bootstrap" / "src" / "qa_trust.rs"
+    ).read_text(encoding="utf-8")
+    for marker in (
+        "prepare-qa-trust",
+        "--root-certificate",
+        "--root-sha256",
+        "--publisher-certificate",
+        "--publisher-sha256",
+        "qa_certificate_trust",
+    ):
+        if marker not in bootstrap_main:
+            fail(f"native QA trust command omits {marker!r}")
+    for marker in (
+        "CERT_SYSTEM_STORE_LOCAL_MACHINE",
+        'add_to_machine_store("Root"',
+        'add_to_machine_store("TrustedPublisher"',
+        "CERT_STORE_ADD_REPLACE_EXISTING",
+        "MAX_CERTIFICATE_BYTES",
+        "QA {name} certificate SHA-256 mismatch",
+    ):
+        if marker not in qa_trust:
+            fail(f"native QA trust implementation omits {marker!r}")
     for marker in (
         "--validate-installation",
         "ValidateInstallation",

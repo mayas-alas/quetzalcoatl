@@ -26,6 +26,9 @@ function Test-RebootContract {
     $bundle = [xml] $bundleText
     $exePackages = @($bundle.SelectNodes('//*[local-name()="ExePackage"]'))
     $expectedMappings = @{
+        PrepareQaTrust = @{
+            '0' = 'success'
+        }
         PrepareWsl = @{
             '0' = 'success'
             $rebootPending = 'forceReboot'
@@ -209,7 +212,7 @@ function Test-ReleaseIdentityContract {
         throw "Release identity contract: deterministic binder package lock must resolve WixToolset.Extensibility $($dependencyLock.wix.version)."
     }
 
-    foreach ($packageId in @('PrepareWsl', 'InstallWsl', 'InstallPodman', 'ValidateHost')) {
+    foreach ($packageId in @('PrepareQaTrust', 'PrepareWsl', 'InstallWsl', 'InstallPodman', 'ValidateHost')) {
         $exePackage = @($bundle.SelectNodes('//*[local-name()="ExePackage"]') | Where-Object {
             $_.GetAttribute('Id') -eq $packageId
         })
@@ -324,6 +327,10 @@ function Test-MaintenanceContract {
     $serviceConfig = [xml] (Get-Content -LiteralPath $serviceConfigPath -Raw -Encoding utf8)
 
     $expected = @{
+        PrepareQaTrust = @{
+            Install = 'prepare-qa-trust --root-certificate "[WixBundleExecutePackageCacheFolder]\gnx-qa-root.cer" --root-sha256 $(var.QaRootSha256) --publisher-certificate "[WixBundleExecutePackageCacheFolder]\gnx-qa-publisher.cer" --publisher-sha256 $(var.QaPublisherSha256) --operation install --format json'
+            Repair = 'prepare-qa-trust --root-certificate "[WixBundleExecutePackageCacheFolder]\gnx-qa-root.cer" --root-sha256 $(var.QaRootSha256) --publisher-certificate "[WixBundleExecutePackageCacheFolder]\gnx-qa-publisher.cer" --publisher-sha256 $(var.QaPublisherSha256) --operation repair --format json'
+        }
         PrepareWsl = @{
             Install = 'prepare-wsl --operation install --format json'
             Repair = 'prepare-wsl --operation repair --format json'

@@ -17,7 +17,7 @@ report success or launch the tray.
 For upgrade, launch the newer Setup. Stable upgrade families locate the installed
 product; MSI stops service/tray, replaces keyed files and restarts them after commit.
 Schemas 2/2/1, payload contract 6, node identity, role and incomplete member
-checkpoints remain compatible. 0.2.40 uses new package identities to replace 0.2.39
+checkpoints remain compatible. 0.2.41 uses new package identities to replace 0.2.40
 while retaining recovery of earlier complete, incomplete and cached maintenance
 states. Repair recognizes enabled Windows features without requesting a redundant
 reboot. Never delete ProgramData state before an upgrade.
@@ -66,9 +66,9 @@ Do not raise it until a do-not-fragment probe of at least 1200 payload bytes pas
 between the Windows host and every managed service; small pings alone do not prove
 that HTTPS certificates can cross the nested path.
 
-Quetzalcoatl never disables Smart App Control, SmartScreen or Defender. A
-self-signed QA certificate can still lack cloud reputation even when Authenticode
-is valid. Re-enable Smart App Control from Windows Security after a QA exception;
+Quetzalcoatl never disables Smart App Control, SmartScreen or Defender. The QA
+certificate chain is locally trusted but still lacks public reputation. A QA image
+must admit the first Setup execution before Setup can install its public trust;
 production artifacts require a publicly trusted code-signing identity.
 
 The tray menu contains only status, version and Connect. Connect is enabled only for
@@ -81,13 +81,12 @@ Release validation requires a trusted code-signing certificate:
 `installer\build.ps1 -AllowUnsigned` is development-only and never produces an
 accepted release artifact.
 
-A self-signed QA artifact is equally non-releasable. It requires an explicit
-thumbprint plus `-AllowSelfSigned`; the production path rejects that certificate
-even when the current user trusts it locally. Production additionally requires an
-RSA publisher chain rooted in Windows `AuthRoot`; the build extracts MSI and Burn
-and verifies the signature and product version of every first-party executable,
-plus the trusted signatures of the WiX, WSL and Podman binaries they load.
-
-`create-development-certificate.ps1 -TrustForLocalMachine` establishes test trust
-for UAC in the local-machine Root and TrustedPublisher stores. Use it only on a
-controlled QA host; it does not make the publisher publicly trusted.
+`installer\build.ps1 -QaSigning` is the sole QA signing profile. It reuses a
+ten-year local QA root, automatically renews the shorter publisher leaf and emits a
+Setup that installs only those hash-locked public certificates before all other
+packages. QA personnel only run Setup and accept UAC; no annual certificate command
+is required. Production preprocessing carries no QA certificate or trust action.
+Production additionally requires an RSA publisher chain rooted in Windows
+`AuthRoot`; the build extracts MSI and Burn and verifies the signature and product
+version of every first-party executable, plus the trusted signatures of the WiX,
+WSL and Podman binaries they load.

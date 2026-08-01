@@ -6,7 +6,7 @@ param(
     [string] $SigningCertificateThumbprint = $env:GNX_SIGNING_CERTIFICATE_THUMBPRINT,
     [string] $TimestampUrl = 'http://timestamp.digicert.com',
     [switch] $AllowUnsigned,
-    [switch] $AllowSelfSigned
+    [switch] $QaSigning
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,13 +65,21 @@ Test-MaintenanceContract
 Test-RuntimePayloadSource -RuntimePayload (Join-Path $repoRoot 'runtime') -ExpectedPayloadVersion $runtimePayloadContract
 Test-PlatformPayloadSource -PlatformPayload (Join-Path $repoRoot 'platform')
 $signingIdentity = $null
-if ($AllowUnsigned -and $AllowSelfSigned) {
-    throw 'AllowUnsigned and AllowSelfSigned are mutually exclusive.'
+if ($AllowUnsigned -and $QaSigning) {
+    throw 'AllowUnsigned and QaSigning are mutually exclusive.'
+}
+$qaTrust = $null
+if ($QaSigning) {
+    $qaCertificateScript = Join-Path $installerRoot 'create-qa-signing-certificate.ps1'
+    if ($PSBoundParameters.ContainsKey('SigningCertificateThumbprint')) {
+        $qaTrust = & $qaCertificateScript `
+            -SigningCertificateThumbprint $SigningCertificateThumbprint
+    } else {
+        $qaTrust = & $qaCertificateScript
+    }
+    $SigningCertificateThumbprint = $qaTrust.PublisherThumbprint
 }
 if ([string]::IsNullOrWhiteSpace($SigningCertificateThumbprint)) {
-    if ($AllowSelfSigned) {
-        throw 'AllowSelfSigned requires an explicit SigningCertificateThumbprint.'
-    }
     if (-not $AllowUnsigned) {
         throw 'Production release requires -SigningCertificateThumbprint or GNX_SIGNING_CERTIFICATE_THUMBPRINT.'
     }
@@ -82,12 +90,14 @@ if ([string]::IsNullOrWhiteSpace($SigningCertificateThumbprint)) {
     }
     $signingIdentity = Resolve-CodeSigningCertificate -Thumbprint $SigningCertificateThumbprint
     if ($signingIdentity.SelfSigned) {
-        if (-not $AllowSelfSigned) {
-            throw 'Production release rejects self-signed certificates. Use -AllowSelfSigned only for local QA.'
-        }
-        Write-Warning 'Building a self-signed development artifact; it is trusted only by explicitly configured test machines and is not releasable.'
-    } elseif ($AllowSelfSigned) {
-        throw 'AllowSelfSigned is valid only for a self-signed development certificate.'
+        throw 'Release and QA signing reject self-signed publisher certificates.'
+    }
+    if ($QaSigning) {
+        Test-QaCodeSigningCertificateTrust `
+            -Certificate $signingIdentity.Certificate `
+            -RootCertificatePath $qaTrust.RootCertificatePath `
+            -PublisherCertificatePath $qaTrust.PublisherCertificatePath
+        Write-Warning 'Building a QA-only artifact that bootstraps its pinned public QA trust chain; it is not releasable.'
     } else {
         Test-CodeSigningCertificateTrust `
             -Certificate $signingIdentity.Certificate `
@@ -324,6 +334,11 @@ try {
         -d "BrandLogo=$(Join-Path $installerRoot 'assets\wixstdba-logo.png')" `
         -d "BrandSide=$(Join-Path $installerRoot 'assets\wixstdba-side.png')" `
         -d "BrandTheme=$(Join-Path $installerRoot 'assets\wixstdba-theme.xml')" `
+        -d "QaTrustEnabled=$(if ($QaSigning) { '1' } else { '0' })" `
+        -d "QaRootCertificate=$(if ($QaSigning) { $qaTrust.RootCertificatePath } else { $gnxBootstrap })" `
+        -d "QaRootSha256=$(if ($QaSigning) { $qaTrust.RootSha256 } else { (('0' * 64) -join '') })" `
+        -d "QaPublisherCertificate=$(if ($QaSigning) { $qaTrust.PublisherCertificatePath } else { $gnxBootstrap })" `
+        -d "QaPublisherSha256=$(if ($QaSigning) { $qaTrust.PublisherSha256 } else { (('0' * 64) -join '') })" `
         -out $setupExe
     if ($LASTEXITCODE -ne 0) { throw "Bundle build failed." }
     Set-BurnDeterministicMetadata -Path $setupExe
@@ -335,7 +350,10 @@ try {
         -PodmanMsiPath $artifacts.podman `
         -ExpectedProductVersion $releaseVersion `
         -ExpectSigned $expectSignedArtifacts `
-        -ExpectedSignerThumbprint $expectedSignerThumbprint
+        -ExpectedSignerThumbprint $expectedSignerThumbprint `
+        -QaTrustEnabled $QaSigning `
+        -QaRootCertificatePath $(if ($QaSigning) { $qaTrust.RootCertificatePath } else { $null }) `
+        -QaPublisherCertificatePath $(if ($QaSigning) { $qaTrust.PublisherCertificatePath } else { $null })
     if ($signingIdentity) {
         Invoke-BurnAuthenticodeSign `
             -BundlePath $setupExe `
@@ -350,7 +368,10 @@ try {
             -PodmanMsiPath $artifacts.podman `
             -ExpectedProductVersion $releaseVersion `
             -ExpectSigned $expectSignedArtifacts `
-            -ExpectedSignerThumbprint $expectedSignerThumbprint
+            -ExpectedSignerThumbprint $expectedSignerThumbprint `
+            -QaTrustEnabled $QaSigning `
+            -QaRootCertificatePath $(if ($QaSigning) { $qaTrust.RootCertificatePath } else { $null }) `
+            -QaPublisherCertificatePath $(if ($QaSigning) { $qaTrust.PublisherCertificatePath } else { $null })
     }
     Test-ReleaseArtifactSet `
         -Artifacts @(@{ Name = 'setup'; Path = $setupExe; ExpectedVersion = $releaseVersion }) `

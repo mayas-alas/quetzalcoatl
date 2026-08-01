@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.41
+
+- Replaces annually redistributed self-signed QA publishers with one ten-year QA
+  root and renewable leaf, and makes QA Setup install their hash-locked public
+  trust automatically before other packages; production carries neither payload.
+- Assigns fresh MSI and Burn identities so the QA trust bootstrap upgrades the
+  installed 0.2.40 package without reusing cached package bytes.
+
 ## 0.2.40
 
 - Adds the canonical elevated `gnx forgejo admin show` credential inspection flow.

@@ -43,44 +43,37 @@ timestamped. Burn validation also verifies the signed WiX bootstrapper applicati
 and the pinned WSL/Podman payloads. `-AllowUnsigned` exists only for local installer
 QA and its artifacts must never be recorded as accepted release evidence.
 
-For local Authenticode QA, create or reuse the non-exportable GNX Labs development
-certificate and pass its thumbprint explicitly. The script trusts only its public
-certificate for the current Windows user. `-AllowSelfSigned` remains non-releasable,
-and the default production path rejects self-signed certificates:
+For controlled Authenticode QA, select the explicit QA profile:
 
 ```powershell
-$certificate = .\installer\create-development-certificate.ps1
-.\installer\build.ps1 `
-    -SigningCertificateThumbprint $certificate.Thumbprint `
-    -AllowSelfSigned
+.\installer\build.ps1 -QaSigning
 ```
+
+The build creates or reuses a non-exportable `GNX Labs QA Root` valid for ten
+years, renews its two-year `GNX Labs QA Publisher` leaf when fewer than 120 days
+remain and signs every first-party artifact with that leaf. The QA Bundle contains
+only hash-locked DER public certificates and runs the elevated native
+`prepare-qa-trust` operation before WSL, Podman or the product MSI. That operation
+accepts only the two declared files and hashes, replaces their public contexts in
+`LocalMachine\Root` and `LocalMachine\TrustedPublisher`, and is idempotent across
+install and repair. No private key enters Setup.
 
 The default RFC 3161 endpoint is DigiCert's official
 `http://timestamp.digicert.com`. RFC 3161 signs the timestamp response itself;
 the signing gate requires a trusted timestamper certificate and accepts no other
 plain-HTTP endpoint.
 
-On a dedicated QA machine, an administrator may additionally trust the public
-certificate for all local users so UAC can resolve the publisher as GNX Labs:
+QA operators therefore launch Setup and accept its normal UAC elevation; there is
+no separate PowerShell or certificate-store procedure. This local trust does not
+make the first launch acceptable to Smart App Control in enforcement mode, because
+the bootstrap cannot run until Windows admits Setup. QA images must already have
+that policy disabled or be provisioned by the organization. Setup never changes
+Smart App Control, SmartScreen or Defender. Production preprocessing excludes the
+QA package and certificates, and production still requires Windows `AuthRoot` or
+Microsoft Trusted Signing plus physical enforcement tests.
 
-```powershell
-Start-Process powershell -Verb RunAs -Wait -ArgumentList @(
-    '-NoProfile',
-    '-ExecutionPolicy', 'Bypass',
-    '-File', (Resolve-Path '.\installer\create-development-certificate.ps1'),
-    '-TrustForLocalMachine'
-)
-```
-
-This adds only the public certificate to `LocalMachine\Root` and
-`LocalMachine\TrustedPublisher`. It is appropriate only for controlled QA
-machines and does not create public trust on other computers. In particular,
-locally trusting an Authenticode certificate does not make it acceptable to Smart
-App Control in enforcement mode; that release path requires a CA represented by
-Windows `AuthRoot` (or Microsoft Trusted Signing) and physical enforcement tests.
-
-After trust is established, `tools\qa-lifecycle.ps1` performs the reusable
+After Setup establishes trust, `tools\qa-lifecycle.ps1` performs the reusable
 physical QA sequence: repair, complete uninstall and fresh install. It requires
-the expected version/controller, validates the timestamped GNX Labs signer, checks
+the expected version/controller, validates the timestamped QA publisher, checks
 one visible Setup plus one hidden MSI registration, and requires the same READY
 controller after maintenance.

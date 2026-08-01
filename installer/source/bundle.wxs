@@ -26,6 +26,36 @@
     </BootstrapperApplication>
 
     <Chain>
+      <?if $(var.QaTrustEnabled) = 1 ?>
+      <!-- QA-only trust bootstrap. Production preprocessing removes this
+           package and both public certificate payloads completely. -->
+      <ExePackage
+        Id="PrepareQaTrust"
+        SourceFile="$(var.GnxBootstrap)"
+        Name="gnx-bootstrap-prepare-qa-trust.exe"
+        CacheId="gnx-bootstrap-prepare-qa-trust-$(var.ProductVersion)"
+        DetectCondition="0"
+        InstallArguments="prepare-qa-trust --root-certificate &quot;[WixBundleExecutePackageCacheFolder]\gnx-qa-root.cer&quot; --root-sha256 $(var.QaRootSha256) --publisher-certificate &quot;[WixBundleExecutePackageCacheFolder]\gnx-qa-publisher.cer&quot; --publisher-sha256 $(var.QaPublisherSha256) --operation install --format json"
+        RepairArguments="prepare-qa-trust --root-certificate &quot;[WixBundleExecutePackageCacheFolder]\gnx-qa-root.cer&quot; --root-sha256 $(var.QaRootSha256) --publisher-certificate &quot;[WixBundleExecutePackageCacheFolder]\gnx-qa-publisher.cer&quot; --publisher-sha256 $(var.QaPublisherSha256) --operation repair --format json"
+        RepairCondition="1"
+        PerMachine="yes"
+        Permanent="yes"
+        Vital="yes">
+        <Payload
+          Id="QaRootCertificatePayload"
+          SourceFile="$(var.QaRootCertificate)"
+          Name="gnx-qa-root.cer"
+          Compressed="yes" />
+        <Payload
+          Id="QaPublisherCertificatePayload"
+          SourceFile="$(var.QaPublisherCertificate)"
+          Name="gnx-qa-publisher.cer"
+          Compressed="yes" />
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Behavior="error" />
+      </ExePackage>
+      <?endif?>
+
       <ExePackage
         Id="PrepareWsl"
         SourceFile="$(var.GnxBootstrap)"

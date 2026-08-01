@@ -1,4 +1,4 @@
-# Quetzalcoatl 0.2.40
+# Quetzalcoatl 0.2.41
 
 Quetzalcoatl is a Windows-managed MVP that installs and reconciles a Fedora Podman
 Machine containing the Tailscale and Proxmox runtime for controller and member nodes.
@@ -66,9 +66,10 @@ while iterating when physical installer artifacts are not required. An unsigned 
 build requires the explicit `installer\build.ps1 -AllowUnsigned` switch and is not
 releasable.
 
-A locally trusted self-signed build uses
-`installer\create-development-certificate.ps1` and the explicit
-`-AllowSelfSigned` switch. It validates Authenticode plumbing only and is not a
-publicly trusted release.
+A controlled QA build uses `installer\build.ps1 -QaSigning`. The build reuses a
+ten-year non-exportable QA root, renews its shorter code-signing leaf when needed
+and embeds only both public certificates. Setup installs that pinned trust before
+the product payload, so QA operators do not run certificate commands. This profile
+is not a publicly trusted release and is removed entirely from production builds.
 
 Start with [docs/README.md](docs/README.md).

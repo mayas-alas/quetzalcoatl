@@ -64,7 +64,10 @@ function Test-BundleIdentityAndPayload {
         [Parameter(Mandatory)][string] $PodmanMsiPath,
         [Parameter(Mandatory)][string] $ExpectedProductVersion,
         [Parameter(Mandatory)][bool] $ExpectSigned,
-        [AllowNull()][string] $ExpectedSignerThumbprint
+        [AllowNull()][string] $ExpectedSignerThumbprint,
+        [Parameter(Mandatory)][bool] $QaTrustEnabled,
+        [AllowNull()][string] $QaRootCertificatePath,
+        [AllowNull()][string] $QaPublisherCertificatePath
     )
 
     $verificationRoot = Join-Path $outputRoot ("verify-" + [guid]::NewGuid().ToString('N'))
@@ -117,8 +120,9 @@ function Test-BundleIdentityAndPayload {
             'gnx-bootstrap-install-podman.exe',
             'gnx-bootstrap-install-wsl.exe',
             'gnx-bootstrap-prepare.exe',
+            $(if ($QaTrustEnabled) { 'gnx-bootstrap-prepare-qa-trust.exe' }),
             'gnx-bootstrap-validate.exe'
-        )
+        ) | Where-Object { $_ }
         $embeddedBootstraps = @(Get-ChildItem -LiteralPath $payloadRoot -Recurse -File -Filter 'gnx-bootstrap-*.exe')
         $actualBootstrapNames = @($embeddedBootstraps | ForEach-Object Name | Sort-Object)
         if (($actualBootstrapNames -join "`n") -ne ($expectedBootstrapNames -join "`n")) {
@@ -136,6 +140,42 @@ function Test-BundleIdentityAndPayload {
             }) `
             -ExpectSigned $ExpectSigned `
             -ExpectedThumbprint $ExpectedSignerThumbprint
+
+        $embeddedQaCertificates = @(Get-ChildItem -LiteralPath $payloadRoot -Recurse -File -Filter 'gnx-qa-*.cer')
+        if ($QaTrustEnabled) {
+            if ([string]::IsNullOrWhiteSpace($QaRootCertificatePath) -or
+                [string]::IsNullOrWhiteSpace($QaPublisherCertificatePath)) {
+                throw 'QA Bundle verification requires both public certificate sources.'
+            }
+            $expectedQaCertificates = @(
+                @{ Name = 'gnx-qa-root.cer'; Source = $QaRootCertificatePath },
+                @{ Name = 'gnx-qa-publisher.cer'; Source = $QaPublisherCertificatePath }
+            )
+            $actualQaCertificateNames = @($embeddedQaCertificates | ForEach-Object Name | Sort-Object)
+            if (($actualQaCertificateNames -join "`n") -ne (($expectedQaCertificates.Name | Sort-Object) -join "`n")) {
+                throw "QA Bundle certificate inventory differs: $($actualQaCertificateNames -join ', ')"
+            }
+            foreach ($expectedQaCertificate in $expectedQaCertificates) {
+                $embedded = @($embeddedQaCertificates | Where-Object Name -eq $expectedQaCertificate.Name)
+                if ($embedded.Count -ne 1 -or
+                    (Get-FileHash -LiteralPath $embedded[0].FullName -Algorithm SHA256).Hash -ne
+                    (Get-FileHash -LiteralPath $expectedQaCertificate.Source -Algorithm SHA256).Hash) {
+                    throw "Embedded QA certificate differs from its locked public source: $($expectedQaCertificate.Name)"
+                }
+                $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+                    [IO.File]::ReadAllBytes($embedded[0].FullName)
+                )
+                try {
+                    if ($certificate.HasPrivateKey) {
+                        throw "Embedded QA certificate contains a private key: $($expectedQaCertificate.Name)"
+                    }
+                } finally {
+                    $certificate.Dispose()
+                }
+            }
+        } elseif ($embeddedQaCertificates.Count -ne 0) {
+            throw 'Production Bundle must not contain QA trust certificates.'
+        }
 
         $bootstrapperApplication = @(Get-ChildItem -LiteralPath $baRoot -Recurse -File -Filter 'wixstdba.exe')
         if ($bootstrapperApplication.Count -ne 1) {

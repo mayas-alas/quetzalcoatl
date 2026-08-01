@@ -1,6 +1,6 @@
 schema_version = 1
-version = "0.2.40"
-release_timestamp_utc = "2026-07-31T22:48:46Z"
+version = "0.2.41"
+release_timestamp_utc = "2026-08-01T17:20:51Z"
 
 [contracts]
 protocol_schema = 2
@@ -10,14 +10,14 @@ runtime_generation = "proxmox-platform"
 payload_contract = 6
 
 [identities]
-product_code = "{F77A2D91-43FA-4456-A0C6-A53763AD0A11}"
+product_code = "{F43403AB-A35B-4127-9256-FE79AA4FC009}"
 upgrade_code = "{47D5BD44-D061-407B-913B-47D17EC3BEA9}"
-package_code = "{91E15C62-2981-4C7B-8316-21BEFFA08F49}"
-bundle_id = "{40CB4EE0-BB38-4FB6-8866-00804F734AC3}"
+package_code = "{11794170-00CF-4232-9D0E-9B99AB7706A5}"
+bundle_id = "{C3289902-6200-47EE-B164-0D91C021ED62}"
 bundle_upgrade_code = "{10B764B2-36AE-4911-A8C8-2F1A2A963769}"
-previous_product_code = "{7692C53E-4F85-46E1-876D-F27F0F3855BC}"
-previous_package_code = "{3C902500-6B30-424D-99B7-FFAE50C90740}"
-previous_bundle_id = "{51EA756C-14F9-4376-8131-DB834D41BE5E}"
+previous_product_code = "{F77A2D91-43FA-4456-A0C6-A53763AD0A11}"
+previous_package_code = "{91E15C62-2981-4C7B-8316-21BEFFA08F49}"
+previous_bundle_id = "{40CB4EE0-BB38-4FB6-8866-00804F734AC3}"
 
 [paths]
 gnx = "apps/gnx"

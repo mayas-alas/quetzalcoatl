@@ -25,7 +25,7 @@ LXC workload and a private Tailscale HTTPS URL.
 | REC | Safe recovery | Repair uses the installed locked bundle and foundation state; it does not recreate healthy resources, rotate identities or destroy durable data. |
 | ARP | Sole maintenance entry | One visible Setup registration owns install, upgrade, repair and uninstall; internal packages remain hidden. |
 | SUP | Verifiable supply chain | Rust binaries, MSI, Burn, platform bundle, OCI images and service releases have explicit digest/signature gates. |
-| REL | Integrated release | Source, version, installer, upgrade, repair, status and physical foundation evidence agree on 0.2.40. |
+| REL | Integrated release | Source, version, installer, upgrade, repair, status and physical foundation evidence agree on 0.2.41. |
 
 ## Preserved invariants
 
@@ -49,6 +49,13 @@ LXC workload and a private Tailscale HTTPS URL.
 ## Explicit contract amendments
 
 - Runtime generation becomes `proxmox-platform`; payload contract becomes `6`.
+- A build selected explicitly with `-QaSigning` may carry one pinned public
+  `GNX Labs QA Root` certificate and its current `GNX Labs QA Publisher` leaf.
+  Before any product payload runs, the elevated native bootstrap may add only
+  those hash-locked public certificates to `LocalMachine\Root` and
+  `LocalMachine\TrustedPublisher`. Production builds must neither embed nor
+  install QA trust, private keys are prohibited from every artifact, and the
+  bootstrap must never change Smart App Control, SmartScreen or Defender.
 - Protocol may add bounded platform operations while preserving reads of the
   current core status and state.
 - Fixed repository-owned scripts are permitted only through the closed
@@ -86,8 +93,8 @@ LXC workload and a private Tailscale HTTPS URL.
 
 ## Definition of done
 
-All included rows are `done`; `tools/check.ps1` passes; the development-signed
-0.2.40 Setup upgrades the installed 0.2.39 controller and repair reconverges the
+All included rows are `done`; `tools/check.ps1` passes; the QA-signed 0.2.41 Setup
+upgrades the installed 0.2.40 controller and repair reconverges the
 same identities. Garage survives restart and passes S3 state/lock probes.
 Forgejo opens over Tailscale, offers the injected service template and its
 dedicated runner builds a repository created from that template. The controller
