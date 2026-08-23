@@ -80,7 +80,7 @@
                   {
                       "path":  "services/omniroute/compose.yml",
                       "mode":  "0644",
-                      "sha256":  "13ae3cb8586bdb14273001db53211d0a95d7c63c8198dda6523a71c722a75838"
+                      "sha256":  "287eca926664d2fea4a78948486162092ad4aceac753b1fc99dc6e3f4b6def37"
                   },
                   {
                       "path":  "operations/lxc-host",
@@ -135,7 +135,7 @@
                   {
                       "path":  "services/freellmapi/compose.yml",
                       "mode":  "0644",
-                      "sha256":  "c788e6345c4c904b3197467e88bbb21f4c3605c9c277471e40247133d318342c"
+                      "sha256":  "50688e14ad1a5d380f7388ab8e50a5694b85d85ce8fa8bd4e72bab0193dce6ea"
                   },
                   {
                       "path":  "operations/verify-release.py",

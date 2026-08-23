@@ -1,7 +1,7 @@
 services:
   tailscale:
     image: docker.io/tailscale/tailscale@sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e
-    container_name: gnx-freellmapi-tailscale
+    container_name: ${GNX_CONTAINER_PREFIX:?GNX_CONTAINER_PREFIX is required}-tailscale
     hostname: ${TS_HOSTNAME:?TS_HOSTNAME is required}
     environment:
       TS_STATE_DIR: /var/lib/tailscale
@@ -30,7 +30,7 @@ services:
 
   freellmapi:
     image: ghcr.io/tashfeenahmed/freellmapi@sha256:3f4ca3e8f55b11f0fc03f85c09c96651c48e46b78c24a81dc750af3bb2f394fa
-    container_name: gnx-freellmapi
+    container_name: ${GNX_CONTAINER_PREFIX:?GNX_CONTAINER_PREFIX is required}
     network_mode: service:tailscale
     depends_on:
       tailscale:
