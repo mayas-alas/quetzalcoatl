@@ -1,0 +1,1 @@
+{"schema_version":2,"overall":"ready","stage":"READY","role":"member","controller":"gnx-controller-a","components":{"service":"ready","wsl":"ready","podman_machine":"ready","kvm":"ready","tailscale":"ready","tailscale_serve":"ready","proxmox":"ready"},"cluster":{"joined":true,"quorate":true},"last_error":null}

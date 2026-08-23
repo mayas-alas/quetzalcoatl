@@ -1,0 +1,37 @@
+[package]
+name = "gnx"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "gnx"
+path = "src/main.rs"
+
+[[bin]]
+name = "gnx-tray"
+path = "src/bin/gnx-tray.rs"
+
+[dependencies]
+gnx-contracts = { path = "../../crates/gnx-contracts" }
+serde_json = "1.0"
+zeroize = "1.8"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Console",
+    "Win32_System_Pipes",
+    "Win32_System_Services",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
