@@ -48,12 +48,10 @@ that crosses into production trust surfaces must be recorded as a blocker first.
    (SCOPE excludes hosted CI on another Windows host) and private keys never
    enter the repository.
 
-Local agent fleet (`.kilo/agent/`, git-ignored): `maya`, `pi` and `pi-claude`
-are primary assistants on different backends; `pi2` orchestrates and delegates;
-`pi-embeddings` and `troubleshoot` are subagents. Backend differences do not
-create ownership lanes — lane ownership comes only from
-`.AGENTS/WORKSTREAMS.md`. A reviewer is any different agent identity,
-independent of model.
+The agent fleet is defined by roles in `.AGENTS/agentA/ROLES.md`, not by any
+tool's local configuration. Local runtime connectivity (`.kilo/agent/`,
+git-ignored) only selects a backend; it never changes lanes, roles or review
+rules. A reviewer is any different agent identity, independent of model or tool.
 
 ## Remote execution
 

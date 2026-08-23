@@ -35,7 +35,7 @@ IFS= read -r auth_key <&3 || exit 64
 
 [ "$schema" = 1 ]
 case "$kind:$hostname" in
-  garage:gnx-garage|forgejo:gnx-forgejo|runner:gnx-runner|service:gnx-svc-*) ;;
+  garage:gnx-garage|forgejo:gnx-forgejo|runner:gnx-runner|service:gnx-*) ;;
   *) exit 64 ;;
 esac
 case "$hostname" in *[!a-z0-9-]*|*-|'') exit 64 ;; esac
@@ -105,6 +105,7 @@ constrain_tailscale_mtu() {
 
 enroll_tailscale() {
   scope=$1
+  enroll_tag=$2
   permanent="gnx-$scope-tailscale"
   state_dir="/var/lib/quetzalcoatl/tailscale/$scope"
   temporary="gnx-$scope-enroll"
@@ -125,10 +126,10 @@ enroll_tailscale() {
 
   if docker inspect "$permanent" >/dev/null 2>&1 &&
      docker exec "$permanent" tailscale status --json > "$status_file.gnx-new" 2>/dev/null &&
-     jq -e --arg host "$hostname" '
+     jq -e --arg host "$hostname" --arg tag "$enroll_tag" '
        .BackendState == "Running" and
        .Self.HostName == $host and
-       (.Self.Tags | index("tag:quetzalcoatl-service") != null)
+       (.Self.Tags | index($tag) != null)
      ' "$status_file.gnx-new" >/dev/null; then
     mv -f "$status_file.gnx-new" "$status_file"
     return 0
@@ -145,6 +146,7 @@ enroll_tailscale() {
       '  "locked": true,' \
       '  "enabled": true,'
     printf '  "hostname": "%s",\n' "$hostname"
+    printf '  "tags": ["%s"],\n' "$enroll_tag"
     printf '%s\n' \
       '  "acceptDNS": true,' \
       '  "netfilterMode": "on"' \
@@ -174,10 +176,10 @@ enroll_tailscale() {
     attempt=$((attempt + 1))
     if docker exec "$temporary" tailscale status --json \
          > "$status_file.gnx-new" 2>/dev/null &&
-       jq -e --arg host "$hostname" '
+       jq -e --arg host "$hostname" --arg tag "$enroll_tag" '
          .BackendState == "Running" and
          .Self.HostName == $host and
-         (.Self.Tags | index("tag:quetzalcoatl-service") != null)
+         (.Self.Tags | index($tag) != null)
        ' "$status_file.gnx-new" >/dev/null; then
       mv -f "$status_file.gnx-new" "$status_file"
       docker rm -f "$temporary" >/dev/null
@@ -243,7 +245,7 @@ configure_garage() {
     printf 'admin_token = "%s"\n' "$garage_admin_token"
   } | write_atomic /var/lib/quetzalcoatl/secrets/garage.toml 0600
   write_public_environment "$app_dir"
-  enroll_tailscale garage
+  enroll_tailscale garage tag:quetzalcoatl-service
   stage='garage-compose'
   docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \
     -f "$app_dir/compose.yml" config --quiet
@@ -608,7 +610,7 @@ configure_forgejo() {
   fi
   write_forgejo_configuration "$install_lock"
   write_public_environment "$app_dir"
-  enroll_tailscale forgejo
+  enroll_tailscale forgejo tag:quetzalcoatl-service
   stage='forgejo-compose'
   docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \
     -f "$app_dir/compose.yml" config --quiet
@@ -734,7 +736,7 @@ configure_runner() {
     printf '      uuid: %s\n' "$runner_uuid"
     printf '      token: %s\n' "$runner_secret"
   } | write_atomic /var/lib/quetzalcoatl/runner/runner-config.yml 0600
-  enroll_tailscale runner
+  enroll_tailscale runner tag:quetzalcoatl-service
   stage='runner-compose'
   docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \
     -f "$app_dir/compose.yml" config --quiet
@@ -748,6 +750,7 @@ configure_runner() {
 configure_service() {
   IFS= read -r slug <&3 || exit 64
   IFS= read -r image <&3 || exit 64
+  IFS= read -r tag <&3 || exit 64
   IFS= read -r registry_token <&3 || exit 64
   if IFS= read -r extra <&3; then exit 64; fi
   case "$slug" in ''|*[!a-z0-9-]*|*-*) exit 64 ;; esac
@@ -756,6 +759,8 @@ configure_service() {
     "gnx-forgejo.$tailnet/gnx-labs/"*"@sha256:"????????????????????????????????????????????????????????????????) ;;
     *) exit 64 ;;
   esac
+  case "$tag" in tag:quetzalcoatl-[a-z0-9][a-z0-9-]*) ;; *) exit 64 ;; esac
+  [ "${#tag}" -le 48 ]
   [ "${#registry_token}" -ge 20 ] && [ "${#registry_token}" -le 512 ]
 
   app_dir="/opt/quetzalcoatl/services/$slug"
@@ -769,7 +774,7 @@ configure_service() {
   printf '%s' "$registry_token" |
     docker login "gnx-forgejo.$tailnet" \
       --username gnx-admin --password-stdin >/dev/null
-  enroll_tailscale service
+  enroll_tailscale service "$tag"
   docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \
     -f "$app_dir/compose.yml" config --quiet
   docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \

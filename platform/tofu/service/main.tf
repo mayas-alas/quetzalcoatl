@@ -20,8 +20,8 @@ variable "service_hostname" {
   type = string
 
   validation {
-    condition     = can(regex("^gnx-svc-[a-z0-9][a-z0-9-]{0,31}$", var.service_hostname)) && length(var.service_hostname) <= 63
-    error_message = "service_hostname must use the canonical GNX service prefix."
+    condition     = can(regex("^gnx-[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$", var.service_hostname)) && length(var.service_hostname) <= 63
+    error_message = "service_hostname must use the canonical GNX service prefix and end in an alphanumeric."
   }
 }
 
@@ -29,8 +29,8 @@ variable "service_vmid" {
   type = number
 
   validation {
-    condition     = var.service_vmid >= 1000 && var.service_vmid <= 7999 && floor(var.service_vmid) == var.service_vmid
-    error_message = "service_vmid must be an integer in the reserved workload range."
+    condition     = var.service_vmid >= 300 && var.service_vmid <= 7999 && floor(var.service_vmid) == var.service_vmid
+    error_message = "service_vmid must be an integer in the reserved service range."
   }
 }
 

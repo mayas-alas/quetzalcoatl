@@ -33,8 +33,10 @@ EXPECTED_SERVICES = {
     "platform/services/service/compose.yml",
     "platform/services/service/serve.json",
     "platform/services/freellmapi/compose.yml",
+    "platform/services/freellmapi/policy.json",
     "platform/services/freellmapi/serve.json",
     "platform/services/omniroute/compose.yml",
+    "platform/services/omniroute/policy.json",
     "platform/services/omniroute/serve.json",
 }
 IGNORED_ROOTS = {".git", ".wix", "target", ".kilo", ".AGENTS/agentA"}

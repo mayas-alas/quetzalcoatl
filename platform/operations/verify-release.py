@@ -25,8 +25,6 @@ def main() -> None:
         "port",
         "health_path",
         "service_slug",
-        "hostname",
-        "vm_id",
         "signature",
     }
     if not isinstance(record, dict) or set(record) != expected:
@@ -44,22 +42,20 @@ def main() -> None:
     ):
         raise SystemExit("release record authentication failed")
     slug = str(record["service_slug"])
-    hostname = str(record["hostname"])
     source = str(record["source"])
     image = str(record["image"])
+    health_path = str(record["health_path"])
     if (
-        record["schema"] != 1
+        record["schema"] != 2
         or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", slug)
-        or hostname != f"gnx-svc-{slug}"
         or not re.fullmatch(r"gnx-labs/[a-z0-9][a-z0-9._-]{0,63}", source)
         or not re.fullmatch(
             rf"gnx-forgejo\.[a-z0-9.-]+\.ts\.net/{re.escape(source)}@sha256:[0-9a-f]{{64}}",
             image,
         )
-        or not isinstance(record["vm_id"], int)
-        or not 1000 <= record["vm_id"] <= 7999
-        or record["port"] != 8080
-        or record["health_path"] != "/"
+        or not isinstance(record["port"], int)
+        or not 1 <= record["port"] <= 65535
+        or not re.fullmatch(r"/[a-z0-9._/-]{0,127}", health_path)
         or not re.fullmatch(r"[0-9a-f]{40}", str(record["commit"]))
     ):
         raise SystemExit("release record values differ")
@@ -67,12 +63,10 @@ def main() -> None:
         "|".join(
             (
                 slug,
-                hostname,
-                str(record["vm_id"]),
                 source,
                 image,
-                "8080",
-                "/",
+                str(record["port"]),
+                health_path,
             )
         )
     )

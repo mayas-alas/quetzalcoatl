@@ -15,9 +15,10 @@ export TF_IN_AUTOMATION=1
 
 case "${GNX_TAILNET:-}" in *.ts.net) ;; *) exit 64 ;; esac
 case "${TF_VAR_service_slug:-}" in ''|*[!a-z0-9-]*|-*|*-) exit 64 ;; esac
-case "${TF_VAR_service_hostname:-}" in gnx-svc-*) ;; *) exit 64 ;; esac
+printf '%s\n' "${TF_VAR_service_hostname:-}" | grep -Eq '^gnx-[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$' || exit 64
+[ "${#TF_VAR_service_hostname}" -le 63 ] || exit 64
 case "${TF_VAR_service_vmid:-}" in *[!0-9]*|'') exit 64 ;; esac
-[ "$TF_VAR_service_vmid" -ge 1000 ] && [ "$TF_VAR_service_vmid" -le 7999 ]
+[ "$TF_VAR_service_vmid" -ge 300 ] && [ "$TF_VAR_service_vmid" -le 7999 ]
 
 backend_args="
   -backend-config=bucket=gnx-tofu-state
