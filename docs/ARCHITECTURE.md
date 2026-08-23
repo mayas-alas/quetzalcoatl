@@ -1,17 +1,9 @@
-<<<<<<< HEAD
-﻿# Architecture
+# Architecture
 
 Quetzalcoatl is a Windows control plane around one managed Podman Machine. The
 workspace contains exactly four Cargo packages. Setup owns installation, upgrade
 and repair; the service owns reconciliation; CLI and tray are bounded Named Pipe
 clients.
-=======
-# Architecture
-
-Quetzalcoatl is a Windows control plane around one managed Podman Machine. Setup
-owns installation, upgrade and repair; the service owns reconciliation; CLI and
-tray are bounded Named Pipe clients.
->>>>>>> origin/master
 
 ```text
 QuetzalcoatlSetup.exe
@@ -27,11 +19,9 @@ gnx / tray -- Named Pipe schema 2 --> gnx-service
                                                `-- Proxmox
 ```
 
-<<<<<<< HEAD
 ## Workspace packages
-=======
+
 The workspace has exactly four packages:
->>>>>>> origin/master
 
 | Path | Responsibility |
 |---|---|
@@ -44,11 +34,8 @@ The workspace has exactly four packages:
 vendor storage. Application sequencing belongs in `application/`, rules and closed
 types in `domain/`, and operating-system/process adapters in `infrastructure/`.
 
-<<<<<<< HEAD
 ## Service lifecycle
 
-=======
->>>>>>> origin/master
 The service lifecycle is: host profile and WSL, pinned Podman Machine, Fedora/KVM,
 locked payload, protected configuration, Tailscale identity and role, local PVE
 readiness, fixed HTTPS Serve route, controller creation or bounded member join, then
@@ -58,7 +45,6 @@ restart.
 
 The native tray intentionally adds no localhost UI, listener, port or Tauri runtime.
 
-<<<<<<< HEAD
 ## Platform foundation
 
 The platform foundation extends only a READY controller. OpenTofu owns PVE
@@ -66,13 +52,6 @@ resources; the locked GNX reconciler streams one fixed host operation through
 `pct exec <known-vmid> -- /bin/sh -s` and then applies fixed Compose definitions.
 Every LXC host is prepared independently before Garage, Forgejo and the runner are
 ordered by their real dependencies.
-=======
-The platform foundation extends only a READY controller. OpenTofu owns PVE
-resources; the locked GNX reconciler streams one fixed host operation through
-`pct exec ... sh -s` and then applies fixed Compose definitions. Every LXC host is
-prepared independently before Garage, Forgejo and the runner are ordered by their
-real dependencies.
->>>>>>> origin/master
 
 `gnx configure platform` stores a dedicated service-enrollment credential without
 rewriting node, tailnet or PVE configuration. Each service uses a Tailscale
@@ -86,7 +65,6 @@ fixed `gnx-admin` identity is shared as a closed IPC constant; its credential is
 owned by the controller, verified against Forgejo before disclosure and rotated
 through the loopback API. The service enforces elevated local-administrator access,
 and the remote path remains a fixed runtime-agent operation with bounded stdin.
-<<<<<<< HEAD
 
 ## Runtime layout
 
@@ -169,15 +147,27 @@ graph TB
         LXC200["LXC 200<br/>Garage (S3)"]
         LXC201["LXC 201<br/>Forgejo (git)"]
         LXC202["LXC 202<br/>Runner (CI)"]
+        LXC300["LXC 300<br/>FreeLLMAPI"]
+        LXC301["LXC 301<br/>FreeLLMAPI (HA)"]
+        LXC302["LXC 302<br/>OmniRoute"]
+        LXC303["LXC 303<br/>OmniRoute (HA)"]
     end
 
     Proxmox --> LXC200
     Proxmox --> LXC201
     Proxmox --> LXC202
+    Proxmox --> LXC300
+    Proxmox --> LXC301
+    Proxmox --> LXC302
+    Proxmox --> LXC303
 
     LXC200 --> Tailscale
     LXC201 --> Tailscale
     LXC202 --> Tailscale
+    LXC300 --> Tailscale
+    LXC301 --> Tailscale
+    LXC302 --> Tailscale
+    LXC303 --> Tailscale
 ```
 
 ## Install and upgrade flow
@@ -245,6 +235,10 @@ graph LR
         LXC200["LXC 200 Garage"]
         LXC201["LXC 201 Forgejo"]
         LXC202["LXC 202 Runner"]
+        LXC300["LXC 300 FreeLLMAPI"]
+        LXC301["LXC 301 FreeLLMAPI"]
+        LXC302["LXC 302 OmniRoute"]
+        LXC303["LXC 303 OmniRoute"]
     end
 
     Pipe -->|closed stdin| Reconciler
@@ -262,6 +256,10 @@ graph LR
     DeployOp -->|pct exec sh -s| LXC200
     DeployOp -->|pct exec sh -s| LXC201
     DeployOp -->|pct exec sh -s| LXC202
+    DeployOp -->|pct exec sh -s| LXC300
+    DeployOp -->|pct exec sh -s| LXC301
+    DeployOp -->|pct exec sh -s| LXC302
+    DeployOp -->|pct exec sh -s| LXC303
     DeployOp -->|podman run| TofuContainer
 
     SecretStore -.->|never in argv/env/logs| ReconcileOp
@@ -322,6 +320,8 @@ graph TB
         Garage["Garage :443"]
         Forgejo["Forgejo :443"]
         Runner["Actions Runner"]
+        FreeLLMAPI["FreeLLMAPI :443"]
+        OmniRoute["OmniRoute :443"]
     end
 
     HostPipe -->|only local IPC| Service
@@ -335,6 +335,8 @@ graph TB
     Tailnet --> Garage
     Tailnet --> Forgejo
     Tailnet --> Runner
+    Tailnet --> FreeLLMAPI
+    Tailnet --> OmniRoute
 
     style HostPipe fill:#e1f5fe,stroke:#01579b
     style TailscaleSidecar fill:#f3e5f5,stroke:#4a148c
@@ -448,5 +450,3 @@ then activates.
   secrets, Compose, `.env`, OCI images, logs, argv and OpenTofu state.
 - Images use immutable digests; mutable tags are prohibited.
 - `installer/build.ps1` remains the release entry point.
-=======
->>>>>>> origin/master

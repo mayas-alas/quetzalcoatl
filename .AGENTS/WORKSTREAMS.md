@@ -55,6 +55,18 @@ Agent C updates: `tools/validation/platform.py`, `tools/validation/repository.py
 
 Coordinator integrates and records evidence.
 
+## Workstream process
+
+Agent delegation, issue tracking and branch conventions are documented in
+`docs/AGENT_WORKFLOW.md`. Each agent:
+
+1. Opens a workstream-claim issue from `.github/ISSUE_TEMPLATE/workstream-claim.md`.
+2. Creates branch `wstream/<lane>/<issue>-<slug>` from `master`.
+3. Works only inside the lane's owned paths (`.AGENTS/WORKSTREAMS.md`).
+4. Runs change-scoped validators and records results.
+5. Opens a PR using the handoff template below; the coordinator reviews.
+6. The PR updates `.AGENTS/TRACKER.md` (status) and `.AGENTS/EVIDENCE.md` (evidence).
+
 ## Handoff template
 
 ```text

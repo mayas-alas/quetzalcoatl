@@ -20,6 +20,7 @@ EXPECTED_DOCS = {
     "OPERATIONS.md",
     "TROUBLESHOOTING.md",
     "VALIDATION.md",
+    "AGENT_WORKFLOW.md",
 }
 EXPECTED_SERVICES = {
     "platform/services/forgejo/compose.yml",
