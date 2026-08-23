@@ -1,0 +1,11 @@
+schema_version = 1
+generation = "proxmox-platform"
+payload_contract = 6
+payload_lock = "payload.lock.json"
+
+[layout]
+commands = "commands"
+operations = "operations"
+containers = "containers"
+services = "services"
+configuration = "configuration"

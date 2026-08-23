@@ -1,0 +1,52 @@
+#!/bin/sh
+set -eu
+umask 077
+
+secret='/run/secrets/pve-password'
+import_vmid='/run/config/import-vmid'
+test -s "$secret"
+test -f "$import_vmid"
+
+password=$(cat "$secret")
+[ "${#password}" -ge 12 ] || exit 64
+export PROXMOX_VE_USERNAME='root@pam'
+export PROXMOX_VE_PASSWORD="$password"
+export TF_IN_AUTOMATION=1
+
+case "${GNX_TAILNET:-}" in *.ts.net) ;; *) exit 64 ;; esac
+case "${TF_VAR_service_slug:-}" in ''|*[!a-z0-9-]*|-*|*-) exit 64 ;; esac
+case "${TF_VAR_service_hostname:-}" in gnx-svc-*) ;; *) exit 64 ;; esac
+case "${TF_VAR_service_vmid:-}" in *[!0-9]*|'') exit 64 ;; esac
+[ "$TF_VAR_service_vmid" -ge 1000 ] && [ "$TF_VAR_service_vmid" -le 7999 ]
+
+backend_args="
+  -backend-config=bucket=gnx-tofu-state
+  -backend-config=key=services/$TF_VAR_service_slug/terraform.tfstate
+  -backend-config=region=garage
+  -backend-config=use_path_style=true
+  -backend-config=use_lockfile=true
+  -backend-config=skip_credentials_validation=true
+  -backend-config=skip_region_validation=true
+  -backend-config=skip_requesting_account_id=true
+  -backend-config=skip_metadata_api_check=true
+"
+# shellcheck disable=SC2086
+tofu init -input=false -lockfile=readonly -no-color $backend_args
+tofu validate -no-color
+
+if [ -s "$import_vmid" ] &&
+  ! tofu state show proxmox_virtual_environment_container.service >/dev/null 2>&1; then
+  tofu import -input=false -no-color \
+    proxmox_virtual_environment_container.service \
+    "${TF_VAR_node_name}/$(cat "$import_vmid")"
+fi
+
+tofu apply -auto-approve -input=false -no-color -parallelism=1
+tofu output -json service
+
+if grep -Fq -- "$password" terraform.tfstate 2>/dev/null; then
+  printf '%s\n' 'PVE credential was written to service OpenTofu state' >&2
+  exit 66
+fi
+unset PROXMOX_VE_PASSWORD password
+printf '%s\n' 'OPENTOFU_SERVICE=ready'

@@ -1,0 +1,10 @@
+[Unit]
+Description=Quetzalcoatl node pod
+Wants=network-online.target
+After=network-online.target
+
+[Pod]
+PodName=gnx-node
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,410 @@
+#!/bin/sh
+set -eu
+umask 077
+export LC_ALL=C
+export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+bundle='/usr/share/quetzalcoatl/platform'
+state_root='/var/lib/quetzalcoatl/platform'
+tofu_state="$state_root/tofu/foundation"
+secret_root="$state_root/secrets"
+runtime='/run/gnx/platform'
+run_log="$state_root/reconcile.log.gnx-new"
+operation_lock="$state_root/operation.lock"
+pve_password="$runtime/pve-password"
+tailscale_key="$runtime/tailscale-auth-key"
+imports="$runtime/imports"
+tofu_environment="$runtime/tofu-environment"
+
+cleanup() {
+  result=$?
+  trap - EXIT HUP INT TERM
+  rm -rf -- "$runtime"
+  if [ "$result" -ne 0 ] && [ -s "$run_log" ]; then
+    tail -c 2000 "$run_log" >&2 || true
+  fi
+  exit "$result"
+}
+trap cleanup EXIT HUP INT TERM
+
+[ "$(id -u)" -eq 0 ]
+test -s "$bundle/manifest.toml"
+test -x "$bundle/operations/lxc-host"
+test -x "$bundle/operations/lxc-service"
+test -x "$bundle/tofu/foundation/entrypoint"
+install -d -m 0700 "$state_root" "$tofu_state" "$secret_root" "$runtime"
+exec 9> "$operation_lock"
+flock -x 9
+: > "$run_log"
+chmod 0600 "$run_log"
+
+IFS= read -r schema || exit 64
+IFS= read -r node_name || exit 64
+IFS= read -r tailnet || exit 64
+IFS= read -r password || exit 64
+IFS= read -r auth_key || exit 64
+if IFS= read -r extra; then exit 64; fi
+
+[ "$schema" = 1 ]
+case "$node_name" in gnx-controller-*) ;; *) exit 64 ;; esac
+case "$node_name" in *[!a-z0-9-]*|*-|'') exit 64 ;; esac
+case "$tailnet" in *.ts.net) ;; *) exit 64 ;; esac
+case "$tailnet" in *[!a-z0-9.-]*|.*|*.|*..*) exit 64 ;; esac
+case "$auth_key" in tskey-auth-*) ;; *) exit 64 ;; esac
+[ "${#auth_key}" -ge 20 ] && [ "${#auth_key}" -le 512 ]
+[ "${#password}" -ge 12 ] && [ "${#password}" -le 256 ]
+case "$password$auth_key" in *'
+'*) exit 64 ;; esac
+
+printf '%s' "$password" > "$pve_password"
+printf '%s' "$auth_key" > "$tailscale_key"
+chmod 0400 "$pve_password" "$tailscale_key"
+unset password auth_key
+
+ensure_hex() (
+  target=$1
+  bytes=$2
+  if [ ! -s "$target" ]; then
+    od -An -N "$bytes" -tx1 /dev/urandom | tr -d ' \n' > "$target.gnx-new"
+    chmod 0400 "$target.gnx-new"
+    mv -f "$target.gnx-new" "$target"
+  fi
+  value=$(cat "$target")
+  [ "${#value}" -eq $((bytes * 2)) ]
+  case "$value" in *[!0-9a-f]*) exit 65 ;; esac
+  printf '%s' "$value" > "$target.gnx-new"
+  chmod 0400 "$target.gnx-new"
+  mv -f "$target.gnx-new" "$target"
+)
+
+ensure_access_key() (
+  target=$1
+  if [ ! -s "$target" ]; then
+    random=$(od -An -N 12 -tx1 /dev/urandom | tr -d ' \n')
+    printf 'GK%s' "$random" > "$target.gnx-new"
+    unset random
+    chmod 0400 "$target.gnx-new"
+    mv -f "$target.gnx-new" "$target"
+  fi
+  value=$(cat "$target")
+  case "$value" in GK????????????????????????) ;; *) exit 65 ;; esac
+  case "${value#GK}" in *[!0-9a-f]*) exit 65 ;; esac
+  printf '%s' "$value" > "$target.gnx-new"
+  chmod 0400 "$target.gnx-new"
+  mv -f "$target.gnx-new" "$target"
+)
+
+ensure_base64url_32() (
+  target=$1
+  replace=false
+  if [ -s "$target" ]; then
+    value=$(cat "$target")
+    if [ "${#value}" -eq 43 ] &&
+      [ "$(printf '%s=' "$value" | tr '_-' '/+' | base64 -d 2>/dev/null | wc -c | tr -d ' ')" -eq 32 ]; then
+      printf '%s' "$value" > "$target.gnx-new"
+      chmod 0400 "$target.gnx-new"
+      mv -f "$target.gnx-new" "$target"
+      exit 0
+    fi
+    if [ "${#value}" -eq 44 ] &&
+      [ "$(printf '%s' "$value" | base64 -d 2>/dev/null | wc -c | tr -d ' ')" -eq 32 ]; then
+      replace=true
+    else
+      exit 65
+    fi
+  else
+    replace=true
+  fi
+  if [ "$replace" = true ]; then
+    head -c 32 /dev/urandom | base64 | tr '/+' '_-' | tr -d '=\n' > "$target.gnx-new"
+    chmod 0400 "$target.gnx-new"
+    mv -f "$target.gnx-new" "$target"
+  fi
+  value=$(cat "$target")
+  [ "${#value}" -eq 43 ]
+  [ "$(printf '%s=' "$value" | tr '_-' '/+' | base64 -d 2>/dev/null | wc -c | tr -d ' ')" -eq 32 ]
+  printf '%s' "$value" > "$target.gnx-new"
+  chmod 0400 "$target.gnx-new"
+  mv -f "$target.gnx-new" "$target"
+)
+
+normalize_optional_token_pair() (
+  first=$1
+  second=$2
+  first_value=''
+  second_value=''
+  if [ -s "$first" ]; then first_value=$(cat "$first"); fi
+  if [ -s "$second" ]; then second_value=$(cat "$second"); fi
+  valid=true
+  for value in "$first_value" "$second_value"; do
+    if [ "${#value}" -ne 40 ]; then valid=false; fi
+    case "$value" in *[!0-9a-f]*) valid=false ;; esac
+  done
+  if [ "$valid" != true ]; then
+    rm -f -- "$first" "$second"
+    exit 0
+  fi
+  printf '%s' "$first_value" > "$first.gnx-new"
+  printf '%s' "$second_value" > "$second.gnx-new"
+  chmod 0400 "$first.gnx-new" "$second.gnx-new"
+  mv -f "$first.gnx-new" "$first"
+  mv -f "$second.gnx-new" "$second"
+)
+
+ensure_hex "$secret_root/garage-rpc-secret" 32
+ensure_hex "$secret_root/garage-admin-token" 32
+ensure_access_key "$secret_root/tofu-s3-access-key"
+ensure_hex "$secret_root/tofu-s3-secret-key" 32
+ensure_access_key "$secret_root/forgejo-s3-access-key"
+ensure_hex "$secret_root/forgejo-s3-secret-key" 32
+ensure_hex "$secret_root/forgejo-secret-key" 32
+ensure_hex "$secret_root/forgejo-internal-token" 32
+ensure_base64url_32 "$secret_root/forgejo-jwt-secret"
+ensure_hex "$secret_root/forgejo-admin-password" 24
+ensure_hex "$secret_root/forgejo-runner-secret" 20
+ensure_hex "$secret_root/release-signing-key" 32
+normalize_optional_token_pair \
+  "$secret_root/forgejo-api-token" \
+  "$secret_root/forgejo-registry-token"
+
+printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_REGION=garage\nAWS_ENDPOINT_URL_S3=https://gnx-garage.%s\n' \
+  "$(cat "$secret_root/tofu-s3-access-key")" \
+  "$(cat "$secret_root/tofu-s3-secret-key")" \
+  "$tailnet" > "$tofu_environment"
+chmod 0400 "$tofu_environment"
+
+install -m 0644 "$bundle/tofu/foundation/main.tf" "$tofu_state/main.tf"
+install -m 0644 "$bundle/tofu/foundation/versions.tf" "$tofu_state/versions.tf"
+install -m 0644 "$bundle/tofu/foundation/.terraform.lock.hcl" "$tofu_state/.terraform.lock.hcl"
+install -m 0755 "$bundle/tofu/foundation/entrypoint" "$tofu_state/entrypoint"
+rm -f "$tofu_state/backend_override.tf"
+if [ ! -f "$tofu_state/.gnx-remote-backend" ]; then
+  rm -f "$tofu_state/backend.tf"
+fi
+
+: > "$imports"
+for identity in garage:200:gnx-garage forgejo:201:gnx-forgejo runner:202:gnx-runner; do
+  service=${identity%%:*}
+  remainder=${identity#*:}
+  vmid=${remainder%%:*}
+  hostname=${identity##*:}
+  if podman exec gnx-proxmox pct config "$vmid" > "$runtime/pct-$vmid" 2>/dev/null; then
+    actual=$(sed -n 's/^hostname: //p' "$runtime/pct-$vmid")
+    [ "$actual" = "$hostname" ] || {
+      printf 'VMID %s belongs to %s, expected %s\n' "$vmid" "$actual" "$hostname" >&2
+      exit 66
+    }
+    printf '%s|%s\n' "$service" "$vmid" >> "$imports"
+  fi
+done
+chmod 0400 "$imports"
+
+tofu_image='ghcr.io/opentofu/opentofu@sha256:6b66d996afc7f043154e33a0420285d0d58c165305ac8f36d32df213a3c4bbd4'
+run_tofu() {
+  podman run --rm \
+    --pod gnx-node \
+    --security-opt label=disable \
+    --volume "$tofu_state:/workspace" \
+    --volume "$pve_password:/run/secrets/pve-password:ro" \
+    --volume "$imports:/run/config/imports:ro" \
+    --workdir /workspace \
+    --env-file "$tofu_environment" \
+    --env TF_REGISTRY_DISCOVERY_RETRY=5 \
+    --env TF_PROVIDER_DOWNLOAD_RETRY=5 \
+    --env TF_REGISTRY_CLIENT_TIMEOUT=20 \
+    --env "TF_VAR_node_name=$node_name" \
+    --env "GNX_TAILNET=$tailnet" \
+    --entrypoint /workspace/entrypoint \
+    "$tofu_image"
+}
+
+if ! run_tofu >> "$run_log" 2>&1; then
+  exit 67
+fi
+
+guest_script() (
+  vmid=$1
+  script=$2
+  podman exec -i gnx-proxmox pct exec "$vmid" -- /bin/sh -s < "$script"
+)
+
+guest_directory() (
+  vmid=$1
+  directory=$2
+  mode=$3
+  podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/install -d -o 0 -g 0 -m "$mode" "$directory"
+)
+
+guest_put() (
+  vmid=$1
+  source=$2
+  target=$3
+  mode=$4
+  temporary="$target.gnx-new"
+  expected=$(sha256sum "$source" | cut -d ' ' -f 1)
+  podman exec -i gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/tee "$temporary" < "$source" >/dev/null
+  podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/chmod "$mode" "$temporary"
+  actual=$(podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/sha256sum "$temporary" | cut -d ' ' -f 1)
+  [ "$actual" = "$expected" ]
+  podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/mv -f "$temporary" "$target"
+)
+
+guest_input() (
+  vmid=$1
+  source=$2
+  podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/install -d -o 0 -g 0 -m 0700 /run/gnx
+  podman exec -i gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/tee /run/gnx/platform-input.gnx-new < "$source" >/dev/null
+  podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/chmod 0400 /run/gnx/platform-input.gnx-new
+  podman exec gnx-proxmox pct exec "$vmid" -- \
+    /usr/bin/mv -f /run/gnx/platform-input.gnx-new /run/gnx/platform-input
+)
+
+# Base convergence is independent: every LXC is attempted even when another
+# host fails, so a Garage error cannot leave Forgejo or the runner unprepared.
+host_failures=0
+for vmid in 200 201 202; do
+  host_log="$runtime/lxc-host-$vmid.log"
+  if guest_script "$vmid" "$bundle/operations/lxc-host" > "$host_log" 2>&1 &&
+     [ "$(grep -c '^LXC_HOST=ready$' "$host_log")" -eq 1 ]; then
+    cat "$host_log" >> "$run_log"
+  else
+    cat "$host_log" >> "$run_log"
+    printf 'LXC_HOST_FAILED=%s\n' "$vmid" >> "$run_log"
+    host_failures=$((host_failures + 1))
+  fi
+done
+[ "$host_failures" -eq 0 ] || exit 68
+
+prepare_service_assets() (
+  vmid=$1
+  service=$2
+  directory="/opt/quetzalcoatl/$service"
+  if [ "$service" = service ]; then
+    directory=/opt/quetzalcoatl/service-template
+  fi
+  guest_directory "$vmid" "$directory" 0755
+  guest_directory "$vmid" "$directory/serve" 0755
+  guest_put "$vmid" "$bundle/services/$service/compose.yml" "$directory/compose.yml" 0644
+  if [ -f "$bundle/services/$service/serve.json" ]; then
+    guest_put "$vmid" "$bundle/services/$service/serve.json" "$directory/serve/serve.json" 0644
+  fi
+)
+
+prepare_service_assets 200 garage
+garage_input="$runtime/garage.input"
+{
+  printf '%s\n' 1 garage gnx-garage "$tailnet"
+  cat "$tailscale_key"
+  printf '\n'
+  cat "$secret_root/garage-rpc-secret"
+  printf '\n'
+  cat "$secret_root/garage-admin-token"
+  printf '\n'
+  cat "$secret_root/tofu-s3-access-key"
+  printf '\n'
+  cat "$secret_root/tofu-s3-secret-key"
+  printf '\n'
+  cat "$secret_root/forgejo-s3-access-key"
+  printf '\n'
+  cat "$secret_root/forgejo-s3-secret-key"
+  printf '\n'
+} > "$garage_input"
+chmod 0400 "$garage_input"
+guest_input 200 "$garage_input"
+if ! guest_script 200 "$bundle/operations/lxc-service" >> "$run_log" 2>&1; then
+  exit 69
+fi
+
+printf '%s\n' 'terraform {' '  backend "s3" {}' '}' \
+  > "$tofu_state/backend.tf.gnx-new"
+chmod 0644 "$tofu_state/backend.tf.gnx-new"
+mv -f "$tofu_state/backend.tf.gnx-new" "$tofu_state/backend.tf"
+if ! run_tofu >> "$run_log" 2>&1; then
+  exit 70
+fi
+test -f "$tofu_state/.gnx-remote-backend"
+rm -f "$tofu_state/terraform.tfstate.backup"
+
+prepare_service_assets 201 forgejo
+forgejo_input="$runtime/forgejo.input"
+{
+  printf '%s\n' 1 forgejo gnx-forgejo "$tailnet"
+  cat "$tailscale_key"
+  printf '\n'
+  for name in forgejo-s3-access-key forgejo-s3-secret-key forgejo-secret-key \
+    forgejo-internal-token forgejo-jwt-secret forgejo-admin-password \
+    forgejo-runner-secret; do
+    cat "$secret_root/$name"
+    printf '\n'
+  done
+  for name in forgejo-api-token forgejo-registry-token forgejo-runner-uuid; do
+    if [ -s "$secret_root/$name" ]; then cat "$secret_root/$name"; fi
+    printf '\n'
+  done
+} > "$forgejo_input"
+chmod 0400 "$forgejo_input"
+guest_input 201 "$forgejo_input"
+forgejo_status=0
+forgejo_output=$(guest_script 201 "$bundle/operations/lxc-service" 2>> "$run_log") ||
+  forgejo_status=$?
+for marker in FORGEJO_API_TOKEN FORGEJO_REGISTRY_TOKEN FORGEJO_RUNNER_UUID; do
+  count=$(printf '%s\n' "$forgejo_output" | grep -c "^$marker=" || true)
+  if [ "$count" -eq 0 ]; then
+    continue
+  fi
+  [ "$count" -eq 1 ]
+  value=$(printf '%s\n' "$forgejo_output" | sed -n "s/^$marker=//p")
+  [ -n "$value" ]
+  target=$(printf '%s' "$marker" | tr 'A-Z_' 'a-z-')
+  printf '%s' "$value" > "$secret_root/$target.gnx-new"
+  chmod 0400 "$secret_root/$target.gnx-new"
+  mv -f "$secret_root/$target.gnx-new" "$secret_root/$target"
+  unset count value target
+done
+[ "$forgejo_status" -eq 0 ] || exit 71
+for marker in FORGEJO_API_TOKEN FORGEJO_REGISTRY_TOKEN FORGEJO_RUNNER_UUID; do
+  [ "$(printf '%s\n' "$forgejo_output" | grep -c "^$marker=")" -eq 1 ]
+done
+[ "$(printf '%s\n' "$forgejo_output" | grep -c '^FORGEJO=ready$')" -eq 1 ]
+unset forgejo_output forgejo_status
+
+prepare_service_assets 202 runner
+runner_input="$runtime/runner.input"
+{
+  printf '%s\n' 1 runner gnx-runner "$tailnet"
+  cat "$tailscale_key"
+  printf '\n'
+  cat "$secret_root/forgejo-runner-uuid"
+  printf '\n'
+  cat "$secret_root/forgejo-runner-secret"
+  printf '\n'
+} > "$runner_input"
+chmod 0400 "$runner_input"
+guest_input 202 "$runner_input"
+if ! guest_script 202 "$bundle/operations/lxc-service" >> "$run_log" 2>&1; then
+  exit 72
+fi
+
+for forbidden in "$pve_password" "$tailscale_key"; do
+  test ! -e "$forbidden" || rm -f -- "$forbidden"
+done
+for secret_file in "$secret_root"/*; do
+  secret=$(cat "$secret_file")
+  if grep -Fq -- "$secret" "$run_log" "$tofu_state/terraform.tfstate" 2>/dev/null; then
+    printf 'A platform secret escaped into state or logs\n' >&2
+    exit 73
+  fi
+done
+
+mv -f "$run_log" "$state_root/reconcile.log"
+trap - EXIT HUP INT TERM
+rm -rf -- "$runtime"
+printf '%s\n' 'PLATFORM_RECONCILE=ready'

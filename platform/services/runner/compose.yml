@@ -1,0 +1,38 @@
+services:
+  tailscale:
+    image: docker.io/tailscale/tailscale@sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e
+    container_name: gnx-runner-tailscale
+    hostname: ${TS_HOSTNAME:?TS_HOSTNAME is required}
+    environment:
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+      TS_AUTH_ONCE: "true"
+      TS_ACCEPT_DNS: "true"
+      TS_ENABLE_HEALTH_CHECK: "true"
+      TS_LOCAL_ADDR_PORT: 127.0.0.1:41234
+      TS_DEBUG_FIREWALL_MODE: nftables
+    volumes:
+      - /var/lib/quetzalcoatl/tailscale/runner:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add: [NET_ADMIN, NET_RAW]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:41234/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
+
+  runner:
+    image: code.forgejo.org/forgejo/runner@sha256:eb6e7bc21973382d261e6eb883dbd27b8cb56939d33a3bfd79a1352b7f9a33a0
+    container_name: gnx-runner
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    user: "0:0"
+    command: ["forgejo-runner", "daemon", "--config", "/data/runner-config.yml"]
+    volumes:
+      - /var/lib/quetzalcoatl/runner:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped

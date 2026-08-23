@@ -1,0 +1,511 @@
+#!/bin/sh
+set -eu
+umask 077
+
+script='/usr/libexec/quetzalcoatl/gnx-pve-cluster-create'
+pve_env='/etc/quetzalcoatl/node/pve.env'
+persistent_key='/var/lib/pve-cluster/quetzalcoatl-corosync.authkey'
+runtime_key='/etc/corosync/authkey'
+
+validate_input() {
+  case "$pve_hostname" in
+    ''|*[!a-z0-9-]*|-*|*-) exit 64 ;;
+  esac
+  case "$pve_hostname" in
+    gnx-controller-*[a-z0-9]|gnx-member-*[a-z0-9]) ;;
+    *) exit 64 ;;
+  esac
+  [ "${#pve_hostname}" -le 63 ] || exit 64
+  case "$pve_ip" in
+    *[!0-9.]*|'') exit 65 ;;
+  esac
+  old_ifs=$IFS
+  IFS=.
+  set -- $pve_ip
+  IFS=$old_ifs
+  [ "$#" -eq 4 ] || exit 65
+  [ "$1" -eq 100 ] && [ "$2" -ge 64 ] && [ "$2" -le 127 ] || exit 65
+  for octet in "$1" "$2" "$3" "$4"; do
+    [ "$octet" -ge 0 ] && [ "$octet" -le 255 ] || exit 65
+  done
+}
+
+validate_controller_input() {
+  case "$pve_hostname" in
+    gnx-controller-*[a-z0-9]) ;;
+    *) exit 64 ;;
+  esac
+}
+
+validate_member_input() {
+  case "$controller_hostname" in
+    gnx-controller-*[a-z0-9]) ;;
+    *) fail PVE_JOIN_CONTROLLER_IDENTITY 64 ;;
+  esac
+  case "$member_hostname" in
+    gnx-member-*[a-z0-9]) ;;
+    *) fail PVE_JOIN_MEMBER_IDENTITY 64 ;;
+  esac
+  pve_hostname=$controller_hostname
+  pve_ip=$controller_ip
+  (validate_input) || fail PVE_JOIN_CONTROLLER_ADDRESS 65
+  pve_hostname=$member_hostname
+  pve_ip=$member_ip
+  case "$pve_hostname" in ''|*[!a-z0-9-]*|-*|*-) fail PVE_JOIN_MEMBER_IDENTITY 64 ;; esac
+  [ "${#pve_hostname}" -le 63 ] || fail PVE_JOIN_MEMBER_IDENTITY 64
+  case "$pve_ip" in *[!0-9.]*|'') fail PVE_JOIN_MEMBER_ADDRESS 65 ;; esac
+  old_ifs=$IFS
+  IFS=.
+  set -- $pve_ip
+  IFS=$old_ifs
+  [ "$#" -eq 4 ] || fail PVE_JOIN_MEMBER_ADDRESS 65
+  [ "$1" -eq 100 ] && [ "$2" -ge 64 ] && [ "$2" -le 127 ] || fail PVE_JOIN_MEMBER_ADDRESS 65
+  for octet in "$1" "$2" "$3" "$4"; do
+    [ "$octet" -ge 0 ] && [ "$octet" -le 255 ] || fail PVE_JOIN_MEMBER_ADDRESS 65
+  done
+  [ "$controller_ip" != "$member_ip" ] || fail PVE_JOIN_ADDRESS_CONFLICT 65
+  [ "$controller_hostname" != "$member_hostname" ] || fail PVE_JOIN_IDENTITY_CONFLICT 64
+}
+
+fail() {
+  code=$1
+  status=$2
+  printf '%s\n' "$code" >&2
+  exit "$status"
+}
+
+reject_trailing_input() {
+  trailing_input=
+  if IFS= read -r trailing_input || [ -n "$trailing_input" ]; then
+    unset trailing_input
+    fail PVE_JOIN_INPUT_EXCESS 64
+  fi
+  unset trailing_input
+}
+
+load_pve_env() {
+  [ -s "$pve_env" ] || return 1
+  pve_hostname=$(sed -n 's/^PVE_HOSTNAME=//p' "$pve_env")
+  pve_ip=$(sed -n 's/^PVE_IP=//p' "$pve_env")
+  [ "$(grep -c '^PVE_HOSTNAME=' "$pve_env")" -eq 1 ] || exit 66
+  [ "$(grep -c '^PVE_IP=' "$pve_env")" -eq 1 ] || exit 66
+  validate_input
+}
+
+apply_hostname() {
+  hostname "$pve_hostname"
+  printf '%s\n' "$pve_hostname" > /etc/hostname
+  hosts_tmp=/run/gnx-hosts.tmp
+  grep -v '[[:space:]]# quetzalcoatl-managed$' /etc/hosts > "$hosts_tmp" || true
+  printf '%s %s # quetzalcoatl-managed\n' "$pve_ip" "$pve_hostname" >> "$hosts_tmp"
+  cat "$hosts_tmp" > /etc/hosts
+  rm -f "$hosts_tmp"
+  getent ahostsv4 "$pve_hostname" |
+    awk -v expected="$pve_ip" '$1 == expected { found=1 } END { exit !found }'
+}
+
+verify_network() {
+  ip -o -4 address show |
+    awk -v expected="$pve_ip" '{ split($4, address, "/"); if (address[1] == expected) found=1 } END { exit !found }'
+}
+
+verify_member_preflight() {
+  for tool in awk cat curl getent grep hostname install ip jq nc openssl ping pvecm rm sed sleep stat systemctl timedatectl; do
+    command -v "$tool" >/dev/null 2>&1 || fail PVE_JOIN_TOOL_MISSING 69
+  done
+  timedatectl show --property=NTPSynchronized --value 2>/dev/null |
+    grep -Fx yes >/dev/null || fail PVE_JOIN_CLOCK_UNSYNCED 72
+  getent ahostsv4 "$controller_hostname" |
+    awk -v expected="$controller_ip" '$1 == expected { found=1 } END { exit !found }' ||
+    fail PVE_JOIN_CONTROLLER_DNS 73
+  curl -kfsS --connect-timeout 5 --max-time 15 \
+    "https://${controller_ip}:8006/api2/json/version" |
+    jq -e '.data.version | type == "string" and length > 0' >/dev/null ||
+    fail PVE_JOIN_API_UNREACHABLE 74
+  nc -z -w 5 "$controller_ip" 22 || fail PVE_JOIN_SSH_UNREACHABLE 75
+  # UDP scans are only a negative preflight: a successful probe cannot prove a
+  # working Corosync path. Successful join/quorum, then the physical lab gate,
+  # are the functional proof.
+  for port in 5405 5406 5407 5408 5409 5410 5411 5412; do
+    nc -u -z -w 2 "$controller_ip" "$port" || fail PVE_JOIN_COROSYNC_UNREACHABLE 76
+  done
+  ping -c 3 -W 2 -M do -s 1200 "$controller_ip" >/dev/null 2>&1 ||
+    fail PVE_JOIN_MTU_UNUSABLE 77
+}
+
+controller_fingerprint() {
+  fingerprint=$(openssl s_client -connect "${controller_ip}:8006" \
+    -servername "$controller_hostname" </dev/null 2>/dev/null |
+    openssl x509 -noout -fingerprint -sha256 2>/dev/null |
+    sed -n 's/^sha256 Fingerprint=//p') || fail PVE_JOIN_FINGERPRINT_UNAVAILABLE 74
+  printf '%s\n' "$fingerprint" |
+    grep -Eq '^([0-9A-F]{2}:){31}[0-9A-F]{2}$' ||
+    fail PVE_JOIN_FINGERPRINT_INVALID 74
+}
+
+topology_matches() {
+  config=/etc/pve/corosync.conf
+  [ -s "$config" ] || return 1
+  awk -v controller_hostname="$controller_hostname" \
+      -v controller_ip="$controller_ip" \
+      -v member_hostname="$member_hostname" \
+      -v member_ip="$member_ip" '
+    $1 == "cluster_name:" && $2 == "quetzalcoatl" { cluster = 1 }
+    $1 == "node" && $2 == "{" { in_node = 1; name = ""; ring0 = ""; next }
+    in_node && $1 == "name:" { name = $2; next }
+    in_node && $1 == "ring0_addr:" { ring0 = $2; next }
+    in_node && $1 == "}" {
+      if (name == controller_hostname && ring0 == controller_ip) controller = 1
+      if (name == member_hostname && ring0 == member_ip) member = 1
+      in_node = 0
+    }
+    END { exit !(cluster && controller && member) }
+  ' "$config"
+}
+
+verify_joined_once() {
+  status=$(pvecm status 2>/dev/null || true)
+  systemctl is-active --quiet pve-cluster.service corosync.service || return 1
+  printf '%s\n' "$status" | grep -Eq '^[[:space:]]*Name:[[:space:]]+quetzalcoatl[[:space:]]*$' || return 1
+  printf '%s\n' "$status" | grep -Eq '^[[:space:]]*Quorate:[[:space:]]+Yes[[:space:]]*$' || return 1
+  topology_matches
+}
+
+verify_joined() {
+  attempt=0
+  while [ "$attempt" -lt 30 ]; do
+    attempt=$((attempt + 1))
+    verify_joined_once && return 0
+    sleep 2
+  done
+  return 1
+}
+
+verify_direct_tailscale_route() {
+  route_output=$(podman exec gnx-tailscaled tailscale ping --c 3 --timeout 5s "$controller_ip" 2>&1) ||
+    fail PVE_JOIN_TAILSCALE_UNREACHABLE 80
+  printf '%s\n' "$route_output" | grep -Eqi 'via[[:space:]]+(derp|peer-relay)' &&
+    fail PVE_JOIN_TAILSCALE_RELAYED 80
+  printf '%s\n' "$route_output" |
+    awk '
+      /via.*:/ {
+        for (field = 1; field < NF; field++) {
+          if ($field == "in") {
+            latency = $(field + 1)
+            sub(/ms$/, "", latency)
+            if (latency + 0 >= 5) exit 1
+            direct += 1
+          }
+        }
+      }
+      END { exit !(direct >= 3) }
+    ' || fail PVE_JOIN_TAILSCALE_LATENCY 80
+}
+
+join_inside() {
+  IFS= read -r controller_ip || fail PVE_JOIN_INPUT_INCOMPLETE 64
+  IFS= read -r controller_hostname || fail PVE_JOIN_INPUT_INCOMPLETE 64
+  IFS= read -r member_ip || fail PVE_JOIN_INPUT_INCOMPLETE 64
+  IFS= read -r member_hostname || fail PVE_JOIN_INPUT_INCOMPLETE 64
+  install -d -o 0 -g 0 -m 0700 /run/gnx
+  password_file=/run/gnx/pve-join-password
+  rm -f "$password_file"
+  trap 'rm -f "$password_file"; unset join_password fingerprint' EXIT HUP INT TERM
+  umask 077
+  IFS= read -r join_password || fail PVE_JOIN_INPUT_INCOMPLETE 64
+  [ -n "$join_password" ] || fail PVE_JOIN_PASSWORD_MISSING 64
+  reject_trailing_input
+  printf '%s\n' "$join_password" > "$password_file"
+  unset join_password
+  [ "$(stat -c '%u:%g:%a' "$password_file")" = '0:0:600' ] || fail PVE_JOIN_SECRET_PERMISSIONS 71
+  validate_member_input
+  pve_hostname=$member_hostname
+  pve_ip=$member_ip
+  apply_hostname
+  verify_network || fail PVE_JOIN_MEMBER_NETWORK 73
+  if [ -s /etc/pve/corosync.conf ]; then
+    if verify_joined; then
+      printf 'PVE_JOIN=ready\n'
+      exit 0
+    fi
+    fail PVE_JOIN_INCOMPLETE_TOPOLOGY 79
+  fi
+  if verify_joined; then
+    printf 'PVE_JOIN=ready\n'
+    exit 0
+  fi
+  verify_member_preflight
+  controller_fingerprint
+  if ! cat "$password_file" | pvecm add "$controller_ip" --link0 "$member_ip" --fingerprint "$fingerprint" 1>&2; then
+    fail PVE_JOIN_COMMAND_FAILED 78
+  fi
+  verify_joined || fail PVE_JOIN_VERIFY_FAILED 79
+  printf 'PVE_JOIN=ready\n'
+}
+
+confirm_membership_inside() {
+  IFS= read -r controller_ip || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  IFS= read -r controller_hostname || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  IFS= read -r member_ip || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  IFS= read -r member_hostname || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  reject_trailing_input
+  validate_member_input
+  status=$(pvecm status 2>/dev/null || true)
+  nodes=$(pvecm nodes 2>/dev/null || true)
+  systemctl is-active --quiet pve-cluster.service corosync.service ||
+    fail PVE_CONFIRM_SERVICES_NOT_READY 83
+  printf '%s\n' "$status" |
+    grep -Eq '^[[:space:]]*Name:[[:space:]]+quetzalcoatl[[:space:]]*$' ||
+    fail PVE_CONFIRM_CLUSTER_MISMATCH 83
+  printf '%s\n' "$status" |
+    grep -Eq '^[[:space:]]*Quorate:[[:space:]]+Yes[[:space:]]*$' ||
+    fail PVE_CONFIRM_NOT_QUORATE 83
+  printf '%s\n' "$nodes" | grep -F "$controller_hostname" >/dev/null ||
+    fail PVE_CONFIRM_CONTROLLER_MISSING 83
+  printf '%s\n' "$nodes" | grep -F "$member_hostname" >/dev/null ||
+    fail PVE_CONFIRM_MEMBER_MISSING 83
+  topology_matches || fail PVE_CONFIRM_TOPOLOGY_MISMATCH 83
+  resources=$(pvesh get /cluster/resources --type node --output-format json 2>/dev/null) ||
+    fail PVE_CONFIRM_API_UNAVAILABLE 83
+  printf '%s\n' "$resources" |
+    jq -e --arg controller "$controller_hostname" --arg member "$member_hostname" '
+      any(.[]; .node == $controller and .status == "online") and
+      any(.[]; .node == $member and .status == "online")
+    ' >/dev/null || fail PVE_CONFIRM_NODE_OFFLINE 83
+  printf 'PVE_MEMBERSHIP=confirmed\n'
+}
+
+persist_identity() {
+  IFS= read -r pve_ip || fail PVE_IDENTITY_INPUT_INCOMPLETE 64
+  IFS= read -r pve_hostname || fail PVE_IDENTITY_INPUT_INCOMPLETE 64
+  reject_trailing_input
+  validate_input
+  install -d -m 0755 "$(dirname "$pve_env")"
+  temporary="${pve_env}.tmp"
+  rm -f "$temporary"
+  trap 'rm -f "$temporary"' EXIT HUP INT TERM
+  printf 'PVE_HOSTNAME=%s\nPVE_IP=%s\n' "$pve_hostname" "$pve_ip" > "$temporary"
+  chmod 0600 "$temporary"
+  mv "$temporary" "$pve_env"
+  trap - EXIT HUP INT TERM
+  printf 'PVE_IDENTITY=ready\n'
+}
+
+verify_node_identity_inside() {
+  IFS= read -r pve_ip || fail PVE_IDENTITY_INPUT_INCOMPLETE 64
+  IFS= read -r pve_hostname || fail PVE_IDENTITY_INPUT_INCOMPLETE 64
+  reject_trailing_input
+  validate_input
+  expected_ip=$pve_ip
+  expected_hostname=$pve_hostname
+  load_pve_env || fail PVE_IDENTITY_MISSING 66
+  [ "$pve_ip" = "$expected_ip" ] && [ "$pve_hostname" = "$expected_hostname" ] ||
+    fail PVE_IDENTITY_PERSISTENCE_MISMATCH 81
+  unset expected_ip expected_hostname
+  [ "$(hostname -s)" = "$pve_hostname" ] || fail PVE_HOSTNAME_MISMATCH 81
+  [ "$(cat /etc/hostname)" = "$pve_hostname" ] || fail PVE_HOSTNAME_FILE_MISMATCH 81
+  [ "$(readlink /etc/pve/local)" = "nodes/$pve_hostname" ] || fail PVE_PMXCFS_LOCAL_MISMATCH 81
+  [ -d "/etc/pve/nodes/$pve_hostname" ] || fail PVE_NODE_DIRECTORY_MISSING 81
+  getent ahostsv4 "$pve_hostname" |
+    awk -v expected="$pve_ip" '$1 == expected { found=1 } END { exit !found }' ||
+    fail PVE_HOSTNAME_ADDRESS_MISMATCH 81
+  systemctl is-active --quiet pve-cluster.service pvedaemon.service pvestatd.service pveproxy.service ||
+    fail PVE_SERVICE_NOT_READY 82
+  pvesh get "/nodes/$pve_hostname/status" --output-format json >/dev/null 2>&1 ||
+    fail PVE_NODE_API_UNAVAILABLE 82
+  pvesh get /cluster/resources --type node --output-format json |
+    jq -e --arg node "$pve_hostname" 'any(.[]; .node == $node and .status == "online")' >/dev/null ||
+    fail PVE_NODE_STATUS_NOT_ONLINE 82
+  printf 'PVE_NODE=ready\n'
+}
+
+static_check() {
+  script=$0
+  /bin/sh -n "$script"
+}
+
+join_host() {
+  IFS= read -r controller_ip || fail PVE_JOIN_INPUT_INCOMPLETE 64
+  IFS= read -r controller_hostname || fail PVE_JOIN_INPUT_INCOMPLETE 64
+  IFS= read -r member_ip || fail PVE_JOIN_INPUT_INCOMPLETE 64
+  IFS= read -r member_hostname || fail PVE_JOIN_INPUT_INCOMPLETE 64
+  IFS= read -r join_password || fail PVE_JOIN_INPUT_INCOMPLETE 64
+  [ -n "$join_password" ] || fail PVE_JOIN_PASSWORD_MISSING 64
+  reject_trailing_input
+  validate_member_input
+  verify_direct_tailscale_route
+  install -d -m 0755 "$(dirname "$pve_env")"
+  temporary="${pve_env}.tmp"
+  rm -f "$temporary"
+  trap 'rm -f "$temporary"; unset join_password' EXIT HUP INT TERM
+  printf 'PVE_HOSTNAME=%s\nPVE_IP=%s\n' "$member_hostname" "$member_ip" > "$temporary"
+  chmod 0600 "$temporary"
+  mv "$temporary" "$pve_env"
+  printf '%s\n%s\n%s\n%s\n%s\n' \
+    "$controller_ip" "$controller_hostname" "$member_ip" "$member_hostname" "$join_password" |
+    podman exec -i gnx-proxmox "$script" join-inside
+  unset join_password
+}
+
+confirm_member_host() {
+  IFS= read -r controller_ip || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  IFS= read -r controller_hostname || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  IFS= read -r member_ip || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  IFS= read -r member_hostname || fail PVE_CONFIRM_INPUT_INCOMPLETE 64
+  reject_trailing_input
+  validate_member_input
+  verify_direct_tailscale_route
+  printf '%s\n%s\n%s\n%s\n' \
+    "$controller_ip" "$controller_hostname" "$member_ip" "$member_hostname" |
+    podman exec -i gnx-proxmox "$script" confirm-member-inside
+}
+
+persist_corosync_key() {
+  temporary="${persistent_key}.gnx-new"
+  [ -f "$runtime_key" ] && [ ! -L "$runtime_key" ] && [ -s "$runtime_key" ] || exit 71
+  rm -f "$temporary"
+  install -o 0 -g 0 -m 0400 "$runtime_key" "$temporary"
+  mv -f "$temporary" "$persistent_key"
+}
+
+verify_corosync_key() {
+  [ -f "$persistent_key" ] && [ ! -L "$persistent_key" ] && [ -s "$persistent_key" ] || exit 71
+  [ "$(stat -c '%u:%g:%a' "$persistent_key")" = '0:0:400' ] || exit 71
+  [ -f "$runtime_key" ] && [ ! -L "$runtime_key" ] && [ -s "$runtime_key" ] || exit 71
+  cmp -s "$persistent_key" "$runtime_key" || exit 71
+}
+
+mode=${1:-host}
+case "$mode" in
+  prepare)
+    persist_identity
+    exit 0
+    ;;
+  prepare-hostname)
+    load_pve_env || fail PVE_IDENTITY_MISSING 66
+    apply_hostname
+    exit 0
+    ;;
+  verify-node)
+    IFS= read -r pve_ip || fail PVE_IDENTITY_INPUT_INCOMPLETE 64
+    IFS= read -r pve_hostname || fail PVE_IDENTITY_INPUT_INCOMPLETE 64
+    reject_trailing_input
+    validate_input
+    printf '%s\n%s\n' "$pve_ip" "$pve_hostname" |
+      podman exec -i gnx-proxmox "$script" verify-node-inside
+    exit 0
+    ;;
+  verify-node-inside)
+    verify_node_identity_inside
+    exit 0
+    ;;
+  inside)
+    IFS= read -r pve_ip
+    IFS= read -r pve_hostname
+    validate_input
+    validate_controller_input
+    apply_hostname
+    verify_network
+    ;;
+  host)
+    IFS= read -r pve_ip
+    IFS= read -r pve_hostname
+    validate_input
+    validate_controller_input
+    install -d -m 0755 "$(dirname "$pve_env")"
+    temporary="${pve_env}.tmp"
+    rm -f "$temporary"
+    trap 'rm -f "$temporary"' EXIT HUP INT TERM
+    printf 'PVE_HOSTNAME=%s\nPVE_IP=%s\n' "$pve_hostname" "$pve_ip" > "$temporary"
+    chmod 0600 "$temporary"
+    mv "$temporary" "$pve_env"
+    printf '%s\n%s\n' "$pve_ip" "$pve_hostname" |
+      podman exec -i gnx-proxmox "$script" inside
+    exit 0
+    ;;
+  verify)
+    IFS= read -r pve_ip
+    IFS= read -r pve_hostname
+    validate_input
+    validate_controller_input
+    printf '%s\n%s\n' "$pve_ip" "$pve_hostname" |
+      podman exec -i gnx-proxmox "$script" verify-inside
+    exit 0
+    ;;
+  verify-inside)
+    IFS= read -r pve_ip
+    IFS= read -r pve_hostname
+    validate_input
+    validate_controller_input
+    apply_hostname
+    verify_network
+    config=/etc/pve/corosync.conf
+    [ -s "$config" ] || exit 70
+    verify_corosync_key
+    status=$(pvecm status 2>/dev/null || true)
+    systemctl is-active --quiet pve-cluster.service corosync.service &&
+      printf '%s\n' "$status" | grep -Eq '^[[:space:]]*Name:[[:space:]]+quetzalcoatl[[:space:]]*$' &&
+      printf '%s\n' "$status" | grep -Eq '^[[:space:]]*Quorate:[[:space:]]+Yes[[:space:]]*$' &&
+      awk -v expected="$pve_hostname" '$1 == "name:" && $2 == expected { found=1 } END { exit !found }' "$config" &&
+      awk -v expected="$pve_ip" '$1 == "ring0_addr:" && $2 == expected { found=1 } END { exit !found }' "$config" || exit 70
+    printf 'PVE_CLUSTER=ready\n'
+    exit 0
+    ;;
+  join)
+    # stdin: controller IP, controller hostname, member IP, member hostname, PVE password.
+    # The password is never accepted as an argument or written outside /run.
+    join_host
+    exit 0
+    ;;
+  join-inside)
+    join_inside
+    exit 0
+    ;;
+  confirm-member)
+    # stdin: controller IP, controller hostname, member IP, member hostname.
+    confirm_member_host
+    exit 0
+    ;;
+  confirm-member-inside)
+    confirm_membership_inside
+    exit 0
+    ;;
+  static-check)
+    static_check
+    exit 0
+    ;;
+  *) exit 64 ;;
+esac
+
+config=/etc/pve/corosync.conf
+if [ ! -s "$config" ]; then
+  pvecm create quetzalcoatl --link0 "$pve_ip" 1>&2
+  persist_corosync_key
+fi
+verify_corosync_key
+if ! systemctl is-active --quiet corosync.service; then
+  if ! systemctl restart corosync.service; then
+    systemctl --no-pager --full status corosync.service >&2 || true
+    journalctl --no-pager --unit corosync.service --lines 40 >&2 || true
+    exit 70
+  fi
+fi
+
+attempt=0
+while [ "$attempt" -lt 90 ]; do
+  attempt=$((attempt + 1))
+  status=$(pvecm status 2>/dev/null || true)
+  if systemctl is-active --quiet pve-cluster.service corosync.service &&
+     printf '%s\n' "$status" | grep -Eq '^[[:space:]]*Name:[[:space:]]+quetzalcoatl[[:space:]]*$' &&
+     printf '%s\n' "$status" | grep -Eq '^[[:space:]]*Nodes:[[:space:]]+1[[:space:]]*$' &&
+     printf '%s\n' "$status" | grep -Eq '^[[:space:]]*Quorate:[[:space:]]+Yes[[:space:]]*$' &&
+     awk -v expected="$pve_hostname" '$1 == "name:" && $2 == expected { found=1 } END { exit !found }' "$config" &&
+     awk -v expected="$pve_ip" '$1 == "ring0_addr:" && $2 == expected { found=1 } END { exit !found }' "$config"; then
+    printf 'PVE_CLUSTER=ready\n'
+    exit 0
+  fi
+  sleep 2
+done
+
+printf '%s\n' "$status" >&2
+exit 70

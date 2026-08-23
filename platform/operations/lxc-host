@@ -1,0 +1,98 @@
+#!/bin/sh
+set -eu
+umask 077
+export DEBIAN_FRONTEND=noninteractive
+export LC_ALL=C
+export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+docker_version='5:29.6.2-1~debian.13~trixie'
+containerd_version='2.2.6-1~debian.13~trixie'
+buildx_version='0.35.0-1~debian.13~trixie'
+compose_version='5.3.1-1~debian.13~trixie'
+key_sha256='1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570'
+evidence='/var/lib/quetzalcoatl/evidence/lxc-host.env'
+
+verify() {
+  test "$(dpkg-query -W -f='${Version}' docker-ce 2>/dev/null)" = "$docker_version" || return 1
+  test "$(dpkg-query -W -f='${Version}' docker-ce-cli 2>/dev/null)" = "$docker_version" || return 1
+  test "$(dpkg-query -W -f='${Version}' containerd.io 2>/dev/null)" = "$containerd_version" || return 1
+  test "$(dpkg-query -W -f='${Version}' docker-buildx-plugin 2>/dev/null)" = "$buildx_version" || return 1
+  test "$(dpkg-query -W -f='${Version}' docker-compose-plugin 2>/dev/null)" = "$compose_version" || return 1
+  systemctl is-enabled --quiet docker.service || return 1
+  systemctl is-active --quiet docker.service || return 1
+  test "$(docker version --format '{{.Server.Version}}')" = '29.6.2' || return 1
+  test "$(docker info --format '{{.Driver}}')" = 'fuse-overlayfs' || return 1
+  docker compose version --short | grep -Eq '^5\.3\.1$' || return 1
+  docker buildx version | grep -Eq 'v?0\.35\.0([[:space:]]|$)' || return 1
+  test "$(stat -fc %T /sys/fs/cgroup)" = 'cgroup2fs' || return 1
+  test -w /sys/fs/cgroup || return 1
+  test -c /dev/net/tun || return 1
+  test -r /dev/net/tun || return 1
+  test -w /dev/net/tun || return 1
+  test -c /dev/fuse || return 1
+  test -r /dev/fuse || return 1
+  test -w /dev/fuse || return 1
+  command -v python3 >/dev/null || return 1
+  command -v jq >/dev/null || return 1
+  python3 -c 'import base64, hashlib, http.client, json, secrets, urllib.request' || return 1
+}
+
+write_evidence() {
+  install -d -m 0755 "$(dirname "$evidence")"
+  {
+    printf 'HOSTNAME=%s\n' "$(hostname)"
+    printf 'DOCKER_VERSION=%s\n' "$(docker version --format '{{.Server.Version}}')"
+    printf 'DOCKER_DRIVER=%s\n' "$(docker info --format '{{.Driver}}')"
+    printf 'COMPOSE_VERSION=%s\n' "$(docker compose version --short)"
+  } > "$evidence.gnx-new"
+  chmod 0644 "$evidence.gnx-new"
+  mv -f "$evidence.gnx-new" "$evidence"
+}
+
+state=$(systemctl is-system-running --wait 2>/dev/null || true)
+case "$state" in running|degraded) ;; *) printf 'LXC init is not ready: %s\n' "$state" >&2; exit 64 ;; esac
+
+if verify >/dev/null 2>&1; then
+  write_evidence
+  printf '%s\n' 'LXC_HOST=ready'
+  exit 0
+fi
+
+. /etc/os-release
+[ "${ID:-}" = debian ]
+[ "${VERSION_CODENAME:-}" = trixie ]
+[ "$(dpkg --print-architecture)" = amd64 ]
+
+apt-get update -qq
+apt-get install -y -qq ca-certificates curl fuse-overlayfs git gpg jq python3 util-linux
+install -d -m 0755 /etc/apt/keyrings /run/gnx
+curl --fail --silent --show-error --location \
+  https://download.docker.com/linux/debian/gpg \
+  --output /run/gnx/docker.asc
+printf '%s  %s\n' "$key_sha256" /run/gnx/docker.asc | sha256sum -c -
+install -m 0644 /run/gnx/docker.asc /etc/apt/keyrings/docker.asc
+rm -f /run/gnx/docker.asc
+printf '%s\n' \
+  'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian trixie stable' \
+  > /etc/apt/sources.list.d/docker.list.gnx-new
+chmod 0644 /etc/apt/sources.list.d/docker.list.gnx-new
+mv -f /etc/apt/sources.list.d/docker.list.gnx-new /etc/apt/sources.list.d/docker.list
+apt-get update -qq
+apt-get install -y -qq --allow-downgrades \
+  "docker-ce=$docker_version" \
+  "docker-ce-cli=$docker_version" \
+  "containerd.io=$containerd_version" \
+  "docker-buildx-plugin=$buildx_version" \
+  "docker-compose-plugin=$compose_version"
+apt-mark hold docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+install -d -m 0755 /etc/docker
+printf '%s\n' '{' '  "storage-driver": "fuse-overlayfs"' '}' \
+  > /etc/docker/daemon.json.gnx-new
+chmod 0644 /etc/docker/daemon.json.gnx-new
+mv -f /etc/docker/daemon.json.gnx-new /etc/docker/daemon.json
+systemctl enable containerd.service docker.service
+systemctl restart containerd.service docker.service
+verify
+write_evidence
+printf '%s\n' 'LXC_HOST=ready'

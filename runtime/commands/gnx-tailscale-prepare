@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+umask 077
+
+IFS= read -r auth_key
+IFS= read -r hostname
+case "$auth_key" in
+  tskey-auth-*) ;;
+  *) exit 64 ;;
+esac
+case "$hostname" in
+  ''|*[!a-z0-9-]*|-*|*-) exit 65 ;;
+esac
+
+install -d -m 0700 /run/gnx /var/lib/quetzalcoatl/tailscale/host
+install -d -m 0755 /etc/quetzalcoatl/node
+printf 'GNX_TS_HOSTNAME=%s\n' "$hostname" > /run/gnx/tailscale-enroll.env
+chmod 0600 /run/gnx/tailscale-enroll.env
+printf 'TS_HOSTNAME=%s\n' "$hostname" > /etc/quetzalcoatl/node/node.env
+chmod 0600 /etc/quetzalcoatl/node/node.env
+
+systemctl stop tailscaled.service >/dev/null 2>&1 || true
+systemctl stop gnx-tailscale-enroll.service >/dev/null 2>&1 || true
+printf '%s' "$auth_key" > /run/gnx/ts-authkey
+chmod 0400 /run/gnx/ts-authkey
+unset auth_key

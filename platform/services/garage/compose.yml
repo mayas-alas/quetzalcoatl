@@ -1,0 +1,47 @@
+services:
+  tailscale:
+    image: docker.io/tailscale/tailscale@sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e
+    container_name: gnx-garage-tailscale
+    hostname: ${TS_HOSTNAME:?TS_HOSTNAME is required}
+    environment:
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "false"
+      TS_AUTH_ONCE: "true"
+      TS_ACCEPT_DNS: "true"
+      TS_ENABLE_HEALTH_CHECK: "true"
+      TS_LOCAL_ADDR_PORT: 127.0.0.1:41234
+      TS_DEBUG_FIREWALL_MODE: nftables
+    volumes:
+      - /var/lib/quetzalcoatl/tailscale/garage:/var/lib/tailscale
+      - ./serve:/config:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add: [NET_ADMIN, NET_RAW]
+    ports:
+      - "127.0.0.1:3900:3900"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:41234/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
+
+  garage:
+    image: docker.io/dxflrs/garage@sha256:dac0c92add4f1a0b41035e94b41036a270ffbe88a37c7ac9c3f19e6dc5bdccf2
+    container_name: gnx-garage
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    command: ["/garage", "server", "--single-node"]
+    volumes:
+      - /var/lib/quetzalcoatl/secrets/garage.toml:/etc/garage.toml:ro
+      - /var/lib/quetzalcoatl/garage/data:/var/lib/garage/data
+      - /var/lib/quetzalcoatl/garage/meta:/var/lib/garage/meta
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
