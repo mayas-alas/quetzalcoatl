@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Commit | `1f60a58` (local HEAD, pushed to `0e573bf` on remote) |
+| Commit | `c5031a6` (master; pushed to `521f632` on origin/master) |
 | Branch | `master` |
 | Installed product | 0.2.41 QA-chain-signed |
 | Physical state | controller service and platform READY; authorized QA Smart App Control Off transition applied after restart; CLI and tray recovered |
@@ -35,6 +35,8 @@
 |---|---|---|
 | B40-1 | Smart App Control Enforce blocks the self-signed payload: 0.2.27 was rejected before QA changed the policy from `1` to `0`; the apparent 0.2.33-0.2.38 success occurred while it was Off, and restored Enforce rejects 0.2.39/0.2.40. | Keep local signing for controlled QA, but obtain trusted signing for physical release acceptance; do not silently mutate the host policy. |
 | PHY-1 | Physical execution of 0.2.42 (install/upgrade/repair on this host) and the 4 new FreeLLMAPI/OmniRoute LXCs has not yet been exercised. | Coordinate elevated Setup run on the Proxmox controller; deploy 4 new LXCs via OpenTofu; verify Tailscale HTTPS access and health probes. |
+| SEC-1 | A plaintext FreeLLMAPI API key is committed to `origin/master` history at `edc28d4` (inside `.AGENTS/TRACKER.md` notes of that era). | Rotate the token, keep `API Key` redacted in the tracker, and do not rewrite public history (forward-fix only). |
+| OCI-1 | FreeLLMAPI/OmniRoute image digests are pinned in manifest/compose but no image has been built/published by the OCI runner lane. | Agent A / OCI lane: build both images via the Forgejo template + dedicated runner and publish by digest; then reconcile digests. |
 
 ## Resolved blockers
 
@@ -45,6 +47,7 @@
 | PUB-1 | GitHub repo `mayas-alas/quetzalcoatl` created and master pushed; QA-signed 0.2.42 build completed; per-agent commits landed; `v0.2.42-qa` release uploaded. |
 | PUB-2 | Three pre-existing source-gate blockers (stale contracts.py, missing TROUBLESHOOTING.md in repo taxonomy, environment-dependent Docker test) are recorded as known. The stale `contracts.py` (hardcoded 0.2.41) was advanced to 0.2.42 and the TROUBLESHOOTING.md taxonomy gap was closed; `tools/check.ps1 -SourceOnly` now passes through the Rust gate. The Docker-dependent test remains environment-local. |
 | RTM-1 | `runtime.py` failed: `gnx-tailscale-rename` SHA-256 mismatch. Corrected `runtime/payload.lock.json` to match the on-disk command file (`b9fce7fe...`). All six validators now pass. |
+| MRK-1 | Three `<<<<<<<`/`>>>>>>>` merge markers were committed on `master` (`.AGENTS/README.md`, `Cargo.toml`, `release/manifest.toml`) during the 0.2.41 upstream-history merge and pushed with the publication commits. Forward-fix landed on master: markers resolved to the `0.2.42` identities; `cargo metadata --no-deps` and `tomllib` both parse; validator taxonomy reconciled via `COORDINATOR.md`. |
 
 ## Handoff
 
@@ -64,6 +67,7 @@ Residual risk: Physical deployment of the 4 new LXCs is pending; image digests f
 - **Coordinator closing lane completed** (2026-08-23): Agent C produced `-QaSigning` 0.2.42 build (Setup `408EA213...`, MSI `4EE1EA2B...`); assembled minimal release zip (800 MB, SHA-256 `AAA80768...`, no private keys); per-agent commit history; created `mayas-alas/quetzalcoatl` repo, pushed master, published `v0.2.42-qa` release.
 - **FreeLLMAPI/OmniRoute workstream complete** (2026-08-23): Agent B delivered OpenTofu service templates for 2× FreeLLMAPI LXCs (VMIDs 300-301) and 2× OmniRoute LXCs (VMIDs 302-303), Compose+serve definitions with immutable digests, manifest updates, platform.lock.json (29 files); Agent C updated validators; all 6 validators pass.
 - **Runtime validator blocker resolved** (2026-08-23): Corrected `gnx-tailscale-rename` SHA-256 in `runtime/payload.lock.json`; runtime.py validator now passes.
+- **Master merge-markers fixed** (2026-08-23): forward-fix commits `1814f5b`, `521f632`, `c5031a6` resolve the three outstanding merge blocks on master (0.2.42 identities), enable the issue/PR execution layer (`AGENTS.md` + `.github/**`), and reconcile `.AGENTS` taxonomy (`COORDINATOR.md`); all six source validators pass; origin pushed to `521f632`.
 
 ## Next steps
 

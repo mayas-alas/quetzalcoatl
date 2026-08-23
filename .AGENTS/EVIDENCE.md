@@ -124,6 +124,13 @@ intentionally local and production preprocessing removes it.
 | `f4bd8a0` | Coordinator | chore(release): merge upstream release history into closing lane |
 | `13cf7f1` | Coordinator | chore(release): ship 0.2.42-qa zip as GitHub release asset |
 | `2c30ba0` | Coordinator | chore(release): finalize SHA256SUMS for v0.2.42-qa installer zip |
+| `6dfaab4` | Coordinator | chore(coord): add freellmapi-omniroute workstream spec |
+| `e574f89` | Agent B | fix(runtime): align FreeLLMAPI/OmniRoute compose with canonical naming |
+| `bca05d8` | Agent B | feat(runtime): add FreeLLMAPI and OmniRoute service definitions |
+| `6fdf35b` | Agent C | feat(delivery): update validators for FreeLLMAPI/OmniRoute services |
+| `1f60a58` | Agent B | fix(runtime): correct gnx-tailscale-rename SHA-256 in payload.lock.json |
+| `f1edfc9` | Coordinator | chore(coord): finalize TRACKER for 0.2.42 pub + service lanes |
+| `910bfa5` | Coordinator | docs(coord): add coordinator delegation guide |
 
 ### Preserved invariants (publication)
 
@@ -134,3 +141,15 @@ intentionally local and production preprocessing removes it.
 | No mutable image tags; immutable digests only | upheld |
 | `installer/build.ps1` remains the release entry point | upheld |
 | Production builds must not embed QA trust; QA root is local-only | upheld — QA root/publisher embedded only under `-QaSigning`
+
+## 0.2.42 master repair and freellmapi/omniroute source closure (Coordinator)
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Merge markers resolved | passed | Three `<<<<<<<`/`>>>>>>>` blocks committed on `master` (`.AGENTS/README.md`, `Cargo.toml`, `release/manifest.toml`) were forward-fixed to the `0.2.42` identities in `1814f5b` (no history rewrite); `cargo metadata --no-deps` and Python `tomllib` both parse the repaired tree. |
+| Issue/PR execution layer | added | `AGENTS.md` "Development flow" plus `.github/` (CODEOWNERS, `ISSUE_TEMPLATE/{deliverable,blocker,bug}.md`, `PULL_REQUEST_TEMPLATE.md`) committed in `521f632`. |
+| Source validators | passed | All six validators exit 0 on `master`: `repository.py` (`.AGENTS` taxonomy includes `COORDINATOR.md` and `SPEC.md`; platform services inventory matches the 11 expected files), `contracts.py` (0.2.42 supersession), `remote_execution.py`, `runtime.py` (payload SHA reconciled in `1f60a58`), `platform.py` (freellmapi/omniroute service roots present, 29 locked files), `installer.py`. |
+| Feature source inventory | passed | `platform/services/freellmapi/{compose.yml,serve.json}` and `platform/services/omniroute/{compose.yml,serve.json}` plus `platform/tofu/service/{freellmapi,omniroute}.tf` and manifest/digest entries are committed (`bca05d8`, `e574f89`, `6fdf35b`); compose follows the canonical forgejo sidecar pattern with per-service `tag:quetzalcoatl-<service>` and digest-pinned images. |
+| Push state | passed | `origin/master` advanced `f1edfc9 → 521f632`; the public tree no longer contains merge markers. |
+
+Remaining gates are recorded as blockers in `TRACKER.md` (`PHY-1` physical LXC/Tailscale execution, `OCI-1` image publication by the runner lane, `SEC-1` rotation of the FreeLLMAPI key leaked historically in `edc28d4`).
