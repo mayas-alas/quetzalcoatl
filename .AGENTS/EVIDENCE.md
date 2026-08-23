@@ -53,6 +53,7 @@ Evidence is recorded only after execution. Historical release notes belong in
 | QA trust distribution | passed | before Setup, neither new certificate existed in LocalMachine; after Setup, the root exists exactly once in `LocalMachine\Root` and the leaf exactly once in `LocalMachine\TrustedPublisher`, both public-only; CLI/tray/service/wrapper signatures are `Valid` under the leaf |
 | Forgejo admin show/reset | not exercised | source and packaged contracts pass; this QA signing change restored physical CLI execution but did not disclose or rotate the administrator credential |
 
+<<<<<<< HEAD
 ## 0.2.42 build and source-gate closure (Agent C)
 
 | Gate | Result | Evidence |
@@ -94,3 +95,9 @@ Evidence is recorded only after execution. Historical release notes belong in
 | Environment-dependent test | `check_docker_pipe_contention_missing_pipe` fails without a Docker daemon on this host (recorded in the prior 0.2.42 session); blocks `cargo test`. | Agent C / host env |
 
 `tools/check.ps1 -SourceOnly` therefore does not yet run green; the three failures above are recorded as blockers for the closing lane rather than mutated out of scope. The runtime fix itself is complete and its change-scoped validators pass. Physical `gnx status` verification on a freshly installed 0.2.42 remains pending the Agent C build + install lane.
+=======
+The installer-driven QA trust objective passes end to end. Public release
+acceptance remains separately blocked because Smart App Control enforcement
+requires reputation or a publisher represented by Windows AuthRoot; the QA root is
+intentionally local and production preprocessing removes it.
+>>>>>>> origin/master

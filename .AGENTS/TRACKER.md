@@ -4,12 +4,21 @@
 
 | Field | Value |
 |---|---|
+<<<<<<< HEAD
 | Commit | `9f07372e14077c7dc909041c488580e06f71a923` |
 | Branch | `master` |
 | Installed product | 0.2.41 QA-chain-signed |
 | Physical state | controller service and platform READY; authorized QA Smart App Control Off transition applied after restart; CLI and tray recovered |
 | Candidate | 0.2.42 |
 | Coordinator | Codex (closing lane claimed 2026-08-23: QA-signed 0.2.42 build, per-agent commit history, `mayas-alas/quetzalcoatl` GitHub publication, release zipped without private keys) |
+=======
+| Commit | `3df17c4344169b01dc0cd6a68820c22cb7ad2802` |
+| Branch | `master` |
+| Installed product | 0.2.41 QA-chain-signed |
+| Physical state | controller service and platform READY; authorized QA Smart App Control Off transition applied after restart; CLI and tray recovered |
+| Candidate | 0.2.41 |
+| Coordinator | Codex |
+>>>>>>> origin/master
 
 ## Board
 
@@ -22,16 +31,23 @@
 | APP | done | Garage, Forgejo and runner are healthy; both HTTPS endpoints and the Forgejo UI were exercised |
 | ADM | blocked | CLI/IPC, rotation, verification and source gates pass; physical execution awaits trusted installation |
 | SEC | active | Authorized QA transition is applied and verified after restart; QA trust bootstrap is being added without any security-policy mutation |
+<<<<<<< HEAD
 | PKG | review | official 0.2.41 QA build, MSI/Burn extraction and production-without-QA-payload probe pass; 0.2.42 unsigned development build passed `tools/check.ps1 -SourceOnly` and produced coherent MSI + Setup (SHA-256 in EVIDENCE); public release signing remains blocked |
 | PHY | review | 0.2.40 to 0.2.41 upgrade and 0.2.41 repair exited 0; controller and platform returned READY with one visible/one hidden registration; physical 0.2.42 install/upgrade/repair not yet executed |
 | SIG | review | ten-year QA root, renewable publisher and installer-driven machine trust passed physically; 0.2.42 build adopted the closed `CN=GNX Labs QA Publisher` subject (the malformed `CN=GNX Labs. QA Publisher` was corrected in source and signing); production still requires Windows AuthRoot |
 | PUB | active | coordinator closing lane claimed 2026-08-23; awaiting Agent C `-QaSigning` build, per-agent commit history, `mayas-alas/quetzalcoatl` repo creation and `v0.2.42-qa` release upload |
+=======
+| PKG | review | official 0.2.41 QA build, MSI/Burn extraction and production-without-QA-payload probe pass; public release signing remains blocked |
+| PHY | review | 0.2.40 to 0.2.41 upgrade and 0.2.41 repair exited 0; controller and platform returned READY with one visible/one hidden registration |
+| SIG | review | ten-year QA root, renewable publisher and installer-driven machine trust passed physically; production still requires Windows AuthRoot |
+>>>>>>> origin/master
 
 ## Active blockers
 
 | ID | Finding | Required resolution |
 |---|---|---|
 | B40-1 | Smart App Control Enforce blocks the self-signed payload: 0.2.27 was rejected before QA changed the policy from `1` to `0`; the apparent 0.2.33-0.2.38 success occurred while it was Off, and restored Enforce rejects 0.2.39/0.2.40. | Keep local signing for controlled QA, but obtain trusted signing for physical release acceptance; do not silently mutate the host policy. |
+<<<<<<< HEAD
 | PUB-1 | No GitHub remote exists; repo `mayas-alas/quetzalcoatl` must be created; QA-signed 0.2.42 build must complete before release zips are assembled; per-agent commits required before push. | Delegate Agent C `-QaSigning` build; after success, coordinator performs per-agent commits, repo creation, push, and release `v0.2.42-qa` with minimal installer zip (no private keys). |
 | PUB-2 | Three pre-existing source-gate blockers prevent `tools/check.ps1 -SourceOnly` green: stale version validator (`contracts.py`), missing `TROUBLESHOOTING.md` in repository taxonomy, environment-dependent Docker test. | Coordinator records these as known; they are not mutated out of scope. The QA signing build lane is orthogonal and must proceed. |
 
@@ -60,3 +76,12 @@
 - Agent name: maya
 - Base URL: http://localhost:31415/v1
 - API Key: freellmapi-50698af42b84ff91b4313e372da172138f6fb1b188810bc6
+=======
+
+## Resolved blockers
+
+| ID | Resolution |
+|---|---|
+| B40-2 | Advanced the material installer change to 0.2.41 with fresh ProductCode, PackageCode and BundleId; upgrade from cached 0.2.40 passed. |
+| B40-3 | Authorized restart applied Smart App Control Off; CLI and tray recovered before the 0.2.41 work. |
+>>>>>>> origin/master

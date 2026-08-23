@@ -4,9 +4,12 @@
 
 __pycache__/
 *.pyc
+<<<<<<< HEAD
 
 .kilo/
 .AGENTS/agentA/
 .config/
 .editorconfig
 release/artifacts/
+=======
+>>>>>>> origin/master

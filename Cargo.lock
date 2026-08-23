@@ -58,7 +58,11 @@ dependencies = [
 
 [[package]]
 name = "gnx"
+<<<<<<< HEAD
 version = "0.2.42"
+=======
+version = "0.2.41"
+>>>>>>> origin/master
 dependencies = [
  "gnx-contracts",
  "serde_json",
@@ -68,7 +72,11 @@ dependencies = [
 
 [[package]]
 name = "gnx-bootstrap"
+<<<<<<< HEAD
 version = "0.2.42"
+=======
+version = "0.2.41"
+>>>>>>> origin/master
 dependencies = [
  "gnx-contracts",
  "serde",
@@ -80,7 +88,11 @@ dependencies = [
 
 [[package]]
 name = "gnx-contracts"
+<<<<<<< HEAD
 version = "0.2.42"
+=======
+version = "0.2.41"
+>>>>>>> origin/master
 dependencies = [
  "serde",
  "serde_json",
@@ -89,7 +101,11 @@ dependencies = [
 
 [[package]]
 name = "gnx-service"
+<<<<<<< HEAD
 version = "0.2.42"
+=======
+version = "0.2.41"
+>>>>>>> origin/master
 dependencies = [
  "gnx-contracts",
  "serde",

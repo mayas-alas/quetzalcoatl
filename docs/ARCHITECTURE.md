@@ -1,9 +1,17 @@
+<<<<<<< HEAD
 ﻿# Architecture
 
 Quetzalcoatl is a Windows control plane around one managed Podman Machine. The
 workspace contains exactly four Cargo packages. Setup owns installation, upgrade
 and repair; the service owns reconciliation; CLI and tray are bounded Named Pipe
 clients.
+=======
+# Architecture
+
+Quetzalcoatl is a Windows control plane around one managed Podman Machine. Setup
+owns installation, upgrade and repair; the service owns reconciliation; CLI and
+tray are bounded Named Pipe clients.
+>>>>>>> origin/master
 
 ```text
 QuetzalcoatlSetup.exe
@@ -19,7 +27,11 @@ gnx / tray -- Named Pipe schema 2 --> gnx-service
                                                `-- Proxmox
 ```
 
+<<<<<<< HEAD
 ## Workspace packages
+=======
+The workspace has exactly four packages:
+>>>>>>> origin/master
 
 | Path | Responsibility |
 |---|---|
@@ -32,8 +44,11 @@ gnx / tray -- Named Pipe schema 2 --> gnx-service
 vendor storage. Application sequencing belongs in `application/`, rules and closed
 types in `domain/`, and operating-system/process adapters in `infrastructure/`.
 
+<<<<<<< HEAD
 ## Service lifecycle
 
+=======
+>>>>>>> origin/master
 The service lifecycle is: host profile and WSL, pinned Podman Machine, Fedora/KVM,
 locked payload, protected configuration, Tailscale identity and role, local PVE
 readiness, fixed HTTPS Serve route, controller creation or bounded member join, then
@@ -43,6 +58,7 @@ restart.
 
 The native tray intentionally adds no localhost UI, listener, port or Tauri runtime.
 
+<<<<<<< HEAD
 ## Platform foundation
 
 The platform foundation extends only a READY controller. OpenTofu owns PVE
@@ -50,6 +66,13 @@ resources; the locked GNX reconciler streams one fixed host operation through
 `pct exec <known-vmid> -- /bin/sh -s` and then applies fixed Compose definitions.
 Every LXC host is prepared independently before Garage, Forgejo and the runner are
 ordered by their real dependencies.
+=======
+The platform foundation extends only a READY controller. OpenTofu owns PVE
+resources; the locked GNX reconciler streams one fixed host operation through
+`pct exec ... sh -s` and then applies fixed Compose definitions. Every LXC host is
+prepared independently before Garage, Forgejo and the runner are ordered by their
+real dependencies.
+>>>>>>> origin/master
 
 `gnx configure platform` stores a dedicated service-enrollment credential without
 rewriting node, tailnet or PVE configuration. Each service uses a Tailscale
@@ -63,6 +86,7 @@ fixed `gnx-admin` identity is shared as a closed IPC constant; its credential is
 owned by the controller, verified against Forgejo before disclosure and rotated
 through the loopback API. The service enforces elevated local-administrator access,
 and the remote path remains a fixed runtime-agent operation with bounded stdin.
+<<<<<<< HEAD
 
 ## Runtime layout
 
@@ -424,3 +448,5 @@ then activates.
   secrets, Compose, `.env`, OCI images, logs, argv and OpenTofu state.
 - Images use immutable digests; mutable tags are prohibited.
 - `installer/build.ps1` remains the release entry point.
+=======
+>>>>>>> origin/master
