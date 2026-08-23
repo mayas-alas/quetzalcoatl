@@ -1,0 +1,33 @@
+
+Hash                                                             Path                                                                                              
+----                                                             ----                                                                                              
+F790DA4543DA51532BEC36783C69ECB72BE3A0A9A47F510D7FFA292DC1F5060D C:\Users\mayas\quetzalcoatl\release\artifacts\payload.lock.json                                   
+4EE1EA2B63BE85DF3D3C01EFAC9776546AE15006239350CA60924D4FB9A0F93A C:\Users\mayas\quetzalcoatl\release\artifacts\Quetzalcoatl.msi                                    
+408EA213BC63B5292E229EC706573A88CF829B52093083AAC3B4292E6C645758 C:\Users\mayas\quetzalcoatl\release\artifacts\QuetzalcoatlSetup.exe                               
+09B1C92B1518149EDA28D3A680625EFD527DBFE613BE065E3AD5FBB5614BA273 C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\manifest.toml                      
+463CF8D74816A3C9A84BFEF7BD6A74AF85E2F77834DDA56B04B154B8E42F9C78 C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\platform.lock.json                 
+54EEEE86C09294BC4A4441BBDB2929B8F19CFD024B51B105D8648E23665F8E41 C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\operations\deploy                  
+3A185EF53FD31B25170BAB70ED9E57753A54493AA04A18105A6365B4FF810E4D C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\operations\discover-releases.py    
+B9147333D6624339BCA996D43C9C734840D225D180A7B648AEA91A877332339A C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\operations\forgejo-admin           
+0C67E2743C6DC2580B494C27EB79646D5CF81C41AA9FABD950EDCBB85D8CFE8D C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\operations\lxc-host                
+71BD9D86528EF0FEEF2BF324D1EBDFF9991739D8E4616BEB907D348BC78666CA C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\operations\lxc-service             
+98F8C68800DA609F0462EE3BCDD82194E5414C41C4F064179677274EF89F001F C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\operations\reconcile               
+2E3E9E33420F361D1286C57B19B17F03357A666889D12C5EE764371CE692EA16 C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\operations\verify-release.py       
+23983F412A84BFFBF2CF487CBE4146EE97B550712BB23FE3F5EB69D6DC88CCCA C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\services\forgejo\compose.yml       
+1D2995497F7AF4A342108E7511A6866BF85BE95496FE38F4DC4C67C9CE7EF16F C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\services\forgejo\serve.json        
+9E1E4DF3C2662CEE1C2393A056785EED770242410444499237BA30FCA91330BF C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\services\garage\compose.yml        
+6F38548C26ADD2AFA47BE2D03EE6D0DA0A374247D17350A73F0E8FD535CBB742 C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\services\garage\serve.json         
+D2ADB310B140939147C699BE0C83D03163D502FC6B82997E2AB3C4D0CB952B50 C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\services\runner\compose.yml        
+D9719C1BF5E4241463D24D5750494989C51837DCD05E8FAF133FB5167183067E C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\services\service\compose.yml       
+800BAE3B5F58258489DCDA6DD91E41F4E29372D24141328DFADBA4076566EBAD C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\services\service\serve.json        
+4F90534942016B26A1A7500132CF453F449FF44893D070C263024ED9FE2BA1A9 C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\tofu\foundation\.terraform.lock.hcl
+00A8F1F3CC5FD517DDC4359B910BC12C7C34D5E74E5F429FBCCB4C812F77A8A3 C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\tofu\foundation\entrypoint         
+25ABBF52E5D7F804FDB732AFFD23A80E4BCFBDC072E28DAD23473E0127BAE063 C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\tofu\foundation\main.tf            
+EB956F102E30F3F15189D95761C996300C958008A30204CB62E2A6DF210A1E92 C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\tofu\foundation\versions.tf        
+4F90534942016B26A1A7500132CF453F449FF44893D070C263024ED9FE2BA1A9 C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\tofu\service\.terraform.lock.hcl   
+5A8607BF17F3CCC7EA914DC80DAF534A7C667D6527F24561D1FA5FB305FFE1EC C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\tofu\service\entrypoint            
+1F85FD1D1E43F3D9F325B4715BB30CC3727DEE2ECA5FEF9BF36AD4C44EAA3526 C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\tofu\service\main.tf               
+E6AB66EEDC402A865316E592B5A8C4FFAAA35DDA78E4C6D8F7610F93365EC113 C:\Users\mayas\quetzalcoatl\release\artifacts\platform-payload\tofu\service\versions.tf           
+
+
+
