@@ -53,7 +53,44 @@ Evidence is recorded only after execution. Historical release notes belong in
 | QA trust distribution | passed | before Setup, neither new certificate existed in LocalMachine; after Setup, the root exists exactly once in `LocalMachine\Root` and the leaf exactly once in `LocalMachine\TrustedPublisher`, both public-only; CLI/tray/service/wrapper signatures are `Valid` under the leaf |
 | Forgejo admin show/reset | not exercised | source and packaged contracts pass; this QA signing change restored physical CLI execution but did not disclose or rotate the administrator credential |
 
-The installer-driven QA trust objective passes end to end. Public release
-acceptance remains separately blocked because Smart App Control enforcement
-requires reputation or a publisher represented by Windows AuthRoot; the QA root is
-intentionally local and production preprocessing removes it.
+## 0.2.42 build and source-gate closure (Agent C)
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Validator inventory | passed | all six source validators (`repository.py`, `contracts.py`, `remote_execution.py`, `runtime.py`, `platform.py`, `installer.py`) report `ok`; `tools/check.ps1 -SourceOnly` reaches the Rust gate. |
+| Validator taxonomy fix | applied | `tools/validation/repository.py` declares `TROUBLESHOOTING.md` (added 2026-08-22) in `EXPECTED_DOCS` and excludes `.kilo` plus `.AGENTS/agentA` from the inventory scan; the .AGENTS live inventory filter now ignores the `agentA/` working area while still rejecting any other unexpected file. |
+| Release manifest supersession | applied | `release/manifest.toml` advanced to `version = "0.2.42"`, `release_timestamp_utc = "2026-08-22T21:24:00Z"`; `previous_product_code`/`previous_package_code`/`previous_bundle_id` now point at the actual 0.2.41 package (not stale 0.2.40 GUIDs); `bundle_upgrade_code` re-pinned to `{10B764B2-36AE-4911-A8C8-2F1A2A963769}` after a silent drift to a near-identical but distinct GUID was caught; 0.2.42 product/package/bundle GUIDs rotated to non-colliding values. |
+| Contract version advance | applied | `tools/validation/contracts.py` advances the pinned `version` to `0.2.42` and the supersession assertion to `0.2.42 does not identify the superseded 0.2.41 QA package`. |
+| QA publisher subject correction | applied | `installer/create-qa-signing-certificate.ps1` and `installer/modules/signing.ps1` no longer emit the malformed `CN=GNX Labs. QA Publisher` (extra period); the closed publisher subject is now exactly `CN=GNX Labs QA Publisher`, matching the build-script gate and the evidence table. |
+| 0.2.42 Setup SHA-256 | passed | `FAC7E1AD5A7B625CFC9A17303BD439F72AB5AB7072B151DA7C3367438C4E0697` (unsigned development artifact from `installer/build.ps1 -AllowUnsigned`; not releasable). |
+| 0.2.42 MSI SHA-256 | passed | `0EF9124C12DC1ABD55209EBACDF43DE6CE7FE9E03E45156A115D1497F9D02A3F` (unsigned development artifact; not releasable). |
+| Closed identity/version audit | passed | MSI reports `ProductVersion=0.2.42`, `ProductCode={F43403AB-A35B-4127-9256-FE79AA4FC00C}`, `UpgradeCode={47D5BD44-D061-407B-913B-47D17EC3BEA9}`, `PackageCode={11794170-00CF-4232-9D0E-9B99AB7706A7}`; Burn `Bundle/@UpgradeCode` is `{10B764B2-36AE-4911-A8C8-2F1A2A963769}`. |
+| Release artifact signature | passed, not releasable | `installer-validation` accepts the unsigned 0.2.42 development build; production trust still requires `Test-CodeSigningCertificateTrust -RequireAuthRoot $true` and the pinned `GNX Labs` chain. |
+
+### Pre-existing source-gate blockers (not introduced by the 0.2.42 build lane)
+
+| Blocker | Finding | Lane |
+|---|---|---|
+| Environment-dependent test | `infrastructure::podman::tests::check_docker_pipe_contention_missing_pipe` fails without a Docker daemon on this host (recorded since the prior 0.2.42 session); blocks `cargo test --workspace`. | Agent C / host env |
+| Physical execution | A freshly installed 0.2.42 has not been exercised on this host; the unsigned artifact is built but the elevated Setup run, upgrade from 0.2.41, repair and `gnx status` confirmation are still pending. | Coordinator / Agent C |
+
+## 0.2.42 rename restart fix (Agent B)
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Diagnostic probe | passed | `podman machine ssh --username root quetzalcoatl` journal (2026-08-22 18:57): `gnx-tailscale-enroll.service: Failed with result 'exit-code'` → `tailscaled.service: Job/start failed with result 'dependency'` → `Dependency failed for tailscaled.service`. Confirms the sticky-failed oneshot dependency blocks the sidecar restart. Both units are inactive/dead after the fresh machine boot. |
+| Root cause | confirmed | `runtime/containers/tailscaled.container:3` `Requires=gnx-node-pod.service gnx-tailscale-enroll.service`; `rename`'s `restart_tailscale` never cleared the failed enrollment state unlike `runtime/operations/start-tailscale.sh:3`. |
+| Fix | applied | `runtime/commands/gnx-tailscale-rename` `restart_tailscale()` now runs `systemctl reset-failed gnx-tailscale-enroll.service tailscaled.service` before both strategies, refuses to re-enroll without persistent `tailscaled.state`, and dumps `journalctl -r -n 40 -u <unit>` on failure. Success keeps `TAILSCALE_HOSTNAME=updated`. |
+| Payload lock | applied | `runtime/payload.lock.json` `commands/gnx-tailscale-rename` version `4 → 5`, SHA-256 `0e207953…9be9d4b → a76fda0470a22b7ba5e53991c0b4e048dd4547d3344248a68e04ad0a51ae8905`; all other entries byte-identical. `runtime_assets.rs` already lists the file unchanged. |
+| Shell syntax | passed | `bash -n runtime/commands/gnx-tailscale-rename`; `payload.lock.json` parses as JSON. |
+| Change-scoped validators | passed | `runtime.py` ok (recomputes new payload SHA/mode/tree); `remote_execution.py` ok (closed-argv `tailscale-rename` intact). |
+
+### Pre-existing source-gate blockers (not introduced by this change)
+
+| Blocker | Finding | Lane |
+|---|---|---|
+| Version validator stale | `tools/validation/contracts.py:29` hardcodes release version `0.2.41`, but the tree is intentionally `0.2.42` (`Cargo.toml:12`, `release/manifest.toml:2`) per this delivery; `contracts.py` fails until advanced. | Coordinator / Agent A |
+| Documentation taxonomy | `docs/TROUBLESHOOTING.md` (added 2026-08-22) is not in `tools/validation/repository.py` `EXPECTED_DOCS`; `repository.py` fails with `extra=['TROUBLESHOOTING.md']`. | Coordinator / Agent C |
+| Environment-dependent test | `check_docker_pipe_contention_missing_pipe` fails without a Docker daemon on this host (recorded in the prior 0.2.42 session); blocks `cargo test`. | Agent C / host env |
+
+`tools/check.ps1 -SourceOnly` therefore does not yet run green; the three failures above are recorded as blockers for the closing lane rather than mutated out of scope. The runtime fix itself is complete and its change-scoped validators pass. Physical `gnx status` verification on a freshly installed 0.2.42 remains pending the Agent C build + install lane.

@@ -1,0 +1,6 @@
+/target/
+/graphify-out/
+/.wix/
+
+__pycache__/
+*.pyc

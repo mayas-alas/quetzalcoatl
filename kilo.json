@@ -1,0 +1,30 @@
+﻿{
+  "$schema": "https://app.kilo.ai/config.json",
+  "model": "openai/auto",
+  "small_model": "openai/auto",
+  "provider": {
+    "openai": {
+      "models": {
+        "auto": { "name": "Auto (FreeLLMAPI)", "tool_call": true, "limit": { "context": 1048576, "output": 8192 } },
+        "fusion": { "name": "Fusion", "tool_call": true, "limit": { "context": 1048576, "output": 8192 } },
+        "free-router": { "name": "Free Router", "tool_call": true, "limit": { "context": 200000, "output": 8192 } }
+      }
+    },
+    "anthropic": {
+      "models": {
+        "auto": { "name": "Auto (Claude-compatible /v1/messages)", "tool_call": true, "limit": { "context": 1048576, "output": 8192 } }
+      }
+    },
+    "openrouter": {
+      "whitelist": ["openrouter/auto"],
+      "models": {
+        "openrouter/auto": { "name": "OpenRouter Auto (router)", "tool_call": true, "limit": { "context": 1048576, "output": 8192 } }
+      }
+    }
+  },
+  "indexing": {
+    "enabled": false,
+    "provider": "openai-compatible",
+    "model": "auto"
+  }
+}
