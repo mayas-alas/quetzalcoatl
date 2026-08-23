@@ -22,6 +22,31 @@ Then read only the product documentation relevant to the claimed deliverable.
 - Record blockers, handoffs and exact validation evidence.
 - Keep `installer/build.ps1` as the release entry point.
 
+## Development flow
+
+GitHub Issues and pull requests are the execution layer; `.AGENTS/*` remains the
+living contract. One issue maps to one deliverable lane; one PR closes one issue.
+
+1. Open an issue from `.github/ISSUE_TEMPLATE/` (deliverable, blocker or bug)
+   and mirror new blockers into `.AGENTS/TRACKER.md`.
+2. Create branch `wstream/<lane>/<issue>-<slug>` from `master`.
+3. Work only inside the lane's owned paths (`.AGENTS/WORKSTREAMS.md`).
+4. Open a PR using the handoff template; record exact validation evidence
+   (`tools/check.ps1 -SourceOnly` or the change-scoped validators).
+5. A different agent reviews and approves; the author cannot self-approve.
+6. Merge to `master` only via PR. Update `.AGENTS/TRACKER.md` status and
+   `.AGENTS/EVIDENCE.md` inside the same PR.
+7. Release stays local: `installer/build.ps1 -QaSigning` never runs on hosted CI
+   (SCOPE excludes hosted CI on another Windows host) and private keys never
+   enter the repository.
+
+Local agent fleet (`.kilo/agent/`, git-ignored): `maya`, `pi` and `pi-claude`
+are primary assistants on different backends; `pi2` orchestrates and delegates;
+`pi-embeddings` and `troubleshoot` are subagents. Backend differences do not
+create ownership lanes — lane ownership comes only from
+`.AGENTS/WORKSTREAMS.md`. A reviewer is any different agent identity,
+independent of model.
+
 ## Remote execution
 
 Read `docs/CONTRACTS.md` before changing any process that crosses into Podman

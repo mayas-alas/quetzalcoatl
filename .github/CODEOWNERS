@@ -1,0 +1,19 @@
+# Lane ownership (documentation only until a review team exists).
+# Add owner patterns when a maintainers team is available, e.g.:
+#   @mayas-alas/quetzalcoatl-maintainers
+#
+# Agent A - product contract
+#   apps/gnx/**, crates/gnx-contracts/**, root Cargo/release metadata,
+#   README.md, product architecture/contracts docs
+#
+# Agent B - platform runtime
+#   apps/gnx-service/**, runtime/**, platform bundle source,
+#   runtime compatibility tests
+#
+# Agent C - delivery assurance
+#   apps/gnx-bootstrap/**, installer/**, tools/**,
+#   operational/validation docs
+#
+# Coordinator-only
+#   .AGENTS/**, AGENTS.md, Cargo.lock, CHANGELOG.md, .github/**,
+#   cross-lane integration, physical host mutations, final evidence
