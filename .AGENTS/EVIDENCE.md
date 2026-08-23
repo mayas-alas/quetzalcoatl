@@ -131,6 +131,7 @@ intentionally local and production preprocessing removes it.
 | `1f60a58` | Agent B | fix(runtime): correct gnx-tailscale-rename SHA-256 in payload.lock.json |
 | `f1edfc9` | Coordinator | chore(coord): finalize TRACKER for 0.2.42 pub + service lanes |
 | `910bfa5` | Coordinator | docs(coord): add coordinator delegation guide |
+| `49d7804` | Coordinator | docs: agent workflow guide, workstream-claim template, architecture resolution |
 
 ### Preserved invariants (publication)
 
@@ -147,9 +148,10 @@ intentionally local and production preprocessing removes it.
 | Gate | Result | Evidence |
 |---|---|---|
 | Merge markers resolved | passed | Three `<<<<<<<`/`>>>>>>>` blocks committed on `master` (`.AGENTS/README.md`, `Cargo.toml`, `release/manifest.toml`) were forward-fixed to the `0.2.42` identities in `1814f5b` (no history rewrite); `cargo metadata --no-deps` and Python `tomllib` both parse the repaired tree. |
-| Issue/PR execution layer | added | `AGENTS.md` "Development flow" plus `.github/` (CODEOWNERS, `ISSUE_TEMPLATE/{deliverable,blocker,bug}.md`, `PULL_REQUEST_TEMPLATE.md`) committed in `521f632`. |
-| Source validators | passed | All six validators exit 0 on `master`: `repository.py` (`.AGENTS` taxonomy includes `COORDINATOR.md` and `SPEC.md`; platform services inventory matches the 11 expected files), `contracts.py` (0.2.42 supersession), `remote_execution.py`, `runtime.py` (payload SHA reconciled in `1f60a58`), `platform.py` (freellmapi/omniroute service roots present, 29 locked files), `installer.py`. |
+| Issue/PR execution layer | added | `AGENTS.md` "Development flow" plus `.github/` (CODEOWNERS, `ISSUE_TEMPLATE/{deliverable,blocker,bug,workstream-claim}.md`, `PULL_REQUEST_TEMPLATE.md`) committed in `521f632`. |
+| Source validators | passed | All six validators exit 0 on `master`: `repository.py` (`.AGENTS` taxonomy includes `COORDINATOR.md` and `SPEC.md`; platform services inventory matches the 11 expected files; `EXPECTED_DOCS` includes `AGENT_WORKFLOW.md`), `contracts.py` (0.2.42 supersession), `remote_execution.py`, `runtime.py` (payload SHA reconciled in `1f60a58`), `platform.py` (freellmapi/omniroute service roots present, 29 locked files), `installer.py`. |
 | Feature source inventory | passed | `platform/services/freellmapi/{compose.yml,serve.json}` and `platform/services/omniroute/{compose.yml,serve.json}` plus `platform/tofu/service/{freellmapi,omniroute}.tf` and manifest/digest entries are committed (`bca05d8`, `e574f89`, `6fdf35b`); compose follows the canonical forgejo sidecar pattern with per-service `tag:quetzalcoatl-<service>` and digest-pinned images. |
+| Agent workflow docs | added | `docs/AGENT_WORKFLOW.md` and `docs/README.md` updated with agent fleet table, delegation flow, issue tracking, branch conventions, and blocker handling; referenced from `.AGENTS/WORKSTREAMS.md`. Commitment: `49d7804`. |
 | Push state | passed | `origin/master` advanced `f1edfc9 → 521f632`; the public tree no longer contains merge markers. |
 
 Remaining gates are recorded as blockers in `TRACKER.md` (`PHY-1` physical LXC/Tailscale execution, `OCI-1` image publication by the runner lane, `SEC-1` rotation of the FreeLLMAPI key leaked historically in `edc28d4`).
