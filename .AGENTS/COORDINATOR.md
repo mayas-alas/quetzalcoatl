@@ -133,3 +133,38 @@ Known failures:
 Residual risk:
 Next dependency:
 ```
+
+## 8. Findings-to-Issues flow
+
+Discoveries during execution must be persisted via `.github/ISSUE_TEMPLATE/finding.md`
+and mirrored into the `.AGENTS/TRACKER.md` **Workstream findings log**.
+
+When a subagent or the coordinator encounters a finding:
+
+1. **Open a finding issue** using `gh issue create --title "[finding] ..." --template finding.md`
+   - Fill: discovered-by, context, where, what observed, reproducer, expected vs actual
+2. **The coordinator triages** into one of:
+   - `deliverable` — new feature work (→ `.AGENTS/SPEC.md` section + branch `wstream/<lane>/<n>-<slug>`)
+   - `correction` — cleanup/dead-code/docs (→ direct commit by owning lane)
+   - `blocker` — invariant at risk or physical gate (→ active blockers table, must be resolved before proceeding)
+   - `wontfix` / `duplicate` — explicitly closed
+3. **Add a row to the Findings log** in `.AGENTS/TRACKER.md` with: Date, Agent, Workstream, Finding summary, Lane, Issue #, TRACKER row, Triage.
+4. **Link the issue number** in the Board/Blockers/Resolved table rows.
+5. **Close the finding issue** when the associated TRACKER row reaches `done` (coordinator does this after verification).
+
+This ensures every corrective observation is:
+- **Auditable** over time (the log grows, never overwrites)
+- **Actionable** (assigned lane + subagent)
+- **Verifiable** (validator output in PR + evidence)
+- **Persistent** (survives across sessions in both `.AGENTS/` and GitHub)
+
+**Field mapping** (finding.md → TRACKER.md):
+| Issue field | TRACKER column |
+|---|---|
+| Date (UTC) | Date (UTC) |
+| Discovered by | Agent |
+| Workstream | Workstream |
+| Where / What | Finding (summarized) |
+| Triage → Lane | Lane |
+| Issue number | Issue |
+| Triage reference | TRACKER row + Triage |

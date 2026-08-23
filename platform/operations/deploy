@@ -121,91 +121,123 @@ while IFS= read -r record || [ -n "$record" ]; do
   IFS='|'
   set -- $release
   IFS=$old_ifs
-  [ "$#" -eq 7 ] || exit 65
+  [ "$#" -eq 5 ] || exit 65
   slug=$1
-  hostname=$2
-  vmid=$3
-  source=$4
-  image=$5
-  port=$6
-  health_path=$7
+  source=$2
+  image=$3
+  port=$4
+  health_path=$5
   unset release
-  [ "$port" = 8080 ] && [ "$health_path" = / ]
+  [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || exit 64
+  case "$health_path" in /|/[a-z0-9._/-]*) ;; *) exit 64 ;; esac
+  [ "${#health_path}" -le 128 ] || exit 64
+  service_name=${source#*/}
 
-  service_state="$state_root/tofu/services/$slug"
-  import_vmid="$runtime/import-$slug"
-  tofu_environment="$runtime/tofu-environment-$slug"
-  install -d -m 0700 "$service_state"
-  install -m 0644 "$bundle/tofu/service/main.tf" "$service_state/main.tf"
-  install -m 0644 "$bundle/tofu/service/versions.tf" "$service_state/versions.tf"
-  install -m 0644 "$bundle/tofu/service/.terraform.lock.hcl" "$service_state/.terraform.lock.hcl"
-  install -m 0755 "$bundle/tofu/service/entrypoint" "$service_state/entrypoint"
-
-  : > "$import_vmid"
-  if podman exec gnx-proxmox pct config "$vmid" > "$runtime/pct-$vmid" 2>/dev/null; then
-    actual=$(sed -n 's/^hostname: //p' "$runtime/pct-$vmid")
-    [ "$actual" = "$hostname" ] || {
-      printf 'VMID %s belongs to %s, expected %s\n' "$vmid" "$actual" "$hostname" >&2
-      exit 66
-    }
-    printf '%s\n' "$vmid" > "$import_vmid"
-  fi
-  chmod 0400 "$import_vmid"
-
-  printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_REGION=garage\nAWS_ENDPOINT_URL_S3=https://gnx-garage.%s\n' \
-    "$(cat "$secret_root/tofu-s3-access-key")" \
-    "$(cat "$secret_root/tofu-s3-secret-key")" \
-    "$tailnet" > "$tofu_environment"
-  chmod 0400 "$tofu_environment"
-
-  if ! podman run --rm \
-    --pod gnx-node \
-    --security-opt label=disable \
-    --volume "$service_state:/workspace" \
-    --volume "$pve_password:/run/secrets/pve-password:ro" \
-    --volume "$import_vmid:/run/config/import-vmid:ro" \
-    --workdir /workspace \
-    --env-file "$tofu_environment" \
-    --env TF_REGISTRY_DISCOVERY_RETRY=5 \
-    --env TF_PROVIDER_DOWNLOAD_RETRY=5 \
-    --env TF_REGISTRY_CLIENT_TIMEOUT=20 \
-    --env "TF_VAR_node_name=$node_name" \
-    --env "TF_VAR_service_slug=$slug" \
-    --env "TF_VAR_service_hostname=$hostname" \
-    --env "TF_VAR_service_vmid=$vmid" \
-    --env "GNX_TAILNET=$tailnet" \
-    --entrypoint /workspace/entrypoint \
-    "$tofu_image" >> "$run_log" 2>&1; then
-    exit 67
+  policy="$bundle/services/$service_name/policy.json"
+  if [ -f "$policy" ]; then
+    instances=$(jq -r '.instances' "$policy")
+    vm_id_base=$(jq -r '.vm_id_base' "$policy")
+    tag=$(jq -r '.tag' "$policy")
+    policy_port=$(jq -r '.port' "$policy")
+    policy_health=$(jq -r '.health_path' "$policy")
+    compose_template="$service_name"
+    case "$instances" in ''|*[!0-9]*) exit 64 ;; esac
+    [ "$instances" -ge 1 ] && [ "$instances" -le 10 ] || exit 64
+    case "$vm_id_base" in ''|*[!0-9]*) exit 64 ;; esac
+    [ "$vm_id_base" -ge 300 ] && [ "$vm_id_base" -le 7999 ] || exit 64
+    case "$tag" in tag:quetzalcoatl-[a-z0-9][a-z0-9-]*) ;; *) exit 64 ;; esac
+    [ "${#tag}" -le 48 ] || exit 64
+    [ "$port" = "$policy_port" ] && [ "$health_path" = "$policy_health" ] || exit 64
+  else
+    instances=1
+    vm_id_base="$vmid"
+    tag='tag:quetzalcoatl-service'
+    compose_template='service'
+    [ "$port" = 8080 ] && [ "$health_path" = / ] || exit 64
   fi
 
-  if ! guest_script "$vmid" "$bundle/operations/lxc-host" >> "$run_log" 2>&1; then
-    exit 68
-  fi
-  app_dir="/opt/quetzalcoatl/services/$slug"
-  guest_directory "$vmid" "$app_dir" 0755
-  guest_directory "$vmid" "$app_dir/serve" 0755
-  guest_put "$vmid" "$bundle/services/service/compose.yml" "$app_dir/compose.yml" 0644
-  guest_put "$vmid" "$bundle/services/service/serve.json" "$app_dir/serve/serve.json" 0644
+  instance=1
+  while [ "$instance" -le "$instances" ]; do
+    instance_hostname="gnx-${slug}-${instance}"
+    instance_vmid=$((vm_id_base + instance - 1))
+    instance_slug="${slug}-${instance}"
 
-  service_input="$runtime/service-$slug.input"
-  {
-    printf '%s\n' 1 service "$hostname" "$tailnet"
-    cat "$tailscale_key"
-    printf '\n%s\n%s\n' "$slug" "$image"
-    cat "$secret_root/forgejo-registry-token"
-    printf '\n'
-  } > "$service_input"
-  chmod 0400 "$service_input"
-  guest_input "$vmid" "$service_input"
-  if ! guest_script "$vmid" "$bundle/operations/lxc-service" >> "$run_log" 2>&1; then
-    exit 69
-  fi
+    service_state="$state_root/tofu/services/$instance_slug"
+    import_vmid="$runtime/import-$instance_slug"
+    tofu_environment="$runtime/tofu-environment-$instance_slug"
+    install -d -m 0700 "$service_state"
+    install -m 0644 "$bundle/tofu/service/main.tf" "$service_state/main.tf"
+    install -m 0644 "$bundle/tofu/service/versions.tf" "$service_state/versions.tf"
+    install -m 0644 "$bundle/tofu/service/.terraform.lock.hcl" "$service_state/.terraform.lock.hcl"
+    install -m 0755 "$bundle/tofu/service/entrypoint" "$service_state/entrypoint"
 
-  curl --fail --silent --show-error --max-time 20 \
-    "https://$hostname.$tailnet/" >/dev/null
-  printf 'SERVICE_RELEASE=ready;SOURCE=%s;VMID=%s;URL=https://%s.%s/\n' \
-    "$source" "$vmid" "$hostname" "$tailnet" >> "$run_log"
+    : > "$import_vmid"
+    if podman exec gnx-proxmox pct config "$instance_vmid" > "$runtime/pct-$instance_vmid" 2>/dev/null; then
+      actual=$(sed -n 's/^hostname: //p' "$runtime/pct-$instance_vmid")
+      [ "$actual" = "$instance_hostname" ] || {
+        printf 'VMID %s belongs to %s, expected %s\n' "$instance_vmid" "$actual" "$instance_hostname" >&2
+        exit 66
+      }
+      printf '%s\n' "$instance_vmid" > "$import_vmid"
+    fi
+    chmod 0400 "$import_vmid"
+
+    printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_REGION=garage\nAWS_ENDPOINT_URL_S3=https://gnx-garage.%s\n' \
+      "$(cat "$secret_root/tofu-s3-access-key")" \
+      "$(cat "$secret_root/tofu-s3-secret-key")" \
+      "$tailnet" > "$tofu_environment"
+    chmod 0400 "$tofu_environment"
+
+    if ! podman run --rm \
+      --pod gnx-node \
+      --security-opt label=disable \
+      --volume "$service_state:/workspace" \
+      --volume "$pve_password:/run/secrets/pve-password:ro" \
+      --volume "$import_vmid:/run/config/import-vmid:ro" \
+      --workdir /workspace \
+      --env-file "$tofu_environment" \
+      --env TF_REGISTRY_DISCOVERY_RETRY=5 \
+      --env TF_PROVIDER_DOWNLOAD_RETRY=5 \
+      --env TF_REGISTRY_CLIENT_TIMEOUT=20 \
+      --env "TF_VAR_node_name=$node_name" \
+      --env "TF_VAR_service_slug=$instance_slug" \
+      --env "TF_VAR_service_hostname=$instance_hostname" \
+      --env "TF_VAR_service_vmid=$instance_vmid" \
+      --env "GNX_TAILNET=$tailnet" \
+      --entrypoint /workspace/entrypoint \
+      "$tofu_image" >> "$run_log" 2>&1; then
+      exit 67
+    fi
+
+    if ! guest_script "$instance_vmid" "$bundle/operations/lxc-host" >> "$run_log" 2>&1; then
+      exit 68
+    fi
+    app_dir="/opt/quetzalcoatl/services/$slug"
+    guest_directory "$instance_vmid" "$app_dir" 0755
+    guest_directory "$instance_vmid" "$app_dir/serve" 0755
+    guest_put "$instance_vmid" "$bundle/services/$compose_template/compose.yml" "$app_dir/compose.yml" 0644
+    guest_put "$instance_vmid" "$bundle/services/$compose_template/serve.json" "$app_dir/serve/serve.json" 0644
+
+    service_input="$runtime/service-$instance_slug.input"
+    {
+      printf '%s\n' 1 service "$instance_hostname" "$tailnet"
+      cat "$tailscale_key"
+      printf '\n%s\n%s\n%s\n' "$instance_slug" "$image" "$tag"
+      cat "$secret_root/forgejo-registry-token"
+      printf '\n'
+    } > "$service_input"
+    chmod 0400 "$service_input"
+    guest_input "$instance_vmid" "$service_input"
+    if ! guest_script "$instance_vmid" "$bundle/operations/lxc-service" >> "$run_log" 2>&1; then
+      exit 69
+    fi
+
+    curl --fail --silent --show-error --max-time 20 \
+      "https://$instance_hostname.$tailnet$health_path" >/dev/null
+    printf 'SERVICE_RELEASE=ready;SOURCE=%s;VMID=%s;URL=https://%s.%s%s\n' \
+      "$source" "$instance_vmid" "$instance_hostname" "$tailnet" "$health_path" >> "$run_log"
+    instance=$((instance + 1))
+  done
 done < "$records"
 
 rm -f -- "$pve_password" "$tailscale_key"

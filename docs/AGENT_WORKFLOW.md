@@ -29,6 +29,21 @@ from `.AGENTS/WORKSTREAMS.md`.
 3. Create a branch `wstream/<lane>/<issue>-<slug>` from `master`.
 4. Update `.AGENTS/TRACKER.md` board status to `active` with the branch name.
 
+### Feature → Issue → Spec → Branch flow
+
+For **many features** that must be audited and fitted into workstreams:
+
+1. **Open a `deliverable.md` issue** for each feature (`gh issue create --template deliverable.md`).
+2. **Link to / create a `.AGENTS/SPEC.md` section** — the issue references the
+   spec doc that defines acceptance criteria, contract invariants, and owned paths.
+3. **Coordinator assigns lane + subagent** per `WORKSTREAMS.md` ownership.
+4. **Subagent branches** `wstream/<lane>/<issue>-<slug>` from `master`.
+5. **Implement → validate → PR** (see handoff template below).
+
+Use `.github/ISSUE_TEMPLATE/finding.md` for discoveries during execution that
+need triage (correction/blocker/deliverable). See `.AGENTS/COORDINATOR.md §8`
+for the full findings-to-issues flow.
+
 ### Executing within a lane
 
 - Work **only** inside the lane's owned paths (listed in `.AGENTS/WORKSTREAMS.md`).

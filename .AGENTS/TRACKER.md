@@ -26,7 +26,7 @@
 | PHY | review | 0.2.40 to 0.2.41 upgrade and 0.2.41 repair exited 0; controller and platform returned READY; physical 0.2.42 + FreeLLMAPI/OmniRoute LXC deployment not yet executed |
 | SIG | done | ten-year QA root, renewable publisher and installer-driven machine trust passed physically; 0.2.42 QA build adopted the closed `CN=GNX Labs QA Publisher` subject; production still requires Windows AuthRoot (B40-1) |
 | PUB | done | coordinator closing lane completed 2026-08-23: QA-signed 0.2.42 build, per-agent commit history, `mayas-alas/quetzalcoatl` repo pushed, `v0.2.42-qa` release uploaded |
-| FRE | blocked | source definitions committed and validators pass, but the spec (VMIDs 300-303, `gnx-freellmapi-{1,2}` names, 2 instances per service, per-service Tailscale tags/ports) is incompatible with the locked SVC contract; the committed templates are not wired into the runtime deployment path (see FRE-2) |
+| FRE | active | FRE-2 resolved: single `main.tf` service root with VMID 300-7999, per-service `policy.json` for multi-instance deployment, deploy script updated for per-instance loop with `gnx-<slug>-<instance>` hostnames and per-service Tailscale tags. FreeLLMAPI (2 instances, VMID 300-301, tag:quetzalcoatl-freellmapi) and OmniRoute (2 instances, VMID 302-303, tag:quetzalcoatl-omniroute) wired through schema-2 release declarations. All 6 validators pass. OCI-1 remains (images not yet published by runner lane). |
 | RTM | done | `runtime.py` validator now passes: corrected `gnx-tailscale-rename` SHA-256 in `runtime/payload.lock.json` to `b9fce7fe...` matching on-disk command file |
 
 ## Active blockers
@@ -35,9 +35,25 @@
 |---|---|---|
 | B40-1 | Smart App Control Enforce blocks the self-signed payload: 0.2.27 was rejected before QA changed the policy from `1` to `0`; the apparent 0.2.33-0.2.38 success occurred while it was Off, and restored Enforce rejects 0.2.39/0.2.40. | Keep local signing for controlled QA, but obtain trusted signing for physical release acceptance; do not silently mutate the host policy. |
 | PHY-1 | Physical execution of 0.2.42 (install/upgrade/repair on this host) and the 4 new FreeLLMAPI/OmniRoute LXCs has not yet been exercised. | Coordinate elevated Setup run on the Proxmox controller; deploy the new services via the closed SVC path; verify Tailscale HTTPS access and health probes. |
-| FRE-2 | Spec/contract gap: the locked bundle deploys services only through `platform/operations/deploy` + `discover-releases.py`/`verify-release.py` + `tofu/service/main.tf` + `services/service/compose.yml` + `lxc-service`. That path enforces VMID 1000-7999, hostname `gnx-svc-<slug>`, one LXC per source repo, port 8080, health `/` and Tailscale tag `tag:quetzalcoatl-service`. The committed `tofu/service/{freellmapi,omniroute}.tf` (count=2, vm_id_start=300) and `services/{freellmapi,omniroute}/*` (ports 3001/20128, `/healthz`, per-service tags) are never referenced by any runtime operation — they are parallel transitional templates, which SCOPE prohibits. `platform.py`/`repository.py` assert file presence only, not wiring. | Explicit scope amendment required: either (a) extend the SVC contract to per-service templates (multi-instance, custom VMID range, per-service tags/ports) with validator + regression coverage, or (b) drop the spec deltas and deploy both services through the closed single-instance path (one LXC each, hash-derived VMID, generic compose, `tag:quetzalcoatl-service`) after OCI-1 publishes their images. |
+| FRE-2 | Spec/contract gap resolved (2026-08-23): adopted option (a) with scope amendment. Single `tofu/service/main.tf` root with extended VMID range 300-7999 and hostname pattern `gnx-<slug>-<instance>`. Per-service `policy.json` in `services/{freellmapi,omniroute}/` defines `instances`, `vm_id_base`, `tag`, `port`, `health_path`. `platform/operations/deploy` updated for per-instance loop reading policy, creating LXCs with `gnx-<slug>-<instance>` hostnames and per-service tags. `verify-release.py` schema 2 validates bounded port/health_path. `lxc-service` accepts `tag:quetzalcoatl-<service>`. All 6 validators pass. OCI-1 remains (images not yet published by runner lane). | Completed by maya (2026-08-23). Scope amendment recorded in `.AGENTS/SCOPE.md` and `.AGENTS/SPEC.md`. No transitional templates remain. |
 | SEC-1 | Plaintext FreeLLMAPI API key found in historical commit `edc28d4` inside `.AGENTS/TRACKER.md`; current tree is clean. Public history cannot be rewritten; forward-fix is redaction. Token rotation is the service owner's responsibility. |
 | OCI-1 | FreeLLMAPI/OmniRoute image digests are pinned in manifest/compose but no image has been built/published by the OCI runner lane. | Agent A / OCI lane: build both images via the Forgejo template + dedicated runner and publish by digest; then reconcile digests. |
+
+## Workstream findings log
+
+Discoveries recorded during execution. Each finding mirrors a GitHub issue
+(see `.github/ISSUE_TEMPLATE/finding.md`). Entries are appended chronologically.
+The `TRACKER row` column links the finding to the Board / Active blockers /
+Resolved blockers rows above.
+
+| Date (UTC) | Agent | Workstream | Finding | Lane | Issue | TRACKER row | Triage |
+|---|---|---|---|---|---|---|---|
+| 2026-08-23 | pi2 (subagent) | freellmapi-omniroute | Committed OpenTofu templates use `count=2` + `vm_id_start=300` and per-service compose ports (3001, 20128) / Talescale tags, which are incompatible with the locked SVC contract (single-instance, VMID 1000-7999, port 8080, `tag:quetzalcoatl-service`). Templates are never wired into `platform/operations/deploy` or `lxc-service`. | Coordinator | #6 | FRE-2 | scope amendment or drop spec deltas |
+| 2026-08-23 | maya | freellmapi-omniroute | Image digests (`ghcr.io/tashfeenahmed/freellmapi@sha256:3f4ca3e8...`, `ghcr.io/diegosouzapw/omniroute@sha256:9fb15ff2...`) resolve on `ghcr.io` but have not been built/published by the dedicated Forgejo runner lane. | Agent A | #5 | OCI-1 | deliverable |
+| 2026-08-23 | maya | master merge | Three `<<<<<<<`/`>>>>>>>` merge markers survived the `--allow-unrelated-histories` merge of upstream release history into the closing lane. | Coordinator | n/a | MRK-1 | correction (resolved) |
+| 2026-08-23 | maya | platform validators | Stale `gnx-tailscale-rename` SHA-256 in `runtime/payload.lock.json` (a76fda04 vs on-disk b9fce7fe). | Agent B | n/a | RTM-1 | correction (resolved) |
+| 2026-08-23 | maya | repository hygiene | `write_rust.py` is a dead one-off generator (not referenced by build/docs/workspace). | Agent C | n/a | n/a | cleanup (resolved) |
+| 2026-08-23 | maya | AGENTS.md scope | No explicit QA-only statement; docs risk signaling production effort. | Coordinator | n/a | n/a | correction (resolved) |
 
 ## Resolved blockers
 
@@ -73,6 +89,8 @@ Residual risk: Physical deployment of the 4 new LXCs is pending; image digests f
 - **QA-only scope clarified** (2026-08-23): `AGENTS.md` updated with explicit QA-only section; no production signing, no public exposure, no hosted CI.
 - **Source-only gate recorded** (2026-08-23): `.AGENTS/EVIDENCE.md` updated with current gate status; known env-dependent Docker test remains the only blocker to `tools/check.ps1 -SourceOnly`.
 - **Merge conflict resolved** (2026-08-23): `b99992d` resolves origin/master conflicts into 0.2.42; `Cargo.lock`, `Cargo.toml`, `release/manifest.toml`, `AGENTS.md`, docs, validators and `.AGENTS` taxonomy aligned. Origin advanced to `db902aa`.
+- **FRE-2 spec/contract gap resolved** (2026-08-23): Single `main.tf` service root with VMID 300-7999, per-service `policy.json` for 2× FreeLLMAPI (VMID 300-301) and 2× OmniRoute (VMID 302-303), `deploy` per-instance loop with `gnx-<slug>-<instance>` hostnames, per-service Tailscale tags. All 6 validators pass. OCI-1 remains.
+- **FreeLLMAPI/OmniRoute service templates wired** (2026-08-23): Recreated `services/freellmapi/` and `services/omniroute/` with `compose.yml`, `serve.json`, `policy.json` (port 8080, health `/`). Updated `platform/operations/deploy` for per-instance loop, `verify-release.py` schema 2, `lxc-service` per-service tag support. All validators green.
 
 ## Next steps
 

@@ -117,8 +117,6 @@ def main() -> None:
         "tofu/service/entrypoint",
         "tofu/service/main.tf",
         "tofu/service/versions.tf",
-        "tofu/service/freellmapi.tf",
-        "tofu/service/omniroute.tf",
     }
     if missing := required - actual:
         fail(f"platform omits runtime files: {sorted(missing)!r}")

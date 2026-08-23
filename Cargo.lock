@@ -60,43 +60,43 @@ dependencies = [
 name = "gnx"
 version = "0.2.42"
 dependencies = [
-  "gnx-contracts",
-  "serde_json",
-  "windows-sys 0.61.2",
-  "zeroize",
+ "gnx-contracts",
+ "serde_json",
+ "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
 name = "gnx-bootstrap"
 version = "0.2.42"
 dependencies = [
-  "gnx-contracts",
-  "serde",
-  "serde_json",
-  "sha2",
-  "windows-sys 0.61.2",
-  "winreg",
+ "gnx-contracts",
+ "serde",
+ "serde_json",
+ "sha2",
+ "windows-sys 0.61.2",
+ "winreg",
 ]
 
 [[package]]
 name = "gnx-contracts"
 version = "0.2.42"
 dependencies = [
-  "serde",
-  "serde_json",
-  "zeroize",
+ "serde",
+ "serde_json",
+ "zeroize",
 ]
 
 [[package]]
 name = "gnx-service"
 version = "0.2.42"
 dependencies = [
-  "gnx-contracts",
-  "serde",
-  "serde_json",
-  "sha2",
-  "windows-sys 0.61.2",
-  "zeroize",
+ "gnx-contracts",
+ "serde",
+ "serde_json",
+ "sha2",
+ "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
