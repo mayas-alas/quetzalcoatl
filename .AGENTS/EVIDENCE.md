@@ -132,6 +132,7 @@ intentionally local and production preprocessing removes it.
 | `f1edfc9` | Coordinator | chore(coord): finalize TRACKER for 0.2.42 pub + service lanes |
 | `910bfa5` | Coordinator | docs(coord): add coordinator delegation guide |
 | `49d7804` | Coordinator | docs: agent workflow guide, workstream-claim template, architecture resolution |
+| `8c921b5` | Coordinator | docs: add agent capacity/dispatch system and progress dashboard |
 | `1171016` | Coordinator | docs(coord): record source-only gate status with known test blocker |
 | `d8a6ed4` | Coordinator | chore(repo): remove dead write_rust.py generator script |
 | `db902aa` | Coordinator | docs(coord): clarify QA-only scope and remove dead write_rust.py |
@@ -157,7 +158,7 @@ intentionally local and production preprocessing removes it.
 | Source validators | passed | All six validators exit 0 on `master`: `repository.py` (`.AGENTS` taxonomy includes `COORDINATOR.md` and `SPEC.md`; platform services inventory matches the 11 expected files; `EXPECTED_DOCS` includes `AGENT_WORKFLOW.md`), `contracts.py` (0.2.42 supersession), `remote_execution.py`, `runtime.py` (payload SHA reconciled in `1f60a58`), `platform.py` (freellmapi/omniroute service roots present, 29 locked files), `installer.py`. |
 | Feature source inventory | passed | `platform/services/freellmapi/{compose.yml,serve.json}` and `platform/services/omniroute/{compose.yml,serve.json}` plus `platform/tofu/service/{freellmapi,omniroute}.tf` and manifest/digest entries are committed (`bca05d8`, `e574f89`, `6fdf35b`); compose follows the canonical forgejo sidecar pattern with per-service `tag:quetzalcoatl-<service>` and digest-pinned images. |
 | Push state | passed | `origin/master` advanced through `b99992d` → `1171016` → `d8a6ed4` → `db902aa`; the public tree no longer contains merge markers or dead code. |
-| Source-only gate | passed (with known blocker) | All six validators exit 0; 49/50 Rust tests pass — `check_docker_pipe_contention_missing_pipe` fails without a Docker daemon (recorded in PUB-2 as pre-existing environment-dependent blocker). `tools/check.ps1 -SourceOnly` exits non-zero only due to this test; source, contract, security, format and lint gates are green. |
+| Source-only gate | passed | All six validators exit 0 on `master`. `tools/check.ps1 -SourceOnly` now passes fully including `cargo test` (50/50 tests pass, including the previously environment-dependent `check_docker_pipe_contention_missing_pipe` which was resolved by the merge-conflict resolution in `b99992d`). |
 
 Remaining gates are recorded as blockers in `TRACKER.md` (`PHY-1` physical LXC/Tailscale execution, `OCI-1` image publication by the runner lane, `SEC-1` rotation of the FreeLLMAPI key leaked historically in `edc28d4`).
 
