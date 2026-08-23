@@ -1,0 +1,29 @@
+schema_version = 1
+version = "0.2.42"
+release_timestamp_utc = "2026-08-22T21:24:00Z"
+
+[contracts]
+protocol_schema = 2
+persisted_state_schema = 2
+host_profile_schema = 1
+runtime_generation = "proxmox-platform"
+payload_contract = 6
+
+[identities]
+product_code = "{F43403AB-A35B-4127-9256-FE79AA4FC00C}"
+upgrade_code = "{47D5BD44-D061-407B-913B-47D17EC3BEA9}"
+package_code = "{11794170-00CF-4232-9D0E-9B99AB7706A7}"
+bundle_id = "{C3289902-6200-47EE-B164-0D91C021ED64}"
+bundle_upgrade_code = "{10B764B2-36AE-4911-A8C8-2F1A2A963769}"
+previous_product_code = "{F43403AB-A35B-4127-9256-FE79AA4FC00B}"
+previous_package_code = "{11794170-00CF-4232-9D0E-9B99AB7706A6}"
+previous_bundle_id = "{C3289902-6200-47EE-B164-0D91C021ED63}"
+
+[paths]
+gnx = "apps/gnx"
+gnx_service = "apps/gnx-service"
+gnx_bootstrap = "apps/gnx-bootstrap"
+gnx_contracts = "crates/gnx-contracts"
+branding = "installer/assets/branding"
+runtime = "runtime"
+installer = "installer"
