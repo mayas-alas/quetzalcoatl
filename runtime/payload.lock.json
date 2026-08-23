@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "payload_version": 6,
+  "target": {
+    "os": "linux",
+    "architecture": "amd64"
+  },
+  "policy": {
+    "mutable_image_tags_allowed": false,
+    "oci_digest_scope": "linux/amd64 image manifest",
+    "embedded_secrets_allowed": false
+  },
+  "components": [
+    {
+      "id": "podman-machine-os",
+      "kind": "oci_machine_image",
+      "source": "https://github.com/podman-container-tools/podman-machine-os",
+      "version": "6.0.1",
+      "source_ref": "v6.0.1",
+      "source_commit": "137982aea62947e436bfb58408676e246414ea47",
+      "image": "quay.io/podman/machine-os",
+      "index_digest": "sha256:6dec5eadc84f41e55c3b6fc67264ed6c985e5f61a1d4ba243056dc0efc234bec",
+      "manifest_digest": "sha256:c1b05f0f5f5cdbbfb2be4e23fccfbd0436f3aa6bfa6d4705daed00a251b03943",
+      "layer_digest": "sha256:0d828beef16a031a50a7cee594fd79ade36c3d3972b590cb01c32a987bd88bc3",
+      "artifact": "podman-machine.x86_64.wsl.tar.zst",
+      "artifact_url": "https://github.com/podman-container-tools/podman-machine-os/releases/download/v6.0.1/podman-machine.x86_64.wsl.tar.zst",
+      "artifact_size": 249510008,
+      "platform": {
+        "os": "linux",
+        "architecture": "x86_64",
+        "disk_type": "wsl"
+      }
+    },
+    {
+      "id": "proxmox",
+      "kind": "oci_image",
+      "source": "https://github.com/mayas-alas/tailnet-proxmox",
+      "version": "0.0.1",
+      "source_ref": "v0.0.1",
+      "source_commit": "e71615e8e63cbc4a49a32fcd86d0424ac885f850",
+      "image": "ghcr.io/mayas-alas/tailnet-proxmox",
+      "index_digest": "sha256:904ed4d92d9d74b11c0b9e3278c1e91023dcbcfa27b5d496629dde2efa5633c6",
+      "manifest_digest": "sha256:9b3f516d7b645148c35396b5655ed9f9249e4d4e1c33366164a469e957e4ae53",
+      "config_digest": "sha256:d972a1ede38974ca556b87800789b9a4980cd61acdd9db10f13d9ecf71874a8a"
+    },
+    {
+      "id": "tailscale",
+      "kind": "oci_image",
+      "source": "https://github.com/tailscale/tailscale",
+      "version": "1.98.8",
+      "source_ref": "v1.98.8",
+      "source_commit": "05a91829316e055517a1e84f7b00016846ef4107",
+      "image": "docker.io/tailscale/tailscale",
+      "index_digest": "sha256:d54b2e6a9c09f0e5ec52e82b9ad4af3d446b54a7c08075e92f11c39dd410105f",
+      "manifest_digest": "sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e",
+      "config_digest": "sha256:1e26d7400ae5dd99fb62f0d7706908d5a9dd8ee9fed3a5100611521cfccbd645"
+    }
+  ],
+  "files": [
+    {
+      "path": "commands/gnx-runtime-agent",
+      "source": "quetzalcoatl",
+      "version": 7,
+      "mode": "0755",
+      "sha256": "cc74acec64bb9cc962c3f1caaed810dccad69dd621abcdfa5b992887525242fd"
+    },
+    {
+      "path": "commands/gnx-proxmox-entrypoint",
+      "source": "quetzalcoatl",
+      "version": 3,
+      "mode": "0755",
+      "sha256": "c9c705c02e2735e7c99a952849aac8aa594d08e54755bc70dd5e0b41accc4c8a"
+    },
+    {
+      "path": "commands/gnx-pve-configure",
+      "source": "quetzalcoatl",
+      "version": 4,
+      "mode": "0755",
+      "sha256": "bb29738e0af1e81e9c311fe91a7a01323701c1b447e5480e6c20000550b615d6"
+    },
+    {
+      "path": "commands/gnx-pve-cluster-create",
+      "source": "quetzalcoatl",
+      "version": 4,
+      "mode": "0755",
+      "sha256": "415b9e6fe481bf260d0d1b815edf9252a33340633535b9db5b723ff97d91b1e1"
+    },
+    {
+      "path": "commands/gnx-tailscale-prepare",
+      "source": "quetzalcoatl",
+      "version": 3,
+      "mode": "0755",
+      "sha256": "0bf898bdb34d8e2332b803a036b1b552c37afc2b157bfcf1b17464b106ff34b8"
+    },
+    {
+      "path": "commands/gnx-tailscale-rename",
+      "source": "quetzalcoatl",
+      "version": 5,
+      "mode": "0755",
+      "sha256": "a76fda0470a22b7ba5e53991c0b4e048dd4547d3344248a68e04ad0a51ae8905"
+    },
+    {
+      "path": "commands/gnx-tailscale-enroll",
+      "source": "quetzalcoatl",
+      "version": 3,
+      "mode": "0755",
+      "sha256": "79e9cf7a9af94b6c5f30b59cabc1e72aaf975de2935d9be1587cb9dcc0df0b2f"
+    },
+    {
+      "path": "configuration/serve.json",
+      "source": "quetzalcoatl",
+      "version": 3,
+      "mode": "0644",
+      "sha256": "b7b877a89f855d59d16b4a4bcd9cabb4493da24a04ce593d633f5e17491d709d"
+    },
+    {
+      "path": "containers/gnx-node.pod",
+      "source": "quetzalcoatl",
+      "version": 3,
+      "mode": "0644",
+      "sha256": "734ef0e3e92f9ca35d9a56dbe69d54256ac94745f952ea226a1e5f979c53b979"
+    },
+    {
+      "path": "containers/proxmox.container",
+      "source": "quetzalcoatl",
+      "version": 3,
+      "mode": "0644",
+      "sha256": "32b8a136b8d8a9bee0f65aabc66ebce2d1bb2bbfc3c3657835847ef668771b60"
+    },
+    {
+      "path": "containers/tailscaled.container",
+      "source": "quetzalcoatl",
+      "version": 3,
+      "mode": "0644",
+      "sha256": "d6aa1724947db0bc40c6821da369f631ba8aebd58a837547b0492af10050fcb4"
+    },
+    {
+      "path": "services/gnx-tailscale-enroll.service",
+      "source": "quetzalcoatl",
+      "version": 3,
+      "mode": "0644",
+      "sha256": "3e9cdade5f7f811a14c2766acc9e9c5a5e3375f819cfd4ed44b05af1e1c62bfe"
+    }
+  ]
+}

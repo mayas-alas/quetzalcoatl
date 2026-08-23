@@ -1,0 +1,79 @@
+#!/bin/sh
+set -eu
+umask 077
+
+IFS= read -r hostname
+case "$hostname" in
+  ''|*[!a-z0-9-]*|-*|*-) exit 64 ;;
+esac
+[ "${#hostname}" -le 63 ] || exit 64
+
+node_dir='/etc/quetzalcoatl/node'
+temporary="$node_dir/.node.env.tmp"
+install -d -m 0755 "$node_dir"
+rm -f "$temporary"
+trap 'rm -f "$temporary"' EXIT HUP INT TERM
+printf 'TS_HOSTNAME=%s\n' "$hostname" > "$temporary"
+chmod 0600 "$temporary"
+mv "$temporary" "$node_dir/node.env"
+
+# Check if hostname is already set correctly
+current_hostname=$(podman exec gnx-tailscaled tailscale status --json 2>/dev/null | grep -o '"HostName":"[^"]*"' | cut -d'"' -f4 || true)
+if [ "$current_hostname" = "$hostname" ]; then
+  printf 'TAILSCALE_HOSTNAME=updated\n'
+  exit 0
+fi
+
+# Set the new hostname
+podman exec gnx-tailscaled tailscale set --hostname="$hostname" >/dev/null
+
+# Try restart with fallback strategies
+restart_tailscale() {
+  # Clear sticky failed states from the oneshot dependency so systemd no
+  # longer refuses the sidecar restart with a dependency job failure.
+  systemctl reset-failed gnx-tailscale-enroll.service tailscaled.service >/dev/null 2>&1 || true
+
+  # A persistent tailnet identity must already exist: rename never re-enrolls
+  # because the transient auth key is already consumed.
+  if [ ! -s /var/lib/quetzalcoatl/tailscale/host/tailscaled.state ]; then
+    journalctl --no-pager -o cat -r -n 40 -u gnx-tailscale-enroll.service >&2 || true
+    return 1
+  fi
+
+  # Strategy 1: Try normal restart with --no-block
+  if systemctl restart --no-block tailscaled.service 2>/dev/null; then
+    # Wait for service to become active (up to 30 seconds)
+    attempts=0
+    while [ $attempts -lt 30 ]; do
+      if systemctl is-active --quiet tailscaled.service; then
+        return 0
+      fi
+      sleep 1
+      attempts=$((attempts + 1))
+    done
+  fi
+  
+  # Strategy 2: Try stop then start
+  systemctl stop tailscaled.service 2>/dev/null || true
+  sleep 2
+  if systemctl start tailscaled.service 2>/dev/null; then
+    attempts=0
+    while [ $attempts -lt 30 ]; do
+      if systemctl is-active --quiet tailscaled.service; then
+        return 0
+      fi
+      sleep 1
+      attempts=$((attempts + 1))
+    done
+  fi
+
+  journalctl --no-pager -o cat -r -n 40 -u tailscaled.service >&2 || true
+  
+  return 1
+}
+
+if restart_tailscale; then
+  printf 'TAILSCALE_HOSTNAME=updated\n'
+else
+  exit 1
+fi
