@@ -49,6 +49,14 @@ LXC workload and a private Tailscale HTTPS URL.
 ## Explicit contract amendments
 
 - Runtime generation becomes `proxmox-platform`; payload contract becomes `6`.
+- A signed service release declaration advances to schema 2 and may carry a
+  bounded app port and health path. The platform service policy (locked bundle)
+  may nominate one bounded instance set (`instances`, `vm_id_base`) and one
+  per-service Tailscale enrollment tag (`tag:quetzalcoatl-<service>`), with one
+  OpenTofu state key and one LXC per instance, hostname `gnx-<slug>-<instance>`,
+  and the service VMID range extended to 300-7999. A service repository cannot
+  dictate topology: its declared port and health path must equal the closed
+  bundle policy, and only the published digest is trusted.
 - A build selected explicitly with `-QaSigning` may carry one pinned public
   `GNX Labs QA Root` certificate and its current `GNX Labs QA Publisher` leaf.
   Before any product payload runs, the elevated native bootstrap may add only

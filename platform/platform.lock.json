@@ -8,6 +8,11 @@
                },
     "files":  [
                   {
+                      "path":  "services/service/serve.json",
+                      "mode":  "0644",
+                      "sha256":  "800bae3b5f58258489dcda6dd91e41f4e29372d24141328dfadba4076566ebad"
+                  },
+                  {
                       "path":  "tofu/foundation/.terraform.lock.hcl",
                       "mode":  "0644",
                       "sha256":  "4f90534942016b26a1a7500132cf453f449ff44893d070c263024ed9fe2ba1a9"
@@ -18,19 +23,19 @@
                       "sha256":  "00a8f1f3cc5fd517ddc4359b910bc12c7c34d5e74e5f429fbccb4c812f77a8a3"
                   },
                   {
-                      "path":  "tofu/foundation/main.tf",
+                      "path":  "services/service/compose.yml",
                       "mode":  "0644",
-                      "sha256":  "25abbf52e5d7f804fdb732affd23a80e4bcfbdc072e28dad23473e0127bae063"
+                      "sha256":  "d9719c1bf5e4241463d24d5750494989c51837dcd05e8faf133fb5167183067e"
                   },
                   {
-                      "path":  "services/service/serve.json",
+                      "path":  "services/omniroute/policy.json",
                       "mode":  "0644",
-                      "sha256":  "800bae3b5f58258489dcda6dd91e41f4e29372d24141328dfadba4076566ebad"
+                      "sha256":  "54d4ad1fd5ff73f1b01984ad9f64f6d80ff27367376116ef2bb6951d64e16ec4"
                   },
                   {
                       "path":  "services/omniroute/serve.json",
                       "mode":  "0644",
-                      "sha256":  "29d410ffe35e0c7c0e801ed1d0f40cad15e3fce5c1f8e45790cb2d4d7210c3a7"
+                      "sha256":  "188a797e7c446b5f9a2dd5a798bed7b9631b3f3a39464749eefa43f29a52fc65"
                   },
                   {
                       "path":  "services/runner/compose.yml",
@@ -38,19 +43,19 @@
                       "sha256":  "d2adb310b140939147c699be0c83d03163d502fc6b82997e2ab3c4d0cb952b50"
                   },
                   {
-                      "path":  "services/service/compose.yml",
+                      "path":  "tofu/foundation/main.tf",
                       "mode":  "0644",
-                      "sha256":  "d9719c1bf5e4241463d24d5750494989c51837dcd05e8faf133fb5167183067e"
+                      "sha256":  "25abbf52e5d7f804fdb732affd23a80e4bcfbdc072e28dad23473e0127bae063"
                   },
                   {
                       "path":  "tofu/service/main.tf",
                       "mode":  "0644",
-                      "sha256":  "1f85fd1d1e43f3d9f325b4715bb30cc3727dee2eca5fef9bf36ad4c44eaa3526"
+                      "sha256":  "897d0a53f2ea53fc992e4c4eef3d6b89f65a63e0a2713204972a2e89ac5b782c"
                   },
                   {
                       "path":  "tofu/service/omniroute.tf",
                       "mode":  "0644",
-                      "sha256":  "9a56bd14c278c820860bc1733b6c321359813743605b74009624534fde050cb3"
+                      "sha256":  "070bb7f26ff0160ba4ad29d445a20564c91ef39a35f4d8876cf96770d01d8b45"
                   },
                   {
                       "path":  "tofu/service/versions.tf",
@@ -60,7 +65,7 @@
                   {
                       "path":  "tofu/service/freellmapi.tf",
                       "mode":  "0644",
-                      "sha256":  "9a56bd14c278c820860bc1733b6c321359813743605b74009624534fde050cb3"
+                      "sha256":  "070bb7f26ff0160ba4ad29d445a20564c91ef39a35f4d8876cf96770d01d8b45"
                   },
                   {
                       "path":  "tofu/foundation/versions.tf",
@@ -75,12 +80,12 @@
                   {
                       "path":  "tofu/service/entrypoint",
                       "mode":  "0755",
-                      "sha256":  "5a8607bf17f3ccc7ea914dc80daf534a7c667d6527f24561d1fa5fb305ffe1ec"
+                      "sha256":  "2ce1487fad294eb7466a58edaa340713a68fa1e65b8dff99c027180fdb84acec"
                   },
                   {
                       "path":  "services/omniroute/compose.yml",
                       "mode":  "0644",
-                      "sha256":  "287eca926664d2fea4a78948486162092ad4aceac753b1fc99dc6e3f4b6def37"
+                      "sha256":  "e5384b1088bb22b9ab30b8b3a109a5bba2e6c0213bb8f9a025fd3d8e51e94191"
                   },
                   {
                       "path":  "operations/lxc-host",
@@ -90,7 +95,7 @@
                   {
                       "path":  "operations/lxc-service",
                       "mode":  "0755",
-                      "sha256":  "71bd9d86528ef0feef2bf324d1ebdff9991739d8e4616beb907d348bc78666ca"
+                      "sha256":  "553505fc0aed241edded96790049b4144cd34dc0135e8d915bedc2ad5d1be126"
                   },
                   {
                       "path":  "operations/reconcile",
@@ -110,17 +115,22 @@
                   {
                       "path":  "operations/deploy",
                       "mode":  "0755",
-                      "sha256":  "54eeee86c09294bc4a4441bbdb2929b8f19cfd024b51b105d8648e23665f8e41"
+                      "sha256":  "651ecac4c9ecb3e08b76ccb95bd79603b0bbe3d44a6ec095700273e4ef013a4d"
                   },
                   {
                       "path":  "operations/discover-releases.py",
                       "mode":  "0755",
-                      "sha256":  "3a185ef53fd31b25170bab70ed9e57753a54493aa04a18105a6365b4ff810e4d"
+                      "sha256":  "bb947685a2b3c691aba5677fb8f1cbc869a2e3848e6627c43fcab051d14bdfc4"
+                  },
+                  {
+                      "path":  "operations/verify-release.py",
+                      "mode":  "0755",
+                      "sha256":  "f336852d624106a77da3280c715b94397917ea027b902a769ddc4ab99108af6f"
                   },
                   {
                       "path":  "services/freellmapi/serve.json",
                       "mode":  "0644",
-                      "sha256":  "2130435af3aeb615bc15aff24391e3cb655040b1468c1cf6a3ef055a5760c82d"
+                      "sha256":  "8d15a3aed4aaa3e6abfd9a4a316f0d4b3fb1b000497af6979bf2e9116b48a7c0"
                   },
                   {
                       "path":  "services/garage/compose.yml",
@@ -133,14 +143,9 @@
                       "sha256":  "6f38548c26add2afa47be2d03ee6d0da0a374247d17350a73f0e8fd535cbb742"
                   },
                   {
-                      "path":  "services/freellmapi/compose.yml",
+                      "path":  "services/freellmapi/policy.json",
                       "mode":  "0644",
-                      "sha256":  "50688e14ad1a5d380f7388ab8e50a5694b85d85ce8fa8bd4e72bab0193dce6ea"
-                  },
-                  {
-                      "path":  "operations/verify-release.py",
-                      "mode":  "0755",
-                      "sha256":  "2e3e9e33420f361d1286c57b19b17f03357a666889d12c5ee764371ce692ea16"
+                      "sha256":  "51c06ab73806881ca26a77315eea6ba00449d4366e52f40315843a2978fedbb9"
                   },
                   {
                       "path":  "services/forgejo/compose.yml",
@@ -151,6 +156,11 @@
                       "path":  "services/forgejo/serve.json",
                       "mode":  "0644",
                       "sha256":  "1d2995497f7af4a342108e7511a6866bf85be95496fe38f4dc4c67c9ce7ef16f"
+                  },
+                  {
+                      "path":  "services/freellmapi/compose.yml",
+                      "mode":  "0644",
+                      "sha256":  "4e913e2dd87ce9d19465d42efeb5e08c2701a06732452da71873310621e58438"
                   }
               ]
 }

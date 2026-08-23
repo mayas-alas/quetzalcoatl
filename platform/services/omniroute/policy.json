@@ -1,0 +1,7 @@
+{
+  "instances": 2,
+  "vm_id_base": 302,
+  "tag": "tag:quetzalcoatl-omniroute",
+  "port": 8080,
+  "health_path": "/"
+}

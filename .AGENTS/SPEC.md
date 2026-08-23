@@ -29,15 +29,24 @@
 
 ## Implementation lanes
 
+The deployment topology (instance count, VMID base, Tailscale tag, port, health
+path) is Platform-bundle policy, closed in `platform/services/<slug>/policy.json`
+and enforced by `platform/operations/deploy`; the service repository only
+publishes the OCI digest and its bounded port/health declaration (`schema: 2`).
+Deployment replicates one LXC per instance (`gnx-<slug>-<instance>`, one OpenTofu
+state key per instance) from the single `tofu/service/main.tf` root.
+
 ### Agent B (platform runtime) — owns all changes
 
 | Path | Change |
 |---|---|
-| `platform/tofu/service/` | Add `freellmapi.tf` and `omniroute.tf` (or parameterized single template) for 2× LXC each |
-| `platform/services/freellmapi/` | Compose.yml + serve.json for FreeLLMAPI (2 instances → 2 LXCs, each with single Compose) |
-| `platform/services/omniroute/` | Compose.yml + serve.json for OmniRoute (2 instances → 2 LXCs) |
-| `platform/manifest.toml` | Add image digests for both services |
-| `platform/platform.lock.json` | Update with new files + SHAs |
+| `platform/tofu/service/` | Keep only the single `main.tf` service root; widen VMID range and hostname pattern; delete the counted `freellmapi.tf`/`oninroute.tf` copies (prohibited parallel templates) |
+| `platform/services/{freellmapi,omniroute}/` | `compose.yml` + `serve.json` (per-service port, health, tag) plus a locked `policy.json` (`instances`, `vm_id_base`, `tag`) |
+| `platform/operations/deploy` | Per-instance loop driven by the policy file; per-instance state key and hostname; bounded health probe |
+| `platform/operations/lxc-service` | `service` kind accepts the per-service tag and `gnx-*` hostname |
+| `platform/operations/{discover-releases,verify-release}.py` | Schema 2 with bounded port/health-path |
+| `platform/manifest.toml` | Keep runner/image digests |
+| `platform/platform.lock.json` | Regenerate with added and removed files |
 | `runtime/` | No changes (Tailscale sidecar reused as-is) |
 
 ### Agent C (delivery assurance) — validator updates

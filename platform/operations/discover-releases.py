@@ -88,13 +88,10 @@ def valid_signature(record: dict[str, object]) -> bool:
     )
 
 
-def service_identity(source: str) -> tuple[str, str, int]:
+def service_identity(source: str) -> str:
     repository = source.split("/", 1)[1]
     normalized = re.sub(r"[^a-z0-9]+", "-", repository.lower()).strip("-")
-    suffix = hashlib.sha256(source.encode("ascii")).hexdigest()[:8]
-    slug = f"{normalized[:23].rstrip('-')}-{suffix}"
-    vm_id = 1000 + int(hashlib.sha256(source.encode("ascii")).hexdigest()[:8], 16) % 7000
-    return slug, f"gnx-svc-{slug}", vm_id
+    return normalized[:31].rstrip("-")
 
 
 def load_declaration(repository: dict[str, object]) -> dict[str, object] | None:
@@ -127,11 +124,13 @@ def load_declaration(repository: dict[str, object]) -> dict[str, object] | None:
     if not isinstance(declaration, dict) or set(declaration) != expected_keys:
         raise RuntimeError(f"{full_name} release schema differs")
     if (
-        declaration["schema"] != 1
+        declaration["schema"] != 2
         or declaration["source"] != full_name
         or not re.fullmatch(r"[0-9a-f]{40}", str(declaration["commit"]))
-        or declaration["port"] != 8080
-        or declaration["health_path"] != "/"
+        or not isinstance(declaration["port"], int)
+        or not 1 <= declaration["port"] <= 65535
+        or not isinstance(declaration["health_path"], str)
+        or not re.fullmatch(r"/[a-z0-9._/-]{0,127}", declaration["health_path"])
     ):
         raise RuntimeError(f"{full_name} release values differ from the fixed contract")
     image = str(declaration["image"])
@@ -145,7 +144,7 @@ def load_declaration(repository: dict[str, object]) -> dict[str, object] | None:
 
 def write_record(declaration: dict[str, object]) -> Path:
     source = str(declaration["source"])
-    slug, hostname, vm_id = service_identity(source)
+    slug = service_identity(source)
     target = RELEASE_ROOT / f"{slug}.json"
     if target.exists():
         previous = json.loads(target.read_text(encoding="utf-8"))
@@ -154,15 +153,11 @@ def write_record(declaration: dict[str, object]) -> Path:
         if (
             previous.get("source") != source
             or previous.get("service_slug") != slug
-            or previous.get("hostname") != hostname
-            or previous.get("vm_id") != vm_id
         ):
             raise RuntimeError(f"persisted service identity for {source} drifted")
     record: dict[str, object] = {
         **declaration,
         "service_slug": slug,
-        "hostname": hostname,
-        "vm_id": vm_id,
     }
     record["signature"] = hmac.new(
         SIGNING_KEY, canonical_payload(record), hashlib.sha256
