@@ -1,0 +1,47 @@
+services:
+  tailscale:
+    image: docker.io/tailscale/tailscale@sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e
+    container_name: gnx-omniroute-tailscale
+    hostname: ${TS_HOSTNAME:?TS_HOSTNAME is required}
+    environment:
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "false"
+      TS_AUTH_ONCE: "true"
+      TS_ACCEPT_DNS: "true"
+      TS_ENABLE_HEALTH_CHECK: "true"
+      TS_LOCAL_ADDR_PORT: 127.0.0.1:41234
+      TS_DEBUG_FIREWALL_MODE: nftables
+      TS_TAGS: tag:quetzalcoatl-omniroute
+    volumes:
+      - /var/lib/quetzalcoatl/tailscale/omniroute:/var/lib/tailscale
+      - ./serve:/config:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add: [NET_ADMIN, NET_RAW]
+    ports:
+      - "127.0.0.1:20128:20128"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:41234/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
+
+  omniroute:
+    image: ghcr.io/diegosouzapw/omniroute@sha256:9fb15ff2aebc79ae8dca8ec5ba870705e7f21b218ed1602295be59f8a78d49bf
+    container_name: gnx-omniroute
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    environment:
+      PORT: "20128"
+    volumes:
+      - /var/lib/quetzalcoatl/omniroute/data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:20128/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
