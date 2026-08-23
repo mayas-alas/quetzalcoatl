@@ -1,0 +1,17 @@
+pub const OK: i32 = 0;
+pub const WINDOWS_INCOMPATIBLE: i32 = 10;
+pub const NOT_ELEVATED: i32 = 11;
+pub const VIRTUALIZATION_DISABLED: i32 = 12;
+pub const FEATURES_DISABLED: i32 = 13;
+pub const REBOOT_PENDING: i32 = 14;
+pub const WSL_UNAVAILABLE: i32 = 15;
+pub const PODMAN_INCOMPATIBLE: i32 = 16;
+pub const HOST_RESOURCES_INSUFFICIENT: i32 = 17;
+pub const OPERATIONAL_ERROR: i32 = 20;
+pub const INSTALL_PAYLOAD_MISSING: i32 = 21;
+pub const INSTALL_PAYLOAD_INVALID: i32 = 22;
+pub const INSTALL_STAGING_FAILED: i32 = 23;
+pub const INSTALL_MSI_FAILED: i32 = 24;
+pub const INSTALL_RESUME_LIMIT: i32 = 25;
+pub const USAGE: i32 = 64;
+pub const REBOOT_REQUIRED: i32 = 3010;
