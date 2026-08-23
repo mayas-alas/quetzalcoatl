@@ -9,11 +9,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2024"
-<<<<<<< HEAD
 version = "0.2.42"
-=======
-version = "0.2.41"
->>>>>>> origin/master
 authors = ["GNX Labs, Hector AB and other contributors"]
 license = "AGPL-3.0-only"
 repository = "https://github.com/mayas-alas/quetzalcoatl"
