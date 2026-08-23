@@ -22,6 +22,7 @@ EXPECTED_DOCS = {
     "VALIDATION.md",
     "AGENT_WORKFLOW.md",
     "AGENT_AUDIT.md",
+    "DASHBOARD.md",
 }
 EXPECTED_SERVICES = {
     "platform/services/forgejo/compose.yml",
@@ -104,6 +105,7 @@ def main() -> None:
             "EVIDENCE.md",
             "SPEC.md",
             "COORDINATOR.md",
+            "CAPACITY.md",
         ]
     )
     if agents != expected_agents:

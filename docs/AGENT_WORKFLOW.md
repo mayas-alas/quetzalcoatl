@@ -110,7 +110,17 @@ Coordinator (pi2 orchestrator)
             └── CHANGELOG.md entry
 ```
 
-### Delegation command pattern
+### 3.1 Capacity-aware dispatch
+
+Before delegating, the coordinator consults `.AGENTS/CAPACITY.md`:
+
+1. Read the agent roster — check `Active assignments` vs `Max concurrent workstreams`.
+2. Prefer the owning lane (Agent A for `A`-lane, etc.).
+3. If the owning lane is at capacity, escalate to `pi2` (orchestrator) which can
+   run parallel waves.
+4. Mark the assignment in `CAPACITY.md` (increment count, set status to `assigned`).
+
+### 3.2 Delegation command pattern
 
 The coordinator uses the Task tool with `pi2` subagent type to delegate:
 

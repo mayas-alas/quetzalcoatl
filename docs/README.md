@@ -8,6 +8,8 @@
   branch conventions and blocker handling.
 - `AGENT_AUDIT.md` — audit of agent management, gamification gaps, and improvement
   recommendations.
+- `DASHBOARD.md` — real-time agent progress dashboard (activity, velocity, backlog).
+- `CAPACITY.md` (`.AGENTS/`) — agent capacity and dispatch protocol.
 
 Release history belongs only in `CHANGELOG.md`; active delivery state belongs only
 in `.AGENTS/`.
