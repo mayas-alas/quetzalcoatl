@@ -107,12 +107,18 @@ def main() -> None:
         "services/runner/compose.yml",
         "services/service/compose.yml",
         "services/service/serve.json",
+        "services/freellmapi/compose.yml",
+        "services/freellmapi/serve.json",
+        "services/omniroute/compose.yml",
+        "services/omniroute/serve.json",
         "tofu/foundation/entrypoint",
         "tofu/foundation/main.tf",
         "tofu/foundation/versions.tf",
         "tofu/service/entrypoint",
         "tofu/service/main.tf",
         "tofu/service/versions.tf",
+        "tofu/service/freellmapi.tf",
+        "tofu/service/omniroute.tf",
     }
     if missing := required - actual:
         fail(f"platform omits runtime files: {sorted(missing)!r}")

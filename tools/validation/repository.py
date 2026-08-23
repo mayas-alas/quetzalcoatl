@@ -21,6 +21,19 @@ EXPECTED_DOCS = {
     "TROUBLESHOOTING.md",
     "VALIDATION.md",
 }
+EXPECTED_SERVICES = {
+    "platform/services/forgejo/compose.yml",
+    "platform/services/forgejo/serve.json",
+    "platform/services/garage/compose.yml",
+    "platform/services/garage/serve.json",
+    "platform/services/runner/compose.yml",
+    "platform/services/service/compose.yml",
+    "platform/services/service/serve.json",
+    "platform/services/freellmapi/compose.yml",
+    "platform/services/freellmapi/serve.json",
+    "platform/services/omniroute/compose.yml",
+    "platform/services/omniroute/serve.json",
+}
 IGNORED_ROOTS = {".git", ".wix", "target", ".kilo", ".AGENTS/agentA"}
 FORBIDDEN_NAME = re.compile(
     r"(?:_v\d+|-v\d+|(?:^|[-_.])(old|legacy|new|final|buildfix)(?:[-_.]|$))",
@@ -87,6 +100,7 @@ def main() -> None:
             "WORKSTREAMS.md",
             "TRACKER.md",
             "EVIDENCE.md",
+            "SPEC.md",
         ]
     )
     if agents != expected_agents:
@@ -98,6 +112,18 @@ def main() -> None:
         fail("root icons directory remains outside installer/assets/branding")
     if (ROOT / "assets").exists():
         fail("root assets directory remains outside installer ownership")
+
+    actual_services = {
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "platform" / "services").rglob("*")
+        if path.is_file()
+    }
+    if actual_services != EXPECTED_SERVICES:
+        fail(
+            "platform services inventory differs: "
+            f"missing={sorted(EXPECTED_SERVICES - actual_services)!r} "
+            f"extra={sorted(actual_services - EXPECTED_SERVICES)!r}"
+        )
 
     build_rs = (ROOT / "apps" / "gnx" / "build.rs").read_text(encoding="utf-8")
     if '"0.2.0"' in build_rs or 'VALUE "CompanyName", "Quetzalcoatl\\0"' in build_rs:
