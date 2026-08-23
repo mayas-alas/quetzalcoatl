@@ -27,6 +27,14 @@ Then read only the product documentation relevant to the claimed deliverable.
 GitHub Issues and pull requests are the execution layer; `.AGENTS/*` remains the
 living contract. One issue maps to one deliverable lane; one PR closes one issue.
 
+**QA-only scope — no production effort:** This repository is under active QA
+development. Production release is explicitly blocked (see `.AGENTS/SCOPE.md`
+exclusion: hosted CI on another Windows host; and active blocker B40-1:
+Smart App Control requires trusted Windows AuthRoot). All workstream subagents
+must scope to QA-signed (`-QaSigning`) artifacts only. Do not implement production
+signing pipelines, public Internet exposure, or hosted CI runners. Any change
+that crosses into production trust surfaces must be recorded as a blocker first.
+
 1. Open an issue from `.github/ISSUE_TEMPLATE/` (deliverable, blocker or bug)
    and mirror new blockers into `.AGENTS/TRACKER.md`.
 2. Create branch `wstream/<lane>/<issue>-<slug>` from `master`.
