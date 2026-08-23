@@ -3,24 +3,18 @@ use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-<<<<<<< HEAD
 use std::ptr::null_mut;
-=======
->>>>>>> origin/master
 use std::thread;
 use std::time::Duration;
 
 use gnx_contracts::MachineProfile;
 use sha2::{Digest, Sha256};
-<<<<<<< HEAD
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ACCESS_DENIED, ERROR_PIPE_BUSY, GetLastError, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
-=======
->>>>>>> origin/master
 use zeroize::Zeroizing;
 
 use crate::domain::errors::GateError;
@@ -32,7 +26,6 @@ use crate::infrastructure::runtime_assets::{
     POD_NETWORK_MTU, RUNTIME_GENERATION, RUNTIME_GENERATION_PATH, TAILSCALE_STATE_PATH,
 };
 
-<<<<<<< HEAD
 fn check_docker_pipe_contention() -> Result<(), GateError> {
     const PIPE_PATH: &str = r"\\.\pipe\docker_engine";
     let wide_path: Vec<u16> = PIPE_PATH.encode_utf16().chain([0]).collect();
@@ -66,8 +59,6 @@ fn check_docker_pipe_contention() -> Result<(), GateError> {
     Ok(())
 }
 
-=======
->>>>>>> origin/master
 pub(crate) fn ensure_machine(
     podman: &Path,
     image: &MachineImage,
@@ -131,11 +122,7 @@ pub(crate) fn ensure_machine(
             Component::PodmanMachine,
             format!(
                 "managed machine configuration does not match host profile: expected {} CPU, {} MiB RAM and {} GiB disk",
-<<<<<<< HEAD
-                profile.machine_cpus, profile.machine_memory_mib, profile.machine_disk_gib,
-=======
                 profile.machine_cpus, profile.machine_memory_mib, profile.machine_disk_gib
->>>>>>> origin/master
             ),
         ));
     }
@@ -153,7 +140,6 @@ pub(crate) fn ensure_machine(
     Ok(())
 }
 
-<<<<<<< HEAD
 fn is_pipe_contention(error: &GateError) -> bool {
     error.message.contains("failed with exit 125")
         && (error.message.contains("All pipe instances are busy")
@@ -184,8 +170,6 @@ fn map_machine_start_error(error: GateError) -> GateError {
     }
 }
 
-=======
->>>>>>> origin/master
 pub(crate) fn create_managed_machine(
     podman: &Path,
     image: &MachineImage,
@@ -213,28 +197,17 @@ pub(crate) fn create_managed_machine(
         OsString::from("--now"),
         OsString::from(MACHINE_NAME),
     ];
-<<<<<<< HEAD
     check_docker_pipe_contention()?;
     run_command(podman, args)
         .map(|_| ())
         .map_err(map_machine_init_error)
-=======
-    run_command(podman, args)
-        .map(|_| ())
-        .map_err(|error| error.with_code("MACHINE_CREATE_FAILED", Component::PodmanMachine))
->>>>>>> origin/master
 }
 
 pub(crate) fn ensure_machine_running(podman: &Path) -> Result<(), GateError> {
     let inspect = inspect_machine(podman)?;
     if inspect.state != "running" {
-<<<<<<< HEAD
         check_docker_pipe_contention()?;
         run_command(podman, ["machine", "start", MACHINE_NAME]).map_err(map_machine_start_error)?;
-=======
-        run_command(podman, ["machine", "start", MACHINE_NAME])
-            .map_err(|error| error.with_code("MACHINE_CREATE_FAILED", Component::PodmanMachine))?;
->>>>>>> origin/master
     }
     Ok(())
 }
@@ -524,7 +497,6 @@ pub(crate) fn validate_devices(podman: &Path) -> Result<(), GateError> {
     }
     Ok(())
 }
-<<<<<<< HEAD
 
 #[cfg(test)]
 mod tests {
@@ -598,5 +570,3 @@ mod tests {
         assert_eq!(result.code, "MACHINE_CREATE_FAILED");
     }
 }
-=======
->>>>>>> origin/master

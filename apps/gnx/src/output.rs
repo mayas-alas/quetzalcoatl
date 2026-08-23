@@ -6,7 +6,6 @@ pub(crate) fn format_human(status: &StatusResponse) -> String {
         format!("stage: {}", status.stage),
         format!(
             "role: {}",
-<<<<<<< HEAD
             status.role.map(|role| role.as_str()).unwrap_or("ready")
         ),
         format!(
@@ -14,17 +13,6 @@ pub(crate) fn format_human(status: &StatusResponse) -> String {
             status.controller.as_deref().unwrap_or("ready")
         ),
         format!("pve_url: {}", status.pve_url.as_deref().unwrap_or("ready")),
-=======
-            status
-                .role
-                .map(|role| role.as_str())
-                .unwrap_or("not_resolved")
-        ),
-        format!(
-            "controller: {}",
-            status.controller.as_deref().unwrap_or("not_resolved")
-        ),
->>>>>>> origin/master
         format!("service: {}", status.components.service),
         format!("wsl: {}", status.components.wsl),
         format!("podman_machine: {}", status.components.podman_machine),

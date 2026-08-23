@@ -51,11 +51,7 @@ pub(crate) fn run_platform() -> CliResult<()> {
 }
 
 fn collect_configuration() -> CliResult<InstallerConfiguration> {
-<<<<<<< HEAD
     let tailnet = read_public("Tailnet DNS name (example: your-tailnet.ts.net): ")?
-=======
-    let tailnet = read_public("Tailnet DNS name (example: tetra-balance.ts.net): ")?
->>>>>>> origin/master
         .trim()
         .to_ascii_lowercase();
     let auth_key = read_secret("Tailscale auth_key: ")?;
