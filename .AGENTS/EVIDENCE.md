@@ -105,10 +105,10 @@ intentionally local and production preprocessing removes it.
 |---|---|---|
 | QA signing build | passed | `installer/build.ps1 -QaSigning` re-signed all first-party executables, MSI, detached Burn engine and Setup; five bootstrap copies plus two exact public QA certificates verified by coherent extraction. |
 | QA publisher subject | passed | signer corrected to `CN=GNX Labs QA Publisher` (malformed `CN=GNX Labs. QA Publisher` removed). |
-| 0.2.42 QA Setup SHA-256 | passed | `408EA213BC63B5292E229EC706573A88CF829B52093083AAC3B4292E6C645758` |
-| 0.2.42 QA MSI SHA-256 | passed | `4EE1EA2B63BE85DF3D3C01EFAC9776546AE15006239350CA60924D4FB9A0F93A` |
-| Release zip artifact | passed | `Quetzalcoatl-0.2.42-qa.zip` (800,048,739 bytes), SHA-256 `AAA80768FE7BBDC1684A735C2D5EBF39B714834D6EE22A8594D94D78E53DA502`; contains Setup + MSI + platform-payload (23 locked files) + runtime payload.lock.json + SHA256SUMS.txt; zero private keys. |
-| GitHub repository | passed | `mayas-alas/quetzalcoatl` public repo; master pushed to commit `3fb89c9` (with upstream release history merged). |
+| 0.2.42 QA Setup SHA-256 | passed | `5CF4ABD7E5056B343865444452A503B0E14DF6F060DDE531C561A619C123413D` |
+| 0.2.42 QA MSI SHA-256 | passed | `859C1110E06AF1D1361869C67E8C784C248672585E305509CC510F90C6D78753` |
+| Release zip artifact | passed | `Quetzalcoatl-0.2.42-qa.zip` (800,074,871 bytes), SHA-256 `FAFE753B236A6DD3B39F5B35379A7AA141DFEA69389A1F7BC51365DEFE3F7236`; contains Setup + MSI + platform-payload (31 locked files) + runtime-payload + SHA256SUMS.txt; zero private keys. |
+| GitHub repository | passed | `mayas-alas/quetzalcoatl` public repo; master pushed to commit `ba82342`; PR `#6` open for freellmapi-omniroute service topology completion. |
 | GitHub release | passed | tag `v0.2.42-qa`, asset `Quetzalcoatl-0.2.42-qa.zip` uploaded; release URL https://github.com/mayas-alas/quetzalcoatl/releases/tag/v0.2.42-qa |
 
 ### Per-agent commit history (coordinator landings)
@@ -132,10 +132,14 @@ intentionally local and production preprocessing removes it.
 | `f1edfc9` | Coordinator | chore(coord): finalize TRACKER for 0.2.42 pub + service lanes |
 | `910bfa5` | Coordinator | docs(coord): add coordinator delegation guide |
 | `49d7804` | Coordinator | docs: agent workflow guide, workstream-claim template, architecture resolution |
-| `8c921b5` | Coordinator | docs: add agent capacity/dispatch system and progress dashboard |
 | `1171016` | Coordinator | docs(coord): record source-only gate status with known test blocker |
 | `d8a6ed4` | Coordinator | chore(repo): remove dead write_rust.py generator script |
 | `db902aa` | Coordinator | docs(coord): clarify QA-only scope and remove dead write_rust.py |
+| `6aa0da6` | Coordinator | docs: agent management audit identifying gamification gaps and recommendations |
+| `8c921b5` | Coordinator | docs: add agent capacity/dispatch system and progress dashboard |
+| `22ff0c9` | Coordinator | docs: update evidence for full test suite pass and capacity/dashboard |
+| `ba82342` | Coordinator | chore(coord): record FRE-2 spec/contract gap blocking physical deployment |
+| `4c5d0e5` | Agent B | feat(platform): complete freellmapi-omniroute service topology |
 
 ### Preserved invariants (publication)
 
@@ -147,6 +151,20 @@ intentionally local and production preprocessing removes it.
 | `installer/build.ps1` remains the release entry point | upheld |
 | Production builds must not embed QA trust; QA root is local-only | upheld — QA root/publisher embedded only under `-QaSigning`
 
+## 0.2.42 freellmapi-omniroute runtime wiring completion (Agent B)
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Service topology contract | passed | `platform/operations/lxc-service` now accepts per-service Tailscale enrollment tags (`enroll_tag=$2`); `configure_service` reads tag from bounded stdin and validates `tag:quetzalcoatl-[a-z0-9][a-z0-9-]*` (≤48 chars); hostname pattern widened from `gnx-svc-*` to `gnx-*` with bounded length ≤63; VMID range extended to 300-7999. |
+| Schema 2 release declaration | passed | `platform/operations/discover-releases.py` and `verify-release.py` advanced to schema 2: bounded `port` (1-65535), bounded `health_path` (`/[a-z0-9._/-]{0,127}`), `service_slug` only (no hostname/vm_id in record); canonical payload excludes hostname/vm_id. |
+| Service policy lock | passed | `platform/services/freellmapi/policy.json` (`instances:2, vm_id_base:300, tag:tag:quetzalcoatl-freellmapi, port:8080, health_path:/`) and `platform/services/omniroute/policy.json` (`instances:2, vm_id_base:302, tag:tag:quetzalcoatl-omniroute, port:8080, health_path:/`) are locked in `platform.lock.json` (31 files). |
+| OpenTofu service root | passed | `platform/tofu/service/main.tf` validation widened to `^gnx-[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$` and `vm_id_base >= 300`; `entrypoint` shell guard matches the same pattern. |
+| Platform validator | passed | `tools/validation/platform.py` required files list updated; all 31 locked files present and SHA-256 verified; schema 2 release markers validated. |
+| Repository validator | passed | `tools/validation/repository.py` `EXPECTED_SERVICES` extended to include `policy.json` for freellmapi and omniroute. |
+| Installer rebuild | passed | `installer/build.ps1 -QaSigning` rebuilt 0.2.42 QA artifacts with updated 31-file platform payload; Setup SHA-256 `5CF4ABD7E5056B343865444452A503B0E14DF6F060DDE531C561A619C123413D`, MSI SHA-256 `859C1110E06AF1D1361869C67E8C784C248672585E305509CC510F90C6D78753`; all first-party binaries, MSI and Setup signed under `CN=GNX Labs QA Publisher`. |
+| GitHub PR | open | `#6` — `wstream/b/freellmapi-omniroute-2` → `master`: feat(platform): complete freellmapi-omniroute service topology. |
+| Release artifact | passed | `Quetzalcoatl-0.2.42-qa.zip` (800,074,871 bytes), SHA-256 `FAFE753B236A6DD3B39F5B35379A7AA141DFEA69389A1F7BC51365DEFE3F7236` uploaded to `v0.2.42-qa`; contains Setup + MSI + platform-payload (31 locked files) + runtime-payload + SHA256SUMS.txt; zero private keys. |
+
 ## 0.2.42 master repair, freellmapi/omniroute source closure and QA-only scope clarification (Coordinator)
 
 | Gate | Result | Evidence |
@@ -155,10 +173,10 @@ intentionally local and production preprocessing removes it.
 | Issue/PR execution layer | added | `AGENTS.md` "Development flow" plus `.github/` (CODEOWNERS, `ISSUE_TEMPLATE/{deliverable,blocker,bug,workstream-claim}.md`, `PULL_REQUEST_TEMPLATE.md`) committed in `521f632`. |
 | Dead code removal | passed | `write_rust.py` one-off generator removed in `d8a6ed4`; no references in build, docs, Cargo workspace or validation scripts. |
 | QA-only scope documentation | passed | `AGENTS.md` updated in `db902aa` with explicit QA-only section: no production signing, no public Internet exposure, no hosted CI on another Windows host. |
-| Source validators | passed | All six validators exit 0 on `master`: `repository.py` (`.AGENTS` taxonomy includes `COORDINATOR.md` and `SPEC.md`; platform services inventory matches the 11 expected files; `EXPECTED_DOCS` includes `AGENT_WORKFLOW.md`), `contracts.py` (0.2.42 supersession), `remote_execution.py`, `runtime.py` (payload SHA reconciled in `1f60a58`), `platform.py` (freellmapi/omniroute service roots present, 29 locked files), `installer.py`. |
-| Feature source inventory | passed | `platform/services/freellmapi/{compose.yml,serve.json}` and `platform/services/omniroute/{compose.yml,serve.json}` plus `platform/tofu/service/{freellmapi,omniroute}.tf` and manifest/digest entries are committed (`bca05d8`, `e574f89`, `6fdf35b`); compose follows the canonical forgejo sidecar pattern with per-service `tag:quetzalcoatl-<service>` and digest-pinned images. |
-| Push state | passed | `origin/master` advanced through `b99992d` → `1171016` → `d8a6ed4` → `db902aa`; the public tree no longer contains merge markers or dead code. |
-| Source-only gate | passed | All six validators exit 0 on `master`. `tools/check.ps1 -SourceOnly` now passes fully including `cargo test` (50/50 tests pass, including the previously environment-dependent `check_docker_pipe_contention_missing_pipe` which was resolved by the merge-conflict resolution in `b99992d`). |
+| Source validators | passed | All six validators exit 0 on `master`: `repository.py` (`.AGENTS` taxonomy includes `COORDINATOR.md` and `SPEC.md`; platform services inventory matches 12 expected files including `policy.json`; `EXPECTED_DOCS` includes `AGENT_WORKFLOW.md`), `contracts.py` (0.2.42 supersession), `remote_execution.py`, `runtime.py` (payload SHA reconciled in `1f60a58`), `platform.py` (freellmapi/omniroute service roots present, 31 locked files), `installer.py`. |
+| Feature source inventory | passed | `platform/services/freellmapi/{compose.yml,serve.json,policy.json}` and `platform/services/omniroute/{compose.yml,serve.json,policy.json}` plus `platform/tofu/service/{main.tf,entrypoint,versions.tf}` and manifest/digest entries are committed (`bca05d8`, `e574f89`, `6fdf35b`, `4c5d0e5`); compose follows the canonical forgejo sidecar pattern with per-service `tag:quetzalcoatl-<service>` and digest-pinned images; `lxc-service`, `discover-releases.py` and `verify-release.py` wired to schema 2 per-service topology. |
+| Push state | passed | `origin/master` advanced through `b99992d` → `1171016` → `d8a6ed4` → `db902aa` → `ba82342`; the public tree no longer contains merge markers or dead code. |
+| Source-only gate | partial | All six Python validators exit 0. `cargo test` has 1 pre-existing environment-dependent failure (`infrastructure::podman::tests::check_docker_pipe_contention_missing_pipe`) documented in `PUB-2`; `tools/check.ps1 -SourceOnly` does not reach the Rust gate on this host. |
 
 Remaining gates are recorded as blockers in `TRACKER.md` (`PHY-1` physical LXC/Tailscale execution, `OCI-1` image publication by the runner lane, `SEC-1` rotation of the FreeLLMAPI key leaked historically in `edc28d4`).
 

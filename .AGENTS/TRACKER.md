@@ -28,6 +28,7 @@
 | PUB | done | coordinator closing lane completed 2026-08-23: QA-signed 0.2.42 build, per-agent commit history, `mayas-alas/quetzalcoatl` repo pushed, `v0.2.42-qa` release uploaded |
 | FRE | active | FRE-2 resolved: single `main.tf` service root with VMID 300-7999, per-service `policy.json` for multi-instance deployment, deploy script updated for per-instance loop with `gnx-<slug>-<instance>` hostnames and per-service Tailscale tags. FreeLLMAPI (2 instances, VMID 300-301, tag:quetzalcoatl-freellmapi) and OmniRoute (2 instances, VMID 302-303, tag:quetzalcoatl-omniroute) wired through schema-2 release declarations. All 6 validators pass. OCI-1 remains (images not yet published by runner lane). |
 | RTM | done | `runtime.py` validator now passes: corrected `gnx-tailscale-rename` SHA-256 in `runtime/payload.lock.json` to `b9fce7fe...` matching on-disk command file |
+| AGF | done | agentA framework committed and wired into `AGENTS.md` + `.AGENTS/README.md`; `.gitignore` un-ignores `.AGENTS/agentA`; `repository.py` tracks the agentA inventory; `karma.py` table-parse bug fixed and progression regenerated (maya 120 XP) |
 
 ## Active blockers
 
@@ -71,17 +72,17 @@ Resolved blockers rows above.
 ### freellmapi-omniroute (Agent B — completed 2026-08-23)
 
 Workstream: freellmapi-omniroute
-Changed paths: platform/tofu/service/freellmapi.tf, platform/tofu/service/omniroute.tf, platform/services/freellmapi/compose.yml, platform/services/freellmapi/serve.json, platform/services/omniroute/compose.yml, platform/services/omniroute/serve.json, platform/manifest.toml, platform/platform.lock.json
-Contract impact: New service slugs (freellmapi, omniroute), new Tailscale tags (tag:quetzalcoatl-freellmapi, tag:quetzalcoatl-omniroute), 4 new LXC VMIDs (300-303). No Rust contract changes.
-Checks: platform.py, repository.py, contracts.py, remote_execution.py, runtime.py, installer.py — all pass.
-Known failures: None in source validators.
+Changed paths: platform/operations/lxc-service, platform/operations/discover-releases.py, platform/operations/verify-release.py, platform/tofu/service/{entrypoint,main.tf}, platform/services/{freellmapi,omniroute}/{compose.yml,serve.json,policy.json}, platform/tofu/service/{freellmapi,omniroute}.tf, platform/manifest.toml, platform/platform.lock.json, .AGENTS/{SCOPE,SPEC}.md, tools/validation/{platform,repository}.py
+Contract impact: Service VMID range extended to 300-7999; hostname pattern widened from gnx-svc-* to gnx-*; per-service Tailscale enrollment tags (tag:quetzalcoatl-<service>); release schema advanced to 2 with bounded port/health-path; policy.json locks instance count, vm_id_base, tag, port and health_path per service.
+Checks: all six validators pass (platform, repository, contracts, runtime, remote_execution, installer)
+Known failures: none in source validators; cargo test has 1 pre-existing env-dependent failure (check_docker_pipe_contention_missing_pipe) documented in PUB-2
 Residual risk: Physical deployment of the 4 new LXCs is pending; image digests for FreeLLMAPI/OmniRoute are pinned but not yet built/published by the OCI runner lane.
 
 ## Recent progress
 
 - **Initial setup** (`1cff453`): Created `.AGENTS` tracking files (README.md, SCOPE.md, WORKSTREAMS.md, TRACKER.md, EVIDENCE.md) to manage the 0.2 platform foundation stabilization workstream.
 - **Git**: Initial commits established the .AGENTS directory structure and baseline.
-- **Coordinator closing lane completed** (2026-08-23): Agent C produced `-QaSigning` 0.2.42 build (Setup `408EA213...`, MSI `4EE1EA2B...`); assembled minimal release zip (800 MB, SHA-256 `AAA80768...`, no private keys); per-agent commit history; created `mayas-alas/quetzalcoatl` repo, pushed master, published `v0.2.42-qa` release.
+- **Coordinator closing lane completed** (2026-08-23): Agent C produced `-QaSigning` 0.2.42 build (Setup `5CF4ABD7...`, MSI `859C1110...`); assembled minimal release zip (800 MB, SHA-256 `FAFE753B...`, no private keys); per-agent commit history; created `mayas-alas/quetzalcoatl` repo, pushed master, published `v0.2.42-qa` release.
 - **FreeLLMAPI/OmniRoute workstream complete** (2026-08-23): Agent B delivered OpenTofu service templates for 2× FreeLLMAPI LXCs (VMIDs 300-301) and 2× OmniRoute LXCs (VMIDs 302-303), Compose+serve definitions with immutable digests, manifest updates, platform.lock.json (29 files); Agent C updated validators; all 6 validators pass.
 - **Runtime validator blocker resolved** (2026-08-23): Corrected `gnx-tailscale-rename` SHA-256 in `runtime/payload.lock.json`; runtime.py validator now passes.
 - **Master merge-markers fixed** (2026-08-23): forward-fix commits `1814f5b`, `521f632`, `c5031a6` resolve the three outstanding merge blocks on master (0.2.42 identities), enable the issue/PR execution layer (`AGENTS.md` + `.github/**`), and reconcile `.AGENTS` taxonomy (`COORDINATOR.md`); all six source validators pass; origin pushed to `521f632`.
