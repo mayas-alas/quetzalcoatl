@@ -101,6 +101,7 @@ def main() -> None:
             "TRACKER.md",
             "EVIDENCE.md",
             "SPEC.md",
+            "COORDINATOR.md",
         ]
     )
     if agents != expected_agents:
