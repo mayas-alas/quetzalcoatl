@@ -53,7 +53,6 @@ Evidence is recorded only after execution. Historical release notes belong in
 | QA trust distribution | passed | before Setup, neither new certificate existed in LocalMachine; after Setup, the root exists exactly once in `LocalMachine\Root` and the leaf exactly once in `LocalMachine\TrustedPublisher`, both public-only; CLI/tray/service/wrapper signatures are `Valid` under the leaf |
 | Forgejo admin show/reset | not exercised | source and packaged contracts pass; this QA signing change restored physical CLI execution but did not disclose or rotate the administrator credential |
 
-<<<<<<< HEAD
 ## 0.2.42 build and source-gate closure (Agent C)
 
 | Gate | Result | Evidence |
@@ -95,9 +94,43 @@ Evidence is recorded only after execution. Historical release notes belong in
 | Environment-dependent test | `check_docker_pipe_contention_missing_pipe` fails without a Docker daemon on this host (recorded in the prior 0.2.42 session); blocks `cargo test`. | Agent C / host env |
 
 `tools/check.ps1 -SourceOnly` therefore does not yet run green; the three failures above are recorded as blockers for the closing lane rather than mutated out of scope. The runtime fix itself is complete and its change-scoped validators pass. Physical `gnx status` verification on a freshly installed 0.2.42 remains pending the Agent C build + install lane.
-=======
 The installer-driven QA trust objective passes end to end. Public release
 acceptance remains separately blocked because Smart App Control enforcement
 requires reputation or a publisher represented by Windows AuthRoot; the QA root is
 intentionally local and production preprocessing removes it.
->>>>>>> origin/master
+
+## 0.2.42 QA-signed build and GitHub publication (Coordinator closing lane)
+
+| Gate | Result | Evidence |
+|---|---|---|
+| QA signing build | passed | `installer/build.ps1 -QaSigning` re-signed all first-party executables, MSI, detached Burn engine and Setup; five bootstrap copies plus two exact public QA certificates verified by coherent extraction. |
+| QA publisher subject | passed | signer corrected to `CN=GNX Labs QA Publisher` (malformed `CN=GNX Labs. QA Publisher` removed). |
+| 0.2.42 QA Setup SHA-256 | passed | `408EA213BC63B5292E229EC706573A88CF829B52093083AAC3B4292E6C645758` |
+| 0.2.42 QA MSI SHA-256 | passed | `4EE1EA2B63BE85DF3D3C01EFAC9776546AE15006239350CA60924D4FB9A0F93A` |
+| Release zip artifact | passed | `Quetzalcoatl-0.2.42-qa.zip` (800,048,739 bytes), SHA-256 `AAA80768FE7BBDC1684A735C2D5EBF39B714834D6EE22A8594D78E53DA502`; contains Setup + MSI + platform-payload (23 locked files) + runtime payload.lock.json + SHA256SUMS.txt; zero private keys. |
+| GitHub repository | passed | `mayas-alas/quetzalcoatl` public repo; master pushed to commit `3fb89c9` (with upstream release history merged). |
+| GitHub release | passed | tag `v0.2.42-qa`, asset `Quetzalcoatl-0.2.42-qa.zip` uploaded; release URL https://github.com/mayas-alas/quetzalcoatl/releases/tag/v0.2.42-qa |
+
+### Per-agent commit history (coordinator landings)
+
+| Commit | Lane | Summary |
+|---|---|---|
+| `4a6cf10` | Agent A | feat(contracts): product contract and CLI/tray platform status |
+| `14df510` | Agent B | feat(runtime): platform bundle source and closed runtime operations |
+| `6c0ed2b` | Agent C | feat(delivery): bootstrap, installer, tools, docs |
+| `01749cb` | Coordinator | chore(coord): .AGENTS tracking, AGENTS.md, kilo.json |
+| `8b25779` | Coordinator | chore(gitignore): exclude kilo config, agentA workarea |
+| `53768f0` | Coordinator | chore(git): mark release zip binary in .gitattributes |
+| `f4bd8a0` | Coordinator | chore(release): merge upstream release history into closing lane |
+| `13cf7f1` | Coordinator | chore(release): ship 0.2.42-qa zip as GitHub release asset |
+| `2c30ba0` | Coordinator | chore(release): finalize SHA256SUMS for v0.2.42-qa installer zip |
+
+### Preserved invariants (publication)
+
+| Invariant | Status |
+|---|---|
+| No Tailscale enrollment credentials in repositories, Compose, logs, argv, OpenTofu state | upheld — zip excludes runtime node.env, tailscaled.state |
+| No PVE credentials enter Forgejo, registry, Actions, or runner | upheld |
+| No mutable image tags; immutable digests only | upheld |
+| `installer/build.ps1` remains the release entry point | upheld |
+| Production builds must not embed QA trust; QA root is local-only | upheld — QA root/publisher embedded only under `-QaSigning`
