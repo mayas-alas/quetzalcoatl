@@ -191,3 +191,14 @@ Remaining gates are recorded as blockers in `TRACKER.md` (`PHY-1` physical LXC/T
 | Spec-vs-contract deltas | confirmed | VMID range (300-303 vs 1000-7999), LXC naming (`gnx-{service}-{1,2}` vs `gnx-svc-<slug>`), instance count (2 vs 1 per repo), Tailscale tag (`tag:quetzalcoatl-<service>` vs hardcoded `tag:quetzalcoatl-service`), port/health (3001/20128 + `/healthz` vs 8080 + `/`). |
 
 Physical deployment of the two services therefore cannot proceed on the current locked bundle; it requires the FRE-2 scope amendment (extend SVC to per-service templates, or deploy through the closed single-instance path after OCI-1 publishes images).
+
+## agentA framework durability and stickiness (Coordinator)
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Framework committed | passed | `.AGENTS/agentA/**` (README, ROLES, FLOW, GAMIFIED, TRACKING, CORRECTIONS, TEMPLATES, agents/, python/karma.py) removed from `.gitignore` and now tracked; survives clone/session loss. |
+| Entry-point wiring | passed | `AGENTS.md` read order adds `agentA/README.md` and a "Sticky resume — any agent, any state" protocol; `.AGENTS/README.md` read order adds item 5 and protocol rules 9–10 (tool-agnostic, resume from `agentA/TRACKING.md`). |
+| Tool-agnostic contract | passed | `AGENTS.md` fleet paragraph now derives roles from `.AGENTS/agentA/ROLES.md`; `.kilo/agent/` is only local runtime connectivity, git-ignored, never part of the contract; `docs/AGENT_WORKFLOW.md` and `docs/AGENT_AUDIT.md` de-Kiloed. |
+| Validator inventory | passed | `tools/validation/repository.py` includes the 13 agentA files in the `.AGENTS` live inventory and no longer ignores `agentA/` in the forbidden-name scan; `repository.py` exits 0. |
+| Gamification engine | passed | `python/karma.py` table-parse bug fixed (only the first table was parsed; master-table rows were skipped, so progression was always empty); `karma.py --write` regenerates the Progresión section and `karma.py --check` exits 0. Current: maya 120 XP, 2 clean `done`, streak 2. |
+| A-002 closure | passed | agentA `TRACKING.md` A-002 (`Enlazar agentA desde .AGENTS/README.md`) closed `done` with evidence; role card `agents/maya.md` updated. |

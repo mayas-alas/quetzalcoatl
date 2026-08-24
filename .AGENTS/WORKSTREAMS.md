@@ -2,6 +2,25 @@
 
 Three lanes may work concurrently; one path has one writer.
 
+## Issue-First mandate
+
+**Every workstream, feature, bug, blocker, or finding MUST have a GitHub Issue
+before any work begins.** The Issue is the source of truth; the `.AGENTS/*`
+framework documents *how* work is done.
+
+### Mandatory Issue linkage
+
+| Artifact | Must reference GitHub Issue # |
+|---|---|
+| Workstream (in `.AGENTS/WORKSTREAMS.md`) | Yes — column `Issue` |
+| Board row (in `.AGENTS/TRACKER.md`) | Yes — column `Issue` |
+| Active blocker row | Yes — column `Issue` |
+| Finding row (in Findings log) | Yes — column `Issue` |
+| Branch name | `wstream/<lane>/<issue>-<slug>` |
+| PR title / body | Must include `Closes #<issue>` |
+
+If a workstream lacks an Issue, it is invalid and will not be merged.
+
 ## Agent A — product contract
 
 Owns root Cargo/release metadata, `apps/gnx/**`, `crates/gnx-contracts/**`,
@@ -39,6 +58,7 @@ integration, physical host mutations and final evidence.
 
 Owner: Agent B — platform runtime
 Spec: `.AGENTS/SPEC.md`
+Issue: #2 (closed, delivered)
 
 Adds two new managed services, each deployed as 2 LXC instances via OpenTofu service
 root, with Tailscale sidecar HTTPS exposure:

@@ -13,32 +13,32 @@
 
 ## Board
 
-| ID | Status | Evidence |
-|---|---|---|
-| IPC | done | protocol-v2 status remains compatible; elevated Forgejo admin commands are closed and tested |
-| BND | done | 23-file platform bundle and candidate staging are hash locked |
-| IAC | done | OpenTofu owns PVE resources; Ansible is absent |
-| HST | done | Docker is active and enabled in VMIDs 200, 201 and 202 |
-| APP | done | Garage, Forgejo and runner are healthy; both HTTPS endpoints and the Forgejo UI were exercised |
-| ADM | blocked | CLI/IPC, rotation, verification and source gates pass; physical execution awaits trusted installation |
-| SEC | done | Authorized QA transition applied and verified after restart; QA trust bootstrap complete; production trust surfaces blocked by B40-1 per SCOPE exclusion |
-| PKG | done | official 0.2.42 QA build produced and published as `v0.2.42-qa`; MSI/Burn extraction and production-without-QA-payload probe pass; public release signing remains blocked by B40-1 |
-| PHY | review | 0.2.40 to 0.2.41 upgrade and 0.2.41 repair exited 0; controller and platform returned READY; physical 0.2.42 + FreeLLMAPI/OmniRoute LXC deployment not yet executed |
-| SIG | done | ten-year QA root, renewable publisher and installer-driven machine trust passed physically; 0.2.42 QA build adopted the closed `CN=GNX Labs QA Publisher` subject; production still requires Windows AuthRoot (B40-1) |
-| PUB | done | coordinator closing lane completed 2026-08-23: QA-signed 0.2.42 build, per-agent commit history, `mayas-alas/quetzalcoatl` repo pushed, `v0.2.42-qa` release uploaded |
-| FRE | active | FRE-2 resolved: single `main.tf` service root with VMID 300-7999, per-service `policy.json` for multi-instance deployment, deploy script updated for per-instance loop with `gnx-<slug>-<instance>` hostnames and per-service Tailscale tags. FreeLLMAPI (2 instances, VMID 300-301, tag:quetzalcoatl-freellmapi) and OmniRoute (2 instances, VMID 302-303, tag:quetzalcoatl-omniroute) wired through schema-2 release declarations. All 6 validators pass. OCI-1 remains (images not yet published by runner lane). |
-| RTM | done | `runtime.py` validator now passes: corrected `gnx-tailscale-rename` SHA-256 in `runtime/payload.lock.json` to `b9fce7fe...` matching on-disk command file |
-| AGF | done | agentA framework committed and wired into `AGENTS.md` + `.AGENTS/README.md`; `.gitignore` un-ignores `.AGENTS/agentA`; `repository.py` tracks the agentA inventory; `karma.py` table-parse bug fixed and progression regenerated (maya 120 XP) |
+| ID | Status | Issue | Evidence |
+|---|---|---|---|
+| IPC | done | — | protocol-v2 status remains compatible; elevated Forgejo admin commands are closed and tested |
+| BND | done | — | 23-file platform bundle and candidate staging are hash locked |
+| IAC | done | — | OpenTofu owns PVE resources; Ansible is absent |
+| HST | done | — | Docker is active and enabled in VMIDs 200, 201 and 202 |
+| APP | done | — | Garage, Forgejo and runner are healthy; both HTTPS endpoints and the Forgejo UI were exercised |
+| ADM | blocked | — | CLI/IPC, rotation, verification and source gates pass; physical execution awaits trusted installation |
+| SEC | done | — | Authorized QA transition applied and verified after restart; QA trust bootstrap complete; production trust surfaces blocked by B40-1 per SCOPE exclusion |
+| PKG | done | #8 | official 0.2.42 QA build produced and published as `v0.2.42-qa`; MSI/Burn extraction and production-without-QA-payload probe pass; public release signing remains blocked by B40-1 |
+| PHY | review | #5 | 0.2.40 to 0.2.41 upgrade and 0.2.41 repair exited 0; controller and platform returned READY; physical 0.2.42 + FreeLLMAPI/OmniRoute LXC deployment not yet executed |
+| SIG | done | — | ten-year QA root, renewable publisher and installer-driven machine trust passed physically; 0.2.42 QA build adopted the closed `CN=GNX Labs QA Publisher` subject; production still requires Windows AuthRoot (B40-1) |
+| PUB | done | #1, #2 | coordinator closing lane completed 2026-08-23: QA-signed 0.2.42 build, per-agent commit history, `mayas-alas/quetzalcoatl` repo pushed, `v0.2.42-qa` release uploaded |
+| FRE | active | #2, #9 | FRE-2 resolved: single `main.tf` service root with VMID 300-7999, per-service `policy.json` for multi-instance deployment, deploy script updated for per-instance loop with `gnx-<slug>-<instance>` hostnames and per-service Tailscale tags. FreeLLMAPI (2 instances, VMID 300-301, tag:quetzalcoatl-freellmapi) and OmniRoute (2 instances, VMID 302-303, tag:quetzalcoatl-omniroute) wired through schema-2 release declarations. All 6 validators pass. OCI-1 remains (images not yet published by runner lane). |
+| RTM | done | #9 | `runtime.py` validator now passes: corrected `gnx-tailscale-rename` SHA-256 in `runtime/payload.lock.json` to `b9fce7fe...` matching on-disk command file |
+| AGF | done | — | agentA framework committed and wired into `AGENTS.md` + `.AGENTS/README.md`; `.gitignore` un-ignores `.AGENTS/agentA`; `repository.py` tracks the agentA inventory; `karma.py` table-parse bug fixed and progression regenerated (maya 120 XP) |
 
 ## Active blockers
 
-| ID | Finding | Required resolution |
-|---|---|---|
-| B40-1 | Smart App Control Enforce blocks the self-signed payload: 0.2.27 was rejected before QA changed the policy from `1` to `0`; the apparent 0.2.33-0.2.38 success occurred while it was Off, and restored Enforce rejects 0.2.39/0.2.40. | Keep local signing for controlled QA, but obtain trusted signing for physical release acceptance; do not silently mutate the host policy. |
-| PHY-1 | Physical execution of 0.2.42 (install/upgrade/repair on this host) and the 4 new FreeLLMAPI/OmniRoute LXCs has not yet been exercised. | Coordinate elevated Setup run on the Proxmox controller; deploy the new services via the closed SVC path; verify Tailscale HTTPS access and health probes. |
-| FRE-2 | Spec/contract gap resolved (2026-08-23): adopted option (a) with scope amendment. Single `tofu/service/main.tf` root with extended VMID range 300-7999 and hostname pattern `gnx-<slug>-<instance>`. Per-service `policy.json` in `services/{freellmapi,omniroute}/` defines `instances`, `vm_id_base`, `tag`, `port`, `health_path`. `platform/operations/deploy` updated for per-instance loop reading policy, creating LXCs with `gnx-<slug>-<instance>` hostnames and per-service tags. `verify-release.py` schema 2 validates bounded port/health_path. `lxc-service` accepts `tag:quetzalcoatl-<service>`. All 6 validators pass. OCI-1 remains (images not yet published by runner lane). | Completed by maya (2026-08-23). Scope amendment recorded in `.AGENTS/SCOPE.md` and `.AGENTS/SPEC.md`. No transitional templates remain. |
-| SEC-1 | Plaintext FreeLLMAPI API key found in historical commit `edc28d4` inside `.AGENTS/TRACKER.md`; current tree is clean. Public history cannot be rewritten; forward-fix is redaction. Token rotation is the service owner's responsibility. |
-| OCI-1 | FreeLLMAPI/OmniRoute image digests are pinned in manifest/compose but no image has been built/published by the OCI runner lane. | Agent A / OCI lane: build both images via the Forgejo template + dedicated runner and publish by digest; then reconcile digests. |
+| ID | Finding | Required resolution | Issue |
+|---|---|---|---|
+| B40-1 | Smart App Control Enforce blocks the self-signed payload: 0.2.27 was rejected before QA changed the policy from `1` to `0`; the apparent 0.2.33-0.2.38 success occurred while it was Off, and restored Enforce rejects 0.2.39/0.2.40. | Keep local signing for controlled QA, but obtain trusted signing for physical release acceptance; do not silently mutate the host policy. | — |
+| PHY-1 | Physical execution of 0.2.42 (install/upgrade/repair on this host) and the 4 new FreeLLMAPI/OmniRoute LXCs has not yet been exercised. | Coordinate elevated Setup run on the Proxmox controller; deploy the new services via the closed SVC path; verify Tailscale HTTPS access and health probes. | #5 |
+| FRE-2 | Spec/contract gap resolved (2026-08-23): adopted option (a) with scope amendment. Single `tofu/service/main.tf` root with extended VMID range 300-7999 and hostname pattern `gnx-<slug>-<instance>`. Per-service `policy.json` in `services/{freellmapi,omniroute}/` defines `instances`, `vm_id_base`, `tag`, `port`, `health_path`. `platform/operations/deploy` updated for per-instance loop reading policy, creating LXCs with `gnx-<slug>-<instance>` hostnames and per-service tags. `verify-release.py` schema 2 validates bounded port/health_path. `lxc-service` accepts `tag:quetzalcoatl-<service>`. All 6 validators pass. OCI-1 remains (images not yet published by runner lane). | Completed by maya (2026-08-23). Scope amendment recorded in `.AGENTS/SCOPE.md` and `.AGENTS/SPEC.md`. No transitional templates remain. | #9 |
+| SEC-1 | Plaintext FreeLLMAPI API key found in historical commit `edc28d4` inside `.AGENTS/TRACKER.md`; current tree is clean. Public history cannot be rewritten; forward-fix is redaction. Token rotation is the service owner's responsibility. | — |
+| OCI-1 | FreeLLMAPI/OmniRoute image digests are pinned in manifest/compose but no image has been built/published by the OCI runner lane. | Agent A / OCI lane: build both images via the Forgejo template + dedicated runner and publish by digest; then reconcile digests. | #7 |
 
 ## Workstream findings log
 
@@ -55,6 +55,7 @@ Resolved blockers rows above.
 | 2026-08-23 | maya | platform validators | Stale `gnx-tailscale-rename` SHA-256 in `runtime/payload.lock.json` (a76fda04 vs on-disk b9fce7fe). | Agent B | n/a | RTM-1 | correction (resolved) |
 | 2026-08-23 | maya | repository hygiene | `write_rust.py` is a dead one-off generator (not referenced by build/docs/workspace). | Agent C | n/a | n/a | cleanup (resolved) |
 | 2026-08-23 | maya | AGENTS.md scope | No explicit QA-only statement; docs risk signaling production effort. | Coordinator | n/a | n/a | correction (resolved) |
+| 2026-08-23 | maya | agentA framework | `python/karma.py` parsed only the first table (Leyenda) and skipped the master table rows, so the progression always rendered "Sin datos". | Coordinator | n/a | AGF | correction (resolved) |
 
 ## Resolved blockers
 
@@ -92,6 +93,7 @@ Residual risk: Physical deployment of the 4 new LXCs is pending; image digests f
 - **Merge conflict resolved** (2026-08-23): `b99992d` resolves origin/master conflicts into 0.2.42; `Cargo.lock`, `Cargo.toml`, `release/manifest.toml`, `AGENTS.md`, docs, validators and `.AGENTS` taxonomy aligned. Origin advanced to `db902aa`.
 - **FRE-2 spec/contract gap resolved** (2026-08-23): Single `main.tf` service root with VMID 300-7999, per-service `policy.json` for 2× FreeLLMAPI (VMID 300-301) and 2× OmniRoute (VMID 302-303), `deploy` per-instance loop with `gnx-<slug>-<instance>` hostnames, per-service Tailscale tags. All 6 validators pass. OCI-1 remains.
 - **FreeLLMAPI/OmniRoute service templates wired** (2026-08-23): Recreated `services/freellmapi/` and `services/omniroute/` with `compose.yml`, `serve.json`, `policy.json` (port 8080, health `/`). Updated `platform/operations/deploy` for per-instance loop, `verify-release.py` schema 2, `lxc-service` per-service tag support. All validators green.
+- **Agent framework made durable and sticky** (2026-08-23): `.AGENTS/agentA/` (tool-agnostic roles/flow/loop-guard/gamification) is no longer git-ignored and is committed; `AGENTS.md` and `.AGENTS/README.md` wire it as the mandatory resume protocol for any agent from any state; `tools/validation/repository.py` includes the agentA inventory; `docs/AGENT_WORKFLOW.md` and `docs/AGENT_AUDIT.md` de-Kiloed; `karma.py` table-parse bug fixed (master table rows were skipped) and progression regenerated (maya 120 XP, 2 clean done).
 
 ## Next steps
 
