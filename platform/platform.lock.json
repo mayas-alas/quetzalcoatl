@@ -10,7 +10,7 @@
     {
       "path": "manifest.toml",
       "mode": "0644",
-      "sha256": "d17df213d1340635c64ac626b7436286e542587d052c551fea525a1d33778ae0"
+      "sha256": "da62a445dfda6085dce62b4f6d9b5569e3340df6a82dfc23a39a6363d982a2ed"
     },
     {
       "path": "operations/deploy",
@@ -46,6 +46,21 @@
       "path": "operations/verify-release.py",
       "mode": "0755",
       "sha256": "f336852d624106a77da3280c715b94397917ea027b902a769ddc4ab99108af6f"
+    },
+    {
+      "path": "services/deepseek-dsh/compose.yml",
+      "mode": "0644",
+      "sha256": "5af1b87341a3018dcbd0b316b829e982ac2639102a24852237609d7238eba675"
+    },
+    {
+      "path": "services/deepseek-dsh/policy.json",
+      "mode": "0644",
+      "sha256": "0b932100cb7a9c50480b48be48700acb92e232eb335e9c92765162b78a8ac309"
+    },
+    {
+      "path": "services/deepseek-dsh/serve.json",
+      "mode": "0644",
+      "sha256": "29eba37cfbfca4653cc0c9d578e201ce52d3496ccb2d156686524687e9601f28"
     },
     {
       "path": "services/forgejo/compose.yml",

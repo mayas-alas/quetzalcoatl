@@ -1,0 +1,7 @@
+{
+  "instances": 1,
+  "vm_id_base": 304,
+  "tag": "tag:quetzalcoatl-deepseek-dsh",
+  "port": 3080,
+  "health_path": "/"
+}
