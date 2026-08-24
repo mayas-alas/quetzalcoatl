@@ -1,0 +1,47 @@
+name: source-gate
+
+on:
+  pull_request:
+    branches: [master, hot]
+  push:
+    branches: [hot]
+
+jobs:
+  source-gate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install tomli
+
+      - name: Repository validator
+        run: python tools/validation/repository.py
+
+      - name: Contracts validator
+        run: python tools/validation/contracts.py
+
+      - name: Platform validator
+        run: python tools/validation/platform.py
+
+      - name: Runtime validator
+        run: python tools/validation/runtime.py
+
+      - name: Remote execution validator
+        run: python tools/validation/remote_execution.py
+
+      - name: Installer validator
+        run: python tools/validation/installer.py
+
+      - name: Source-only gate
+        shell: pwsh
+        run: pwsh tools/check.ps1 -SourceOnly
