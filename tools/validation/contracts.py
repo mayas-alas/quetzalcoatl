@@ -26,8 +26,8 @@ def main() -> None:
     release = tomllib.loads((ROOT / "release" / "manifest.toml").read_text(encoding="utf-8"))
     workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
     version = release["version"]
-    if version != "0.2.42":
-        fail("release manifest must identify 0.2.42")
+    if version != "0.2.44":
+        fail("release manifest must identify 0.2.44")
     if workspace["workspace"]["package"]["version"] != version:
         fail("workspace package version differs from the release manifest")
     identities = release["identities"]
@@ -50,13 +50,13 @@ def main() -> None:
             fail(f"release reuses {current} from the previous package")
     if (
         identities["previous_product_code"]
-        != "{F43403AB-A35B-4127-9256-FE79AA4FC00B}"
+        != "{E9E8199E-E3FB-4B44-9A6B-C0087BFDCF50}"
         or identities["previous_package_code"]
-        != "{11794170-00CF-4232-9D0E-9B99AB7706A6}"
+        != "{F414918E-4777-4DBC-BDCE-C9173372905C}"
         or identities["previous_bundle_id"]
-        != "{C3289902-6200-47EE-B164-0D91C021ED63}"
+        != "{79709310-741A-4CAA-9F02-C7F529EFBE77}"
     ):
-        fail("0.2.42 does not identify the superseded 0.2.41 QA package")
+        fail("0.2.44 does not identify the superseded 0.2.43 QA package")
     package = workspace["workspace"]["package"]
     if package.get("license") != "AGPL-3.0-only":
         fail("workspace product license must be AGPL-3.0-only")
