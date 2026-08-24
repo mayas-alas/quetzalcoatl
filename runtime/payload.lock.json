@@ -97,7 +97,7 @@
       "source": "quetzalcoatl",
       "version": 5,
       "mode": "0755",
-      "sha256": "b9fce7fe8714423f2558fcbfa4757f86c0ca65eae7916df17d3bcf7767134b9c"
+      "sha256": "a76fda0470a22b7ba5e53991c0b4e048dd4547d3344248a68e04ad0a51ae8905"
     },
     {
       "path": "commands/gnx-tailscale-enroll",
