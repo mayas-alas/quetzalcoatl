@@ -1,10 +1,16 @@
 # Agent workflow guide
 
-This document describes how the coordinator (Kilo/main agent) delegates
-workstreams to subagents (`pi2`, `maya`, `pi`, `pi-claude`) and how subagents
-claim, execute and hand off deliverable lanes.
+This document describes how the coordinator (main agent) delegates
+workstreams to subagents and how subagents claim, execute and hand off
+deliverable lanes. It is tool-agnostic: the execution framework, roles and
+gamification live in `.AGENTS/agentA/` and apply to any agent backend.
 
 ## 1. Agent fleet
+
+The canonical roles are defined in `.AGENTS/agentA/ROLES.md` (three grades:
+direction, quality, execution). The table below is the local runtime
+connectivity of one host — it is not part of the contract and never changes
+lanes, roles or review rules.
 
 | Agent identity | Role | Backend |
 |---|---|---|
@@ -12,12 +18,12 @@ claim, execute and hand off deliverable lanes.
 | `pi2` | Orquestador subagent | FreeLLMAPI `/v1` |
 | `maya` | Primary assistant | FreeLLMAPI `/v1` |
 | `pi` | Primary assistant | FreeLLMAPI `/v1` |
-| `pi-claude` | Primary assistant | Claude backend |
+| `pi-claude` | Primary assistant | Anthropic backend |
 | `pi-embeddings` | Embedding subagent | `/v1/embeddings` |
-| `troubleshoot` | Connectivity subagent | `127.0.0.1:31415` |
+| `troubleshoot` | Connectivity subagent | `[IP_ADDRESS]:31415` |
 
 **Backend differences do not create ownership lanes.** Lane ownership comes only
-from `.AGENTS/WORKSTREAMS.md`.
+from `.AGENTS/WORKSTREAMS.md`; roles come only from `.AGENTS/agentA/ROLES.md`.
 
 ## 2. Workstream lifecycle
 
@@ -100,7 +106,7 @@ hashes, or `tools/check.ps1 -SourceOnly` output).
 
 ## 3. Coordinator delegation flow
 
-When the coordinator (Kilo) orchestrates a multi-wave delivery:
+When the coordinator orchestrates a multi-wave delivery:
 
 ```
 Coordinator (pi2 orchestrator)

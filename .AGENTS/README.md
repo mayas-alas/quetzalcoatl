@@ -10,6 +10,9 @@ Read in order:
 2. `WORKSTREAMS.md` — three non-overlapping ownership lanes.
 3. `TRACKER.md` — current status, dependencies and blockers.
 4. `EVIDENCE.md` — executable and physical acceptance.
+5. `agentA/README.md` — the agent-agnostic execution framework: roles,
+   closed claim→do→verify→record loop, loop-guard, gamification (XP/badges)
+   and the resume protocol any agent runs before acting.
 
 ## Protocol
 
@@ -25,5 +28,11 @@ Read in order:
 7. The coordinator integrates one Setup artifact and records exact evidence.
 8. `done` requires source gates plus physical acceptance; neither implies the
    other.
+9. The framework is tool-agnostic and lives only under `.AGENTS/`. No agent
+   tool, runtime config or local fleet directory is part of the contract.
+10. Every agent resumes from `agentA/TRACKING.md` before acting: read the
+    checkpoint of any `started` ticket, never re-claim without it, and update
+    `updated_at` + `agent_ping`. This makes any session restart from any state
+    deterministic.
 
 Statuses are exactly `ready`, `active`, `blocked`, `review`, `done`.

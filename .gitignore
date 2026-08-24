@@ -6,7 +6,6 @@ __pycache__/
 *.pyc
 
 .kilo/
-.AGENTS/agentA/
 .config/
 .editorconfig
 release/artifacts/

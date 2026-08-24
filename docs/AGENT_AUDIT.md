@@ -10,7 +10,14 @@ The Quetzalcoatl agent ecosystem currently exhibits **two distinct phases**:
 
 2. **Phase 2 (current)**: The coordinator ran directly as `maya` for post-completion tasks (merge conflict resolution, documentation, evidence recording, dead code removal). No distinct Agent A/B/C roles are visible in commits  `1171016`–`ba82342`.
 
-**Key finding: There is no incentivization, gamification, performance tracking, or agent-specific recognition system.** All commits are authored by a single identity (`maya@email.gnx` or `[EMAIL]`). While the workflow documentation (`docs/AGENT_WORKFLOW.md`, `.AGENTS/WORKSTREAMS.md`, `.github/ISSUE_TEMPLATE/workstream-claim.md`) now describes a multi-agent process, the **actual execution is single-agent**.
+**Key finding (updated 2026-08-23): The incentivization/gamification gap is
+closed by `.AGENTS/agentA/`** — a tool-agnostic execution framework with roles,
+a closed claim→do→verify→record loop, loop-guard, and a deterministic
+XP/badges/leaderboard engine (`python/karma.py`, stdlib only). It is committed
+to the repository and wired into `AGENTS.md` and `.AGENTS/README.md`, so any
+agent resumes from any state. The remaining gap is identity separation: all
+commits are authored by a single identity, which still undermines the
+review/approval separation rule. All commits are authored by a single identity (`maya@email.gnx` or `[EMAIL]`). While the workflow documentation (`docs/AGENT_WORKFLOW.md`, `.AGENTS/WORKSTREAMS.md`, `.github/ISSUE_TEMPLATE/workstream-claim.md`) now describes a multi-agent process, the **actual execution is single-agent**.
 
 ---
 
@@ -44,10 +51,10 @@ The `pi2` orchestrator subagent type is configured (`mode: all`) but **no eviden
 - **Evidence**: `git log --format="%an|%ae"` shows uniform authorship across 20 commits.
 - **Impact**: Cannot verify review/approval separation (rule 5: "A different agent reviews and approves; the author cannot self-approve").
 
-### 3.2 No incentivization or gamification
-- **Problem**: No reward, recognition, scoring, or progress-tracking system exists for agents.
-- **Evidence**: No points, badges, leaderboards, streaks, or performance metrics in `.AGENTS/`, `docs/`, or `.kilo/` configurations.
-- **Impact**: Agents have no mechanism to prioritize high-value work, compete constructively, or be motivated beyond explicit instructions.
+### 3.2 No incentivization or gamification (resolved 2026-08-23)
+- **Problem (original)**: No reward, recognition, scoring, or progress-tracking system existed for agents.
+- **Resolution**: `.AGENTS/agentA/GAMIFIED.md` defines XP/badges/levels/streaks; `.AGENTS/agentA/TRACKING.md` is the master 360° table; `.AGENTS/agentA/python/karma.py` derives the leaderboard deterministically (stdlib only). The framework is committed and wired into `AGENTS.md` + `.AGENTS/README.md`.
+- **Remaining**: Gamification rewards quality and collaboration but depends on agents actually running `karma.py --write` at each close; no tool-level enforcement yet.
 
 ### 3.3 No workload balancing or queuing
 - **Problem**: No central work queue, task prioritization, or load distribution. The coordinator assigns work ad-hoc.
@@ -104,7 +111,13 @@ Add a per-agent workload tracking section:
 Add a `.kilo/hooks/file-change` config (if supported) or a `tools/validate-changed.sh` script that runs only the validators affected by changed files.
 - Reduces redundant full-suite runs.
 
-### Tier 2 — Gamification layer (optional, non-blocking)
+### Tier 2 — Gamification layer (implemented 2026-08-23 in `.AGENTS/agentA/`)
+
+> Status: R2.1 (scoring) and R2.2 (badges) are implemented by
+> `.AGENTS/agentA/GAMIFIED.md` + `TRACKING.md` + `python/karma.py`, with a
+> stricter XP table (quality-weighted, negative XP for self-judging and loops).
+> The original proposals below are kept for reference and can be folded into
+> the agentA table if desired.
 
 #### R2.1: Agent scoring system
 Add a lightweight scoring mechanism in `.AGENTS/SCOREBOARD.md`:
@@ -177,8 +190,8 @@ Modify `tools/check.ps1` to verify that the PR author differs from the reviewer 
 | R1.1 Git author separation | Low | High | **P0** |
 | R1.2 Workload tracking | Low | Medium | **P1** |
 | R1.3 Validator auto-scope | Low | Medium | **P1** |
-| R2.1 Agent scoring | Medium | Medium | P2 |
-| R2.2 Achievement badges | Low | Low-Medium | P2 |
+| R2.1 Agent scoring | Medium | Medium | **done** (`.AGENTS/agentA/`) |
+| R2.2 Achievement badges | Low | Low-Medium | **done** (`.AGENTS/agentA/`) |
 | R2.3 Sprint goals | Low | Low | P2 |
 | R3.1 Validation profiles | Low | Low | P2 |
 | R3.2 Automated dispatch | High | High | P3 |
@@ -188,15 +201,18 @@ Modify `tools/check.ps1` to verify that the PR author differs from the reviewer 
 
 ## 6. Conclusion
 
-The current agent ecosystem is **under-incentivized and under-tracked**. The process framework is well-documented (thanks to the recent `AGENT_WORKFLOW.md` addition), but:
+The agent ecosystem is now **incentivized and tracked** through the committed,
+tool-agnostic framework in `.AGENTS/agentA/` (roles, closed loop, loop-guard,
+XP/badges/leaderboard via `python/karma.py`), wired into `AGENTS.md` and
+`.AGENTS/README.md` so any agent resumes from any state. The remaining gaps:
 
-1. **No rewards**: Agents receive no recognition, points, or feedback for completed work.
-2. **No competition**: No leaderboard, sprint, or achievement system to motivate efficiency.
-3. **No separation**: All commits come from one identity, undermining the multi-agent review process.
-4. **No visibility**: The coordinator must manually track every agent's state.
+1. **No separation**: All commits come from one identity, undermining the
+   multi-agent review process (R1.1 remains the P0 gap).
+2. **No enforcement**: Gamification depends on agents running `karma.py` at
+   each close; there is no tool-level gate yet.
 
-**Immediate action**: Implement R1.1 (git author separation) to enable review-enforcement verification. This is the foundation for any gamification system.
-
-**Secondary action**: Implement R2.1 (scoring) and R2.2 (badges) as a lightweight YAML/JSON file in `.AGENTS/` that agents update themselves after completing work. This adds a feedback loop without infrastructure changes.
+**Immediate action**: Implement R1.1 (git author separation) to enable
+review-enforcement verification. This is the foundation for any further
+gamification enforcement.
 
 **Note**: The `freellmapi-omniroute` workstream (FRE) is currently `blocked` per TRACKER.md (FRE-2) due to a spec/contract gap — the committed service templates are not wired into the runtime deployment path. This is the highest-priority technical blocker to address regardless of gamification.

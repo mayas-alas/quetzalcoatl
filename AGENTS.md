@@ -7,6 +7,8 @@ Read the live framework before changing the repository:
 3. `.AGENTS/WORKSTREAMS.md`
 4. `.AGENTS/TRACKER.md`
 5. `.AGENTS/EVIDENCE.md`
+6. `.AGENTS/agentA/README.md` — the agent-agnostic execution framework
+   (roles, closed loop, loop-guard, gamification, resume protocol)
 
 Then read only the product documentation relevant to the claimed deliverable.
 
@@ -21,6 +23,30 @@ Then read only the product documentation relevant to the claimed deliverable.
 - Do not revert or overwrite another agent's changes.
 - Record blockers, handoffs and exact validation evidence.
 - Keep `installer/build.ps1` as the release entry point.
+
+## Sticky resume — any agent, any state
+
+The framework is self-contained under `.AGENTS/` and independent of any agent
+tool. Before any action, run the resume protocol from
+`.AGENTS/agentA/README.md`:
+
+1. Open `.AGENTS/agentA/TRACKING.md` (master table) and find your role card in
+   `.AGENTS/agentA/agents/<role>.md`.
+2. If a ticket is `started`, resume from its `checkpoint` and update
+   `updated_at` + `agent_ping`. Never re-claim without reading the checkpoint.
+3. Never sign your own `done`; a grade ≥ 2 role signs it, and `done` without
+   `evidence` returns to `verify`.
+4. If a ticket cycles (≥ 2 corrections or past its time-box), stop and follow
+   the `FLOW.md` loop-guard; record the correction in `CORRECTIONS.md` first.
+5. XP/badges/leaderboard are derived by `python/karma.py` from the master
+   table; run `python .AGENTS/agentA/python/karma.py --check` after closing a
+   ticket.
+
+This contract is the single source of truth. Local agent tooling (fleet
+connectivity, prompts) is not part of it: backend differences never create
+ownership lanes — lane ownership comes only from `.AGENTS/WORKSTREAMS.md`, and
+roles come only from `.AGENTS/agentA/ROLES.md`. A reviewer is any different
+agent identity, independent of model or tool.
 
 ## Development flow
 

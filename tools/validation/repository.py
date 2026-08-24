@@ -42,7 +42,7 @@ EXPECTED_SERVICES = {
     "platform/services/deepseek-dsh/policy.json",
     "platform/services/deepseek-dsh/serve.json",
 }
-IGNORED_ROOTS = {".git", ".wix", "target", ".kilo", ".AGENTS/agentA"}
+IGNORED_ROOTS = {".git", ".wix", "target", ".kilo", "__pycache__"}
 FORBIDDEN_NAME = re.compile(
     r"(?:_v\d+|-v\d+|(?:^|[-_.])(old|legacy|new|final|buildfix)(?:[-_.]|$))",
     re.IGNORECASE,
@@ -99,7 +99,7 @@ def main() -> None:
     agents = sorted(
         path.relative_to(ROOT / ".AGENTS").as_posix()
         for path in (ROOT / ".AGENTS").rglob("*")
-        if path.is_file() and not path.relative_to(ROOT / ".AGENTS").parts[0] == "agentA"
+        if path.is_file()
     )
     expected_agents = sorted(
         [
@@ -111,6 +111,19 @@ def main() -> None:
             "SPEC.md",
             "COORDINATOR.md",
             "CAPACITY.md",
+            "agentA/README.md",
+            "agentA/ROLES.md",
+            "agentA/FLOW.md",
+            "agentA/GAMIFIED.md",
+            "agentA/TRACKING.md",
+            "agentA/CORRECTIONS.md",
+            "agentA/TEMPLATES.md",
+            "agentA/agents/arquitecto.md",
+            "agentA/agents/doer.md",
+            "agentA/agents/juez.md",
+            "agentA/agents/maya.md",
+            "agentA/agents/verificador.md",
+            "agentA/python/karma.py",
         ]
     )
     if agents != expected_agents:
