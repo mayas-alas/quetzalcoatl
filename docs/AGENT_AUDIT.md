@@ -2,6 +2,12 @@
 
 ## Status: 2026-08-23T16:27:35-06:00
 
+> **Superseded (2026-08-24):** The execution framework described below
+> (`.AGENTS/agentA/`, role ladder, XP/karma gamification) has been replaced by
+> the lean **gauntlet** framework (`.AGENTS/gauntlet/`): master+hot+agent
+> branch model, bar-builder-blind-critic loop, badges only, no XP. The audit
+> below is kept as history of the superseded system.
+
 ## 1. Executive summary
 
 The Quetzalcoatl agent ecosystem currently exhibits **two distinct phases**:

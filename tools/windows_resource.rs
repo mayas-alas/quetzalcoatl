@@ -34,6 +34,7 @@ pub fn compile_product_resources(binaries: &[BinaryResource]) {
     let compiler = find_resource_compiler();
     println!("cargo:rerun-if-changed={}", icon.display());
     println!("cargo:rerun-if-changed=../../tools/windows_resource.rs");
+    println!("cargo:rerun-if-env-changed=CARGO_PKG_VERSION");
 
     for binary in binaries {
         let resource = compile_resource(&compiler, &out_dir, &icon, binary);

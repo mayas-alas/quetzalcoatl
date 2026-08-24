@@ -144,7 +144,7 @@ When a subagent or the coordinator encounters a finding:
 1. **Open a finding issue** using `gh issue create --title "[finding] ..." --template finding.md`
    - Fill: discovered-by, context, where, what observed, reproducer, expected vs actual
 2. **The coordinator triages** into one of:
-   - `deliverable` — new feature work (→ `.AGENTS/SPEC.md` section + branch `wstream/<lane>/<n>-<slug>`)
+   - `deliverable` — new feature work (→ `.AGENTS/SPEC.md` section + branch `agent/<name>/<slug>` from `hot`)
    - `correction` — cleanup/dead-code/docs (→ direct commit by owning lane)
    - `blocker` — invariant at risk or physical gate (→ active blockers table, must be resolved before proceeding)
    - `wontfix` / `duplicate` — explicitly closed
