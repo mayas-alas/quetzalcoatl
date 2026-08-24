@@ -84,12 +84,12 @@ Next dependency:
 
 When this issue is opened, the **coordinator** (Kilo/main agent) will:
 
-1. Create a branch `wstream/<lane>/<issue-number>-<slug>` from `master`
+1. Create a branch `agent/<name>/<slug>` from `hot` (no feature branches; only `hot` updates `master`)
 2. Delegate to the assigned subagent (`pi2` for orchestration, or direct execution agent)
 3. Subagent works only inside the lane's owned paths
-4. Subagent opens PR using the handoff template
-5. A different agent reviews and approves
-6. Coordinator merges to `master` and updates `.AGENTS/TRACKER.md` and `.AGENTS/EVIDENCE.md`
+4. Subagent builds on its branch; a fresh-context critic runs the gauntlet (`PASS`/`REJECT`)
+5. Subagent opens PR using the handoff template after the gauntlet passes
+6. Coordinator merges to `hot`, then `hot` → `master`, and updates `.AGENTS/TRACKER.md` and `.AGENTS/EVIDENCE.md`
 
 ## Assignment
 
