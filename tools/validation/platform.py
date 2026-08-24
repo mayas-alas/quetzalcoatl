@@ -111,6 +111,8 @@ def main() -> None:
         "services/freellmapi/serve.json",
         "services/omniroute/compose.yml",
         "services/omniroute/serve.json",
+        "services/deepseek-dsh/compose.yml",
+        "services/deepseek-dsh/serve.json",
         "tofu/foundation/entrypoint",
         "tofu/foundation/main.tf",
         "tofu/foundation/versions.tf",
