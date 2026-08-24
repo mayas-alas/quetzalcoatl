@@ -1,0 +1,123 @@
+name: build-and-release
+
+# EXPERIMENTAL — hosted-CI validation lane. Per .AGENTS/SCOPE.md ("Hosted CI on
+# another Windows host") and AGENTS.md this lane is OUT OF SCOPE for production:
+#   - No signing keys are used. `installer/build.ps1 -AllowUnsigned` only.
+#   - The produced Setup/MSI are development artifacts, NOT releasable.
+#   - See blocker HCI-1 in .AGENTS/TRACKER.md.
+# A recorded scope amendment is required before hosted-CI signing/release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publish a GitHub release with this tag when set (e.g. v0.2.42-feedback). Leave empty to only build + upload artifacts.'
+        required: false
+        default: ''
+      release_prerelease:
+        description: 'Mark the release as a pre-release (recommended for unsigned feedback builds).'
+        required: false
+        default: 'true'
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: build-and-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Set up .NET SDK 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Set up Rust 1.96.1
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.96.1'
+
+      - name: Install cargo-audit 0.22.2
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: Verify host tooling
+        shell: pwsh
+        run: |
+          Write-Host "== Versions =="
+          rustc --version
+          cargo --version
+          cargo audit --version
+          python --version
+          dotnet --version
+          (Get-Command cl.exe -ErrorAction SilentlyContinue).Source
+
+      - name: Restore repository-managed tooling
+        shell: pwsh
+        run: |
+          dotnet tool restore --tool-manifest .config/dotnet-tools.json
+          dotnet tool run wix -- --version
+
+      - name: Build unsigned installer
+        shell: pwsh
+        run: ./installer/build.ps1 -AllowUnsigned
+
+      - name: Compute checksums
+        shell: pwsh
+        run: |
+          Get-FileHash -Algorithm SHA256 `
+            -Path target\installer\QuetzalcoatlSetup.exe, target\installer\Quetzalcoatl.msi |
+            ForEach-Object { "{0}  {1}" -f $_.Hash, (Split-Path $_.Path -Leaf) } |
+            Set-Content -LiteralPath target\installer\SHA256SUMS.txt -Encoding ascii
+          Get-Content -LiteralPath target\installer\SHA256SUMS.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: quetzalcoatl-unsigned-build
+          path: |
+            target/installer/QuetzalcoatlSetup.exe
+            target/installer/Quetzalcoatl.msi
+            target/installer/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish GitHub release (tag or release_tag input)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          if (-not $tag -and $env:GITHUB_REF_TYPE -eq 'tag') {
+            $tag = $env:GITHUB_REF_NAME
+          }
+          if (-not $tag) {
+            Write-Host "No tag set; artifacts uploaded only. Re-run with a release_tag for a GitHub release."
+            exit 0
+          }
+          gh release view $tag --repo ${{ github.repository }} 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag --repo ${{ github.repository }} `
+              --clobber `
+              target/installer/QuetzalcoatlSetup.exe target/installer/Quetzalcoatl.msi target/installer/SHA256SUMS.txt
+          } else {
+            gh release create $tag --repo ${{ github.repository }} `
+              --title "Quetzalcoatl $tag (unsigned feedback build)" `
+              --prerelease `
+              target/installer/QuetzalcoatlSetup.exe target/installer/Quetzalcoatl.msi target/installer/SHA256SUMS.txt
+          }
