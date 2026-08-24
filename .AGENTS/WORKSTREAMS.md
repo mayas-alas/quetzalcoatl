@@ -75,6 +75,26 @@ Agent C updates: `tools/validation/platform.py`, `tools/validation/repository.py
 
 Coordinator integrates and records evidence.
 
+### deepseek-dsh (Agent B)
+
+Owner: Agent B — platform runtime
+Spec: `.AGENTS/SPEC.md`
+Issue: #11 (open)
+
+Adds one new managed service deployed as 1 LXC instance via OpenTofu service root,
+with Tailscale sidecar HTTPS exposure:
+
+| Service | Repo | Instances | VMID range | LXC name pattern | Tailscale tag |
+|---|---|---|---|---|---|
+| DeepSeek Harness | `npx @deepseek-ai/dsh` (community image `alliot/deepseek-harness`) | 1 | 304 | gnx-deepseek-dsh-1 | tag:quetzalcoatl-deepseek-dsh |
+
+Agent B owns all changes: `platform/services/deepseek-dsh/*`, `platform/manifest.toml`,
+`platform/platform.lock.json`.
+
+Agent C updates: `tools/validation/platform.py`, `tools/validation/repository.py`.
+
+Coordinator integrates and records evidence.
+
 ## Workstream process
 
 Agent delegation, issue tracking and branch conventions are documented in

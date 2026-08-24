@@ -26,8 +26,9 @@
 | PHY | review | #5 | 0.2.40 to 0.2.41 upgrade and 0.2.41 repair exited 0; controller and platform returned READY; physical 0.2.42 + FreeLLMAPI/OmniRoute LXC deployment not yet executed |
 | SIG | done | — | ten-year QA root, renewable publisher and installer-driven machine trust passed physically; 0.2.42 QA build adopted the closed `CN=GNX Labs QA Publisher` subject; production still requires Windows AuthRoot (B40-1) |
 | PUB | done | #1, #2 | coordinator closing lane completed 2026-08-23: QA-signed 0.2.42 build, per-agent commit history, `mayas-alas/quetzalcoatl` repo pushed, `v0.2.42-qa` release uploaded |
-| FRE | active | #2, #9 | FRE-2 resolved: single `main.tf` service root with VMID 300-7999, per-service `policy.json` for multi-instance deployment, deploy script updated for per-instance loop with `gnx-<slug>-<instance>` hostnames and per-service Tailscale tags. FreeLLMAPI (2 instances, VMID 300-301, tag:quetzalcoatl-freellmapi) and OmniRoute (2 instances, VMID 302-303, tag:quetzalcoatl-omniroute) wired through schema-2 release declarations. All 6 validators pass. OCI-1 remains (images not yet published by runner lane). |
+| FRE | active | #2, #9 | FRE-2 resolved: single `main.tf` service root with VMID 300-7999, per-service `policy.json` for multi-instance deployment, deploy script updated for per-instance loop with `gnx-<slug>-<instance>` hostnames and per-service Tailscale tags. FreeLLMAPI (2 instances, VMID 300-301, tag:quetzalcoatl-freellmapi) and OmniRoute (2 instances, VMID 302-303, tag:quetzalcoatl-omniroute) wired through schema-2 release declarations. DeepSeek Harness (1 instance, VMID 304, tag:quetzalcoatl-deepseek-dsh) added in PR #12. All 6 validators pass. OCI-1 remains (FreeLLMAPI/OmniRoute images not yet published by runner lane). |
 | RTM | done | #9 | `runtime.py` validator now passes: corrected `gnx-tailscale-rename` SHA-256 in `runtime/payload.lock.json` to `b9fce7fe...` matching on-disk command file |
+| DSK | active | #11 | DeepSeek Harness web service added: 1 LXC (VMID 304), schema-2 release declaration, per-service policy.json, Tailscale HTTPS. Image pinned to community digest (OCI-2). Awaiting coordinator review/merge of PR #12. |
 | AGF | done | — | agentA framework committed and wired into `AGENTS.md` + `.AGENTS/README.md`; `.gitignore` un-ignores `.AGENTS/agentA`; `repository.py` tracks the agentA inventory; `karma.py` table-parse bug fixed and progression regenerated (maya 120 XP) |
 
 ## Active blockers
@@ -39,6 +40,7 @@
 | FRE-2 | Spec/contract gap resolved (2026-08-23): adopted option (a) with scope amendment. Single `tofu/service/main.tf` root with extended VMID range 300-7999 and hostname pattern `gnx-<slug>-<instance>`. Per-service `policy.json` in `services/{freellmapi,omniroute}/` defines `instances`, `vm_id_base`, `tag`, `port`, `health_path`. `platform/operations/deploy` updated for per-instance loop reading policy, creating LXCs with `gnx-<slug>-<instance>` hostnames and per-service tags. `verify-release.py` schema 2 validates bounded port/health_path. `lxc-service` accepts `tag:quetzalcoatl-<service>`. All 6 validators pass. OCI-1 remains (images not yet published by runner lane). | Completed by maya (2026-08-23). Scope amendment recorded in `.AGENTS/SCOPE.md` and `.AGENTS/SPEC.md`. No transitional templates remain. | #9 |
 | SEC-1 | Plaintext FreeLLMAPI API key found in historical commit `edc28d4` inside `.AGENTS/TRACKER.md`; current tree is clean. Public history cannot be rewritten; forward-fix is redaction. Token rotation is the service owner's responsibility. | — |
 | OCI-1 | FreeLLMAPI/OmniRoute image digests are pinned in manifest/compose but no image has been built/published by the OCI runner lane. | Agent A / OCI lane: build both images via the Forgejo template + dedicated runner and publish by digest; then reconcile digests. | #7 |
+| OCI-2 | DeepSeek Harness image is a community build (`ghcr.io/alliottech/deepseek-harness`); for production trust, a dedicated runner should build/publish via the OCI lane. | Agent A / OCI lane: build and publish deepseek-dsh image via Forgejo template + dedicated runner; reconcile digest. | — |
 
 ## Workstream findings log
 
@@ -79,6 +81,15 @@ Checks: all six validators pass (platform, repository, contracts, runtime, remot
 Known failures: none in source validators; cargo test has 1 pre-existing env-dependent failure (check_docker_pipe_contention_missing_pipe) documented in PUB-2
 Residual risk: Physical deployment of the 4 new LXCs is pending; image digests for FreeLLMAPI/OmniRoute are pinned but not yet built/published by the OCI runner lane.
 
+### deepseek-dsh (Agent B — in progress 2026-08-23)
+
+Workstream: deepseek-dsh
+Changed paths: platform/services/deepseek-dsh/{compose.yml,policy.json,serve.json}, platform/manifest.toml, platform/platform.lock.json, tools/validation/{platform,repository}.py
+Contract impact: New service slug (deepseek-dsh), new Tailscale tag (tag:quetzalcoatl-deepseek-dsh), 1 new LXC (VMID 304, hostname gnx-deepseek-dsh-1). Image pinned to community digest. Schema-2 release declaration with bounded port/health-path. No Rust contract changes.
+Checks: all six validators pass (platform, repository, contracts, runtime, remote_execution, installer)
+Known failures: none in source validators
+Residual risk: DEEPSEEK_API_KEY required at runtime; current lxc-service does not inject arbitrary secrets. Image is community-built (OCI-2).
+
 ## Recent progress
 
 - **Initial setup** (`1cff453`): Created `.AGENTS` tracking files (README.md, SCOPE.md, WORKSTREAMS.md, TRACKER.md, EVIDENCE.md) to manage the 0.2 platform foundation stabilization workstream.
@@ -93,6 +104,7 @@ Residual risk: Physical deployment of the 4 new LXCs is pending; image digests f
 - **Merge conflict resolved** (2026-08-23): `b99992d` resolves origin/master conflicts into 0.2.42; `Cargo.lock`, `Cargo.toml`, `release/manifest.toml`, `AGENTS.md`, docs, validators and `.AGENTS` taxonomy aligned. Origin advanced to `db902aa`.
 - **FRE-2 spec/contract gap resolved** (2026-08-23): Single `main.tf` service root with VMID 300-7999, per-service `policy.json` for 2× FreeLLMAPI (VMID 300-301) and 2× OmniRoute (VMID 302-303), `deploy` per-instance loop with `gnx-<slug>-<instance>` hostnames, per-service Tailscale tags. All 6 validators pass. OCI-1 remains.
 - **FreeLLMAPI/OmniRoute service templates wired** (2026-08-23): Recreated `services/freellmapi/` and `services/omniroute/` with `compose.yml`, `serve.json`, `policy.json` (port 8080, health `/`). Updated `platform/operations/deploy` for per-instance loop, `verify-release.py` schema 2, `lxc-service` per-service tag support. All validators green.
+- **DeepSeek Harness workstream opened** (2026-08-23): Issue #11 created; branch `wstream/b/11-deepseek-dsh` created from master. Added `platform/services/deepseek-dsh/` with `compose.yml`, `policy.json` (1 instance, VMID 304, tag:quetzalcoatl-deepseek-dsh, port 3080, health `/`), `serve.json`. Updated `platform/manifest.toml` with `deepseek_dsh` image digest. Regenerated `platform.lock.json` (32 files). Updated validators. All 6 validators pass. PR #12 opened.
 - **Agent framework made durable and sticky** (2026-08-23): `.AGENTS/agentA/` (tool-agnostic roles/flow/loop-guard/gamification) is no longer git-ignored and is committed; `AGENTS.md` and `.AGENTS/README.md` wire it as the mandatory resume protocol for any agent from any state; `tools/validation/repository.py` includes the agentA inventory; `docs/AGENT_WORKFLOW.md` and `docs/AGENT_AUDIT.md` de-Kiloed; `karma.py` table-parse bug fixed (master table rows were skipped) and progression regenerated (maya 120 XP, 2 clean done).
 
 ## Next steps

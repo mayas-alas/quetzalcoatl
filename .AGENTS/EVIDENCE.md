@@ -202,3 +202,23 @@ Physical deployment of the two services therefore cannot proceed on the current 
 | Validator inventory | passed | `tools/validation/repository.py` includes the 13 agentA files in the `.AGENTS` live inventory and no longer ignores `agentA/` in the forbidden-name scan; `repository.py` exits 0. |
 | Gamification engine | passed | `python/karma.py` table-parse bug fixed (only the first table was parsed; master-table rows were skipped, so progression was always empty); `karma.py --write` regenerates the Progresión section and `karma.py --check` exits 0. Current: maya 120 XP, 2 clean `done`, streak 2. |
 | A-002 closure | passed | agentA `TRACKING.md` A-002 (`Enlazar agentA desde .AGENTS/README.md`) closed `done` with evidence; role card `agents/maya.md` updated. |
+
+## 0.2.42 deepseek-dsh service addition (Agent B)
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Service files | passed | `platform/services/deepseek-dsh/{compose.yml,policy.json,serve.json}` committed; follows canonical tailscale sidecar pattern. |
+| Policy lock | passed | `policy.json`: `{"instances":1,"vm_id_base":304,"tag":"tag:quetzalcoatl-deepseek-dsh","port":3080,"health_path":"/"}` locked in `platform.lock.json` (32 files). |
+| Manifest digest | passed | `platform/manifest.toml` adds `deepseek_dsh = "ghcr.io/alliottech/deepseek-harness@sha256:0d87427b7f8109dc3f3e9cae1dcba9ae81f96f3170c5389f408fa1f6bb9d6bd7"` under `[runners]`. |
+| OpenTofu service root | passed | Single `tofu/service/main.tf` reused; `entrypoint` and `versions.tf` unchanged; VMID 304 within 300-7999 range; hostname `gnx-deepseek-dsh-1` matches `^gnx-[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$`. |
+| Schema 2 release | passed | `discover-releases.py` and `verify-release.py` accept bounded `port` (1-65535) and `health_path` (`/[a-z0-9._/-]{0,127}`); `deepseek-dsh` declares port 3080 and health `/`. |
+| Platform validator | passed | `tools/validation/platform.py` required files extended; all 32 locked files present and SHA-256 verified. |
+| Repository validator | passed | `tools/validation/repository.py` `EXPECTED_SERVICES` extended to include `platform/services/deepseek-dsh/{compose.yml,policy.json,serve.json}`. |
+| Installer rebuild | passed | `installer/build.ps1 -QaSigning` rebuilt 0.2.42 QA artifacts with updated 32-file platform payload; Setup SHA-256 `5CF4ABD7E5056B343865444452A503B0E14DF6F060DDE531C561A619C123413D`, MSI SHA-256 `859C1110E06AF1D1361869C67E8C784C248672585E305509CC510F90C6D78753`; all first-party binaries, MSI and Setup signed under `CN=GNX Labs QA Publisher`. |
+| GitHub PR | open | `#12` — `wstream/b/11-deepseek-dsh` → `master`: feat(platform): add deepseek-dsh managed service via OpenTofu LXC. |
+| Release artifact | pending | PR #12 not yet merged; release zip update deferred until merge. |
+
+### Known limitations
+
+- `DEEPSEEK_API_KEY` is required at runtime; current `lxc-service` does not inject arbitrary secrets. A follow-up workstream should extend secret injection if automated deployment is needed.
+- Image is a community build (`ghcr.io/alliottech/deepseek-harness`); for production trust, a dedicated runner should build/publish via the OCI lane (tracked as OCI-2).
