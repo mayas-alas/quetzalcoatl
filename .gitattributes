@@ -18,6 +18,8 @@
 # Extension-less runtime shell scripts: install-time payload hashes are LF-based.
 runtime/commands/* text eol=lf
 runtime/operations/* text eol=lf
+platform/operations/* text eol=lf
+platform/tofu/*/entrypoint text eol=lf
 # Binary files
 *.png binary
 *.jpg binary

@@ -15,7 +15,7 @@
         {
             "path": "operations/deploy",
             "mode": "0755",
-            "sha256": "a41242f1305e1361beaaac0c8c9672b61873403b474d59f0fecc1b494c3c2d28"
+            "sha256": "7290d4661c39930fc69e6235e80cfb00dbed34c684767716ccc3e8f24d13274e"
         },
         {
             "path": "operations/discover-releases.py",
@@ -35,7 +35,7 @@
         {
             "path": "operations/lxc-service",
             "mode": "0755",
-            "sha256": "327cb6531e345ecc8c07678ba7a3cb7bead8490f71f80b62d03435fbf3f0fc86"
+            "sha256": "553505fc0aed241edded96790049b4144cd34dc0135e8d915bedc2ad5d1be126"
         },
         {
             "path": "operations/reconcile",
@@ -140,7 +140,7 @@
         {
             "path": "tofu/service/entrypoint",
             "mode": "0755",
-            "sha256": "9b17ec3c9a7657ec6b0fed4c43255045ccdcbd234376089fd1caa0ca363d6e22"
+            "sha256": "ccfff8c6d622c8bc7a4d8ca5f2cac4e3e4dc972f8058a96bea97a396b537dab1"
         },
         {
             "path": "tofu/service/main.tf",
