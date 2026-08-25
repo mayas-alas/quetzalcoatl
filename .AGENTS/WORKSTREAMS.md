@@ -66,8 +66,8 @@ root, with Tailscale sidecar HTTPS exposure:
 
 | Service | Repo | Instances | VMID range | LXC name pattern | Tailscale tag |
 |---|---|---|---|---|---|
-| FreeLLMAPI | github.com/tashfeenahmed/freellmapi | 2 | 300-301 | gnx-freellmapi-{1,2} | tag:quetzalcoatl-freellmapi |
-| OmniRoute | github.com/diegosouzapw/OmniRoute | 2 | 302-303 | gnx-omniroute-{1,2} | tag:quetzalcoatl-omniroute |
+| FreeLLMAPI | github.com/tashfeenahmed/freellmapi | 1 | 300 | gnx-freellmapi-1 | tag:quetzalcoatl-freellmapi |
+| OmniRoute | github.com/diegosouzapw/OmniRoute | 1 | 302 | gnx-omniroute-1 | tag:quetzalcoatl-omniroute |
 
 Agent B owns all changes: `platform/tofu/service/*.tf`, `platform/services/freellmapi/*`,
 `platform/services/omniroute/*`, `platform/manifest.toml`, `platform/platform.lock.json`.

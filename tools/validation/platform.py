@@ -121,6 +121,27 @@ def main() -> None:
     if missing := required - actual:
         fail(f"platform omits runtime files: {sorted(missing)!r}")
 
+    singleton_policies = {
+        "freellmapi": {
+            "instances": 1,
+            "vm_id_base": 300,
+            "tag": "tag:quetzalcoatl-freellmapi",
+            "port": 8080,
+            "health_path": "/",
+        },
+        "omniroute": {
+            "instances": 1,
+            "vm_id_base": 302,
+            "tag": "tag:quetzalcoatl-omniroute",
+            "port": 8080,
+            "health_path": "/",
+        },
+    }
+    for service, expected_policy in singleton_policies.items():
+        policy_path = PLATFORM / "services" / service / "policy.json"
+        if json.loads(policy_path.read_text(encoding="utf-8")) != expected_policy:
+            fail(f"{service} singleton topology policy differs")
+
     operations = "\n".join(
         (PLATFORM / "operations" / name).read_text(encoding="utf-8")
         for name in ("reconcile", "deploy", "forgejo-admin", "lxc-host", "lxc-service")

@@ -4,8 +4,8 @@
 
 | Service | Repo | Instances | VMID range | LXC name pattern | Tailscale tag |
 |---|---|---|---|---|---|
-| FreeLLMAPI | github.com/tashfeenahmed/freellmapi | 2 | 300-301 | gnx-freellmapi-{1,2} | tag:quetzalcoatl-freellmapi |
-| OmniRoute | github.com/diegosouzapw/OmniRoute | 2 | 302-303 | gnx-omniroute-{1,2} | tag:quetzalcoatl-omniroute |
+| FreeLLMAPI | github.com/tashfeenahmed/freellmapi | 1 | 300 | gnx-freellmapi-1 | tag:quetzalcoatl-freellmapi |
+| OmniRoute | github.com/diegosouzapw/OmniRoute | 1 | 302 | gnx-omniroute-1 | tag:quetzalcoatl-omniroute |
 
 ## Acceptance criteria
 
@@ -33,15 +33,16 @@ The deployment topology (instance count, VMID base, Tailscale tag, port, health
 path) is Platform-bundle policy, closed in `platform/services/<slug>/policy.json`
 and enforced by `platform/operations/deploy`; the service repository only
 publishes the OCI digest and its bounded port/health declaration (`schema: 2`).
-Deployment replicates one LXC per instance (`gnx-<slug>-<instance>`, one OpenTofu
-state key per instance) from the single `tofu/service/main.tf` root.
+Deployment creates one LXC per service (`gnx-<slug>-1`, one OpenTofu state key)
+from the single `tofu/service/main.tf` root. This QA topology is superseded by
+Issue #17; convergence must not destroy legacy VMIDs 301 or 303 if they exist.
 
 ### Agent B (platform runtime) — owns all changes
 
 | Path | Change |
 |---|---|
 | `platform/tofu/service/` | Keep only the single `main.tf` service root; widen VMID range and hostname pattern; delete the counted `freellmapi.tf`/`oninroute.tf` copies (prohibited parallel templates) |
-| `platform/services/{freellmapi,omniroute}/` | `compose.yml` + `serve.json` (per-service port, health, tag) plus a locked `policy.json` (`instances`, `vm_id_base`, `tag`) |
+| `platform/services/{freellmapi,omniroute}/` | `compose.yml` + `serve.json` (per-service port, health, tag) plus a locked singleton `policy.json` (`instances: 1`, `vm_id_base`, `tag`) |
 | `platform/operations/deploy` | Per-instance loop driven by the policy file; per-instance state key and hostname; bounded health probe |
 | `platform/operations/lxc-service` | `service` kind accepts the per-service tag and `gnx-*` hostname |
 | `platform/operations/{discover-releases,verify-release}.py` | Schema 2 with bounded port/health-path |
@@ -69,7 +70,7 @@ state key per instance) from the single `tofu/service/main.tf` root.
 ```text
 Workstream: freellmapi-omniroute
 Changed paths: platform/tofu/service/*.tf, platform/services/freellmapi/*, platform/services/omniroute/*, platform/manifest.toml, platform/platform.lock.json
-Contract impact: New service slugs (freellmapi, omniroute), new Tailscale tags, 4 new LXC VMIDs (300-303). No Rust contract changes.
+Contract impact: New service slugs (freellmapi, omniroute), new Tailscale tags, 2 managed LXC VMIDs (300 and 302). VMIDs 301 and 303 are never destroyed automatically. No Rust contract changes.
 Checks: platform.lock.json parses; platform.py validator passes; compose files use only immutable digests; Tailscale tags match spec.
 Known failures: None expected.
 Next dependency: Agent C platform.py validation update; then Coordinator evidence recording.

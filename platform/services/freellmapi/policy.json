@@ -1,5 +1,5 @@
 {
-  "instances": 2,
+  "instances": 1,
   "vm_id_base": 300,
   "tag": "tag:quetzalcoatl-freellmapi",
   "port": 8080,

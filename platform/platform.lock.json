@@ -65,7 +65,7 @@
     {
       "path": "services/freellmapi/policy.json",
       "mode": "0644",
-      "sha256": "51c06ab73806881ca26a77315eea6ba00449d4366e52f40315843a2978fedbb9"
+      "sha256": "91ad3354781804f7aa45860b5321f89bc5f54ecc27f3e1dbbc580fc52ec060cc"
     },
     {
       "path": "services/freellmapi/serve.json",
@@ -90,7 +90,7 @@
     {
       "path": "services/omniroute/policy.json",
       "mode": "0644",
-      "sha256": "54d4ad1fd5ff73f1b01984ad9f64f6d80ff27367376116ef2bb6951d64e16ec4"
+      "sha256": "f2de8745be6f9aef21a772d876cdd0705b1486c4761dca09f6ad60f1800a954d"
     },
     {
       "path": "services/omniroute/serve.json",
