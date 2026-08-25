@@ -25,13 +25,13 @@ $files = @(
                     'tofu/foundation/entrypoint',
                     'tofu/service/entrypoint'
                 )) { '0755' } else { '0644' }
-            [ordered]@{
+            [pscustomobject][ordered]@{
                 path = $relative
                 mode = $mode
                 sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             }
         } |
-        Sort-Object path
+        Sort-Object -Property path
 )
 
 $lock = [ordered]@{
@@ -45,6 +45,6 @@ $lock = [ordered]@{
     files = $files
 }
 
-$json = $lock | ConvertTo-Json -Depth 6
+$json = ($lock | ConvertTo-Json -Depth 6).Replace("`r`n", "`n")
 [System.IO.File]::WriteAllText($lockPath, "$json`n", [System.Text.UTF8Encoding]::new($false))
 Write-Host "Generated $lockPath with $($files.Count) files."
