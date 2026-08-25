@@ -50,7 +50,7 @@
     {
       "path": "services/deepseek-dsh/compose.yml",
       "mode": "0644",
-      "sha256": "5af1b87341a3018dcbd0b316b829e982ac2639102a24852237609d7238eba675"
+      "sha256": "ba318298ac6b12985c9de25dbb4852fce1ddbc87c82986f792c90b3a81adeea7"
     },
     {
       "path": "services/deepseek-dsh/policy.json",
@@ -60,7 +60,7 @@
     {
       "path": "services/deepseek-dsh/serve.json",
       "mode": "0644",
-      "sha256": "29eba37cfbfca4653cc0c9d578e201ce52d3496ccb2d156686524687e9601f28"
+      "sha256": "43aa97b6661cac4b79e1234bf0b84ba151a0d91904d6c3216ffd20523b2fae04"
     },
     {
       "path": "services/forgejo/compose.yml",
