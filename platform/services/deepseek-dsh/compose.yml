@@ -36,13 +36,22 @@ services:
       tailscale:
         condition: service_healthy
     environment:
-      PORT: "3080"
-      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}"
+      DSH_TRUSTED_HOSTS: ${TS_CERT_DOMAIN:?TS_CERT_DOMAIN is required}
+      DSH_ALLOW_REMOTE_CONFIGURATION: "1"
+      DSH_TELEMETRY_DISABLED: "1"
     volumes:
-      - /var/lib/quetzalcoatl/deepseek-dsh/data:/app/data
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3080/healthz"]
-      interval: 15s
-      timeout: 10s
-      retries: 20
+      - deepseek-dsh-home:/home/node/.dsh
+      - deepseek-dsh-workspace:/workspace
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=1g
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 10s
     restart: unless-stopped
+
+volumes:
+  deepseek-dsh-home:
+  deepseek-dsh-workspace:

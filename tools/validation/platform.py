@@ -111,6 +111,9 @@ def main() -> None:
         "services/freellmapi/serve.json",
         "services/omniroute/compose.yml",
         "services/omniroute/serve.json",
+        "services/deepseek-dsh/compose.yml",
+        "services/deepseek-dsh/policy.json",
+        "services/deepseek-dsh/serve.json",
         "tofu/foundation/entrypoint",
         "tofu/foundation/main.tf",
         "tofu/foundation/versions.tf",
@@ -120,6 +123,50 @@ def main() -> None:
     }
     if missing := required - actual:
         fail(f"platform omits runtime files: {sorted(missing)!r}")
+
+    deepseek_compose = (PLATFORM / "services/deepseek-dsh/compose.yml").read_text(
+        encoding="utf-8"
+    )
+    deepseek_policy = json.loads(
+        (PLATFORM / "services/deepseek-dsh/policy.json").read_text(encoding="utf-8")
+    )
+    deepseek_serve = json.loads(
+        (PLATFORM / "services/deepseek-dsh/serve.json").read_text(encoding="utf-8")
+    )
+    if deepseek_policy != {
+        "instances": 1,
+        "vm_id_base": 304,
+        "tag": "tag:quetzalcoatl-deepseek-dsh",
+        "port": 3080,
+        "health_path": "/",
+    }:
+        fail("DeepSeek Harness topology policy differs")
+    for marker in (
+        "ghcr.io/alliottech/deepseek-harness@sha256:",
+        "DSH_TRUSTED_HOSTS: ${TS_CERT_DOMAIN:?TS_CERT_DOMAIN is required}",
+        'DSH_ALLOW_REMOTE_CONFIGURATION: "1"',
+        "deepseek-dsh-home:/home/node/.dsh",
+        "deepseek-dsh-workspace:/workspace",
+        "read_only: true",
+        "no-new-privileges:true",
+        "cap_drop:",
+    ):
+        if marker not in deepseek_compose:
+            fail(f"DeepSeek Harness compose omits {marker!r}")
+    if "DEEPSEEK_API_KEY" in deepseek_compose:
+        fail("DeepSeek Harness API credentials must not enter Compose")
+    certificate_domain = "${TS_CERT_DOMAIN}:443"
+    if (
+        deepseek_serve.get("TCP") != {"443": {"HTTPS": True}}
+        or deepseek_serve.get("AllowFunnel") != {certificate_domain: False}
+        or deepseek_serve.get("Web", {})
+        .get(certificate_domain, {})
+        .get("Handlers", {})
+        .get("/", {})
+        .get("Proxy")
+        != "http://127.0.0.1:3080"
+    ):
+        fail("DeepSeek Harness private HTTPS serve policy differs")
 
     operations = "\n".join(
         (PLATFORM / "operations" / name).read_text(encoding="utf-8")

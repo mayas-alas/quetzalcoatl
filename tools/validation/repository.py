@@ -38,6 +38,9 @@ EXPECTED_SERVICES = {
     "platform/services/omniroute/compose.yml",
     "platform/services/omniroute/policy.json",
     "platform/services/omniroute/serve.json",
+    "platform/services/deepseek-dsh/compose.yml",
+    "platform/services/deepseek-dsh/policy.json",
+    "platform/services/deepseek-dsh/serve.json",
 }
 IGNORED_ROOTS = {".git", ".wix", "target", ".kilo", ".AGENTS/agentA"}
 FORBIDDEN_NAME = re.compile(
