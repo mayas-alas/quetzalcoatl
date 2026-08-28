@@ -6,8 +6,6 @@ lock = "platform.lock.json"
 opentofu = "ghcr.io/opentofu/opentofu@sha256:6b66d996afc7f043154e33a0420285d0d58c165305ac8f36d32df213a3c4bbd4"
 forgejo_runner = "code.forgejo.org/forgejo/runner@sha256:eb6e7bc21973382d261e6eb883dbd27b8cb56939d33a3bfd79a1352b7f9a33a0"
 tailscale = "docker.io/tailscale/tailscale@sha256:2f4584ddb5b8254868f1e2874efa11e7ef1fc554a824ff36e0ab538382e42a8e"
-freellmapi = "ghcr.io/tashfeenahmed/freellmapi@sha256:3f4ca3e8f55b11f0fc03f85c09c96651c48e46b78c24a81dc750af3bb2f394fa"
-omniroute = "ghcr.io/diegosouzapw/omniroute@sha256:9fb15ff2aebc79ae8dca8ec5ba870705e7f21b218ed1602295be59f8a78d49bf"
 
 [policy]
 tailscale_tag = "tag:quetzalcoatl-service"

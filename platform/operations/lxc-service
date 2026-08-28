@@ -35,7 +35,8 @@ IFS= read -r auth_key <&3 || exit 64
 
 [ "$schema" = 1 ]
 case "$kind:$hostname" in
-  garage:gnx-garage|forgejo:gnx-forgejo|runner:gnx-runner|service:gnx-*) ;;
+  garage:gnx-garage|forgejo:gnx-forgejo|runner:gnx-runner|\
+  service:freellmapi|service:omniroute|service:harness) ;;
   *) exit 64 ;;
 esac
 case "$hostname" in *[!a-z0-9-]*|*-|'') exit 64 ;; esac
@@ -344,167 +345,10 @@ write_forgejo_configuration() {
   chown 1000:1000 /var/lib/quetzalcoatl/forgejo/data/gitea/conf/app.ini
 }
 
-configure_forgejo_api() {
+revoke_obsolete_forgejo_tokens() {
   python3 - <<'PY'
 import base64
 import json
-import urllib.error
-import urllib.parse
-import urllib.request
-from pathlib import Path
-
-lines = Path("/run/gnx/platform-input").read_text(encoding="utf-8").splitlines()
-tailnet, admin_password = lines[3], lines[10]
-token = Path("/run/gnx/forgejo-api-token").read_text(encoding="utf-8").strip()
-base = "http://127.0.0.1:3000"
-
-def request(path, method="GET", body=None, accepted=(200,)):
-    data = None if body is None else json.dumps(body).encode("utf-8")
-    req = urllib.request.Request(
-        base + path,
-        data=data,
-        method=method,
-        headers={
-            "Accept": "application/json",
-            "Authorization": f"token {token}",
-            "Content-Type": "application/json",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as response:
-            if response.status not in accepted:
-                raise RuntimeError(f"{path} returned HTTP {response.status}")
-            encoded = response.read()
-            return response.status, json.loads(encoded) if encoded else None
-    except urllib.error.HTTPError as error:
-        if error.code in accepted:
-            return error.code, None
-        raise
-
-status, _ = request("/api/v1/orgs/gnx-labs", accepted=(200, 404))
-if status == 404:
-    request(
-        "/api/v1/orgs",
-        "POST",
-        {
-            "username": "gnx-labs",
-            "full_name": "GNX Labs",
-            "description": "Sovereign GNX service repositories",
-            "visibility": "private",
-            "repo_admin_change_team_access": False,
-        },
-        (201,),
-    )
-
-status, _ = request(
-    "/api/v1/repos/gnx-labs/gnx-service-template", accepted=(200, 404)
-)
-if status == 404:
-    request(
-        "/api/v1/orgs/gnx-labs/repos",
-        "POST",
-        {
-            "name": "gnx-service-template",
-            "description": "Reproducible private GNX service template",
-            "private": True,
-            "template": True,
-            "auto_init": True,
-            "default_branch": "main",
-        },
-        (201,),
-    )
-
-files = {
-    "Dockerfile": """FROM docker.io/library/nginx@sha256:d67ea0d64d518b1bb04acde3b00f722ac3e9764b3209a9b0a98924ba35e4b779
-COPY index.html /usr/share/nginx/html/index.html
-""",
-    "index.html": """<!doctype html>
-<html lang="en">
-  <head><meta charset="utf-8"><title>GNX service</title></head>
-  <body><main><h1>GNX service is ready</h1></main></body>
-</html>
-""",
-    "compose.yml": """services:
-  app:
-    image: ${GNX_IMAGE:?GNX_IMAGE is required}
-    ports:
-      - "127.0.0.1:8080:80"
-    restart: unless-stopped
-""",
-    "gnx.service.yml": """schema: 1
-port: 8080
-exposure: private
-health_path: /
-""",
-    ".forgejo/workflows/build.yml": f"""name: Build OCI image
-on:
-  push:
-    branches: [main]
-    paths-ignore: [gnx.release.json]
-permissions:
-  contents: write
-  packages: write
-env:
-  GNX_REGISTRY: gnx-forgejo.{tailnet}
-jobs:
-  build:
-    runs-on: docker
-    steps:
-      - name: Checkout
-        uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-      - name: Authenticate to the sovereign registry
-        uses: https://github.com/docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
-        with:
-          registry: ${{{{ env.GNX_REGISTRY }}}}
-          username: ${{{{ github.actor }}}}
-          password: ${{{{ secrets.GITHUB_TOKEN }}}}
-      - name: Build and publish by commit
-        id: build
-        uses: https://github.com/docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
-        with:
-          context: .
-          push: true
-          tags: ${{{{ env.GNX_REGISTRY }}}}/${{{{ github.repository }}}}:${{{{ github.sha }}}}
-      - name: Publish the bounded release declaration
-        run: |
-          set -eu
-          printf '{{"schema":1,"source":"%s","commit":"%s","image":"%s/%s@%s","port":8080,"health_path":"/"}}\\n' \\
-            "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GNX_REGISTRY" \\
-            "$GITHUB_REPOSITORY" "${{{{ steps.build.outputs.digest }}}}" \\
-            > gnx.release.json
-          git config user.name "GNX Release"
-          git config user.email "release@gnx.invalid"
-          git add gnx.release.json
-          git diff --cached --quiet || git commit -m "chore: publish $GITHUB_SHA [skip ci]"
-          git push
-""",
-}
-
-for path, content in files.items():
-    quoted = urllib.parse.quote(path, safe="/")
-    status, _ = request(
-        f"/api/v1/repos/gnx-labs/gnx-service-template/contents/{quoted}",
-        accepted=(200, 404),
-    )
-    if status == 404:
-        request(
-            f"/api/v1/repos/gnx-labs/gnx-service-template/contents/{quoted}",
-            "POST",
-            {
-                "branch": "main",
-                "message": f"Initialize {path}",
-                "content": base64.b64encode(content.encode()).decode(),
-            },
-            (201,),
-        )
-PY
-}
-
-reconcile_forgejo_tokens() {
-  python3 - <<'PY'
-import base64
-import json
-import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -544,21 +388,6 @@ for token in tokens:
     if name.startswith(("gnx-platform-reconciler", "gnx-registry-reader")):
         token_id = urllib.parse.quote(str(token["id"]), safe="")
         request(f"/users/gnx-admin/tokens/{token_id}", "DELETE", accepted=(204,))
-
-def create(name, scopes):
-    token = request(
-        "/users/gnx-admin/tokens",
-        "POST",
-        {"name": name, "scopes": scopes},
-        accepted=(201,),
-    )
-    value = token.get("sha1", "")
-    if re.fullmatch(r"[0-9a-f]{40}", value) is None:
-        raise RuntimeError("Forgejo returned an invalid access token")
-    return value
-
-print(create("gnx-platform-reconciler", ["all"]))
-print(create("gnx-registry-reader", ["read:package"]))
 PY
 }
 
@@ -571,8 +400,6 @@ configure_forgejo() {
   IFS= read -r forgejo_jwt_secret <&3 || exit 64
   IFS= read -r forgejo_admin_password <&3 || exit 64
   IFS= read -r forgejo_runner_secret <&3 || exit 64
-  IFS= read -r platform_api_token <&3 || exit 64
-  IFS= read -r registry_reader_token <&3 || exit 64
   IFS= read -r runner_uuid <&3 || exit 64
   if IFS= read -r extra <&3; then exit 64; fi
   valid_access_key "$forgejo_s3_access"
@@ -666,23 +493,8 @@ PY
   stage='forgejo-health'
   wait_http http://127.0.0.1:3000/api/healthz
 
-  stage='forgejo-api-token'
-  if [ -z "$platform_api_token" ] || [ -z "$registry_reader_token" ]; then
-    generated_tokens=$(reconcile_forgejo_tokens)
-    [ "$(printf '%s\n' "$generated_tokens" | wc -l)" -eq 2 ]
-    platform_api_token=$(printf '%s\n' "$generated_tokens" | sed -n '1p')
-    registry_reader_token=$(printf '%s\n' "$generated_tokens" | sed -n '2p')
-    unset generated_tokens
-  fi
-  valid_hex "$platform_api_token" 40
-  valid_hex "$registry_reader_token" 40
-  printf 'FORGEJO_API_TOKEN=%s\n' "$platform_api_token"
-  printf 'FORGEJO_REGISTRY_TOKEN=%s\n' "$registry_reader_token"
-  printf '%s\n' "$platform_api_token" > /run/gnx/forgejo-api-token
-  chmod 0400 /run/gnx/forgejo-api-token
-  stage='forgejo-api-bootstrap'
-  configure_forgejo_api
-  rm -f /run/gnx/forgejo-api-token
+  stage='forgejo-obsolete-token-revocation'
+  revoke_obsolete_forgejo_tokens
 
   stage='forgejo-runner-registration'
   if [ -z "$runner_uuid" ]; then
@@ -749,32 +561,29 @@ configure_runner() {
 
 configure_service() {
   IFS= read -r slug <&3 || exit 64
-  IFS= read -r image <&3 || exit 64
   IFS= read -r tag <&3 || exit 64
-  IFS= read -r registry_token <&3 || exit 64
   if IFS= read -r extra <&3; then exit 64; fi
-  case "$slug" in ''|*[!a-z0-9-]*|*-*) exit 64 ;; esac
-  [ "${#slug}" -le 32 ]
-  case "$image" in
-    "gnx-forgejo.$tailnet/gnx-labs/"*"@sha256:"????????????????????????????????????????????????????????????????) ;;
-    *) exit 64 ;;
-  esac
+  case "$slug" in freellmapi-1|omniroute-1|deepseek-dsh-1) ;; *) exit 64 ;; esac
   case "$tag" in tag:quetzalcoatl-[a-z0-9][a-z0-9-]*) ;; *) exit 64 ;; esac
   [ "${#tag}" -le 48 ]
-  [ "${#registry_token}" -ge 20 ] && [ "${#registry_token}" -le 512 ]
 
   app_dir="/opt/quetzalcoatl/services/$slug"
   install -d -m 0755 "$app_dir" "$app_dir/serve"
+  install -d -m 0700 /var/lib/quetzalcoatl/secrets
   write_public_environment "$app_dir"
-  {
-    printf 'GNX_CONTAINER_PREFIX=gnx-service-%s\n' "$slug"
-    printf 'GNX_IMAGE=%s\n' "$image"
-  } >> "$app_dir/.env"
+  printf 'GNX_CONTAINER_PREFIX=gnx-service-%s\n' "$slug" >> "$app_dir/.env"
+  if [ "$slug" = freellmapi-1 ]; then
+    encryption_key=/var/lib/quetzalcoatl/secrets/freellmapi-encryption-key
+    if [ ! -s "$encryption_key" ]; then
+      umask 077
+      od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$encryption_key.gnx-new"
+      test "$(wc -c < "$encryption_key.gnx-new")" -eq 64
+      mv -f "$encryption_key.gnx-new" "$encryption_key"
+    fi
+    printf 'ENCRYPTION_KEY=%s\n' "$(cat "$encryption_key")" >> "$app_dir/.env"
+  fi
   chmod 0600 "$app_dir/.env"
-  printf '%s' "$registry_token" |
-    docker login "gnx-forgejo.$tailnet" \
-      --username gnx-admin --password-stdin >/dev/null
-  enroll_tailscale service "$tag"
+  enroll_tailscale "service-$slug" "$tag"
   docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \
     -f "$app_dir/compose.yml" config --quiet
   docker compose --project-directory "$app_dir" --env-file "$app_dir/.env" \

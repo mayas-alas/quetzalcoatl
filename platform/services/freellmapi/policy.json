@@ -1,7 +1,8 @@
 {
-  "instances": 2,
-  "vm_id_base": 300,
+  "vm_id": 300,
+  "lxc_hostname": "gnx-freellmapi-1",
+  "tailscale_hostname": "freellmapi",
   "tag": "tag:quetzalcoatl-freellmapi",
-  "port": 8080,
-  "health_path": "/"
+  "port": 3001,
+  "health_path": "/api/ping"
 }

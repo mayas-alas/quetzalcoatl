@@ -14,7 +14,7 @@ services:
       TS_DEBUG_FIREWALL_MODE: nftables
       TS_TAGS: tag:quetzalcoatl-omniroute
     volumes:
-      - /var/lib/quetzalcoatl/tailscale/omniroute:/var/lib/tailscale
+      - /var/lib/quetzalcoatl/tailscale/service-omniroute-1:/var/lib/tailscale
       - ./serve:/config:ro
     devices:
       - /dev/net/tun:/dev/net/tun
@@ -37,11 +37,15 @@ services:
         condition: service_healthy
     environment:
       PORT: "20128"
+      OMNIROUTE_MEMORY_MB: "1024"
     volumes:
-      - /var/lib/quetzalcoatl/omniroute/data:/app/data
+      - omniroute-data:/app/data
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:20128/healthz"]
+      test: ["CMD", "node", "healthcheck.mjs"]
       interval: 15s
       timeout: 10s
       retries: 20
     restart: unless-stopped
+
+volumes:
+  omniroute-data:

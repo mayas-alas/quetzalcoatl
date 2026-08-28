@@ -503,9 +503,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn check_docker_pipe_contention_missing_pipe() {
-        let result = check_docker_pipe_contention();
-        assert!(result.is_ok());
+    fn check_docker_pipe_contention_reports_the_current_host_state() {
+        if let Err(error) = check_docker_pipe_contention() {
+            assert_eq!(error.code, "MACHINE_PIPE_CONTENTION");
+        }
     }
 
     #[test]

@@ -44,12 +44,12 @@ resource "proxmox_virtual_environment_container" "service" {
   start_on_boot = true
 
   cpu {
-    cores = 1
+    cores = 2
   }
 
   memory {
-    dedicated = 1024
-    swap      = 512
+    dedicated = 2048
+    swap      = 1024
   }
 
   features {
@@ -80,7 +80,7 @@ resource "proxmox_virtual_environment_container" "service" {
 
   disk {
     datastore_id = "local"
-    size         = 10
+    size         = 20
   }
 
   operating_system {

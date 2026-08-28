@@ -12,14 +12,15 @@ services:
       TS_ENABLE_HEALTH_CHECK: "true"
       TS_LOCAL_ADDR_PORT: 127.0.0.1:41234
       TS_DEBUG_FIREWALL_MODE: nftables
+      TS_TAGS: tag:quetzalcoatl-deepseek-dsh
     volumes:
-      - /var/lib/quetzalcoatl/tailscale/service:/var/lib/tailscale
+      - /var/lib/quetzalcoatl/tailscale/service-deepseek-dsh-1:/var/lib/tailscale
       - ./serve:/config:ro
     devices:
       - /dev/net/tun:/dev/net/tun
     cap_add: [NET_ADMIN, NET_RAW]
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:3080:3080"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:41234/healthz"]
       interval: 15s
@@ -27,16 +28,30 @@ services:
       retries: 20
     restart: unless-stopped
 
-  app:
-    image: ${GNX_IMAGE:?GNX_IMAGE is required}
+  deepseek-dsh:
+    image: ghcr.io/alliottech/deepseek-harness@sha256:0d87427b7f8109dc3f3e9cae1dcba9ae81f96f3170c5389f408fa1f6bb9d6bd7
     container_name: ${GNX_CONTAINER_PREFIX:?GNX_CONTAINER_PREFIX is required}
     network_mode: service:tailscale
     depends_on:
       tailscale:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
-      interval: 15s
-      timeout: 10s
-      retries: 20
+    environment:
+      DSH_TRUSTED_HOSTS: ${TS_CERT_DOMAIN:?TS_CERT_DOMAIN is required}
+      DSH_ALLOW_REMOTE_CONFIGURATION: "1"
+      DSH_TELEMETRY_DISABLED: "1"
+    volumes:
+      - deepseek-dsh-home:/home/node/.dsh
+      - deepseek-dsh-workspace:/workspace
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=1g
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 10s
     restart: unless-stopped
+
+volumes:
+  deepseek-dsh-home:
+  deepseek-dsh-workspace:

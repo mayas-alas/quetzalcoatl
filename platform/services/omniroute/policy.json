@@ -1,7 +1,8 @@
 {
-  "instances": 2,
-  "vm_id_base": 302,
+  "vm_id": 302,
+  "lxc_hostname": "gnx-omniroute-1",
+  "tailscale_hostname": "omniroute",
   "tag": "tag:quetzalcoatl-omniroute",
-  "port": 8080,
+  "port": 20128,
   "health_path": "/"
 }

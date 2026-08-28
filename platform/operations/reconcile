@@ -128,29 +128,6 @@ ensure_base64url_32() (
   mv -f "$target.gnx-new" "$target"
 )
 
-normalize_optional_token_pair() (
-  first=$1
-  second=$2
-  first_value=''
-  second_value=''
-  if [ -s "$first" ]; then first_value=$(cat "$first"); fi
-  if [ -s "$second" ]; then second_value=$(cat "$second"); fi
-  valid=true
-  for value in "$first_value" "$second_value"; do
-    if [ "${#value}" -ne 40 ]; then valid=false; fi
-    case "$value" in *[!0-9a-f]*) valid=false ;; esac
-  done
-  if [ "$valid" != true ]; then
-    rm -f -- "$first" "$second"
-    exit 0
-  fi
-  printf '%s' "$first_value" > "$first.gnx-new"
-  printf '%s' "$second_value" > "$second.gnx-new"
-  chmod 0400 "$first.gnx-new" "$second.gnx-new"
-  mv -f "$first.gnx-new" "$first"
-  mv -f "$second.gnx-new" "$second"
-)
-
 ensure_hex "$secret_root/garage-rpc-secret" 32
 ensure_hex "$secret_root/garage-admin-token" 32
 ensure_access_key "$secret_root/tofu-s3-access-key"
@@ -162,10 +139,6 @@ ensure_hex "$secret_root/forgejo-internal-token" 32
 ensure_base64url_32 "$secret_root/forgejo-jwt-secret"
 ensure_hex "$secret_root/forgejo-admin-password" 24
 ensure_hex "$secret_root/forgejo-runner-secret" 20
-ensure_hex "$secret_root/release-signing-key" 32
-normalize_optional_token_pair \
-  "$secret_root/forgejo-api-token" \
-  "$secret_root/forgejo-registry-token"
 
 printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_REGION=garage\nAWS_ENDPOINT_URL_S3=https://gnx-garage.%s\n' \
   "$(cat "$secret_root/tofu-s3-access-key")" \
@@ -345,17 +318,17 @@ forgejo_input="$runtime/forgejo.input"
     cat "$secret_root/$name"
     printf '\n'
   done
-  for name in forgejo-api-token forgejo-registry-token forgejo-runner-uuid; do
-    if [ -s "$secret_root/$name" ]; then cat "$secret_root/$name"; fi
-    printf '\n'
-  done
+  if [ -s "$secret_root/forgejo-runner-uuid" ]; then
+    cat "$secret_root/forgejo-runner-uuid"
+  fi
+  printf '\n'
 } > "$forgejo_input"
 chmod 0400 "$forgejo_input"
 guest_input 201 "$forgejo_input"
 forgejo_status=0
 forgejo_output=$(guest_script 201 "$bundle/operations/lxc-service" 2>> "$run_log") ||
   forgejo_status=$?
-for marker in FORGEJO_API_TOKEN FORGEJO_REGISTRY_TOKEN FORGEJO_RUNNER_UUID; do
+for marker in FORGEJO_RUNNER_UUID; do
   count=$(printf '%s\n' "$forgejo_output" | grep -c "^$marker=" || true)
   if [ "$count" -eq 0 ]; then
     continue
@@ -370,10 +343,11 @@ for marker in FORGEJO_API_TOKEN FORGEJO_REGISTRY_TOKEN FORGEJO_RUNNER_UUID; do
   unset count value target
 done
 [ "$forgejo_status" -eq 0 ] || exit 71
-for marker in FORGEJO_API_TOKEN FORGEJO_REGISTRY_TOKEN FORGEJO_RUNNER_UUID; do
+for marker in FORGEJO_RUNNER_UUID; do
   [ "$(printf '%s\n' "$forgejo_output" | grep -c "^$marker=")" -eq 1 ]
 done
 [ "$(printf '%s\n' "$forgejo_output" | grep -c '^FORGEJO=ready$')" -eq 1 ]
+rm -f -- "$secret_root/forgejo-api-token" "$secret_root/forgejo-registry-token"
 unset forgejo_output forgejo_status
 
 prepare_service_assets 202 runner

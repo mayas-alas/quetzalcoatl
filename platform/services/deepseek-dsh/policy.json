@@ -1,0 +1,8 @@
+{
+  "vm_id": 304,
+  "lxc_hostname": "gnx-deepseek-dsh-1",
+  "tailscale_hostname": "harness",
+  "tag": "tag:quetzalcoatl-deepseek-dsh",
+  "port": 3080,
+  "health_path": "/"
+}

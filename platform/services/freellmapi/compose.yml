@@ -14,7 +14,7 @@ services:
       TS_DEBUG_FIREWALL_MODE: nftables
       TS_TAGS: tag:quetzalcoatl-freellmapi
     volumes:
-      - /var/lib/quetzalcoatl/tailscale/freellmapi:/var/lib/tailscale
+      - /var/lib/quetzalcoatl/tailscale/service-freellmapi-1:/var/lib/tailscale
       - ./serve:/config:ro
     devices:
       - /dev/net/tun:/dev/net/tun
@@ -36,12 +36,17 @@ services:
       tailscale:
         condition: service_healthy
     environment:
+      NODE_ENV: production
       PORT: "3001"
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
     volumes:
-      - /var/lib/quetzalcoatl/freellmapi/data:/app/data
+      - freellmapi-data:/app/server/data
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3001/healthz"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/ping').then((res) => { if (!res.ok) process.exit(1); }).catch(() => process.exit(1));"]
       interval: 15s
       timeout: 10s
       retries: 20
     restart: unless-stopped
+
+volumes:
+  freellmapi-data:
