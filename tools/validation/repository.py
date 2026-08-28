@@ -45,24 +45,7 @@ FORBIDDEN_NAME = re.compile(
     re.IGNORECASE,
 )
 SECRET_SHAPED_TEXT = re.compile(r"freellmapi-[a-f0-9]{32,}", re.IGNORECASE)
-SCANNED_TEXT_SUFFIXES = {
-    ".json",
-    ".md",
-    ".ps1",
-    ".py",
-    ".rs",
-    ".sh",
-    ".tf",
-    ".toml",
-    ".txt",
-    ".yaml",
-    ".yml",
-}
-SCANNED_EXTENSIONLESS_ROOTS = {
-    ("platform", "operations"),
-    ("runtime", "commands"),
-    ("runtime", "operations"),
-}
+MAX_SECRET_SCAN_BYTES = 2 * 1024 * 1024
 
 
 def fail(message: str) -> None:
@@ -70,12 +53,20 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def should_scan_text(relative: Path) -> bool:
-    if relative.suffix.lower() in SCANNED_TEXT_SUFFIXES:
-        return True
-    if relative.name == "entrypoint":
-        return True
-    return any(relative.parts[:2] == root for root in SCANNED_EXTENSIONLESS_ROOTS)
+def decode_scannable_text(data: bytes) -> str | None:
+    if len(data) > MAX_SECRET_SCAN_BYTES:
+        return None
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError:
+            return None
+    if b"\0" in data:
+        return None
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return None
 
 
 def main() -> None:
@@ -118,13 +109,11 @@ def main() -> None:
         relative = path.relative_to(ROOT)
         if relative.parts and relative.parts[0] in IGNORED_ROOTS:
             continue
-        if not should_scan_text(relative):
-            continue
         try:
-            source = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
+            source = decode_scannable_text(path.read_bytes())
+        except OSError:
             continue
-        if SECRET_SHAPED_TEXT.search(source):
+        if source is not None and SECRET_SHAPED_TEXT.search(source):
             fail(f"secret-shaped FreeLLMAPI credential in {relative.as_posix()}")
 
     for path in ROOT.rglob("*"):
