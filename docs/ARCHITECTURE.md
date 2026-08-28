@@ -148,26 +148,23 @@ graph TB
         LXC201["LXC 201<br/>Forgejo (git)"]
         LXC202["LXC 202<br/>Runner (CI)"]
         LXC300["LXC 300<br/>FreeLLMAPI"]
-        LXC301["LXC 301<br/>FreeLLMAPI (HA)"]
         LXC302["LXC 302<br/>OmniRoute"]
-        LXC303["LXC 303<br/>OmniRoute (HA)"]
+        LXC304["LXC 304<br/>DeepSeek Harness"]
     end
 
     Proxmox --> LXC200
     Proxmox --> LXC201
     Proxmox --> LXC202
     Proxmox --> LXC300
-    Proxmox --> LXC301
     Proxmox --> LXC302
-    Proxmox --> LXC303
+    Proxmox --> LXC304
 
     LXC200 --> Tailscale
     LXC201 --> Tailscale
     LXC202 --> Tailscale
     LXC300 --> Tailscale
-    LXC301 --> Tailscale
     LXC302 --> Tailscale
-    LXC303 --> Tailscale
+    LXC304 --> Tailscale
 ```
 
 ## Install and upgrade flow
@@ -236,9 +233,8 @@ graph LR
         LXC201["LXC 201 Forgejo"]
         LXC202["LXC 202 Runner"]
         LXC300["LXC 300 FreeLLMAPI"]
-        LXC301["LXC 301 FreeLLMAPI"]
         LXC302["LXC 302 OmniRoute"]
-        LXC303["LXC 303 OmniRoute"]
+        LXC304["LXC 304 DeepSeek Harness"]
     end
 
     Pipe -->|closed stdin| Reconciler
@@ -251,15 +247,10 @@ graph LR
     TofuContainer -->|S3 backend| GarageBucket["Garage S3<br/>(state + lock)"]
 
     Reconciler -->|if READY controller| DeployOp
-    DeployOp -->|discover-releases.py| ForgejoAPI["Forgejo API"]
-    DeployOp -->|verify-release.py| DigestCheck["Digest verification"]
-    DeployOp -->|pct exec sh -s| LXC200
-    DeployOp -->|pct exec sh -s| LXC201
-    DeployOp -->|pct exec sh -s| LXC202
+    DeployOp -->|fixed locked inventory| NativePolicy["native service policies"]
     DeployOp -->|pct exec sh -s| LXC300
-    DeployOp -->|pct exec sh -s| LXC301
     DeployOp -->|pct exec sh -s| LXC302
-    DeployOp -->|pct exec sh -s| LXC303
+    DeployOp -->|pct exec sh -s| LXC304
     DeployOp -->|podman run| TofuContainer
 
     SecretStore -.->|never in argv/env/logs| ReconcileOp
@@ -404,7 +395,7 @@ then activates.
 ```json
 {
   "schema_version": 1,
-  "product_version": "0.2.41",
+  "product_version": "0.3.1",
   "detected": { "logical_cpus": 6, "total_memory_mib": 8192, "system_disk_*": 100 },
   "selected": { "capability": "runtime", "machine_cpus": 4, "machine_memory_mib": 4096, "machine_disk_gib": 60 },
   "supported": true,
@@ -423,8 +414,8 @@ then activates.
 | FND | Reproducible foundation | `platform/operations/lxc-host`, `platform/tofu/foundation/` |
 | STO | Isolated object storage | `platform/operations/reconcile` (Garage S3 backend, secrets) |
 | FRG | Sovereign repository entry | `platform/services/forgejo/`, `platform/operations/forgejo-admin` |
-| OCI | Isolated build path | `platform/operations/discover-releases.py`, `platform/operations/verify-release.py`, `platform/operations/deploy` |
-| SVC | Generic workload path | `platform/tofu/service/`, `platform/services/service/`, `platform/operations/lxc-service` |
+| OCI | Immutable service images | `platform/services/{freellmapi,omniroute,deepseek-dsh}/compose.yml`, `platform/platform.lock.json` |
+| SVC | Fixed native workload path | `platform/tofu/service/`, `platform/operations/list-native-services.py`, `platform/operations/{deploy,lxc-service}` |
 | NET | Private service exposure | `platform/operations/reconcile` (Tailscale enrollment), `platform/services/*/serve.json` |
 | ADM | Closed Forgejo administration | `apps/gnx/src/commands/forgejo.rs`, `platform/operations/forgejo-admin` |
 | REC | Safe recovery | `apps/gnx-service/src/application/installation.rs`, `apps/gnx-bootstrap/src/recovery/`, `installer/modules/*.ps1` |
