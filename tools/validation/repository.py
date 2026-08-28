@@ -44,6 +44,20 @@ FORBIDDEN_NAME = re.compile(
     r"(?:_v\d+|-v\d+|(?:^|[-_.])(old|legacy|new|final|buildfix)(?:[-_.]|$))",
     re.IGNORECASE,
 )
+SECRET_SHAPED_TEXT = re.compile(r"freellmapi-[a-f0-9]{32,}", re.IGNORECASE)
+SCANNED_TEXT_SUFFIXES = {
+    ".json",
+    ".md",
+    ".ps1",
+    ".py",
+    ".rs",
+    ".sh",
+    ".tf",
+    ".toml",
+    ".txt",
+    ".yaml",
+    ".yml",
+}
 
 
 def fail(message: str) -> None:
@@ -86,6 +100,19 @@ def main() -> None:
         )
 
     for path in ROOT.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SCANNED_TEXT_SUFFIXES:
+            continue
+        relative = path.relative_to(ROOT)
+        if relative.parts and relative.parts[0] in IGNORED_ROOTS:
+            continue
+        try:
+            source = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if SECRET_SHAPED_TEXT.search(source):
+            fail(f"secret-shaped FreeLLMAPI credential in {relative.as_posix()}")
+
+    for path in ROOT.rglob("*"):
         relative = path.relative_to(ROOT)
         if relative.parts and relative.parts[0] in IGNORED_ROOTS:
             continue
@@ -108,6 +135,10 @@ def main() -> None:
             "SPEC.md",
             "COORDINATOR.md",
             "CAPACITY.md",
+            "gauntlet/BOARD.md",
+            "gauntlet/GAUNTLET.md",
+            "gauntlet/MODEL.md",
+            "gauntlet/README.md",
         ]
     )
     if agents != expected_agents:
