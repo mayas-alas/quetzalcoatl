@@ -1,7 +1,7 @@
 param(
   [Parameter(Mandatory=$true)][string]$InputText,
   [string]$Model = "auto",
-  [string]$BaseUrl = "http://localhost:31415/v1",
+  [string]$BaseUrl = "http://127.0.0.1:31415/v1",
   [string]$ApiKey = $env:FREELLMAPI_API_KEY
 )
 $ErrorActionPreference = "Stop"
