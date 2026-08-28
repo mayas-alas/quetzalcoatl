@@ -58,11 +58,24 @@ SCANNED_TEXT_SUFFIXES = {
     ".yaml",
     ".yml",
 }
+SCANNED_EXTENSIONLESS_ROOTS = {
+    ("platform", "operations"),
+    ("runtime", "commands"),
+    ("runtime", "operations"),
+}
 
 
 def fail(message: str) -> None:
     print(f"repository-validation: ERROR: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def should_scan_text(relative: Path) -> bool:
+    if relative.suffix.lower() in SCANNED_TEXT_SUFFIXES:
+        return True
+    if relative.name == "entrypoint":
+        return True
+    return any(relative.parts[:2] == root for root in SCANNED_EXTENSIONLESS_ROOTS)
 
 
 def main() -> None:
@@ -100,10 +113,12 @@ def main() -> None:
         )
 
     for path in ROOT.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in SCANNED_TEXT_SUFFIXES:
+        if not path.is_file():
             continue
         relative = path.relative_to(ROOT)
         if relative.parts and relative.parts[0] in IGNORED_ROOTS:
+            continue
+        if not should_scan_text(relative):
             continue
         try:
             source = path.read_text(encoding="utf-8")
