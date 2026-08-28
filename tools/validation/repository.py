@@ -44,11 +44,29 @@ FORBIDDEN_NAME = re.compile(
     r"(?:_v\d+|-v\d+|(?:^|[-_.])(old|legacy|new|final|buildfix)(?:[-_.]|$))",
     re.IGNORECASE,
 )
+SECRET_SHAPED_TEXT = re.compile(r"freellmapi-[a-f0-9]{32,}", re.IGNORECASE)
+MAX_SECRET_SCAN_BYTES = 2 * 1024 * 1024
 
 
 def fail(message: str) -> None:
     print(f"repository-validation: ERROR: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def decode_scannable_text(data: bytes) -> str | None:
+    if len(data) > MAX_SECRET_SCAN_BYTES:
+        return None
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError:
+            return None
+    if b"\0" in data:
+        return None
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return None
 
 
 def main() -> None:
@@ -86,6 +104,19 @@ def main() -> None:
         )
 
     for path in ROOT.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(ROOT)
+        if relative.parts and relative.parts[0] in IGNORED_ROOTS:
+            continue
+        try:
+            source = decode_scannable_text(path.read_bytes())
+        except OSError:
+            continue
+        if source is not None and SECRET_SHAPED_TEXT.search(source):
+            fail(f"secret-shaped FreeLLMAPI credential in {relative.as_posix()}")
+
+    for path in ROOT.rglob("*"):
         relative = path.relative_to(ROOT)
         if relative.parts and relative.parts[0] in IGNORED_ROOTS:
             continue
@@ -108,6 +139,10 @@ def main() -> None:
             "SPEC.md",
             "COORDINATOR.md",
             "CAPACITY.md",
+            "gauntlet/BOARD.md",
+            "gauntlet/GAUNTLET.md",
+            "gauntlet/MODEL.md",
+            "gauntlet/README.md",
         ]
     )
     if agents != expected_agents:
