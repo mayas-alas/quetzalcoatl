@@ -5,6 +5,16 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+User=gnx-runtime
+Group=gnx-runtime
+SupplementaryGroups=kvm
+Environment=HOME=/var/lib/quetzalcoatl-next/runtime
+Environment=XDG_CONFIG_HOME=/var/lib/quetzalcoatl-next/runtime/.config
+Environment=XDG_DATA_HOME=/var/lib/quetzalcoatl-next/runtime/.local/share
+Environment=XDG_RUNTIME_DIR=/run/quetzalcoatl-next
+RuntimeDirectory=quetzalcoatl-next
+RuntimeDirectoryMode=0700
+WorkingDirectory=/var/lib/quetzalcoatl-next/runtime
 ExecStart=/usr/local/bin/gnx __service
 RemainAfterExit=yes
 Restart=on-failure

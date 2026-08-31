@@ -13,6 +13,8 @@ const DEFAULT_CONFIG: &str = include_str!("../../config.example.toml");
 const HOST_SERVICE: &str = include_str!("../../runtime/gnx-host.service");
 const INSTALLED_BINARY: &str = "/usr/local/bin/gnx";
 const SERVICE_PATH: &str = "/etc/systemd/system/gnx-host.service";
+const RUNTIME_ACCOUNT: &str = "gnx-runtime";
+const RUNTIME_HOME: &str = "/var/lib/quetzalcoatl-next/runtime";
 
 pub fn install(options: InstallOptions) -> Result<InstallOutcome, GnxError> {
     if !is_root()? {
@@ -43,12 +45,13 @@ pub fn install(options: InstallOptions) -> Result<InstallOutcome, GnxError> {
     install_packages()?;
     install_binary()?;
     install_default_config()?;
-    install_host_service()?;
-
+    ensure_runtime_account()?;
     fs::create_dir_all(data_root())
         .map_err(|error| GnxError::io("linux_install", error.to_string()))?;
     state.stage = Stage::Installed;
     state.save(&default_state_path())?;
+    grant_runtime_data_access()?;
+    install_host_service()?;
     Ok(InstallOutcome::Installed)
 }
 
@@ -108,6 +111,7 @@ pub fn start_service() -> Result<(), GnxError> {
 }
 
 pub fn run_service() -> Result<(), GnxError> {
+    crate::logs::event("info", "service", "start", "Servicio GNX Linux iniciado");
     let mut state = OperationalState {
         stage: Stage::Working,
         ..OperationalState::default()
@@ -124,6 +128,7 @@ pub fn run_service() -> Result<(), GnxError> {
             state.infra = "applied".to_string();
             state.last_error = None;
             state.save(&default_state_path())?;
+            crate::logs::event("info", "service", "converge", "Runtime convergido");
             Ok(())
         }
         Err(error) => {
@@ -299,9 +304,56 @@ fn install_host_service() -> Result<(), GnxError> {
         .args(["enable", "gnx-host.service"])
         .run_checked("linux_service_enable")?;
     CommandSpec::new("systemctl")
-        .args(["start", "--no-block", "gnx-host.service"])
+        .args(["restart", "--no-block", "gnx-host.service"])
         .run_checked("linux_service_start")?;
     Ok(())
+}
+
+fn ensure_runtime_account() -> Result<(), GnxError> {
+    let existing = CommandSpec::new("id")
+        .args(["-u", RUNTIME_ACCOUNT])
+        .run("linux_runtime_account_query")?;
+    if !existing.success() {
+        let shell = if Path::new("/usr/sbin/nologin").exists() {
+            "/usr/sbin/nologin"
+        } else if Path::new("/sbin/nologin").exists() {
+            "/sbin/nologin"
+        } else {
+            "/bin/false"
+        };
+        CommandSpec::new("useradd")
+            .args([
+                "--system",
+                "--home-dir",
+                RUNTIME_HOME,
+                "--create-home",
+                "--shell",
+                shell,
+                RUNTIME_ACCOUNT,
+            ])
+            .run_checked("linux_runtime_account_create")?;
+    }
+    CommandSpec::new("usermod")
+        .args(["--append", "--groups", "kvm", RUNTIME_ACCOUNT])
+        .run_checked("linux_runtime_account_kvm")?;
+    Ok(())
+}
+
+fn grant_runtime_data_access() -> Result<(), GnxError> {
+    let runtime_home = Path::new(RUNTIME_HOME);
+    fs::create_dir_all(runtime_home)
+        .map_err(|error| GnxError::io("linux_runtime_home", error.to_string()))?;
+    let owner = format!("{RUNTIME_ACCOUNT}:{RUNTIME_ACCOUNT}");
+    CommandSpec::new("chown")
+        .args(["--recursive", &owner])
+        .arg(data_root())
+        .run_checked("linux_runtime_data_owner")?;
+    let mut permissions = fs::metadata(runtime_home)
+        .map_err(|error| GnxError::io("linux_runtime_home", error.to_string()))?
+        .permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(runtime_home, permissions)
+        .map_err(|error| GnxError::io("linux_runtime_home", error.to_string()))
 }
 
 fn remove_if_exists(path: &Path) -> Result<(), GnxError> {
