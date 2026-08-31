@@ -92,12 +92,12 @@ Leyenda: `[x]` implementado y verificado localmente; `[ ]` pendiente;
 
 Evidencia local:
 
-- Tests: 39 Windows, sin fallos; Clippy sin warnings.
+- Tests: 40 Windows, sin fallos; Clippy sin warnings.
 - Windows observado: CLI, tray, servicio dedicado y Podman Machine listos. La
-  instalación presente aún está bloqueada en DNS porque falta introducir la IP
-  real del Headscale; el binario final debe reinstalarse y repetirse la aceptación.
-- Windows EXE nuevo: `102fce1c2409885ba3de4f3014f6c1a0f4220932bce927c1a48366711f516ddd`
-  (3,176,960 bytes); `version` y contrato `init --help` verificados.
+  instalación final quedó aplicada; el gate reporta `MESH_BOOTSTRAP_REQUIRED`
+  porque falta introducir la IP real del Headscale.
+- Windows EXE instalado: `3c552388cbcaf5ea40a274ba1859fca3c8130dbcee6a91f395b80c3a5b4b3815`
+  (3,177,472 bytes); `version`, `init --help`, servicio y tray verificados.
 - Linux ELF: `3c44643cfa54713607bec24b1acdfeffb096b317bb7e097dd075f48a6d77143e`.
 - Linux AppImage: `a8bce8f1c95e6ec7e54f8cc4cc6b8401a923a18ddea553fe6180d57b5661ff4d`.
 - Quadlets runtime/guest aceptados por el generador; HCL válido con lock read-only.
@@ -121,3 +121,4 @@ cerrada.
 - `2c2007b` — gates físicos antes de reportar `READY`.
 - `dfde9d4` — secreto mesh transitorio endurecido.
 - `ec6eda7` — configuración automática de resolución y `/health` Headscale.
+- `37aec9f` — gate explícito cuando falta el bootstrap soberano.
