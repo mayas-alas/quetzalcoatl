@@ -88,7 +88,6 @@ pub fn grant_data_access(path: &Path) -> Result<(), GnxError> {
     CommandSpec::new(r"C:\Windows\System32\icacls.exe")
         .arg(path)
         .args([
-            "/inheritance:r",
             "/grant:r",
             r"*S-1-5-18:(OI)(CI)F",
             r"*S-1-5-32-544:(OI)(CI)F",
@@ -98,6 +97,10 @@ pub fn grant_data_access(path: &Path) -> Result<(), GnxError> {
             "/C",
         ])
         .run_checked("service_data_acl")?;
+    CommandSpec::new(r"C:\Windows\System32\icacls.exe")
+        .arg(path)
+        .args(["/inheritance:r", "/T", "/C"])
+        .run_checked("service_data_inheritance")?;
     Ok(())
 }
 
