@@ -4,6 +4,7 @@ pub mod download;
 pub mod error;
 pub mod host;
 pub mod journal;
+pub mod logs;
 pub mod process;
 pub mod report;
 pub mod runtime;
@@ -21,6 +22,7 @@ where
     match cli::execute(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
+            logs::error(&error);
             eprintln!("{error}");
             ExitCode::from(error.exit_code())
         }

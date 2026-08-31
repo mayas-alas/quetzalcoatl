@@ -10,9 +10,9 @@ use windows_sys::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, LoadIconW, MB_ICONINFORMATION,
-    MB_OK, MSG, MessageBoxW, PostQuitMessage, RegisterClassW, SW_HIDE, ShowWindow,
-    TranslateMessage, WM_APP, WM_DESTROY, WM_LBUTTONDBLCLK, WM_RBUTTONUP, WNDCLASSW,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowW, GetMessageW, LoadIconW,
+    MB_ICONINFORMATION, MB_OK, MSG, MessageBoxW, PostQuitMessage, RegisterClassW, SW_HIDE,
+    ShowWindow, TranslateMessage, WM_APP, WM_DESTROY, WM_LBUTTONDBLCLK, WM_RBUTTONUP, WNDCLASSW,
 };
 
 use crate::error::GnxError;
@@ -26,8 +26,13 @@ const CLASS_NAME: &str = "QuetzalcoatlNextTrayWindow";
 static CONFIG_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn run(config_path: PathBuf) -> Result<(), GnxError> {
+    crate::logs::event("info", "tray", "start", "Iniciando bandeja GNX");
     // SAFETY: this hidden internal mode owns its UI thread and global callback state.
     unsafe {
+        let class_name = wide(CLASS_NAME);
+        if !FindWindowW(class_name.as_ptr(), null()).is_null() {
+            return Ok(());
+        }
         CONFIG_PATH.set(config_path).map_err(|_| {
             GnxError::new(
                 "TRAY_ALREADY_RUNNING",
@@ -49,7 +54,6 @@ pub fn run(config_path: PathBuf) -> Result<(), GnxError> {
         if instance.is_null() {
             return Err(last_error("tray_module"));
         }
-        let class_name = wide(CLASS_NAME);
         let window_class = WNDCLASSW {
             lpfnWndProc: Some(window_proc),
             hInstance: instance,
@@ -91,6 +95,7 @@ pub fn run(config_path: PathBuf) -> Result<(), GnxError> {
         if Shell_NotifyIconW(NIM_ADD, &icon_data) == 0 {
             return Err(last_error("tray_add"));
         }
+        crate::logs::event("info", "tray", "ready", "Icono agregado a la bandeja");
 
         let mut message: MSG = zeroed();
         loop {
@@ -107,6 +112,7 @@ pub fn run(config_path: PathBuf) -> Result<(), GnxError> {
         }
         Shell_NotifyIconW(NIM_DELETE, &icon_data);
     }
+    crate::logs::event("info", "tray", "stop", "Bandeja GNX cerrada");
     Ok(())
 }
 

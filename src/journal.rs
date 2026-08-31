@@ -77,7 +77,17 @@ impl OperationJournal {
     pub fn save(&self, path: &Path) -> Result<(), GnxError> {
         let bytes = serde_json::to_vec_pretty(self)
             .map_err(|error| GnxError::io("journal_serialize", error.to_string()))?;
-        atomic_write(path, &bytes)
+        atomic_write(path, &bytes)?;
+        crate::logs::event(
+            "info",
+            "install",
+            "checkpoint",
+            format!(
+                "operation_id={} checkpoint={:?} reboot_required={}",
+                self.operation_id, self.checkpoint, self.reboot_required
+            ),
+        );
+        Ok(())
     }
 }
 

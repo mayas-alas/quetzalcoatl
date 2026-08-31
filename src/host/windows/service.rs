@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 
 use windows_service::define_windows_service;
 use windows_service::service::{
-    ServiceAccess, ServiceControl, ServiceControlAccept, ServiceErrorControl, ServiceExitCode,
+    ServiceAccess, ServiceAction, ServiceActionType, ServiceControl, ServiceControlAccept,
+    ServiceErrorControl, ServiceExitCode, ServiceFailureActions, ServiceFailureResetPeriod,
     ServiceInfo, ServiceStartType, ServiceState, ServiceStatus, ServiceType,
 };
 use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
@@ -14,14 +15,14 @@ use windows_service::service_dispatcher;
 use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 
 use crate::error::GnxError;
-use crate::host::windows::account::{SERVICE_ACCOUNT, SERVICE_DISPLAY_NAME, SERVICE_NAME};
+use crate::host::windows::account::{RuntimeCredential, SERVICE_DISPLAY_NAME, SERVICE_NAME};
 use crate::state::{OperationalState, Stage, default_state_path};
 
 const SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
 
 define_windows_service!(ffi_service_main, service_main);
 
-pub fn register(executable: &Path) -> Result<(), GnxError> {
+pub fn register(executable: &Path, credential: RuntimeCredential) -> Result<(), GnxError> {
     let manager = ServiceManager::local_computer(
         None::<&str>,
         ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
@@ -37,8 +38,8 @@ pub fn register(executable: &Path) -> Result<(), GnxError> {
         executable_path: executable.to_path_buf(),
         launch_arguments: vec![OsString::from("__service")],
         dependencies: vec![],
-        account_name: Some(OsString::from(SERVICE_ACCOUNT)),
-        account_password: None,
+        account_name: Some(credential.account_name),
+        account_password: Some(credential.password),
     };
     let service = match manager.open_service(
         SERVICE_NAME,
@@ -60,6 +61,30 @@ pub fn register(executable: &Path) -> Result<(), GnxError> {
     service
         .set_description("Owns the Quetzalcoatl Podman Machine and converges GNX runtime")
         .map_err(service_error("service_description"))?;
+    service
+        .update_failure_actions(ServiceFailureActions {
+            reset_period: ServiceFailureResetPeriod::After(Duration::from_secs(86_400)),
+            reboot_msg: None,
+            command: None,
+            actions: Some(vec![
+                ServiceAction {
+                    action_type: ServiceActionType::Restart,
+                    delay: Duration::from_secs(10),
+                },
+                ServiceAction {
+                    action_type: ServiceActionType::Restart,
+                    delay: Duration::from_secs(30),
+                },
+                ServiceAction {
+                    action_type: ServiceActionType::Restart,
+                    delay: Duration::from_secs(60),
+                },
+            ]),
+        })
+        .map_err(service_error("service_failure_actions"))?;
+    service
+        .set_failure_actions_on_non_crash_failures(true)
+        .map_err(service_error("service_failure_policy"))?;
     Ok(())
 }
 
@@ -143,7 +168,15 @@ pub fn run() -> Result<(), GnxError> {
 }
 
 fn service_main(_arguments: Vec<OsString>) {
-    let _ = run_worker();
+    crate::logs::event("info", "service", "start", "Servicio GNX iniciado");
+    if let Err(error) = run_worker() {
+        crate::logs::event(
+            "error",
+            "service",
+            "worker",
+            format!("Windows Service API: {error}"),
+        );
+    }
 }
 
 fn run_worker() -> windows_service::Result<()> {
@@ -168,31 +201,37 @@ fn run_worker() -> windows_service::Result<()> {
     })?;
 
     loop {
+        crate::logs::event(
+            "info",
+            "service",
+            "converge",
+            "Iniciando intento de convergencia",
+        );
         let mut state = OperationalState {
             stage: Stage::Working,
             ..OperationalState::default()
         };
         let _ = state.save(&default_state_path());
-        let convergence = crate::config::Config::load(&crate::config::default_config_path())
-            .and_then(|config| config.validate())
-            .and_then(|controller| {
-                crate::runtime::headscale::verify_controller(&controller)?;
-                Ok(controller)
-            })
-            .and_then(|controller| crate::runtime::machine::ensure(&controller));
+        let convergence = converge(&mut state);
         match convergence {
             Ok(()) => {
-                state.stage = Stage::Installed;
+                state.stage = Stage::Ready;
                 state.machine = "ready".to_string();
                 state.docktail = "deployed".to_string();
                 state.proxmox = "ready".to_string();
                 state.infra = "applied".to_string();
                 state.last_error = None;
+                crate::logs::event("info", "service", "converge", "Runtime convergido");
             }
             Err(error) => {
                 state.stage = Stage::Failed;
-                state.machine = "failed".to_string();
+                if state.machine != "ready" {
+                    state.machine = "failed".to_string();
+                } else if error.component == "mesh" {
+                    state.mesh = "failed".to_string();
+                }
                 state.last_error = Some(error.code.to_string());
+                crate::logs::error(&error);
             }
         }
         let _ = state.save(&default_state_path());
@@ -214,7 +253,23 @@ fn run_worker() -> windows_service::Result<()> {
         wait_hint: Duration::default(),
         process_id: None,
     })?;
+    crate::logs::event("info", "service", "stop", "Servicio GNX detenido");
     Ok(())
+}
+
+fn converge(state: &mut OperationalState) -> Result<(), GnxError> {
+    let config = crate::config::Config::load(&crate::config::default_config_path())?;
+    let controller = config.validate()?;
+
+    crate::runtime::machine::prepare()?;
+    state.machine = "ready".to_string();
+    let _ = state.save(&default_state_path());
+
+    crate::runtime::headscale::verify_controller(&controller)?;
+    state.mesh = "controller_reachable".to_string();
+    let _ = state.save(&default_state_path());
+
+    crate::runtime::machine::deploy(&controller)
 }
 
 fn service_error(operation: &'static str) -> impl FnOnce(windows_service::Error) -> GnxError {

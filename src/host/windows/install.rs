@@ -1,12 +1,20 @@
 use std::fs;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::ptr;
+use std::process::{Command, Stdio};
+use std::ptr::{self, null_mut};
 use std::time::Duration;
 
+use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
 use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
-use windows_sys::Win32::UI::Shell::{IsUserAnAdmin, ShellExecuteW};
-use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+use windows_sys::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
+use windows_sys::Win32::UI::Shell::{
+    IsUserAnAdmin, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    HWND_BROADCAST, MB_ICONERROR, MB_ICONINFORMATION, MB_OK, MessageBoxW, SMTO_ABORTIFHUNG,
+    SW_SHOWNORMAL, SendMessageTimeoutW, WM_SETTINGCHANGE,
+};
 
 use crate::config::{data_root, default_config_path};
 use crate::error::GnxError;
@@ -40,7 +48,31 @@ pub fn install(options: InstallOptions) -> Result<InstallOutcome, GnxError> {
         } else {
             "__install --elevated"
         };
-        elevate(parameters, "instalar WSL, Podman y el servicio")?;
+        let exit_code = elevate(parameters, "instalar WSL, Podman y el servicio")?;
+        if exit_code != 0 {
+            show_result(
+                "Quetzalcoatl Next — instalación incompleta",
+                &format!(
+                    "El instalador terminó con código {exit_code}.\n\nConsulte: {}",
+                    crate::logs::default_log_path().display()
+                ),
+                true,
+            );
+            return Err(GnxError::new(
+                "INSTALL_ELEVATED_CHILD_FAILED",
+                "install",
+                "windows_elevate",
+                format!("El proceso elevado terminó con código {exit_code}."),
+                format!(
+                    "Consulte gnx logs o {}.",
+                    crate::logs::default_log_path().display()
+                ),
+                true,
+                14,
+            ));
+        }
+        launch_tray_for_current_user()?;
+        show_install_result();
         return Ok(InstallOutcome::RelaunchedElevated);
     }
 
@@ -99,13 +131,20 @@ pub fn install(options: InstallOptions) -> Result<InstallOutcome, GnxError> {
         return Ok(InstallOutcome::RebootRequired);
     }
 
-    service::register(&installed_executable)?;
+    service::stop()?;
+    let credential = account::ensure_runtime_account()?;
+    service::register(&installed_executable, credential)?;
     account::grant_data_access(&data_root())?;
     advance(
         &mut journal,
         InstallCheckpoint::ServiceRegistered,
         &journal_path,
     )?;
+    OperationalState {
+        stage: Stage::Installed,
+        ..OperationalState::default()
+    }
+    .save(&default_state_path())?;
     service::start()?;
     advance(
         &mut journal,
@@ -116,11 +155,6 @@ pub fn install(options: InstallOptions) -> Result<InstallOutcome, GnxError> {
     advance(&mut journal, InstallCheckpoint::Completed, &journal_path)?;
     reboot::unregister_resume()?;
 
-    OperationalState {
-        stage: Stage::Installed,
-        ..OperationalState::default()
-    }
-    .save(&default_state_path())?;
     println!("GNX quedó en PATH. Abra una shell nueva y ejecute: gnx status");
     Ok(InstallOutcome::Installed)
 }
@@ -138,7 +172,18 @@ pub fn uninstall(elevated: bool) -> Result<UninstallOutcome, GnxError> {
                 9,
             ));
         }
-        elevate("uninstall --elevated", "retirar GNX y Podman CLI")?;
+        let exit_code = elevate("uninstall --elevated", "retirar GNX y Podman CLI")?;
+        if exit_code != 0 {
+            return Err(GnxError::new(
+                "UNINSTALL_ELEVATED_CHILD_FAILED",
+                "install",
+                "windows_elevate",
+                format!("El proceso elevado terminó con código {exit_code}."),
+                "Consulte el log persistente de GNX.",
+                true,
+                14,
+            ));
+        }
         return Ok(UninstallOutcome::RelaunchedElevated);
     }
 
@@ -201,36 +246,54 @@ fn is_elevated() -> bool {
     unsafe { IsUserAnAdmin() != 0 }
 }
 
-fn elevate(parameters: &str, purpose: &str) -> Result<(), GnxError> {
+fn elevate(parameters: &str, purpose: &str) -> Result<u32, GnxError> {
     let executable = std::env::current_exe()
         .map_err(|error| GnxError::io("windows_elevate", error.to_string()))?;
     let verb = wide("runas");
     let file = wide(executable.as_os_str());
     let parameters = wide(parameters);
-    // SAFETY: all string buffers are NUL-terminated and remain alive through ShellExecuteW.
-    let result = unsafe {
-        ShellExecuteW(
-            ptr::null_mut(),
-            verb.as_ptr(),
-            file.as_ptr(),
-            parameters.as_ptr(),
-            ptr::null(),
-            SW_SHOWNORMAL,
-        )
-    } as isize;
-    if result <= 32 {
-        Err(GnxError::new(
+    let mut execute = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOCLOSEPROCESS,
+        lpVerb: verb.as_ptr(),
+        lpFile: file.as_ptr(),
+        lpParameters: parameters.as_ptr(),
+        nShow: SW_SHOWNORMAL,
+        ..Default::default()
+    };
+    // SAFETY: all string buffers and SHELLEXECUTEINFOW remain live until the call returns.
+    if unsafe { ShellExecuteExW(&mut execute) } == 0 || execute.hProcess.is_null() {
+        return Err(GnxError::new(
             "HOST_ELEVATION_CANCELLED",
             "host",
             "windows_elevate",
-            format!("ShellExecuteW devolvió {result}."),
+            std::io::Error::last_os_error().to_string(),
             format!("Acepte UAC para que GNX pueda {purpose}."),
             true,
             9,
-        ))
-    } else {
-        Ok(())
+        ));
     }
+    crate::logs::event(
+        "info",
+        "install",
+        "windows_elevate",
+        "Esperando al proceso elevado",
+    );
+    // SAFETY: hProcess is owned by this function until CloseHandle below.
+    let waited = unsafe { WaitForSingleObject(execute.hProcess, INFINITE) };
+    let mut exit_code = u32::MAX;
+    let read_exit = waited == WAIT_OBJECT_0
+        // SAFETY: hProcess is valid and exit_code points to writable memory.
+        && unsafe { GetExitCodeProcess(execute.hProcess, &mut exit_code) } != 0;
+    // SAFETY: hProcess was returned by ShellExecuteExW and is closed exactly once.
+    unsafe { CloseHandle(execute.hProcess) };
+    if !read_exit {
+        return Err(GnxError::io(
+            "windows_elevate_wait",
+            std::io::Error::last_os_error().to_string(),
+        ));
+    }
+    Ok(exit_code)
 }
 
 fn install_files() -> Result<PathBuf, GnxError> {
@@ -299,7 +362,25 @@ fn write_machine_path(value: String) -> Result<(), GnxError> {
         .arg(value)
         .arg("/f")
         .run_checked("path_update")?;
+    broadcast_environment_change();
     Ok(())
+}
+
+fn broadcast_environment_change() {
+    let environment = wide("Environment");
+    let mut result = 0_usize;
+    // SAFETY: UTF-16 data remains live for this bounded, synchronous broadcast.
+    unsafe {
+        SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            0,
+            environment.as_ptr() as isize,
+            SMTO_ABORTIFHUNG,
+            5_000,
+            &mut result,
+        );
+    }
 }
 
 fn add_to_machine_path(install_directory: &Path) -> Result<(), GnxError> {
@@ -354,6 +435,65 @@ fn unregister_tray() -> Result<(), GnxError> {
             output.stderr,
             true,
         ))
+    }
+}
+
+fn launch_tray_for_current_user() -> Result<(), GnxError> {
+    let executable = installed_executable();
+    if !executable.exists() {
+        return Err(GnxError::io(
+            "tray_launch",
+            format!("No existe {}.", executable.display()),
+        ));
+    }
+    Command::new(&executable)
+        .arg("__tray")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| GnxError::io("tray_launch", error.to_string()))?;
+    crate::logs::event(
+        "info",
+        "tray",
+        "launch",
+        "Bandeja iniciada en la sesión interactiva",
+    );
+    Ok(())
+}
+
+fn show_install_result() {
+    let state = OperationalState::load(&default_state_path())
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let body = if state.stage == Stage::RebootRequired {
+        "La preparación del host terminó y Windows debe reiniciarse. GNX continuará automáticamente después del inicio de sesión.".to_string()
+    } else {
+        format!(
+            "La instalación base terminó. Abra una shell nueva y ejecute gnx status.\n\nLogs: {}",
+            crate::logs::default_log_path().display()
+        )
+    };
+    show_result("Quetzalcoatl Next", &body, false);
+}
+
+fn show_result(title: &str, body: &str, error: bool) {
+    let title = wide(title);
+    let body = wide(body);
+    // SAFETY: strings are NUL-terminated and no owner window is required.
+    unsafe {
+        MessageBoxW(
+            null_mut(),
+            body.as_ptr(),
+            title.as_ptr(),
+            MB_OK
+                | if error {
+                    MB_ICONERROR
+                } else {
+                    MB_ICONINFORMATION
+                },
+        );
     }
 }
 

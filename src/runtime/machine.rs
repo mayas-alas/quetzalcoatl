@@ -37,7 +37,18 @@ impl MachineOwnership {
 }
 
 pub fn ensure(controller: &ControllerUrl) -> Result<(), GnxError> {
+    prepare()?;
+    deploy(controller)
+}
+
+pub fn prepare() -> Result<(), GnxError> {
     let podman = podman_executable();
+    crate::logs::event(
+        "info",
+        "runtime",
+        "machine_prepare",
+        format!("Inspeccionando Podman Machine {MACHINE_NAME}"),
+    );
     let inspect = CommandSpec::new(&podman)
         .args(["machine", "inspect", MACHINE_NAME])
         .timeout(Duration::from_secs(60))
@@ -72,6 +83,12 @@ pub fn ensure(controller: &ControllerUrl) -> Result<(), GnxError> {
             .timeout(Duration::from_secs(1800))
             .run_checked("machine_init")?;
         save_ownership()?;
+        crate::logs::event(
+            "info",
+            "runtime",
+            "machine_init",
+            format!("Podman Machine {MACHINE_NAME} creada"),
+        );
     }
 
     let start = CommandSpec::new(&podman)
@@ -95,6 +112,17 @@ pub fn ensure(controller: &ControllerUrl) -> Result<(), GnxError> {
         .args(["info", "--format", "json"])
         .timeout(Duration::from_secs(60))
         .run_checked("machine_health")?;
+    crate::logs::event(
+        "info",
+        "runtime",
+        "machine_ready",
+        format!("Podman Machine {MACHINE_NAME} disponible"),
+    );
+    Ok(())
+}
+
+pub fn deploy(controller: &ControllerUrl) -> Result<(), GnxError> {
+    let podman = podman_executable();
     deploy_runtime(&podman, controller)?;
     Ok(())
 }

@@ -16,7 +16,7 @@ pub struct StatusReport {
     pub host: HostReport,
     pub config_path: String,
     pub controller_url: Option<String>,
-    pub controller: &'static str,
+    pub controller: String,
     pub machine: String,
     pub mesh: String,
     pub docktail: String,
@@ -51,7 +51,7 @@ impl StatusReport {
             },
             config_path: config_path.display().to_string(),
             controller_url,
-            controller: "not_checked",
+            controller: state.mesh.clone(),
             machine: state.machine,
             mesh: state.mesh,
             docktail: state.docktail,
@@ -146,6 +146,12 @@ impl DoctorReport {
                 .timeout(Duration::from_secs(30)),
             "podman disponible",
         );
+        #[cfg(target_os = "windows")]
+        if podman_ready {
+            push_windows_runtime_checks(&mut checks);
+        }
+
+        #[cfg(not(target_os = "windows"))]
         if podman_ready {
             let machine_ready = push_process_check(
                 &mut checks,
@@ -220,6 +226,74 @@ impl DoctorReport {
         self.checks
             .iter()
             .any(|check| !matches!(check.state, CheckState::Pass))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn push_windows_runtime_checks(checks: &mut Vec<DoctorCheck>) {
+    let service = CommandSpec::new(r"C:\Windows\System32\sc.exe")
+        .args(["qc", crate::host::windows::account::SERVICE_NAME])
+        .timeout(Duration::from_secs(30))
+        .run("doctor_service_identity");
+    match service {
+        Ok(output)
+            if output.success()
+                && output
+                    .stdout
+                    .to_ascii_lowercase()
+                    .contains(crate::host::windows::account::RUNTIME_ACCOUNT_NAME) =>
+        {
+            checks.push(DoctorCheck {
+                id: "host.runtime_identity",
+                state: CheckState::Pass,
+                detail: "Servicio ejecuta como .\\gnx-runtime".to_string(),
+            });
+        }
+        Ok(output) => checks.push(DoctorCheck {
+            id: "host.runtime_identity",
+            state: CheckState::Fail,
+            detail: format!("Identidad dedicada no observada: {}", output.stdout.trim()),
+        }),
+        Err(error) => checks.push(DoctorCheck {
+            id: "host.runtime_identity",
+            state: CheckState::Fail,
+            detail: format!("{}: {}", error.code, error.message),
+        }),
+    }
+
+    match OperationalState::load(&default_state_path()) {
+        Ok(Some(state)) if state.machine == "ready" => {
+            checks.push(DoctorCheck {
+                id: "runtime.machine",
+                state: CheckState::Pass,
+                detail: "Podman Machine quetzalcoatl reportada por el servicio dedicado"
+                    .to_string(),
+            });
+            checks.push(DoctorCheck {
+                id: "runtime.machine_ownership",
+                state: CheckState::Pass,
+                detail: "Propiedad aislada en el perfil gnx-runtime".to_string(),
+            });
+        }
+        Ok(Some(state)) => checks.push(DoctorCheck {
+            id: "runtime.machine",
+            state: CheckState::Fail,
+            detail: format!(
+                "Servicio dedicado reporta machine={} last_error={}",
+                state.machine,
+                state.last_error.as_deref().unwrap_or("none")
+            ),
+        }),
+        Ok(None) => checks.push(DoctorCheck {
+            id: "runtime.machine",
+            state: CheckState::Fail,
+            detail: "Aún no existe estado del servicio dedicado".to_string(),
+        }),
+        Err(error) => checks.push(DoctorCheck {
+            id: "runtime.machine",
+            state: CheckState::Fail,
+            detail: format!("{}: {}", error.code, error.message),
+        }),
     }
 }
 

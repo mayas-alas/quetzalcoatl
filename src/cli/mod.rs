@@ -43,6 +43,15 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Muestra eventos persistentes de instalación y runtime.
+    Logs {
+        /// Número máximo de eventos recientes.
+        #[arg(long, default_value_t = 100, value_name = "N")]
+        tail: usize,
+        /// Conserva cada evento como JSONL.
+        #[arg(long)]
+        json: bool,
+    },
     /// Reconverge instalación y runtime.
     Repair,
     /// Actualiza GNX mediante un release verificado.
@@ -99,6 +108,7 @@ where
         Some(Command::Init) => init::run(config_path),
         Some(Command::Status { json }) => status::run(config_path, json),
         Some(Command::Doctor { json }) => doctor::run(config_path, json),
+        Some(Command::Logs { tail, json }) => crate::logs::print_tail(tail, json),
         Some(Command::Repair) => repair(config_path),
         Some(Command::Version) => {
             println!("gnx {}", env!("CARGO_PKG_VERSION"));
