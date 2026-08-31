@@ -130,6 +130,7 @@ for _ in $(seq 1 60); do
 done
 pct exec "${workload_vmid}" -- /bin/true
 pct exec "${workload_vmid}" -- install -d -m 0755 /opt/gnx/guest/units
+pct exec "${workload_vmid}" -- install -d -m 0700 /run/gnx/mesh
 pct push "${workload_vmid}" "${payload_root}/bootstrap.sh" /opt/gnx/guest/bootstrap.sh
 pct push "${workload_vmid}" "${payload_root}/tailscale-controller.env" /opt/gnx/guest/tailscale-controller.env
 pct push "${workload_vmid}" "${payload_root}/units/tailscale.container" /opt/gnx/guest/units/tailscale.container
@@ -137,4 +138,8 @@ pct push "${workload_vmid}" "${payload_root}/units/docktail.container" /opt/gnx/
 pct exec "${workload_vmid}" -- chmod 0755 /opt/gnx/guest/bootstrap.sh
 pct exec "${workload_vmid}" -- chmod 0600 /opt/gnx/guest/tailscale-controller.env
 pct exec "${workload_vmid}" -- chmod 0644 /opt/gnx/guest/units/tailscale.container /opt/gnx/guest/units/docktail.container
+if [[ -s /run/gnx/mesh/auth.key ]]; then
+  pct push "${workload_vmid}" /run/gnx/mesh/auth.key /run/gnx/mesh/auth.key
+  pct exec "${workload_vmid}" -- chmod 0400 /run/gnx/mesh/auth.key
+fi
 pct exec "${workload_vmid}" -- /opt/gnx/guest/bootstrap.sh

@@ -228,8 +228,14 @@ fn run_worker() -> windows_service::Result<()> {
                 state.stage = Stage::Failed;
                 if state.machine != "ready" {
                     state.machine = "failed".to_string();
-                } else if error.component == "mesh" {
-                    state.mesh = "failed".to_string();
+                } else {
+                    match error.component {
+                        "mesh" => state.mesh = "failed".to_string(),
+                        "docktail" => state.docktail = "failed".to_string(),
+                        "proxmox" => state.proxmox = "failed".to_string(),
+                        "infra" | "opentofu" => state.infra = "failed".to_string(),
+                        _ => {}
+                    }
                 }
                 state.last_error = Some(error.code.to_string());
                 crate::logs::error(&error);
@@ -270,7 +276,25 @@ fn converge(state: &mut OperationalState) -> Result<(), GnxError> {
     state.mesh = "controller_reachable".to_string();
     let _ = state.save(&default_state_path());
 
-    crate::runtime::machine::deploy(&controller, &config.mesh.bootstrap_addresses)
+    crate::runtime::machine::install_runtime(&controller, &config.mesh.bootstrap_addresses)?;
+
+    crate::runtime::machine::converge_mesh(&controller)?;
+    state.mesh = "ready".to_string();
+    let _ = state.save(&default_state_path());
+
+    crate::runtime::machine::converge_docktail()?;
+    state.docktail = "ready".to_string();
+    let _ = state.save(&default_state_path());
+
+    crate::runtime::machine::converge_proxmox()?;
+    state.proxmox = "ready".to_string();
+    let _ = state.save(&default_state_path());
+
+    crate::runtime::machine::converge_infra()?;
+    state.infra = "applied".to_string();
+    let _ = state.save(&default_state_path());
+
+    crate::runtime::machine::finalize_mesh_auth()
 }
 
 fn service_error(operation: &'static str) -> impl FnOnce(windows_service::Error) -> GnxError {

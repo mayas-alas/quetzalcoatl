@@ -15,7 +15,6 @@ pub fn run(config_path: PathBuf, json: bool) -> Result<(), GnxError> {
             let marker = match check.state {
                 CheckState::Pass => "PASS",
                 CheckState::Fail => "FAIL",
-                CheckState::NotImplemented => "PENDING",
             };
             println!("[{marker}] {} — {}", check.id, check.detail);
         }

@@ -69,7 +69,6 @@ impl StatusReport {
 pub enum CheckState {
     Pass,
     Fail,
-    NotImplemented,
 }
 
 #[derive(Debug, Serialize)]
@@ -113,6 +112,19 @@ impl DoctorReport {
                         state: CheckState::Pass,
                         detail: controller.canonical().to_string(),
                     });
+                    #[cfg(target_os = "windows")]
+                    match crate::host::windows::resolution::verify(&config) {
+                        Ok(detail) => checks.push(DoctorCheck {
+                            id: "mesh.controller_bootstrap",
+                            state: CheckState::Pass,
+                            detail,
+                        }),
+                        Err(error) => checks.push(DoctorCheck {
+                            id: "mesh.controller_bootstrap",
+                            state: CheckState::Fail,
+                            detail: format!("{}: {}", error.code, error.message),
+                        }),
+                    }
                     match crate::runtime::headscale::verify_controller(&controller) {
                         Ok(status) => checks.push(DoctorCheck {
                             id: "mesh.controller_tls",
@@ -215,12 +227,6 @@ impl DoctorReport {
             }
         }
 
-        checks.push(DoctorCheck {
-            id: "docktail.headscale_services",
-            state: CheckState::NotImplemented,
-            detail: "Bloqueado por MESH-SVC-01; nunca equivale a READY.".to_string(),
-        });
-
         Self { checks }
     }
 
@@ -271,6 +277,34 @@ fn push_windows_runtime_checks(checks: &mut Vec<DoctorCheck>) {
                 detail: "Podman Machine quetzalcoatl reportada por el servicio dedicado"
                     .to_string(),
             });
+            push_observed_state(
+                checks,
+                "runtime.mesh_identity",
+                state.mesh == "ready",
+                &state.mesh,
+                state.last_error.as_deref(),
+            );
+            push_observed_state(
+                checks,
+                "runtime.docktail",
+                state.docktail == "ready",
+                &state.docktail,
+                state.last_error.as_deref(),
+            );
+            push_observed_state(
+                checks,
+                "runtime.proxmox",
+                state.proxmox == "ready",
+                &state.proxmox,
+                state.last_error.as_deref(),
+            );
+            push_observed_state(
+                checks,
+                "runtime.opentofu_lxc",
+                state.infra == "applied",
+                &state.infra,
+                state.last_error.as_deref(),
+            );
             checks.push(DoctorCheck {
                 id: "runtime.machine_ownership",
                 state: CheckState::Pass,
@@ -297,6 +331,32 @@ fn push_windows_runtime_checks(checks: &mut Vec<DoctorCheck>) {
             detail: format!("{}: {}", error.code, error.message),
         }),
     }
+}
+
+#[cfg(target_os = "windows")]
+fn push_observed_state(
+    checks: &mut Vec<DoctorCheck>,
+    id: &'static str,
+    ready: bool,
+    observed: &str,
+    last_error: Option<&str>,
+) {
+    checks.push(DoctorCheck {
+        id,
+        state: if ready {
+            CheckState::Pass
+        } else {
+            CheckState::Fail
+        },
+        detail: if ready {
+            format!("Servicio dedicado observó {observed}")
+        } else {
+            format!(
+                "observado={observed}; last_error={}",
+                last_error.unwrap_or("none")
+            )
+        },
+    });
 }
 
 fn push_process_check(
@@ -338,12 +398,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pending_check_blocks_healthy_diagnosis() {
+    fn failed_check_blocks_healthy_diagnosis() {
         let report = DoctorReport {
             checks: vec![DoctorCheck {
                 id: "mesh.gate",
-                state: CheckState::NotImplemented,
-                detail: "pending".to_string(),
+                state: CheckState::Fail,
+                detail: "failed".to_string(),
             }],
         };
 

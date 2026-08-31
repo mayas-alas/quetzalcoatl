@@ -139,8 +139,185 @@ pub fn prepare() -> Result<(), GnxError> {
 }
 
 pub fn deploy(controller: &ControllerUrl, bootstrap_addresses: &[IpAddr]) -> Result<(), GnxError> {
+    install_runtime(controller, bootstrap_addresses)?;
+    converge_mesh(controller)?;
+    converge_docktail()?;
+    converge_proxmox()?;
+    converge_infra()?;
+    finalize_mesh_auth()?;
+    Ok(())
+}
+
+pub fn install_runtime(
+    controller: &ControllerUrl,
+    bootstrap_addresses: &[IpAddr],
+) -> Result<(), GnxError> {
+    deploy_runtime(&podman_executable(), controller, bootstrap_addresses)
+}
+
+pub fn converge_mesh(controller: &ControllerUrl) -> Result<(), GnxError> {
     let podman = podman_executable();
-    deploy_runtime(&podman, controller, bootstrap_addresses)?;
+    start_units(
+        &podman,
+        &["podman.socket", "tailscale.service"],
+        "mesh_start",
+        Duration::from_secs(1200),
+    )
+    .map_err(|error| component_error("MESH_RUNTIME_START_FAILED", "mesh", "start", error, 16))?;
+    verify_mesh(&podman, controller)
+}
+
+pub fn converge_docktail() -> Result<(), GnxError> {
+    let podman = podman_executable();
+    start_units(
+        &podman,
+        &["docktail.service"],
+        "docktail_start",
+        Duration::from_secs(1200),
+    )
+    .map_err(|error| component_error("DOCKTAIL_START_FAILED", "docktail", "start", error, 19))?;
+    remote_checked(
+        &podman,
+        &[
+            "sudo",
+            "systemctl",
+            "is-active",
+            "--quiet",
+            "docktail.service",
+        ],
+        "docktail_active",
+        Duration::from_secs(30),
+    )
+    .map_err(|error| component_error("DOCKTAIL_UNHEALTHY", "docktail", "health", error, 19))?;
+    remote_checked(
+        &podman,
+        &[
+            "sudo",
+            "podman",
+            "inspect",
+            "--format",
+            "{{.State.Status}}",
+            "gnx-docktail",
+        ],
+        "docktail_container",
+        Duration::from_secs(30),
+    )
+    .map_err(|error| component_error("DOCKTAIL_UNHEALTHY", "docktail", "container", error, 19))?;
+    Ok(())
+}
+
+pub fn converge_proxmox() -> Result<(), GnxError> {
+    let podman = podman_executable();
+    for device in ["/dev/kvm", "/dev/fuse"] {
+        let probe = remote(
+            &podman,
+            &["sudo", "test", "-e", device],
+            "proxmox_device",
+            Duration::from_secs(30),
+        )?;
+        if !probe.success() {
+            return Err(GnxError::new(
+                "PROXMOX_ACCELERATION_UNAVAILABLE",
+                "proxmox",
+                "device_preflight",
+                format!("{device} no está disponible dentro de Podman Machine quetzalcoatl."),
+                "Habilite virtualización anidada/KVM y reinicie Windows antes de ejecutar gnx init.",
+                false,
+                20,
+            ));
+        }
+    }
+    start_units(
+        &podman,
+        &["proxmox.service"],
+        "proxmox_start",
+        Duration::from_secs(1200),
+    )
+    .map_err(|error| component_error("PROXMOX_START_FAILED", "proxmox", "start", error, 20))?;
+    remote_checked(
+        &podman,
+        &[
+            "sudo",
+            "podman",
+            "wait",
+            "--condition=healthy",
+            "--interval=5s",
+            "gnx-proxmox",
+        ],
+        "proxmox_health",
+        Duration::from_secs(1200),
+    )
+    .map_err(|error| component_error("PROXMOX_UNHEALTHY", "proxmox", "health", error, 20))?;
+    Ok(())
+}
+
+pub fn converge_infra() -> Result<(), GnxError> {
+    let podman = podman_executable();
+    remote_checked(
+        &podman,
+        &["sudo", "systemctl", "enable", "gnx-opentofu.service"],
+        "opentofu_enable",
+        Duration::from_secs(60),
+    )
+    .map_err(|error| component_error("INFRA_APPLY_FAILED", "infra", "enable", error, 18))?;
+    remote_checked(
+        &podman,
+        &["sudo", "systemctl", "restart", "gnx-opentofu.service"],
+        "opentofu_apply",
+        Duration::from_secs(2400),
+    )
+    .map_err(|error| component_error("INFRA_APPLY_FAILED", "infra", "apply", error, 18))?;
+    for (operation, arguments) in [
+        (
+            "opentofu_runner_health",
+            vec![
+                "sudo",
+                "podman",
+                "exec",
+                "gnx-proxmox",
+                "pct",
+                "exec",
+                "200",
+                "--",
+                "/usr/local/bin/tofu",
+                "version",
+            ],
+        ),
+        (
+            "workload_lxc_health",
+            vec![
+                "sudo",
+                "podman",
+                "exec",
+                "gnx-proxmox",
+                "pct",
+                "exec",
+                "201",
+                "--",
+                "systemctl",
+                "is-active",
+                "--quiet",
+                "tailscale.service",
+                "docktail.service",
+            ],
+        ),
+    ] {
+        remote_checked(&podman, &arguments, operation, Duration::from_secs(60)).map_err(
+            |error| component_error("INFRA_HEALTH_FAILED", "infra", operation, error, 18),
+        )?;
+    }
+    Ok(())
+}
+
+pub fn finalize_mesh_auth() -> Result<(), GnxError> {
+    let podman = podman_executable();
+    remote_checked(
+        &podman,
+        &["sudo", "rm", "-f", "/run/gnx/mesh/auth.key"],
+        "mesh_auth_cleanup",
+        Duration::from_secs(30),
+    )?;
+    install_text(&podman, "", "/run/gnx/mesh/tailscale-auth.env", "0600")?;
     Ok(())
 }
 
@@ -408,23 +585,156 @@ fn deploy_runtime(
         "runtime_daemon_reload",
         Duration::from_secs(60),
     )?;
-    remote_checked(
+    Ok(())
+}
+
+fn start_units(
+    podman: &Path,
+    units: &[&str],
+    operation: &'static str,
+    timeout: Duration,
+) -> Result<(), GnxError> {
+    let mut arguments = vec!["sudo", "systemctl", "enable", "--now"];
+    arguments.extend_from_slice(units);
+    remote_checked(podman, &arguments, operation, timeout)?;
+    Ok(())
+}
+
+fn verify_mesh(podman: &Path, controller: &ControllerUrl) -> Result<(), GnxError> {
+    let started = std::time::Instant::now();
+    let timeout = Duration::from_secs(120);
+    let mut last_state = "unavailable".to_string();
+    while started.elapsed() < timeout {
+        let status = remote(
+            podman,
+            &[
+                "sudo",
+                "podman",
+                "exec",
+                "gnx-tailscale",
+                "tailscale",
+                "--socket=/var/run/tailscale/tailscaled.sock",
+                "status",
+                "--json",
+            ],
+            "mesh_status",
+            Duration::from_secs(30),
+        )?;
+        if status.success()
+            && let Ok(document) = serde_json::from_str::<serde_json::Value>(&status.stdout)
+        {
+            last_state = document
+                .get("BackendState")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown")
+                .to_string();
+            let has_ip = document
+                .get("TailscaleIPs")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|addresses| !addresses.is_empty());
+            if last_state == "Running" && has_ip {
+                verify_mesh_controller(podman, controller)?;
+                return Ok(());
+            }
+        }
+        std::thread::sleep(Duration::from_secs(5));
+    }
+    let key_present = remote(
+        podman,
+        &["sudo", "test", "-s", "/run/gnx/mesh/auth.key"],
+        "mesh_auth_presence",
+        Duration::from_secs(30),
+    )?
+    .success();
+    Err(GnxError::new(
+        if key_present {
+            "MESH_ENROLLMENT_FAILED"
+        } else {
+            "MESH_ENROLLMENT_REQUIRED"
+        },
+        "mesh",
+        "enrollment",
+        format!("tailscaled no obtuvo identidad; BackendState={last_state}."),
+        if key_present {
+            "Verifique que la pre-auth key de Headscale sea válida, reutilizable y etiquetada; consulte gnx logs."
+        } else {
+            "Entregue una pre-auth key reutilizable por stdin: Get-Content <archivo-seguro> | gnx init --mesh-auth-stdin"
+        },
+        true,
+        16,
+    ))
+}
+
+fn verify_mesh_controller(podman: &Path, controller: &ControllerUrl) -> Result<(), GnxError> {
+    let prefs = remote_checked(
         podman,
         &[
             "sudo",
-            "systemctl",
-            "enable",
-            "--now",
-            "podman.socket",
-            "tailscale.service",
-            "docktail.service",
-            "proxmox.service",
-            "gnx-opentofu.service",
+            "podman",
+            "exec",
+            "gnx-tailscale",
+            "tailscale",
+            "--socket=/var/run/tailscale/tailscaled.sock",
+            "debug",
+            "prefs",
         ],
-        "runtime_enable",
-        Duration::from_secs(2400),
+        "mesh_controller_observed",
+        Duration::from_secs(30),
     )?;
+    let document: serde_json::Value = serde_json::from_str(&prefs.stdout).map_err(|error| {
+        GnxError::new(
+            "MESH_STATE_INVALID",
+            "mesh",
+            "controller_observed",
+            error.to_string(),
+            "Conserve los logs y ejecute gnx repair.",
+            true,
+            16,
+        )
+    })?;
+    let observed = document
+        .get("ControlURL")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim_end_matches('/');
+    if observed != controller.canonical() {
+        return Err(GnxError::new(
+            "MESH_CONTROLLER_MISMATCH",
+            "mesh",
+            "controller_observed",
+            format!(
+                "tailscaled usa '{}', pero config exige '{}'.",
+                if observed.is_empty() {
+                    "unknown"
+                } else {
+                    observed
+                },
+                controller.canonical()
+            ),
+            "No se aplicó fallback. Re-enrole la identidad contra el controller configurado.",
+            false,
+            16,
+        ));
+    }
     Ok(())
+}
+
+fn component_error(
+    code: &'static str,
+    component: &'static str,
+    operation: &'static str,
+    source: GnxError,
+    exit_code: u8,
+) -> GnxError {
+    GnxError::new(
+        code,
+        component,
+        operation,
+        source.message,
+        "Consulte gnx logs --tail 100; GNX conservará los recursos y reintentará.",
+        true,
+        exit_code,
+    )
 }
 
 fn ensure_tailscale_environment(podman: &Path, controller: &ControllerUrl) -> Result<(), GnxError> {
