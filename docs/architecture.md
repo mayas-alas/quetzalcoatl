@@ -2,184 +2,149 @@
 
 ## Contrato del MVP
 
-Quetzalcoatl Next (`gnx`) es una línea greenfield. El EXE y el AppImage son a la
-vez instalador inicial y payload de la CLI. Un artefacto ejecutado fuera de la ruta
-instalada inicia el instalador sin argumentos; el `gnx` ya instalado muestra ayuda
-si se ejecuta sin subcomando.
+Quetzalcoatl Next es greenfield. El EXE de Windows y el AppImage de Linux son
+instaladores autocontenidos: abrir el artefacto sin argumentos prepara el host e
+instala `gnx` en el `PATH`. Después, ejecutar `gnx` sin subcomando muestra ayuda.
+No existe un subcomando público de instalación.
 
-El usuario final no prepara WSL, Podman, QEMU ni el `PATH`. GNX hace esa
-preparación con elevación y deja un servicio de host que recupera el runtime después
-de apagar o reiniciar el equipo.
+El control plane es un Headscale externo. Los endpoints de referencia son
+`https://headscale.node.gnx` y `https://controlplane.node.gnx`; GNX conserva el
+endpoint configurado y aplica únicamente validación técnica HTTPS, DNS, puerto
+443 y TLS del sistema. Docktail usa el `tailscaled` local de cada celda.
 
-## Topología objetivo implementada
+## Topología común
 
 ```mermaid
 flowchart TB
-    ART[Windows EXE / Linux AppImage]
-    PREP[Preparación automática del host]
-    CLI[gnx en PATH]
-    HS[Controller HTTPS configurado]
-    SVC[Servicio GNX al boot]
-    PM[Podman Machine quetzalcoatl]
+    WIN["Windows EXE"] --> PREP["Preparación automática del host"]
+    LIN["Linux AppImage"] --> PREP
+    PREP --> CLI["gnx disponible en PATH"]
+    PREP --> HOST["Servicio GNX al arrancar"]
+    HOST --> PM["Podman Machine: quetzalcoatl"]
 
-    subgraph CELL[Celda runtime systemd]
-        TS[tailscaled Quadlet]
-        DT[Docktail Quadlet]
-        PX[Dockur Proxmox Quadlet]
-        TOFU[OpenTofu 1.12.6 one-shot]
+    subgraph RUNTIME["Podman Machine · systemd"]
+        TS["tailscaled · Quadlet"]
+        DT["Docktail · Quadlet"]
+        PVE["Dockur Proxmox · Quadlet"]
+        BOOT["Bootstrap fijo del runner"]
     end
 
-    subgraph GUEST[LXC gnx-cell-01]
-        INIT[bootstrap fijo]
-        GTS[tailscaled Quadlet]
-        GDT[Docktail Quadlet]
-        GP[Podman + socket local]
-        W[workload Quadlets]
-    end
-
-    ART --> PREP --> CLI
-    PREP --> SVC --> PM --> CELL
-    TS <--> HS
+    PM --> RUNTIME
+    TS <--> HS["Headscale externo"]
     DT --> TS
-    PX --> TOFU --> GUEST
-    INIT --> GTS
-    INIT --> GDT
-    INIT --> GP --> W
+    PVE --> BOOT
+    BOOT --> RUNNER["LXC 200 · gnx-infra-runner"]
+
+    subgraph INFRA["LXC dedicado de infraestructura"]
+        TOFU["OpenTofu 1.12.6"]
+        STATE["State y token API · root-only"]
+    end
+
+    RUNNER --> INFRA
+    STATE --> TOFU
+    TOFU --> API["API Proxmox"]
+    API --> CELL["LXC 201 · gnx-cell-01"]
+
+    subgraph WORKLOAD["LXC de workload · systemd"]
+        GTS["tailscaled · Quadlet"]
+        GDT["Docktail · Quadlet"]
+        POD["Podman y socket local"]
+        Q["Workload Quadlets"]
+    end
+
+    CELL --> WORKLOAD
     GTS <--> HS
     GDT --> GTS
+    POD --> Q
 ```
 
-Docktail no sustituye a `tailscaled`: consume el socket del daemon mesh y el
-socket Podman de su propia celda. Ningún socket Podman cruza entre la celda runtime
-y el LXC.
+OpenTofu no está instalado ni se ejecuta en la Podman Machine. La máquina sólo
+almacena un tarball verificado de staging y dispara un script fijo dentro de
+Proxmox. Ese script crea el runner, le entrega el binario y el módulo, genera un
+token Proxmox dedicado y ejecuta la convergencia dentro del LXC.
 
-## Instalación y arranque
+## Flujo Windows
 
-### Windows
+```mermaid
+flowchart TD
+    A["Abrir gnx-windows-x86_64.exe"] --> UAC["Elevación UAC"]
+    UAC --> FILES["Instalar gnx.exe y PATH de máquina"]
+    FILES --> WSL["Habilitar o instalar WSL"]
+    WSL --> MSI["Descargar y verificar Podman MSI"]
+    MSI --> REBOOT{"¿Windows exige reinicio?"}
+    REBOOT -- "sí" --> JOURNAL["Guardar journal y reanudar al logon"]
+    JOURNAL --> SERVICE["Registrar Windows Service"]
+    REBOOT -- "no" --> SERVICE
+    SERVICE --> ID["NT SERVICE\\QuetzalcoatlNext"]
+    ID --> MACHINE["Crear y poseer Podman Machine"]
+    FILES --> TRAY["Registrar tray al logon"]
+```
+
+El EXE contiene dos recursos visuales: branding del instalador y un icono separado
+para la bandeja. La bandeja corre en la sesión interactiva, sólo lee el estado y
+no recibe el socket ni las credenciales del runtime. El servicio automático usa
+la identidad virtual dedicada y reintenta una convergencia fallida después del
+arranque.
+
+## Flujo Linux
+
+```mermaid
+flowchart TD
+    APP["Abrir gnx-x86_64.AppImage"] --> SUDO["Elevación sudo automática"]
+    SUDO --> DETECT["Detectar apt, dnf o pacman"]
+    DETECT --> PACKAGES["Instalar Podman, QEMU y FUSE si faltan"]
+    PACKAGES --> CLI["Copiar gnx a /usr/local/bin"]
+    CLI --> UNIT["Instalar y habilitar gnx-host.service"]
+    UNIT --> BOOT["Arranque o reinicio del host"]
+    BOOT --> MACHINE["Recuperar Podman Machine quetzalcoatl"]
+    MACHINE --> SYSTEMD["Reconverger systemd y Quadlets"]
+```
+
+El usuario final no instala prerequisitos. El servicio de host queda habilitado
+para recuperar la topología después de reboot o power-off. El ELF separado es un
+artefacto de build; el entregable Linux para usuario es el AppImage.
+
+## OpenTofu y LXC
 
 ```mermaid
 sequenceDiagram
-    actor U as Usuario
-    participant A as EXE
-    participant E as UAC
-    participant W as WSL
-    participant M as Podman MSI
-    participant S as Windows Service
-    participant P as Podman Machine
-
-    U->>A: abrir EXE sin argumentos
-    A->>E: solicitar elevación
-    E-->>A: token administrador
-    A->>A: copiar gnx.exe y registrar PATH
-    A->>W: instalar WSL sin distribución
-    A->>M: descargar y verificar tamaño + SHA-256
-    A->>M: instalar machine-scope y provider WSL
-    alt Windows exige reboot
-        A->>A: guardar journal + RunOnce
-        A-->>U: solicitar reinicio
-        U->>A: reanudación automática al logon
-    end
-    A->>S: registrar NT SERVICE\\QuetzalcoatlNext
-    S->>P: crear/iniciar quetzalcoatl y converger
-```
-
-El servicio usa la cuenta virtual dedicada `NT SERVICE\QuetzalcoatlNext`; el
-usuario interactivo recibe la CLI, no el socket ni el perfil propietario de la
-Podman Machine. El journal monotónico permite repetir o reanudar sin retroceder
-checkpoints.
-
-### Linux
-
-```mermaid
-flowchart LR
-    A[abrir AppImage] --> S[sudo interno]
-    S --> PKG[apt / dnf / pacman]
-    PKG --> BIN[/usr/local/bin/gnx]
-    BIN --> UNIT[gnx-host.service enabled]
-    UNIT -->|boot o init| PM[Podman Machine quetzalcoatl]
-```
-
-El AppImage solicita `sudo`, instala Podman/QEMU/FUSE cuando faltan, copia la CLI
-y habilita el servicio. La convergencia se inicia sin bloquear la disponibilidad
-de `gnx` en una shell nueva.
-
-## Runtime declarativo
-
-La Podman Machine nueva se crea rootful con 4 CPU, 8 GiB RAM y 100 GiB de disco.
-GNX instala y habilita:
-
-| Unidad | Función | Persistencia |
-|---|---|---|
-| `tailscale.service` | daemon mesh local por imagen fijada | `/var/lib/gnx/tailscale` |
-| `docktail.service` | reconciliación de Services | sockets locales únicamente |
-| `proxmox.service` | Dockur/Proxmox con KVM/FUSE | `/var/lib/gnx/proxmox` |
-| `gnx-opentofu.service` | `init`, `validate`, `apply` | `/var/lib/gnx/opentofu` |
-
-El endpoint configurado se escribe en un environment file root-only como
-`TS_EXTRA_ARGS=--login-server=<endpoint>`. El pre-auth key no forma parte del TOML,
-state, journal ni argumentos de procesos. Su aprovisionamiento sigue siendo un gate
-de integración; GNX no cambia de controller si falta.
-
-## OpenTofu y primer LXC
-
-`infra/opentofu` es un módulo ejecutable, no un placeholder:
-
-- OpenTofu `1.12.6` y provider `bpg/proxmox` `0.111.1` están fijados;
-- `.terraform.lock.hcl` contiene checksums firmados del provider para Linux amd64;
-- descarga Ubuntu Noble `20260826` por URL inmutable y SHA-256;
-- crea VMID `201`, DHCP, start-on-boot, TUN, nesting, FUSE y disco persistente;
-- monta el bootstrap propiedad del repositorio, sin `local-exec`, `remote-exec` ni
-  provisioners.
-
-La contraseña Proxmox, credenciales del provider y contraseña inicial del LXC se
-generan con aleatoriedad del sistema y quedan en archivos `0600` separados dentro
-de la celda runtime. No se imprimen.
-
-```mermaid
-sequenceDiagram
-    participant G as GNX service
-    participant P as Proxmox Quadlet
+    participant G as Servicio GNX
+    participant P as Dockur Proxmox
+    participant B as Bootstrap fijo
+    participant R as LXC 200 runner
     participant T as OpenTofu
-    participant L as LXC
+    participant W as LXC 201 workload
 
-    G->>P: enable --now
-    P-->>G: healthcheck healthy
-    G->>T: provider lock + variables secretas
-    T->>P: API HTTPS :8006
-    P->>L: crear y arrancar VMID 201
-    L->>L: bootstrap + systemd + Quadlets
+    G->>P: iniciar Quadlet y esperar health
+    G->>B: ejecutar script repository-owned
+    B->>R: crear o verificar VMID 200
+    B->>R: entregar binario, módulo y token dedicado
+    R->>T: systemctl restart gnx-opentofu
+    T->>P: aplicar por API HTTPS
+    P->>W: crear o converger VMID 201
+    B->>W: entregar bootstrap fijo y Quadlets
+    W->>W: habilitar tailscaled, Docktail y Podman
 ```
 
-## Estado y operaciones
+El módulo usa OpenTofu `1.12.6`, provider `bpg/proxmox` `0.111.1`, lock de
+provider y Ubuntu Noble `20260826` por URL inmutable y SHA-256. No contiene
+`local-exec`, `remote-exec` ni provisioners. State, token y contraseña inicial
+quedan dentro del runner con permisos root-only.
 
-```mermaid
-stateDiagram-v2
-    [*] --> Pending
-    Pending --> Installing
-    Installing --> RebootRequired
-    RebootRequired --> Installing: reanudación
-    Installing --> Installed
-    Installed --> Working: init / servicio al boot
-    Working --> Installed: convergencia base completa
-    Working --> Failed: fallo cerrado
-    Failed --> Working: repair / retry de servicio
-    Installed --> Uninstalled: uninstall
-```
+## Fronteras de confianza
 
-`uninstall` deshabilita la integración GNX y retira Podman CLI. Conserva
-configuración, journal, Podman Machine, discos, volúmenes, Proxmox y LXC; no ejecuta
-`podman machine rm`, `podman volume rm` ni destrucción OpenTofu.
+- El usuario Windows opera `gnx`; no posee el perfil de la Podman Machine.
+- Cada celda usa sus propios sockets de Podman y `tailscaled`.
+- El LXC runner reduce exposición accidental de OpenTofu y credenciales.
+- Una toma de `root` de la Podman Machine todavía implica control de su Proxmox
+  privilegiado. El runner no puede crear aislamiento criptográfico contra su
+  propio hipervisor; cerrar ese riesgo requeriría mover Proxmox fuera de la
+  Podman Machine.
+- Ningún gate incompleto se reporta como `READY`.
 
-## Límites y gates explícitos
+## Desinstalación
 
-| Gate | Evidencia aún física |
-|---|---|
-| `WIN-ID-01` | WSL/Podman Machine bajo la cuenta virtual en Windows limpio. |
-| `KVM-01` | `/dev/kvm`, FUSE y nested virtualization en ambos hosts soportados. |
-| `MESH-AUTH-01` | entrega segura de pre-auth key y enrolamiento exacto al controller. |
-| `MESH-SVC-01` | Docktail Services contra la versión Headscale elegida. |
-| `LXC-01` | bootstrap, TUN, Podman y Quadlets dentro del LXC real. |
-| `SIGN-01` | Authenticode/AppImage y manifiesto de release firmado. |
-
-Un gate pendiente nunca se convierte en `READY`. Backup, restore y disaster
-recovery están fuera del alcance actual.
+`gnx uninstall` retira servicio, integración de arranque, binario, `PATH` y
+Podman CLI. Conserva configuración, journal, Podman Machine, volúmenes, discos,
+Proxmox, state de OpenTofu y LXC. No ejecuta operaciones de destrucción sobre
+infraestructura. Backup y recovery no forman parte de este alcance.
