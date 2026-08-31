@@ -10,7 +10,34 @@ No existe un subcomando público de instalación.
 El control plane es un Headscale externo. Los endpoints de referencia son
 `https://headscale.node.gnx` y `https://controlplane.node.gnx`; GNX conserva el
 endpoint configurado y aplica únicamente validación técnica HTTPS, DNS, puerto
-443 y TLS del sistema. Docktail usa el `tailscaled` local de cada celda.
+443 y TLS del sistema. El endpoint debe publicar el health-check de Headscale en
+`/health` y su certificado debe ser válido para el alias configurado.
+
+Headscale es el control plane. `tailscaled` es el cliente mesh de cada celda y se
+inscribe con `--login-server=https://controlplane.node.gnx`. Docktail no recibe
+un controller alternativo: consume el socket del `tailscaled` local y, por esa
+relación, usa el mismo Headscale.
+
+## Resolución soberana del control plane
+
+```mermaid
+flowchart LR
+    IP["IP inicial real de Headscale"] --> HOSTS["Windows hosts · bloque administrado GNX"]
+    IP --> ADDHOST["Quadlet AddHost · Podman Machine y LXC"]
+    HOSTS --> NAME["controlplane.node.gnx / headscale.node.gnx"]
+    ADDHOST --> NAME
+    NAME --> TLS["HTTPS 443 · certificado confiable"]
+    TLS --> HEALTH["Headscale /health"]
+    HEALTH --> TS["tailscaled --login-server"]
+    TS --> SOCK["socket local /var/run/tailscale"]
+    SOCK --> DOCKTAIL["Docktail"]
+```
+
+La IP es bootstrap, no sustituye el nombre: TLS y la identidad del controller
+siempre se validan usando el hostname. En Windows, GNX administra sólo un bloque
+marcado del archivo `hosts`, publica los dos aliases `.node.gnx` cuando se usa
+esa taxonomía y no sobrescribe entradas ajenas en conflicto. La misma lista se
+materializa como `AddHost` en el Quadlet de tailscaled del runtime y del LXC.
 
 ## Topología común
 
@@ -30,8 +57,8 @@ flowchart TB
     end
 
     PM --> RUNTIME
-    TS <--> HS["Headscale externo"]
-    DT --> TS
+    TS <-->|"control plane: controlplane.node.gnx"| HS["Headscale externo"]
+    DT -->|"socket tailscaled local"| TS
     PVE --> BOOT
     BOOT --> RUNNER["LXC 200 · gnx-infra-runner"]
 
@@ -53,8 +80,8 @@ flowchart TB
     end
 
     CELL --> WORKLOAD
-    GTS <--> HS
-    GDT --> GTS
+    GTS <-->|"mismo Headscale"| HS
+    GDT -->|"socket tailscaled local"| GTS
     POD --> Q
 ```
 
@@ -78,9 +105,12 @@ flowchart TD
     REBOOT -- "no" --> SERVICE
     SERVICE --> ID["Cuenta local aislada .\\gnx-runtime"]
     ID --> MACHINE["Crear y poseer WSL/Podman Machine"]
-    MACHINE --> CP{"Controller DNS/TLS disponible"}
+    MACHINE --> ADDRESS["Registrar IP bootstrap del Headscale"]
+    ADDRESS --> DNS["Aplicar aliases en Windows y Quadlets"]
+    DNS --> CP{"/health de Headscale válido por DNS/TLS"}
     CP -- "no" --> RETRY["Conservar machine y reintentar con log"]
-    CP -- "sí" --> QUADLETS["Converger Docktail, Proxmox y runner"]
+    CP -- "sí" --> AUTH["Inscribir tailscaled con key efímera"]
+    AUTH --> QUADLETS["Converger Docktail, Proxmox y runner"]
     FILES --> LOG["JSONL en ProgramData"]
     FILES --> TRAY["Registrar tray al logon"]
     WAIT --> NOW["Iniciar tray en la sesión actual"]
@@ -100,6 +130,20 @@ caída del endpoint deja `machine=ready`, registra el error exacto y reintenta; 
 confunde un fallo mesh con un fallo de máquina. Los eventos están disponibles con
 `gnx logs` y como JSONL en
 `C:\ProgramData\QuetzalcoatlNext\logs\gnx.jsonl`.
+
+Después de instalar, la convergencia inicial puede registrar resolución y
+credencial en una sola elevación:
+
+```powershell
+Get-Content -Raw C:\ruta-segura\headscale-preauth.key |
+  gnx init --controller-address 192.0.2.10 --mesh-auth-stdin
+```
+
+`192.0.2.10` es sólo un ejemplo documental: debe sustituirse por la IP real. La
+key no entra en argumentos, config, journal ni logs; viaja cifrada con DPAPI al
+servicio dedicado, se monta de forma transitoria y se elimina tras converger.
+Para crear tanto la identidad del runtime como la del LXC de workload, la key de
+esta primera pasada debe ser reutilizable y autorizar los tags declarados.
 
 ## Flujo Linux
 

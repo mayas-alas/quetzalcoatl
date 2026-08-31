@@ -139,9 +139,34 @@ Windows limpio:
 1. Abrir el EXE y aceptar UAC.
 2. Verificar instalación automática de WSL y Podman, incluido reboot/resume.
 3. Abrir una shell nueva y ejecutar `gnx`, `gnx status` y `gnx doctor`.
-4. Ejecutar `gnx logs`; verificar JSONL en `ProgramData`, servicio bajo
+4. Registrar la IP real y una pre-auth key reutilizable de Headscale sin poner la
+   key en argumentos:
+
+   ```powershell
+   Get-Content -Raw C:\ruta-segura\headscale-preauth.key |
+     gnx init --controller-address 192.0.2.10 --mesh-auth-stdin
+   ```
+
+5. Confirmar que ambos aliases resuelven a esa IP y que el certificado es válido:
+
+   ```powershell
+   Resolve-DnsName controlplane.node.gnx
+   Resolve-DnsName headscale.node.gnx
+   Invoke-WebRequest https://controlplane.node.gnx/health
+   ```
+
+6. Ejecutar `gnx logs`; verificar JSONL en `ProgramData`, servicio bajo
    `.\gnx-runtime`, tray inmediato y tray después de un logon.
-5. Reiniciar y verificar recuperación de Podman Machine y unidades.
+7. Esperar `gnx status`: sólo puede mostrar `ready` después de observar identidad
+   tailscaled, Docktail, Proxmox, OpenTofu en LXC 200 y workload LXC 201.
+8. Reiniciar y verificar recuperación de Podman Machine y unidades sin volver a
+   entregar la pre-auth key.
+
+La dirección `192.0.2.10` es deliberadamente un ejemplo no enrutable; la prueba
+física debe usar la IP real del reverse proxy/Headscale. GNX conserva la URL por
+nombre y usa la IP sólo para romper el ciclo de resolución previo al enrolamiento.
+El certificado del endpoint debe cubrir `controlplane.node.gnx` y ser confiable
+tanto para Windows como para los clientes incluidos en los contenedores.
 
 La shell que abrió el instalador conserva su entorno anterior; `PATH` se difunde
 a Explorer para procesos nuevos, pero una shell ya abierta debe cerrarse y

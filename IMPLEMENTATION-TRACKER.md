@@ -1,6 +1,6 @@
 # Quetzalcoatl Next — MVP tracker
 
-**Corte:** 2026-08-30
+**Corte:** 2026-08-31
 
 **Objetivo:** EXE Windows y AppImage Linux que instalan `gnx`, preparan el host y
 reconvergen la topología después de reinicios.
@@ -20,6 +20,8 @@ Leyenda: `[x]` implementado y verificado localmente; `[ ]` pendiente;
   `version`.
 - [x] Controllers HTTPS configurables, incluidos los dos aliases `.gnx`, sin
   política de rechazo por marca.
+- [x] `gnx init --controller-address <IP>` persiste el bootstrap, administra sólo
+  el bloque GNX de `hosts` y lo propaga a los Quadlets del runtime y del LXC.
 - [x] Desinstalación retira Podman CLI y conserva máquinas, LXC, volúmenes,
   configuración y state.
 
@@ -53,6 +55,11 @@ Leyenda: `[x]` implementado y verificado localmente; `[ ]` pendiente;
   marca la máquina como fallida ni impide reintentos observables.
 - [x] systemd y Quadlets fijados para `tailscaled`, Docktail y Dockur Proxmox.
 - [x] Tailscale y Docktail usan imágenes por digest y sockets locales por celda.
+- [x] tailscaled conserva exactamente `controlplane.node.gnx` como
+  `--login-server`; Docktail consume su socket local y no configura un control
+  plane paralelo.
+- [x] El gate del controller consulta `/health` de Headscale por HTTPS y exige
+  respuesta 2xx antes de enrolar.
 - [x] Dockur Proxmox usa KVM/FUSE, persistencia y healthcheck.
 - [x] OpenTofu `1.12.6` y provider `bpg/proxmox` `0.111.1` fijados.
 - [x] OpenTofu se ejecuta exclusivamente en LXC 200 `gnx-infra-runner`.
@@ -64,6 +71,9 @@ Leyenda: `[x]` implementado y verificado localmente; `[ ]` pendiente;
   hardware con nested virtualization.
 - [PHYSICAL] `MESH-AUTH-01`: entregar pre-auth keys sin persistirlas en config,
   journal, state o argumentos.
+- [PHYSICAL] `MESH-BOOTSTRAP-01`: usar la IP real de Headscale, confirmar ambos
+  aliases en Windows/Podman Machine/LXC y validar la cadena TLS en las tres
+  fronteras.
 - [PHYSICAL] `MESH-SVC-01`: validar Docktail Services extremo a extremo contra la
   versión Headscale elegida.
 
@@ -82,9 +92,12 @@ Leyenda: `[x]` implementado y verificado localmente; `[ ]` pendiente;
 
 Evidencia local:
 
-- Tests: 28 Windows, sin fallos; reconstrucción Linux pendiente tras el cambio de
-  trazabilidad multiplataforma.
-- Windows EXE: pendiente de reconstrucción y prueba de instalación física.
+- Tests: 39 Windows, sin fallos; Clippy sin warnings.
+- Windows observado: CLI, tray, servicio dedicado y Podman Machine listos. La
+  instalación presente aún está bloqueada en DNS porque falta introducir la IP
+  real del Headscale; el binario final debe reinstalarse y repetirse la aceptación.
+- Windows EXE nuevo: `102fce1c2409885ba3de4f3014f6c1a0f4220932bce927c1a48366711f516ddd`
+  (3,176,960 bytes); `version` y contrato `init --help` verificados.
 - Linux ELF: `3c44643cfa54713607bec24b1acdfeffb096b317bb7e097dd075f48a6d77143e`.
 - Linux AppImage: `a8bce8f1c95e6ec7e54f8cc4cc6b8401a923a18ddea553fe6180d57b5661ff4d`.
 - Quadlets runtime/guest aceptados por el generador; HCL válido con lock read-only.
@@ -104,3 +117,7 @@ cerrada.
 - `d3a0ee8` — branding de instalador y tray Windows.
 - `5a5dbc7` — AppImage y metadata de release portables.
 - `c7f3d85` — identidad Windows aislada, tray inmediato y logs persistentes.
+- `64c12dc` — enrolamiento Headscale y bootstrap soberano.
+- `2c2007b` — gates físicos antes de reportar `READY`.
+- `dfde9d4` — secreto mesh transitorio endurecido.
+- `ec6eda7` — configuración automática de resolución y `/health` Headscale.
