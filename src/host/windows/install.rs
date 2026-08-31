@@ -309,6 +309,7 @@ fn install_files() -> Result<PathBuf, GnxError> {
     let source = std::env::current_exe()
         .map_err(|error| GnxError::io("windows_files", error.to_string()))?;
     if !paths_equal(&source, &destination) {
+        unregister_tray()?;
         tray::stop_running_instance()?;
         if destination.exists() {
             service::stop()?;
