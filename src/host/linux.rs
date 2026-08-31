@@ -184,6 +184,7 @@ fn install_packages() -> Result<(), GnxError> {
     if command_succeeds("podman", &["--version"])
         && (command_succeeds("qemu-system-x86_64", &["--version"])
             || command_succeeds("qemu-system-x86_64", &["-version"]))
+        && command_succeeds("gvproxy", &["--help"])
     {
         return Ok(());
     }
@@ -201,12 +202,20 @@ fn install_packages() -> Result<(), GnxError> {
                 "qemu-system-x86",
                 "qemu-utils",
                 "fuse3",
+                "gvproxy",
             ])
             .timeout(Duration::from_secs(1800))
             .run_checked("linux_packages_install")?;
     } else if Path::new("/usr/bin/dnf").exists() {
         CommandSpec::new("dnf")
-            .args(["install", "-y", "podman", "qemu-kvm", "fuse3"])
+            .args([
+                "install",
+                "-y",
+                "podman",
+                "qemu-kvm",
+                "fuse3",
+                "gvisor-tap-vsock",
+            ])
             .timeout(Duration::from_secs(1800))
             .run_checked("linux_packages_install")?;
     } else if Path::new("/usr/bin/pacman").exists() {
