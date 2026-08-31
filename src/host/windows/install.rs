@@ -369,44 +369,67 @@ fn stop_installed_processes(destination: &Path) -> Result<(), GnxError> {
 }
 
 fn stop_process_if_installed(process_id: u32, destination: &Path) -> Result<(), GnxError> {
-    // SAFETY: access is limited to querying and terminating a verified GNX image.
-    let process = unsafe {
-        OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE,
-            0,
-            process_id,
-        )
-    };
-    if process.is_null() {
+    // SAFETY: this first handle is limited to querying the candidate image path.
+    let query_process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+    if query_process.is_null() {
+        crate::logs::event(
+            "warn",
+            "install",
+            "windows_process_query",
+            format!(
+                "No se pudo consultar gnx.exe pid={process_id}: {}",
+                std::io::Error::last_os_error()
+            ),
+        );
         return Ok(());
     }
     let mut image = vec![0_u16; 32_768];
     let mut length = image.len() as u32;
     // SAFETY: process is open and image is a writable UTF-16 buffer of `length` elements.
     let queried =
-        unsafe { QueryFullProcessImageNameW(process, 0, image.as_mut_ptr(), &mut length) };
-    if queried != 0 {
-        let image = String::from_utf16_lossy(&image[..length as usize]);
-        if normalized_path(&image)
-            .eq_ignore_ascii_case(normalized_path(&destination.display().to_string()))
-        {
-            crate::logs::event(
-                "warn",
-                "install",
-                "windows_process_stop",
-                format!("Cerrando proceso GNX huérfano pid={process_id} image={image}"),
-            );
-            // SAFETY: the image path was verified as the installed GNX executable.
-            if unsafe { TerminateProcess(process, 0) } == 0 {
-                let error = std::io::Error::last_os_error();
-                // SAFETY: process is closed on this error path.
-                unsafe { CloseHandle(process) };
-                return Err(GnxError::io("windows_process_stop", error.to_string()));
-            }
-            // SAFETY: process handle has SYNCHRONIZE access and the wait is bounded.
-            unsafe { WaitForSingleObject(process, 10_000) };
-        }
+        unsafe { QueryFullProcessImageNameW(query_process, 0, image.as_mut_ptr(), &mut length) };
+    let query_error = std::io::Error::last_os_error();
+    // SAFETY: query_process was returned by OpenProcess and is closed exactly once.
+    unsafe { CloseHandle(query_process) };
+    if queried == 0 {
+        crate::logs::event(
+            "warn",
+            "install",
+            "windows_process_query",
+            format!("No se pudo leer la imagen de pid={process_id}: {query_error}"),
+        );
+        return Ok(());
     }
+    let image = String::from_utf16_lossy(&image[..length as usize]);
+    if !normalized_path(&image)
+        .eq_ignore_ascii_case(normalized_path(&destination.display().to_string()))
+    {
+        return Ok(());
+    }
+
+    crate::logs::event(
+        "warn",
+        "install",
+        "windows_process_stop",
+        format!("Cerrando proceso GNX huérfano pid={process_id} image={image}"),
+    );
+    // SAFETY: the image path was verified before requesting termination access.
+    let process = unsafe { OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, process_id) };
+    if process.is_null() {
+        return Err(GnxError::io(
+            "windows_process_stop",
+            std::io::Error::last_os_error().to_string(),
+        ));
+    }
+    // SAFETY: the image path was verified as the installed GNX executable.
+    if unsafe { TerminateProcess(process, 0) } == 0 {
+        let error = std::io::Error::last_os_error();
+        // SAFETY: process is closed on this error path.
+        unsafe { CloseHandle(process) };
+        return Err(GnxError::io("windows_process_stop", error.to_string()));
+    }
+    // SAFETY: process handle has SYNCHRONIZE access and the wait is bounded.
+    unsafe { WaitForSingleObject(process, 10_000) };
     // SAFETY: process was returned by OpenProcess and is closed exactly once.
     unsafe { CloseHandle(process) };
     Ok(())
