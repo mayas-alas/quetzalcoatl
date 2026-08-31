@@ -100,7 +100,29 @@ pub fn discard_pending_mesh_auth() -> Result<(), GnxError> {
     }
 }
 
+pub fn harden_secret_directory() -> Result<(), GnxError> {
+    let directory = secret_directory();
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| GnxError::io("mesh_secret_directory", error.to_string()))?;
+    let runtime_grant = format!(
+        r"{}:(OI)(CI)M",
+        crate::host::windows::account::RUNTIME_ACCOUNT_NAME
+    );
+    CommandSpec::new(r"C:\Windows\System32\icacls.exe")
+        .arg(&directory)
+        .args([
+            "/inheritance:r",
+            "/grant:r",
+            r"*S-1-5-18:(OI)(CI)F",
+            r"*S-1-5-32-544:(OI)(CI)F",
+            &runtime_grant,
+        ])
+        .run_checked("mesh_secret_directory_acl")?;
+    Ok(())
+}
+
 fn stage_machine_secret(secret: &[u8]) -> Result<(), GnxError> {
+    harden_secret_directory()?;
     let path = pending_path();
     let ciphertext = protect(secret, true)?;
     crate::state::atomic_write(&path, &ciphertext)?;
@@ -127,7 +149,11 @@ fn stage_machine_secret(secret: &[u8]) -> Result<(), GnxError> {
 }
 
 fn pending_path() -> PathBuf {
-    crate::config::data_root().join(PENDING_FILE)
+    secret_directory().join(PENDING_FILE)
+}
+
+fn secret_directory() -> PathBuf {
+    crate::config::data_root().join("secrets")
 }
 
 fn validate(secret: &[u8]) -> Result<(), GnxError> {

@@ -153,6 +153,7 @@ pub fn install(options: InstallOptions) -> Result<InstallOutcome, GnxError> {
     let credential = account::ensure_runtime_account()?;
     service::register(&installed_executable, credential)?;
     account::grant_data_access(&data_root())?;
+    crate::host::windows::ipc::harden_secret_directory()?;
     advance(
         &mut journal,
         InstallCheckpoint::ServiceRegistered,
