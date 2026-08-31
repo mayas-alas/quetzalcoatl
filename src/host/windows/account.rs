@@ -98,13 +98,32 @@ pub fn grant_data_access(path: &Path) -> Result<(), GnxError> {
             r"*S-1-5-32-544:(OI)(CI)F",
             &grant,
             r"*S-1-5-32-545:(OI)(CI)RX",
-            "/T",
         ])
         .run_checked("service_data_acl")?;
     CommandSpec::new(r"C:\Windows\System32\icacls.exe")
         .arg(path)
-        .args(["/inheritance:r", "/T"])
+        .arg("/inheritance:r")
         .run_checked("service_data_inheritance")?;
+    CommandSpec::new(r"C:\Windows\System32\icacls.exe")
+        .arg(path.join("*"))
+        .args(["/reset", "/T"])
+        .run_checked("service_data_children_reset")?;
+
+    let config = path.join("config.toml");
+    std::fs::read_to_string(&config).map_err(|error| {
+        GnxError::new(
+            "INSTALL_DATA_ACL_INVALID",
+            "install",
+            "service_data_acl_verify",
+            format!(
+                "No se puede leer {} después de fijar ACL: {error}.",
+                config.display()
+            ),
+            "Revise la política de seguridad local y ejecute de nuevo el instalador.",
+            false,
+            14,
+        )
+    })?;
     Ok(())
 }
 
