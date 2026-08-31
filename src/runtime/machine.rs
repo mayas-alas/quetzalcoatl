@@ -43,13 +43,14 @@ pub fn ensure(controller: &ControllerUrl) -> Result<(), GnxError> {
 
 pub fn prepare() -> Result<(), GnxError> {
     let podman = podman_executable();
+    prepare_podman_environment()?;
     crate::logs::event(
         "info",
         "runtime",
         "machine_prepare",
         format!("Inspeccionando Podman Machine {MACHINE_NAME}"),
     );
-    let inspect = CommandSpec::new(&podman)
+    let inspect = podman_command(&podman)
         .args(["machine", "inspect", MACHINE_NAME])
         .timeout(Duration::from_secs(60))
         .run("machine_inspect")?;
@@ -65,7 +66,7 @@ pub fn prepare() -> Result<(), GnxError> {
         } else {
             "qemu"
         };
-        CommandSpec::new(&podman)
+        podman_command(&podman)
             .args([
                 "machine",
                 "init",
@@ -91,7 +92,7 @@ pub fn prepare() -> Result<(), GnxError> {
         );
     }
 
-    let start = CommandSpec::new(&podman)
+    let start = podman_command(&podman)
         .args(["machine", "start", MACHINE_NAME])
         .timeout(Duration::from_secs(600))
         .run("machine_start")?;
@@ -108,7 +109,7 @@ pub fn prepare() -> Result<(), GnxError> {
             true,
         ));
     }
-    CommandSpec::new(&podman)
+    podman_command(&podman)
         .args(["info", "--format", "json"])
         .timeout(Duration::from_secs(60))
         .run_checked("machine_health")?;
@@ -449,7 +450,7 @@ fn install_bytes(
     mode: &str,
 ) -> Result<(), GnxError> {
     let output_argument = format!("of={destination}");
-    CommandSpec::new(podman)
+    podman_command(podman)
         .args([
             "machine",
             "ssh",
@@ -477,7 +478,7 @@ fn remote(
     operation: &'static str,
     timeout: Duration,
 ) -> Result<crate::process::ProcessOutput, GnxError> {
-    CommandSpec::new(podman)
+    podman_command(podman)
         .args(["machine", "ssh", MACHINE_NAME])
         .args(arguments)
         .timeout(timeout)
@@ -490,7 +491,7 @@ fn remote_checked(
     operation: &'static str,
     timeout: Duration,
 ) -> Result<crate::process::ProcessOutput, GnxError> {
-    CommandSpec::new(podman)
+    podman_command(podman)
         .args(["machine", "ssh", MACHINE_NAME])
         .args(arguments)
         .timeout(timeout)
@@ -510,6 +511,56 @@ pub fn podman_executable() -> PathBuf {
     {
         PathBuf::from("podman")
     }
+}
+
+fn podman_command(podman: &Path) -> CommandSpec {
+    let command = CommandSpec::new(podman);
+    #[cfg(target_os = "windows")]
+    {
+        let profile = crate::host::windows::account::runtime_profile_path();
+        command
+            .cwd(&profile)
+            .env("HOME", &profile)
+            .env("USERPROFILE", &profile)
+            .env("XDG_CONFIG_HOME", profile.join(".config"))
+            .env("XDG_DATA_HOME", profile.join(".local").join("share"))
+            .env("APPDATA", profile.join("AppData").join("Roaming"))
+            .env("LOCALAPPDATA", profile.join("AppData").join("Local"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        command
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn prepare_podman_environment() -> Result<(), GnxError> {
+    let profile = crate::host::windows::account::runtime_profile_path();
+    for path in [
+        profile.join(".config").join("containers"),
+        profile.join(".local").join("share").join("containers"),
+        profile.join("AppData").join("Roaming"),
+        profile.join("AppData").join("Local"),
+    ] {
+        std::fs::create_dir_all(&path).map_err(|error| {
+            GnxError::io(
+                "machine_profile_prepare",
+                format!("{}: {error}", path.display()),
+            )
+        })?;
+    }
+    crate::logs::event(
+        "info",
+        "runtime",
+        "machine_profile",
+        format!("Podman aislado en {}", profile.display()),
+    );
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn prepare_podman_environment() -> Result<(), GnxError> {
+    Ok(())
 }
 
 #[cfg(test)]

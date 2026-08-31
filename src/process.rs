@@ -29,6 +29,7 @@ pub struct CommandSpec {
     program: PathBuf,
     args: Vec<OsString>,
     cwd: Option<PathBuf>,
+    environment: Vec<(OsString, OsString)>,
     stdin: Option<Vec<u8>>,
     timeout: Duration,
     output_limit: usize,
@@ -55,6 +56,7 @@ impl CommandSpec {
             program: program.into(),
             args: Vec::new(),
             cwd: None,
+            environment: Vec::new(),
             stdin: None,
             timeout: Duration::from_secs(300),
             output_limit: DEFAULT_OUTPUT_LIMIT,
@@ -78,6 +80,12 @@ impl CommandSpec {
 
     pub fn cwd(mut self, path: impl Into<PathBuf>) -> Self {
         self.cwd = Some(path.into());
+        self
+    }
+
+    pub fn env(mut self, name: impl AsRef<OsStr>, value: impl AsRef<OsStr>) -> Self {
+        self.environment
+            .push((name.as_ref().to_os_string(), value.as_ref().to_os_string()));
         self
     }
 
@@ -118,6 +126,9 @@ impl CommandSpec {
             if let Some(value) = std::env::var_os(name) {
                 command.env(name, value);
             }
+        }
+        for (name, value) in &self.environment {
+            command.env(name, value);
         }
         if let Some(cwd) = &self.cwd {
             command.current_dir(cwd);

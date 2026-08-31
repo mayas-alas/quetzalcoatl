@@ -1,6 +1,7 @@
 use std::ffi::OsString;
 use std::mem::size_of;
-use std::path::Path;
+use std::os::windows::ffi::OsStringExt;
+use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::NetworkManagement::NetManagement::{
@@ -12,6 +13,7 @@ use windows_sys::Win32::Security::Authentication::Identity::{
     LsaNtStatusToWinError, LsaOpenPolicy, POLICY_CREATE_ACCOUNT, POLICY_LOOKUP_NAMES,
 };
 use windows_sys::Win32::Security::{LookupAccountNameW, PSID, SID_NAME_USE};
+use windows_sys::Win32::UI::Shell::GetProfilesDirectoryW;
 
 use crate::error::GnxError;
 use crate::process::CommandSpec;
@@ -24,6 +26,24 @@ pub const SERVICE_ACCOUNT: &str = r".\gnx-runtime";
 pub struct RuntimeCredential {
     pub account_name: OsString,
     pub password: OsString,
+}
+
+pub fn runtime_profile_path() -> PathBuf {
+    let mut length = 0_u32;
+    // SAFETY: this sizing call intentionally passes a null output buffer.
+    unsafe { GetProfilesDirectoryW(null_mut(), &mut length) };
+    if length > 0 {
+        let mut buffer = vec![0_u16; length as usize];
+        // SAFETY: the buffer uses the exact size requested by GetProfilesDirectoryW.
+        if unsafe { GetProfilesDirectoryW(buffer.as_mut_ptr(), &mut length) } != 0 {
+            let used = buffer
+                .iter()
+                .position(|unit| *unit == 0)
+                .unwrap_or(buffer.len());
+            return PathBuf::from(OsString::from_wide(&buffer[..used])).join(RUNTIME_ACCOUNT_NAME);
+        }
+    }
+    PathBuf::from(r"C:\Users").join(RUNTIME_ACCOUNT_NAME)
 }
 
 pub fn ensure_runtime_account() -> Result<RuntimeCredential, GnxError> {
@@ -276,5 +296,6 @@ mod tests {
     fn runtime_account_is_separate_from_service_name() {
         assert_eq!(SERVICE_ACCOUNT, format!(r".\{RUNTIME_ACCOUNT_NAME}"));
         assert_ne!(RUNTIME_ACCOUNT_NAME, SERVICE_NAME);
+        assert!(runtime_profile_path().ends_with(RUNTIME_ACCOUNT_NAME));
     }
 }
