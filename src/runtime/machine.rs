@@ -1,12 +1,40 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 use crate::config::{ControllerUrl, MACHINE_NAME};
 use crate::error::GnxError;
 use crate::process::CommandSpec;
 
 const REMOTE_TOFU_ARCHIVE: &str = "/opt/gnx/guest/opentofu.tar.gz";
 const PROXMOX_ENV: &str = "/etc/gnx/proxmox.env";
+const OWNERSHIP_SCHEMA: u32 = 1;
+const OWNERSHIP_FILE: &str = "machine-ownership.json";
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct MachineOwnership {
+    schema: u32,
+    product: String,
+    machine_name: String,
+}
+
+impl MachineOwnership {
+    fn current() -> Self {
+        Self {
+            schema: OWNERSHIP_SCHEMA,
+            product: "Quetzalcoatl Next".to_string(),
+            machine_name: MACHINE_NAME.to_string(),
+        }
+    }
+
+    fn is_current(&self) -> bool {
+        self.schema == OWNERSHIP_SCHEMA
+            && self.product == "Quetzalcoatl Next"
+            && self.machine_name == MACHINE_NAME
+    }
+}
 
 pub fn ensure(controller: &ControllerUrl) -> Result<(), GnxError> {
     let podman = podman_executable();
@@ -14,6 +42,12 @@ pub fn ensure(controller: &ControllerUrl) -> Result<(), GnxError> {
         .args(["machine", "inspect", MACHINE_NAME])
         .timeout(Duration::from_secs(60))
         .run("machine_inspect")?;
+    let ownership = load_ownership()?;
+    if inspect.success() && ownership.is_none() {
+        return Err(machine_name_conflict(
+            "Existe una Podman Machine llamada quetzalcoatl sin marcador de propiedad GNX.",
+        ));
+    }
     if !inspect.success() {
         let provider = if cfg!(target_os = "windows") {
             "wsl"
@@ -37,6 +71,7 @@ pub fn ensure(controller: &ControllerUrl) -> Result<(), GnxError> {
             ])
             .timeout(Duration::from_secs(1800))
             .run_checked("machine_init")?;
+        save_ownership()?;
     }
 
     let start = CommandSpec::new(&podman)
@@ -62,6 +97,64 @@ pub fn ensure(controller: &ControllerUrl) -> Result<(), GnxError> {
         .run_checked("machine_health")?;
     deploy_runtime(&podman, controller)?;
     Ok(())
+}
+
+pub fn verify_local_ownership() -> Result<(), GnxError> {
+    if load_ownership()?.is_some() {
+        Ok(())
+    } else {
+        Err(machine_name_conflict(
+            "Falta el marcador de propiedad de Podman Machine quetzalcoatl.",
+        ))
+    }
+}
+
+fn ownership_path() -> PathBuf {
+    crate::config::data_root().join(OWNERSHIP_FILE)
+}
+
+fn load_ownership() -> Result<Option<MachineOwnership>, GnxError> {
+    let path = ownership_path();
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(GnxError::io("machine_ownership_read", error.to_string())),
+    };
+    let ownership: MachineOwnership = serde_json::from_str(&content).map_err(|error| {
+        machine_name_conflict(format!(
+            "El marcador {} no es válido: {error}.",
+            path.display()
+        ))
+    })?;
+    if ownership.is_current() {
+        Ok(Some(ownership))
+    } else {
+        Err(machine_name_conflict(format!(
+            "El marcador {} no pertenece a esta versión de GNX.",
+            path.display()
+        )))
+    }
+}
+
+fn save_ownership() -> Result<(), GnxError> {
+    let bytes = serde_json::to_vec_pretty(&MachineOwnership::current())
+        .map_err(|error| GnxError::io("machine_ownership_encode", error.to_string()))?;
+    crate::state::atomic_write(&ownership_path(), &bytes)
+}
+
+fn machine_name_conflict(detail: impl Into<String>) -> GnxError {
+    GnxError::new(
+        "MACHINE_NAME_CONFLICT",
+        "runtime",
+        "machine_ownership",
+        detail,
+        concat!(
+            "GNX no adopta máquinas existentes. Use un host limpio o retire/renombre ",
+            "esa máquina fuera de GNX antes de reintentar."
+        ),
+        false,
+        21,
+    )
 }
 
 fn deploy_runtime(podman: &Path, controller: &ControllerUrl) -> Result<(), GnxError> {
@@ -388,5 +481,23 @@ pub fn podman_executable() -> PathBuf {
     #[cfg(not(target_os = "windows"))]
     {
         PathBuf::from("podman")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ownership_marker_is_strictly_greenfield() {
+        assert!(MachineOwnership::current().is_current());
+        assert!(
+            !MachineOwnership {
+                schema: OWNERSHIP_SCHEMA,
+                product: "legacy".to_string(),
+                machine_name: MACHINE_NAME.to_string(),
+            }
+            .is_current()
+        );
     }
 }

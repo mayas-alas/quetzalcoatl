@@ -134,6 +134,8 @@ quedan dentro del runner con permisos root-only.
 ## Fronteras de confianza
 
 - El usuario Windows opera `gnx`; no posee el perfil de la Podman Machine.
+- Una máquina `quetzalcoatl` preexistente sin marcador de propiedad GNX falla
+  como `MACHINE_NAME_CONFLICT`; nunca se adopta ni se modifica.
 - Cada celda usa sus propios sockets de Podman y `tailscaled`.
 - El LXC runner reduce exposición accidental de OpenTofu y credenciales.
 - Una toma de `root` de la Podman Machine todavía implica control de su Proxmox

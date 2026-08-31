@@ -156,6 +156,18 @@ impl DoctorReport {
                 "Podman Machine quetzalcoatl existe",
             );
             if machine_ready {
+                match crate::runtime::machine::verify_local_ownership() {
+                    Ok(()) => checks.push(DoctorCheck {
+                        id: "runtime.machine_ownership",
+                        state: CheckState::Pass,
+                        detail: "Marcador greenfield GNX válido".to_string(),
+                    }),
+                    Err(error) => checks.push(DoctorCheck {
+                        id: "runtime.machine_ownership",
+                        state: CheckState::Fail,
+                        detail: format!("{}: {}", error.code, error.message),
+                    }),
+                }
                 push_process_check(
                     &mut checks,
                     "runtime.kvm",

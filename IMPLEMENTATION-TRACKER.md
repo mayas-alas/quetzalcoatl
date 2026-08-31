@@ -41,6 +41,8 @@ Leyenda: `[x]` implementado y verificado localmente; `[ ]` pendiente;
 ## Runtime soberano
 
 - [x] Podman Machine fija `quetzalcoatl`, rootful, 4 CPU, 8 GiB y 100 GiB.
+- [x] Marcador de propiedad obligatorio; una máquina homónima ajena falla antes
+  de arrancar o recibir archivos.
 - [x] systemd y Quadlets fijados para `tailscaled`, Docktail y Dockur Proxmox.
 - [x] Tailscale y Docktail usan imágenes por digest y sockets locales por celda.
 - [x] Dockur Proxmox usa KVM/FUSE, persistencia y healthcheck.
