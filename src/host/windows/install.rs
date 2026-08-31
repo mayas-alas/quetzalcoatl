@@ -6,15 +6,19 @@ use std::ptr::{self, null_mut};
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE, WAIT_OBJECT_0};
+use windows_sys::Win32::Security::{
+    AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED,
+    TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
+};
 use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
-use windows_sys::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
 use windows_sys::Win32::System::Threading::{
-    OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
-    QueryFullProcessImageNameW, TerminateProcess,
+    GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, QueryFullProcessImageNameW, TerminateProcess,
 };
+use windows_sys::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
 use windows_sys::Win32::UI::Shell::{
     IsUserAnAdmin, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
 };
@@ -337,6 +341,7 @@ fn install_files() -> Result<PathBuf, GnxError> {
 }
 
 fn stop_installed_processes(destination: &Path) -> Result<(), GnxError> {
+    enable_debug_privilege()?;
     // SAFETY: snapshot handle is checked and closed before returning.
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
     if snapshot == INVALID_HANDLE_VALUE {
@@ -365,6 +370,50 @@ fn stop_installed_processes(destination: &Path) -> Result<(), GnxError> {
     }
     // SAFETY: snapshot was created by CreateToolhelp32Snapshot and is closed once.
     unsafe { CloseHandle(snapshot) };
+    Ok(())
+}
+
+fn enable_debug_privilege() -> Result<(), GnxError> {
+    let mut token = null_mut();
+    // SAFETY: GetCurrentProcess returns a pseudo-handle and token receives the opened handle.
+    if unsafe {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            &mut token,
+        )
+    } == 0
+    {
+        return Err(GnxError::io(
+            "windows_debug_token",
+            std::io::Error::last_os_error().to_string(),
+        ));
+    }
+    let name = wide("SeDebugPrivilege");
+    let mut luid = Default::default();
+    // SAFETY: name is NUL-terminated and luid is writable.
+    if unsafe { LookupPrivilegeValueW(null_mut(), name.as_ptr(), &mut luid) } == 0 {
+        let error = std::io::Error::last_os_error();
+        // SAFETY: token was returned by OpenProcessToken.
+        unsafe { CloseHandle(token) };
+        return Err(GnxError::io("windows_debug_lookup", error.to_string()));
+    }
+    let privileges = TOKEN_PRIVILEGES {
+        PrivilegeCount: 1,
+        Privileges: [LUID_AND_ATTRIBUTES {
+            Luid: luid,
+            Attributes: SE_PRIVILEGE_ENABLED,
+        }],
+    };
+    // SAFETY: token and privileges remain valid through the call.
+    let adjusted =
+        unsafe { AdjustTokenPrivileges(token, 0, &privileges, 0, null_mut(), null_mut()) };
+    let error = std::io::Error::last_os_error();
+    // SAFETY: token was returned by OpenProcessToken and is closed exactly once.
+    unsafe { CloseHandle(token) };
+    if adjusted == 0 {
+        return Err(GnxError::io("windows_debug_enable", error.to_string()));
+    }
     Ok(())
 }
 
