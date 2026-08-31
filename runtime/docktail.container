@@ -1,0 +1,20 @@
+[Unit]
+Description=GNX Docktail service reconciler
+After=tailscale.service
+Requires=podman.socket tailscale.service
+
+[Container]
+Image=ghcr.io/marvinvr/docktail@sha256:dc1ceec533df5c13d56754e41173767e2cef78da21b9d4d1e58372f73392f668
+ContainerName=gnx-docktail
+Volume=/run/podman/podman.sock:/var/run/docker.sock:ro
+Volume=/run/gnx/tailscale:/var/run/tailscale
+PodmanArgs=--read-only --tmpfs=/tmp:rw,noexec,nosuid,size=16m --security-opt=no-new-privileges
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=60s
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+schema = 1
+
+[mesh]
+controller_url = "https://headscale.node.gnx"
+expected_domain = "node.gnx"
+
+[runtime]
+machine_name = "quetzalcoatl"
+profile = "lab"
+

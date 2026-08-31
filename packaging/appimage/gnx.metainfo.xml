@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>org.gnx.QuetzalcoatlNext</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <name>Quetzalcoatl Next</name>
+  <summary>Sovereign runtime installer and CLI</summary>
+  <description>
+    <p>Installs and operates the Quetzalcoatl Next runtime from one GNX command.</p>
+  </description>
+  <launchable type="desktop-id">gnx.desktop</launchable>
+  <provides>
+    <binary>gnx</binary>
+  </provides>
+</component>

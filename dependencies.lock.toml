@@ -1,0 +1,58 @@
+schema = 1
+
+[windows.podman]
+id = "podman-windows-amd64"
+version = "6.0.1"
+url = "https://github.com/podman-container-tools/podman/releases/download/v6.0.1/podman-installer-windows-amd64.msi"
+sha256 = "3b65848f2d9ae652a15c35f2496a9ece2e07f28746fa651415d519ae7c5902ad"
+size = 27414528
+publisher = "Podman"
+
+[runtime.docktail]
+id = "docktail-amd64"
+version = "1.6.0"
+image = "ghcr.io/marvinvr/docktail@sha256:dc1ceec533df5c13d56754e41173767e2cef78da21b9d4d1e58372f73392f668"
+source = "https://github.com/marvinvr/docktail/releases/tag/1.6.0"
+
+[runtime.tailscale]
+id = "tailscale-amd64"
+version = "1.102.3"
+image = "docker.io/tailscale/tailscale@sha256:51fec4863144d6ba0a22504cfb455d020ee0307d0c04eb48f5afee63390bdba0"
+source = "https://github.com/tailscale/tailscale/releases/tag/v1.102.3"
+
+[runtime.proxmox]
+id = "dockur-proxmox-amd64"
+version = "2026-08-29"
+image = "docker.io/dockurr/proxmox@sha256:99e86ebf6b78b4e551bacabd414ec801a8fc1c3082e76e16ea7fab0f15adb8cc"
+source = "https://github.com/dockur/proxmox"
+
+[runtime.opentofu]
+id = "opentofu-linux-amd64"
+version = "1.12.6"
+url = "https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_amd64.tar.gz"
+sha256 = "50a6106fa4de523d09c87af85f3db1dd47535fc005727fdca6852146476b88ec"
+size = 34646566
+source = "https://github.com/opentofu/opentofu/releases/tag/v1.12.6"
+
+[runtime.proxmox_provider]
+id = "bpg-proxmox-provider"
+version = "0.111.1"
+source = "https://github.com/bpg/terraform-provider-proxmox/releases/tag/v0.111.1"
+
+[guest.ubuntu]
+id = "ubuntu-noble-lxc-amd64"
+version = "24.04-20260826"
+url = "https://cloud-images.ubuntu.com/releases/noble/release-20260826/ubuntu-24.04-server-cloudimg-amd64-root.tar.xz"
+sha256 = "df1146e4f2bc372b193c966b709f1b5e22a5facb27721ad80c5bae254040c380"
+
+[build.appimagetool]
+id = "appimagetool-x86_64"
+version = "1.9.1"
+url = "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
+sha256 = "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+
+[build.appimage_runtime]
+id = "appimage-type2-runtime-x86_64"
+version = "20251108"
+url = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64"
+sha256 = "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"

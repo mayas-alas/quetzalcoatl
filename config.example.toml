@@ -1,0 +1,18 @@
+schema = 1
+
+[mesh]
+# Ambos nombres soberanos requeridos son válidos:
+#   https://headscale.node.gnx
+#   https://controlplane.node.gnx
+controller_url = "https://controlplane.node.gnx"
+expected_domain = "node.gnx"
+
+[runtime]
+machine_name = "quetzalcoatl"
+profile = "lab"
+
+[services]
+garage = false
+forgejo = false
+runner = false
+

@@ -1,0 +1,15 @@
+[Unit]
+Description=Quetzalcoatl Next host runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gnx __service
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=30s
+TimeoutStartSec=45min
+
+[Install]
+WantedBy=multi-user.target

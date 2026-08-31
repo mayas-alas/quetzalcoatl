@@ -1,0 +1,27 @@
+[Unit]
+Description=GNX tailscaled mesh daemon
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/tailscale/tailscale@sha256:51fec4863144d6ba0a22504cfb455d020ee0307d0c04eb48f5afee63390bdba0
+ContainerName=gnx-tailscale
+Network=host
+AddCapability=NET_ADMIN
+AddCapability=NET_RAW
+AddDevice=/dev/net/tun
+Environment=TS_STATE_DIR=/var/lib/tailscale
+Environment=TS_SOCKET=/var/run/tailscale/tailscaled.sock
+Environment=TS_USERSPACE=false
+EnvironmentFile=/etc/gnx/tailscale-controller.env
+EnvironmentFile=/etc/gnx/tailscale-auth.env
+Volume=/var/lib/gnx/tailscale:/var/lib/tailscale
+Volume=/run/gnx/tailscale:/var/run/tailscale
+PodmanArgs=--security-opt=no-new-privileges
+
+[Service]
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
