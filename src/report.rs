@@ -22,6 +22,7 @@ pub struct StatusReport {
     pub docktail: String,
     pub proxmox: String,
     pub infra: String,
+    pub last_error: Option<String>,
     pub note: &'static str,
 }
 
@@ -57,6 +58,7 @@ impl StatusReport {
             docktail: state.docktail,
             proxmox: state.proxmox,
             infra: state.infra,
+            last_error: state.last_error,
             note: "GNX sólo reporta READY después de completar todos los gates.",
         })
     }

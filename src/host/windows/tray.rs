@@ -8,13 +8,14 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::Console::{FreeConsole, GetConsoleWindow};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
+    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
+    Shell_NotifyIconW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowW, GetMessageW, LoadIconW,
-    MB_ICONINFORMATION, MB_OK, MSG, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW,
-    SW_HIDE, ShowWindow, TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY, WM_LBUTTONDBLCLK,
-    WM_RBUTTONUP, WNDCLASSW,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowW, GetMessageW, KillTimer,
+    LoadIconW, MB_ICONINFORMATION, MB_OK, MSG, MessageBoxW, PostMessageW, PostQuitMessage,
+    RegisterClassW, SW_HIDE, SetTimer, ShowWindow, TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY,
+    WM_LBUTTONDBLCLK, WM_RBUTTONUP, WM_TIMER, WNDCLASSW,
 };
 
 use crate::error::GnxError;
@@ -22,6 +23,7 @@ use crate::report::StatusReport;
 
 const ICON_ID: usize = 2;
 const TRAY_ID: u32 = 1;
+const STATUS_TIMER_ID: usize = 1;
 const WM_GNX_TRAY: u32 = WM_APP + 1;
 const CLASS_NAME: &str = "QuetzalcoatlNextTrayWindow";
 
@@ -128,6 +130,10 @@ pub fn run(config_path: PathBuf) -> Result<(), GnxError> {
         if Shell_NotifyIconW(NIM_ADD, &icon_data) == 0 {
             return Err(last_error("tray_add"));
         }
+        if SetTimer(window, STATUS_TIMER_ID, 5_000, None) == 0 {
+            Shell_NotifyIconW(NIM_DELETE, &icon_data);
+            return Err(last_error("tray_timer"));
+        }
         crate::logs::event("info", "tray", "ready", "Icono agregado a la bandeja");
 
         let mut message: MSG = zeroed();
@@ -160,7 +166,13 @@ unsafe extern "system" fn window_proc(
             show_status(window);
             0
         }
+        WM_TIMER if wparam == STATUS_TIMER_ID => {
+            update_tooltip(window);
+            0
+        }
         WM_DESTROY => {
+            // SAFETY: the timer belongs to this hidden tray window.
+            unsafe { KillTimer(window, STATUS_TIMER_ID) };
             // SAFETY: called by the Win32 UI thread that owns the message loop.
             unsafe { PostQuitMessage(0) };
             0
@@ -173,20 +185,44 @@ unsafe extern "system" fn window_proc(
 }
 
 fn tooltip() -> String {
-    let stage = crate::state::OperationalState::load(&crate::state::default_state_path())
+    let state = crate::state::OperationalState::load(&crate::state::default_state_path())
         .ok()
-        .flatten()
-        .map(|state| state.stage.as_str())
-        .unwrap_or("pending");
-    format!("Quetzalcoatl Next — {stage}")
+        .flatten();
+    match state {
+        Some(state) => match state.last_error.as_deref() {
+            Some(error) => format!("Quetzalcoatl Next — {} · {error}", state.stage.as_str()),
+            None => format!("Quetzalcoatl Next — {}", state.stage.as_str()),
+        },
+        None => "Quetzalcoatl Next — pending".to_string(),
+    }
+}
+
+fn update_tooltip(window: HWND) {
+    // SAFETY: the data identifies the live icon owned by the hidden tray window.
+    unsafe {
+        let mut icon_data: NOTIFYICONDATAW = zeroed();
+        icon_data.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
+        icon_data.hWnd = window;
+        icon_data.uID = TRAY_ID;
+        icon_data.uFlags = NIF_TIP;
+        copy_wide(&mut icon_data.szTip, &tooltip());
+        Shell_NotifyIconW(NIM_MODIFY, &icon_data);
+    }
 }
 
 fn show_status(window: HWND) {
     let path = CONFIG_PATH.get();
     let body = match path.and_then(|path| StatusReport::collect(path).ok()) {
         Some(report) => format!(
-            "Estado: {}\nPodman Machine: {}\nDocktail: {}\nProxmox: {}\nInfra: {}",
-            report.stage, report.machine, report.docktail, report.proxmox, report.infra
+            "Estado: {}\nPodman Machine: {}\nMesh: {}\nDocktail: {}\nProxmox: {}\nInfra: {}\nÚltimo error: {}\n\nDiagnóstico: gnx status\nLogs: gnx logs --tail 50\nArchivo: {}",
+            report.stage,
+            report.machine,
+            report.mesh,
+            report.docktail,
+            report.proxmox,
+            report.infra,
+            report.last_error.as_deref().unwrap_or("ninguno"),
+            crate::logs::default_log_path().display()
         ),
         None => "GNX aún no tiene un estado legible. Ejecute gnx doctor.".to_string(),
     };
