@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env sh
+set -eu
 
-repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repository_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 distribution_directory="${repository_root}/dist"
 appdir="${repository_root}/target/appimage/GNX.AppDir"
 tools_directory="${repository_root}/target/appimage-tools"
@@ -23,23 +23,34 @@ download_verified() {
   local url="$1"
   local sha256="$2"
   local destination="$3"
-  if [[ -f "${destination}" ]] && echo "${sha256}  ${destination}" | sha256sum --check --status; then
+  if [ -f "${destination}" ] && echo "${sha256}  ${destination}" | sha256sum -c -s; then
     return
   fi
   rm -f "${destination}.download"
-  curl --fail --location --proto '=https' --tlsv1.2 --output "${destination}.download" "${url}"
-  echo "${sha256}  ${destination}.download" | sha256sum --check
+  case "${url}" in
+    https://*) ;;
+    *) echo "GNX build rechaza una descarga no HTTPS: ${url}" >&2; exit 10 ;;
+  esac
+  if command -v curl >/dev/null 2>&1; then
+    curl --fail --location --proto '=https' --tlsv1.2 --output "${destination}.download" "${url}"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "${destination}.download" "${url}"
+  else
+    echo "Falta curl o wget para descargar herramientas AppImage." >&2
+    exit 10
+  fi
+  echo "${sha256}  ${destination}.download" | sha256sum -c
   mv "${destination}.download" "${destination}"
 }
 
-if [[ "$(uname -m)" != "x86_64" ]]; then
+if [ "$(uname -m)" != "x86_64" ]; then
   echo "GNX AppImage sólo soporta Linux x86_64." >&2
   exit 7
 fi
 
 mkdir -p "${distribution_directory}" "${tools_directory}"
 
-if [[ "${1:-}" != "--skip-compile" ]]; then
+if [ "${1:-}" != "--skip-compile" ]; then
   podman run --rm --arch amd64 \
     --volume "${repository_root}:/workspace" \
     --workdir /workspace \
@@ -48,7 +59,7 @@ if [[ "${1:-}" != "--skip-compile" ]]; then
     sh -c 'cargo test --locked --all-targets && cargo build --locked --release'
 fi
 
-if [[ ! -x "${linux_binary}" ]]; then
+if [ ! -x "${linux_binary}" ]; then
   echo "Falta ${linux_binary}; ejecute el build Linux primero." >&2
   exit 2
 fi
@@ -62,7 +73,7 @@ install -m 0644 "${repository_root}/packaging/appimage/gnx.desktop" "${appdir}/g
 install -m 0644 "${repository_root}/assets/tray-icon.png" "${appdir}/gnx.png"
 install -m 0644 "${repository_root}/assets/tray-icon.png" "${appdir}/.DirIcon"
 install -m 0644 "${repository_root}/packaging/appimage/gnx.metainfo.xml" \
-  "${appdir}/usr/share/metainfo/org.gnx.QuetzalcoatlNext.metainfo.xml"
+  "${appdir}/usr/share/metainfo/gnx.appdata.xml"
 
 appimagetool_url="$(lock_value build.appimagetool url)"
 appimagetool_sha256="$(lock_value build.appimagetool sha256)"

@@ -66,7 +66,16 @@ $manifest = [ordered]@{
     )
 }
 
-Set-Content -LiteralPath (Join-Path $distributionDirectory 'SHA256SUMS') -Encoding ascii -Value $checksumLines
-$manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $distributionDirectory 'release.json') -Encoding utf8
+$checksumPath = Join-Path $distributionDirectory 'SHA256SUMS'
+$checksumText = ($checksumLines -join "`n") + "`n"
+[System.IO.File]::WriteAllText($checksumPath, $checksumText, [System.Text.Encoding]::ASCII)
+
+$manifestPath = Join-Path $distributionDirectory 'release.json'
+$utf8WithoutBom = [System.Text.UTF8Encoding]::new($false)
+[System.IO.File]::WriteAllText(
+    $manifestPath,
+    ($manifest | ConvertTo-Json -Depth 5) + "`n",
+    $utf8WithoutBom
+)
 
 Write-Host "Metadata de desarrollo creada en $distributionDirectory"
