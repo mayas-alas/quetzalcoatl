@@ -5,9 +5,16 @@ use std::process::{Command, Stdio};
 use std::ptr::{self, null_mut};
 use std::time::{Duration, Instant};
 
-use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE, WAIT_OBJECT_0};
 use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
+use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
+};
 use windows_sys::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
+use windows_sys::Win32::System::Threading::{
+    OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+    QueryFullProcessImageNameW, TerminateProcess,
+};
 use windows_sys::Win32::UI::Shell::{
     IsUserAnAdmin, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
 };
@@ -314,6 +321,7 @@ fn install_files() -> Result<PathBuf, GnxError> {
         if destination.exists() {
             service::stop()?;
         }
+        stop_installed_processes(&destination)?;
         copy_executable_with_retry(&source, &destination)?;
     }
 
@@ -326,6 +334,95 @@ fn install_files() -> Result<PathBuf, GnxError> {
     }
     add_to_machine_path(&install_directory)?;
     Ok(destination)
+}
+
+fn stop_installed_processes(destination: &Path) -> Result<(), GnxError> {
+    // SAFETY: snapshot handle is checked and closed before returning.
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(GnxError::io(
+            "windows_process_snapshot",
+            std::io::Error::last_os_error().to_string(),
+        ));
+    }
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: snapshot and entry are valid for ToolHelp iteration.
+    let mut has_entry = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
+    while has_entry {
+        if process_name(&entry).eq_ignore_ascii_case("gnx.exe")
+            && entry.th32ProcessID != std::process::id()
+            && let Err(error) = stop_process_if_installed(entry.th32ProcessID, destination)
+        {
+            // SAFETY: snapshot is closed before propagating the error.
+            unsafe { CloseHandle(snapshot) };
+            return Err(error);
+        }
+        // SAFETY: snapshot remains open and entry remains writable.
+        has_entry = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
+    }
+    // SAFETY: snapshot was created by CreateToolhelp32Snapshot and is closed once.
+    unsafe { CloseHandle(snapshot) };
+    Ok(())
+}
+
+fn stop_process_if_installed(process_id: u32, destination: &Path) -> Result<(), GnxError> {
+    // SAFETY: access is limited to querying and terminating a verified GNX image.
+    let process = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE,
+            0,
+            process_id,
+        )
+    };
+    if process.is_null() {
+        return Ok(());
+    }
+    let mut image = vec![0_u16; 32_768];
+    let mut length = image.len() as u32;
+    // SAFETY: process is open and image is a writable UTF-16 buffer of `length` elements.
+    let queried =
+        unsafe { QueryFullProcessImageNameW(process, 0, image.as_mut_ptr(), &mut length) };
+    if queried != 0 {
+        let image = String::from_utf16_lossy(&image[..length as usize]);
+        if normalized_path(&image)
+            .eq_ignore_ascii_case(normalized_path(&destination.display().to_string()))
+        {
+            crate::logs::event(
+                "warn",
+                "install",
+                "windows_process_stop",
+                format!("Cerrando proceso GNX huérfano pid={process_id} image={image}"),
+            );
+            // SAFETY: the image path was verified as the installed GNX executable.
+            if unsafe { TerminateProcess(process, 0) } == 0 {
+                let error = std::io::Error::last_os_error();
+                // SAFETY: process is closed on this error path.
+                unsafe { CloseHandle(process) };
+                return Err(GnxError::io("windows_process_stop", error.to_string()));
+            }
+            // SAFETY: process handle has SYNCHRONIZE access and the wait is bounded.
+            unsafe { WaitForSingleObject(process, 10_000) };
+        }
+    }
+    // SAFETY: process was returned by OpenProcess and is closed exactly once.
+    unsafe { CloseHandle(process) };
+    Ok(())
+}
+
+fn process_name(entry: &PROCESSENTRY32W) -> String {
+    let length = entry
+        .szExeFile
+        .iter()
+        .position(|character| *character == 0)
+        .unwrap_or(entry.szExeFile.len());
+    String::from_utf16_lossy(&entry.szExeFile[..length])
+}
+
+fn normalized_path(path: &str) -> &str {
+    path.strip_prefix(r"\\?\").unwrap_or(path)
 }
 
 fn copy_executable_with_retry(source: &Path, destination: &Path) -> Result<(), GnxError> {
