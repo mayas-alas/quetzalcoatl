@@ -270,7 +270,7 @@ fn converge(state: &mut OperationalState) -> Result<(), GnxError> {
     state.mesh = "controller_reachable".to_string();
     let _ = state.save(&default_state_path());
 
-    crate::runtime::machine::deploy(&controller)
+    crate::runtime::machine::deploy(&controller, &config.mesh.bootstrap_addresses)
 }
 
 fn service_error(operation: &'static str) -> impl FnOnce(windows_service::Error) -> GnxError {

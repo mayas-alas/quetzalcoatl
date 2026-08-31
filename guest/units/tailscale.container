@@ -14,9 +14,10 @@ Environment=TS_STATE_DIR=/var/lib/tailscale
 Environment=TS_SOCKET=/var/run/tailscale/tailscaled.sock
 Environment=TS_USERSPACE=false
 EnvironmentFile=/etc/gnx/tailscale-controller.env
-EnvironmentFile=/etc/gnx/tailscale-auth.env
+EnvironmentFile=/run/gnx/mesh/tailscale-auth.env
 Volume=/var/lib/gnx/tailscale:/var/lib/tailscale
 Volume=/run/gnx/tailscale:/var/run/tailscale
+Volume=/run/gnx/mesh:/run/secrets/gnx:ro
 
 [Service]
 Restart=always

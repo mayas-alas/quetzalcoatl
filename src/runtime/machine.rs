@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -45,9 +46,9 @@ impl MachineOwnership {
     }
 }
 
-pub fn ensure(controller: &ControllerUrl) -> Result<(), GnxError> {
+pub fn ensure(controller: &ControllerUrl, bootstrap_addresses: &[IpAddr]) -> Result<(), GnxError> {
     prepare()?;
-    deploy(controller)
+    deploy(controller, bootstrap_addresses)
 }
 
 pub fn prepare() -> Result<(), GnxError> {
@@ -137,9 +138,9 @@ pub fn prepare() -> Result<(), GnxError> {
     Ok(())
 }
 
-pub fn deploy(controller: &ControllerUrl) -> Result<(), GnxError> {
+pub fn deploy(controller: &ControllerUrl, bootstrap_addresses: &[IpAddr]) -> Result<(), GnxError> {
     let podman = podman_executable();
-    deploy_runtime(&podman, controller)?;
+    deploy_runtime(&podman, controller, bootstrap_addresses)?;
     Ok(())
 }
 
@@ -258,7 +259,11 @@ fn machine_name_conflict(detail: impl Into<String>) -> GnxError {
     )
 }
 
-fn deploy_runtime(podman: &Path, controller: &ControllerUrl) -> Result<(), GnxError> {
+fn deploy_runtime(
+    podman: &Path,
+    controller: &ControllerUrl,
+    bootstrap_addresses: &[IpAddr],
+) -> Result<(), GnxError> {
     remote_checked(
         podman,
         &[
@@ -285,14 +290,31 @@ fn deploy_runtime(podman: &Path, controller: &ControllerUrl) -> Result<(), GnxEr
         "runtime_secret_directory",
         Duration::from_secs(30),
     )?;
+    remote_checked(
+        podman,
+        &["sudo", "install", "-d", "-m", "0700", "/run/gnx/mesh"],
+        "runtime_ephemeral_secret_directory",
+        Duration::from_secs(30),
+    )?;
 
     ensure_proxmox_environment(podman)?;
     ensure_tailscale_environment(podman, controller)?;
     ensure_opentofu_payload(podman)?;
 
+    let runtime_tailscale_quadlet = crate::runtime::tailscale::quadlet_with_bootstrap(
+        crate::runtime::tailscale::QUADLET,
+        controller,
+        bootstrap_addresses,
+    );
+    let guest_tailscale_quadlet = crate::runtime::tailscale::quadlet_with_bootstrap(
+        crate::runtime::tailscale::GUEST_QUADLET,
+        controller,
+        bootstrap_addresses,
+    );
+
     for (content, destination, mode) in [
         (
-            crate::runtime::tailscale::QUADLET,
+            runtime_tailscale_quadlet.as_str(),
             "/etc/containers/systemd/tailscale.container",
             "0644",
         ),
@@ -362,7 +384,7 @@ fn deploy_runtime(podman: &Path, controller: &ControllerUrl) -> Result<(), GnxEr
             "0755",
         ),
         (
-            include_str!("../../guest/units/tailscale.container"),
+            guest_tailscale_quadlet.as_str(),
             "/opt/gnx/guest/units/tailscale.container",
             "0644",
         ),
@@ -412,21 +434,43 @@ fn ensure_tailscale_environment(podman: &Path, controller: &ControllerUrl) -> Re
         "/etc/gnx/tailscale-controller.env",
         "0600",
     )?;
+    #[cfg(target_os = "windows")]
+    let mut pending = crate::host::windows::ipc::load_pending_mesh_auth()?;
+    #[cfg(not(target_os = "windows"))]
+    let mut pending: Option<Vec<u8>> = None;
+
+    if let Some(secret) = pending.as_ref() {
+        install_bytes(podman, secret.clone(), "/run/gnx/mesh/auth.key", "0400")?;
+        #[cfg(target_os = "windows")]
+        crate::host::windows::ipc::discard_pending_mesh_auth()?;
+    }
+    if let Some(secret) = pending.as_mut() {
+        secret.fill(0);
+    }
+
     let auth = remote(
         podman,
-        &["sudo", "test", "-e", "/etc/gnx/tailscale-auth.env"],
+        &["sudo", "test", "-s", "/run/gnx/mesh/auth.key"],
         "tailscale_auth_check",
         Duration::from_secs(30),
     )?;
-    if !auth.success() {
-        install_text(podman, "", "/etc/gnx/tailscale-auth.env", "0600")?;
-    }
+    let environment = if auth.success() {
+        "TS_AUTHKEY=file:/run/secrets/gnx/auth.key\n"
+    } else {
+        ""
+    };
+    install_text(
+        podman,
+        environment,
+        "/run/gnx/mesh/tailscale-auth.env",
+        "0600",
+    )?;
     Ok(())
 }
 
 fn tailscale_environment(controller: &ControllerUrl, hostname: &str) -> String {
     format!(
-        "TS_HOSTNAME={hostname}\nTS_EXTRA_ARGS=--login-server={} --accept-dns=true\n",
+        "TS_HOSTNAME={hostname}\nTS_AUTH_ONCE=true\nTS_ACCEPT_DNS=true\nTS_EXTRA_ARGS=--login-server={} --accept-dns=true --ssh=false\n",
         controller.canonical()
     )
 }

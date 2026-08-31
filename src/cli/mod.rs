@@ -32,7 +32,11 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Converge el runtime declarado.
-    Init,
+    Init {
+        /// Lee una pre-auth key reutilizable de Headscale exclusivamente desde stdin.
+        #[arg(long)]
+        mesh_auth_stdin: bool,
+    },
     /// Muestra el estado observado sin mutar.
     Status {
         #[arg(long)]
@@ -83,6 +87,13 @@ enum Command {
         #[arg(long, hide = true)]
         resume: bool,
     },
+    #[command(hide = true, name = "__mesh-auth")]
+    InternalMeshAuth {
+        #[arg(long, hide = true)]
+        elevated: bool,
+        #[arg(long, hide = true, value_name = "PATH")]
+        sealed: PathBuf,
+    },
 }
 
 pub fn execute<I, T>(args: I) -> Result<(), GnxError>
@@ -105,7 +116,7 @@ where
     let config_path = cli.config.unwrap_or_else(default_config_path);
 
     match cli.command {
-        Some(Command::Init) => init::run(config_path),
+        Some(Command::Init { mesh_auth_stdin }) => init::run(config_path, mesh_auth_stdin),
         Some(Command::Status { json }) => status::run(config_path, json),
         Some(Command::Doctor { json }) => doctor::run(config_path, json),
         Some(Command::Logs { tail, json }) => crate::logs::print_tail(tail, json),
@@ -122,13 +133,28 @@ where
         Some(Command::InternalInstall { elevated, resume }) => {
             install::run(elevated, resume).map(|_| ())
         }
+        Some(Command::InternalMeshAuth { elevated, sealed }) => {
+            complete_mesh_auth(elevated, sealed)
+        }
         None => Ok(()),
     }
 }
 
+#[cfg(target_os = "windows")]
+fn complete_mesh_auth(elevated: bool, sealed: PathBuf) -> Result<(), GnxError> {
+    crate::host::windows::ipc::complete_mesh_auth(elevated, &sealed)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn complete_mesh_auth(_elevated: bool, _sealed: PathBuf) -> Result<(), GnxError> {
+    Err(GnxError::unsupported_host(
+        "El transporte DPAPI de enrolamiento sólo existe en Windows.",
+    ))
+}
+
 fn repair(config_path: PathBuf) -> Result<(), GnxError> {
     match install::run(false, true)? {
-        crate::host::InstallOutcome::Installed => init::run(config_path),
+        crate::host::InstallOutcome::Installed => init::run(config_path, false),
         crate::host::InstallOutcome::RebootRequired
         | crate::host::InstallOutcome::RelaunchedElevated => Ok(()),
     }
@@ -172,6 +198,7 @@ mod tests {
         assert!(!help.contains("__tray"));
         assert!(!help.contains("__resume"));
         assert!(!help.contains("__install"));
+        assert!(!help.contains("__mesh-auth"));
     }
 
     #[test]

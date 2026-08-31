@@ -6,6 +6,9 @@ schema = 1
 #   https://controlplane.node.gnx
 controller_url = "https://controlplane.node.gnx"
 expected_domain = "node.gnx"
+# Opcional cuando el DNS del host todavía no conoce el controller. GNX usa
+# estas IP sólo para los aliases configurados y conserva TLS/SNI por hostname.
+bootstrap_addresses = []
 
 [runtime]
 machine_name = "quetzalcoatl"
@@ -15,4 +18,3 @@ profile = "lab"
 garage = false
 forgejo = false
 runner = false
-

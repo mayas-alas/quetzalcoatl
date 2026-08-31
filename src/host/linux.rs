@@ -157,7 +157,7 @@ fn converge(state: &mut OperationalState) -> Result<(), GnxError> {
     state.mesh = "controller_reachable".to_string();
     state.save(&default_state_path())?;
 
-    crate::runtime::machine::deploy(&controller)
+    crate::runtime::machine::deploy(&controller, &config.mesh.bootstrap_addresses)
 }
 
 fn is_root() -> Result<bool, GnxError> {
