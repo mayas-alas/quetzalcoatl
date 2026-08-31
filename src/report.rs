@@ -179,11 +179,18 @@ impl DoctorReport {
                             "machine",
                             "ssh",
                             crate::config::MACHINE_NAME,
+                            "podman",
+                            "exec",
+                            "gnx-proxmox",
+                            "pct",
+                            "exec",
+                            "200",
+                            "--",
                             "/usr/local/bin/tofu",
                             "version",
                         ])
                         .timeout(Duration::from_secs(30)),
-                    "OpenTofu instalado en la celda runtime",
+                    "OpenTofu instalado dentro del LXC gnx-infra-runner",
                 );
             }
         }

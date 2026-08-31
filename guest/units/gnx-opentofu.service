@@ -1,0 +1,15 @@
+[Unit]
+Description=GNX OpenTofu convergence inside dedicated LXC
+After=network-online.target
+Wants=network-online.target
+ConditionPathIsExecutable=/usr/local/bin/tofu
+ConditionPathExists=/opt/gnx/infra/main.tf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/gnx-opentofu-run
+TimeoutStartSec=30min
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

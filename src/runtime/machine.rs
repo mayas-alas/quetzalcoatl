@@ -5,9 +5,8 @@ use crate::config::{ControllerUrl, MACHINE_NAME};
 use crate::error::GnxError;
 use crate::process::CommandSpec;
 
-const REMOTE_TOFU_ARCHIVE: &str = "/var/tmp/gnx-opentofu.tar.gz";
+const REMOTE_TOFU_ARCHIVE: &str = "/opt/gnx/guest/opentofu.tar.gz";
 const PROXMOX_ENV: &str = "/etc/gnx/proxmox.env";
-const OPENTOFU_ENV: &str = "/etc/gnx/opentofu.env";
 
 pub fn ensure(controller: &ControllerUrl) -> Result<(), GnxError> {
     let podman = podman_executable();
@@ -76,9 +75,8 @@ fn deploy_runtime(podman: &Path, controller: &ControllerUrl) -> Result<(), GnxEr
             "0755",
             "/etc/containers/systemd",
             "/etc/systemd/system",
-            "/opt/gnx/infra",
+            "/opt/gnx/guest/opentofu",
             "/opt/gnx/guest/units",
-            "/var/lib/gnx/opentofu",
             "/var/lib/gnx/proxmox/data",
             "/var/lib/gnx/proxmox/config",
             "/var/lib/gnx/tailscale",
@@ -94,9 +92,9 @@ fn deploy_runtime(podman: &Path, controller: &ControllerUrl) -> Result<(), GnxEr
         Duration::from_secs(30),
     )?;
 
-    ensure_opentofu(podman)?;
     ensure_proxmox_environment(podman)?;
     ensure_tailscale_environment(podman, controller)?;
+    ensure_opentofu_payload(podman)?;
 
     for (content, destination, mode) in [
         (
@@ -126,27 +124,42 @@ fn deploy_runtime(podman: &Path, controller: &ControllerUrl) -> Result<(), GnxEr
         ),
         (
             crate::runtime::opentofu::VERSIONS_TF,
-            "/opt/gnx/infra/versions.tf",
+            "/opt/gnx/guest/opentofu/versions.tf",
             "0644",
         ),
         (
             crate::runtime::opentofu::VARIABLES_TF,
-            "/opt/gnx/infra/variables.tf",
+            "/opt/gnx/guest/opentofu/variables.tf",
             "0644",
         ),
         (
             crate::runtime::opentofu::MAIN_TF,
-            "/opt/gnx/infra/main.tf",
+            "/opt/gnx/guest/opentofu/main.tf",
             "0644",
         ),
         (
             crate::runtime::opentofu::OUTPUTS_TF,
-            "/opt/gnx/infra/outputs.tf",
+            "/opt/gnx/guest/opentofu/outputs.tf",
             "0644",
         ),
         (
             crate::runtime::opentofu::PROVIDER_LOCK,
-            "/opt/gnx/infra/.terraform.lock.hcl",
+            "/opt/gnx/guest/opentofu/.terraform.lock.hcl",
+            "0644",
+        ),
+        (
+            crate::runtime::opentofu::RUNNER_BOOTSTRAP,
+            "/opt/gnx/guest/infra-runner-bootstrap.sh",
+            "0755",
+        ),
+        (
+            crate::runtime::opentofu::RUNNER_COMMAND,
+            "/opt/gnx/guest/infra-runner-run.sh",
+            "0755",
+        ),
+        (
+            crate::runtime::opentofu::RUNNER_SYSTEMD_UNIT,
+            "/opt/gnx/guest/units/gnx-opentofu.service",
             "0644",
         ),
         (
@@ -224,57 +237,42 @@ fn tailscale_environment(controller: &ControllerUrl, hostname: &str) -> String {
     )
 }
 
-fn ensure_opentofu(podman: &Path) -> Result<(), GnxError> {
+fn ensure_opentofu_payload(podman: &Path) -> Result<(), GnxError> {
     let dependency = crate::runtime::opentofu::dependency()?;
-    let version = remote(
+    let checksum = remote(
         podman,
-        &["/usr/local/bin/tofu", "version"],
-        "opentofu_version",
+        &["sha256sum", REMOTE_TOFU_ARCHIVE],
+        "opentofu_payload_checksum",
         Duration::from_secs(30),
-    );
-    if version.is_ok_and(|output| output.success() && output.stdout.contains(&dependency.version)) {
+    )?;
+    if checksum.success()
+        && checksum
+            .stdout
+            .split_whitespace()
+            .next()
+            .is_some_and(|actual| actual.eq_ignore_ascii_case(&dependency.sha256))
+    {
         return Ok(());
     }
 
     let (_, archive) = crate::runtime::opentofu::download()?;
-    install_blob(podman, &archive, REMOTE_TOFU_ARCHIVE, "0600")?;
-    remote_checked(
-        podman,
-        &[
-            "sudo",
-            "tar",
-            "-xzf",
-            REMOTE_TOFU_ARCHIVE,
-            "-C",
-            "/usr/local/bin",
-            "tofu",
-        ],
-        "opentofu_extract",
-        Duration::from_secs(120),
-    )?;
-    remote_checked(
-        podman,
-        &["sudo", "chmod", "0755", "/usr/local/bin/tofu"],
-        "opentofu_permissions",
-        Duration::from_secs(30),
-    )?;
-    remote_checked(
-        podman,
-        &["sudo", "rm", "-f", REMOTE_TOFU_ARCHIVE],
-        "opentofu_cleanup",
-        Duration::from_secs(30),
-    )?;
+    install_blob(podman, &archive, REMOTE_TOFU_ARCHIVE, "0644")?;
     let installed = remote_checked(
         podman,
-        &["/usr/local/bin/tofu", "version"],
-        "opentofu_verify",
+        &["sha256sum", REMOTE_TOFU_ARCHIVE],
+        "opentofu_payload_verify",
         Duration::from_secs(30),
     )?;
-    if !installed.stdout.contains(&dependency.version) {
+    if !installed
+        .stdout
+        .split_whitespace()
+        .next()
+        .is_some_and(|actual| actual.eq_ignore_ascii_case(&dependency.sha256))
+    {
         return Err(GnxError::new(
-            "OPENTOFU_VERSION_MISMATCH",
+            "OPENTOFU_PAYLOAD_MISMATCH",
             "opentofu",
-            "install",
+            "payload",
             installed.stdout,
             "Conserve el cache verificado y ejecute gnx repair.",
             true,
@@ -291,34 +289,16 @@ fn ensure_proxmox_environment(podman: &Path) -> Result<(), GnxError> {
         "proxmox_secret_check",
         Duration::from_secs(30),
     )?;
-    let opentofu_existing = remote(
-        podman,
-        &["sudo", "test", "-s", OPENTOFU_ENV],
-        "opentofu_secret_check",
-        Duration::from_secs(30),
-    )?;
-    if proxmox_existing.success() && opentofu_existing.success() {
+    if proxmox_existing.success() {
         return Ok(());
     }
     let proxmox_password = crate::secrets::random_hex(32)?;
-    let guest_password = crate::secrets::random_hex(32)?;
-    let opentofu = format!(
-        concat!(
-            "PROXMOX_VE_ENDPOINT=https://127.0.0.1:8006/\n",
-            "PROXMOX_VE_USERNAME=root@pam\n",
-            "PROXMOX_VE_PASSWORD={}\n",
-            "PROXMOX_VE_INSECURE=true\n",
-            "TF_VAR_guest_password={}\n"
-        ),
-        proxmox_password, guest_password
-    );
     install_text(
         podman,
         &format!("PASSWORD={proxmox_password}\n"),
         PROXMOX_ENV,
         "0600",
-    )?;
-    install_text(podman, &opentofu, OPENTOFU_ENV, "0600")
+    )
 }
 
 fn install_text(

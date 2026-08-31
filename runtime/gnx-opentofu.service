@@ -1,21 +1,14 @@
 [Unit]
-Description=GNX OpenTofu one-shot convergence
+Description=GNX fixed bootstrap for the OpenTofu LXC runner
 After=network-online.target proxmox.service
 Requires=proxmox.service
-ConditionPathExists=/opt/gnx/infra/main.tf
-ConditionPathIsExecutable=/usr/local/bin/tofu
+ConditionPathIsExecutable=/opt/gnx/guest/infra-runner-bootstrap.sh
+ConditionPathExists=/opt/gnx/guest/opentofu.tar.gz
 
 [Service]
 Type=oneshot
-WorkingDirectory=/opt/gnx/infra
-EnvironmentFile=/etc/gnx/opentofu.env
-Environment=TF_DATA_DIR=/var/lib/gnx/opentofu/.terraform
-Environment=TF_IN_AUTOMATION=1
 ExecStartPre=/usr/bin/podman wait --condition=healthy --interval=5s gnx-proxmox
-ExecStartPre=/usr/bin/podman exec gnx-proxmox pvesm set local --content iso,vztmpl,backup,rootdir,images,snippets
-ExecStart=/usr/local/bin/tofu init -input=false -lockfile=readonly
-ExecStart=/usr/local/bin/tofu validate
-ExecStart=/usr/local/bin/tofu apply -auto-approve -input=false -lock-timeout=5m
+ExecStart=/usr/bin/podman exec gnx-proxmox /opt/gnx/guest/infra-runner-bootstrap.sh
 TimeoutStartSec=30min
 RemainAfterExit=yes
 

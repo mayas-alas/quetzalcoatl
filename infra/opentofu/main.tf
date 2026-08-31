@@ -25,7 +25,7 @@ resource "proxmox_virtual_environment_container" "cell" {
   vm_id         = var.vm_id
   started       = true
   start_on_boot = true
-  unprivileged  = false
+  unprivileged  = true
   tags          = ["gnx", "managed"]
 
   cpu {
@@ -59,8 +59,7 @@ resource "proxmox_virtual_environment_container" "cell" {
   }
 
   initialization {
-    hostname   = "gnx-cell-01"
-    entrypoint = "/opt/gnx/guest/bootstrap.sh"
+    hostname = "gnx-cell-01"
 
     ip_config {
       ipv4 {
@@ -76,12 +75,6 @@ resource "proxmox_virtual_environment_container" "cell" {
   network_interface {
     bridge = "vmbr0"
     name   = "eth0"
-  }
-
-  mount_point {
-    path      = "/opt/gnx/guest"
-    read_only = true
-    volume    = "/opt/gnx/guest"
   }
 
   startup {

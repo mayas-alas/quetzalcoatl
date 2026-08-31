@@ -16,4 +16,5 @@ if [[ ! -f "${marker}" ]]; then
   touch "${marker}"
 fi
 
-exec /sbin/init
+systemctl daemon-reload
+systemctl enable --now podman.socket tailscale.service docktail.service
