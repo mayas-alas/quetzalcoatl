@@ -95,7 +95,12 @@ pub fn install(options: InstallOptions) -> Result<InstallOutcome, GnxError> {
                 15,
             ));
         }
-        Some(journal) if journal.target_version == env!("CARGO_PKG_VERSION") => journal,
+        Some(journal)
+            if journal.target_version == env!("CARGO_PKG_VERSION")
+                && journal.checkpoint != InstallCheckpoint::Completed =>
+        {
+            journal
+        }
         Some(_) | None => OperationJournal::new_install(),
     };
     advance(&mut journal, InstallCheckpoint::Elevated, &journal_path)?;
