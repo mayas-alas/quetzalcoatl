@@ -9,8 +9,15 @@ use crate::process::CommandSpec;
 
 const REMOTE_TOFU_ARCHIVE: &str = "/opt/gnx/guest/opentofu.tar.gz";
 const PROXMOX_ENV: &str = "/etc/gnx/proxmox.env";
-const OWNERSHIP_SCHEMA: u32 = 1;
+const OWNERSHIP_SCHEMA: u32 = 2;
 const OWNERSHIP_FILE: &str = "machine-ownership.json";
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum OwnershipPhase {
+    Provisioning,
+    Ready,
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -18,14 +25,16 @@ struct MachineOwnership {
     schema: u32,
     product: String,
     machine_name: String,
+    phase: OwnershipPhase,
 }
 
 impl MachineOwnership {
-    fn current() -> Self {
+    fn current(phase: OwnershipPhase) -> Self {
         Self {
             schema: OWNERSHIP_SCHEMA,
             product: "Quetzalcoatl Next".to_string(),
             machine_name: MACHINE_NAME.to_string(),
+            phase,
         }
     }
 
@@ -54,36 +63,47 @@ pub fn prepare() -> Result<(), GnxError> {
         .args(["machine", "inspect", MACHINE_NAME])
         .timeout(Duration::from_secs(60))
         .run("machine_inspect")?;
-    let ownership = load_ownership()?;
-    if inspect.success() && ownership.is_none() {
-        return Err(machine_name_conflict(
-            "Existe una Podman Machine llamada quetzalcoatl sin marcador de propiedad GNX.",
-        ));
+    let mut ownership = load_ownership()?;
+    if inspect.success() {
+        let Some(marker) = ownership.as_ref() else {
+            return Err(machine_name_conflict(
+                "Existe una Podman Machine llamada quetzalcoatl sin marcador de propiedad GNX.",
+            ));
+        };
+        if marker.phase == OwnershipPhase::Provisioning {
+            save_ownership(OwnershipPhase::Ready)?;
+            ownership = Some(MachineOwnership::current(OwnershipPhase::Ready));
+        }
     }
     if !inspect.success() {
+        match ownership.as_ref().map(|marker| marker.phase) {
+            None => save_ownership(OwnershipPhase::Provisioning)?,
+            Some(OwnershipPhase::Provisioning) => {}
+            Some(OwnershipPhase::Ready) => {
+                return Err(machine_name_conflict(
+                    "El marcador GNX indica una máquina lista, pero Podman no puede inspeccionarla. GNX no elimina automáticamente una máquina que pudo contener datos.",
+                ));
+            }
+        }
         let provider = if cfg!(target_os = "windows") {
             "wsl"
         } else {
             "qemu"
         };
-        podman_command(&podman)
-            .args([
-                "machine",
-                "init",
-                "--provider",
-                provider,
-                "--cpus",
-                "4",
-                "--memory",
-                "8192",
-                "--disk-size",
-                "100",
-                "--rootful",
-                MACHINE_NAME,
-            ])
-            .timeout(Duration::from_secs(1800))
-            .run_checked("machine_init")?;
-        save_ownership()?;
+        let mut initialized = initialize_machine(&podman, provider)?;
+        if !initialized.success() && is_partial_hypervisor_conflict(&initialized.stderr) {
+            recover_partial_machine(&podman)?;
+            initialized = initialize_machine(&podman, provider)?;
+        }
+        if !initialized.success() {
+            return Err(GnxError::process(
+                "machine_init",
+                &podman,
+                initialized.stderr,
+                true,
+            ));
+        }
+        save_ownership(OwnershipPhase::Ready)?;
         crate::logs::event(
             "info",
             "runtime",
@@ -165,10 +185,71 @@ fn load_ownership() -> Result<Option<MachineOwnership>, GnxError> {
     }
 }
 
-fn save_ownership() -> Result<(), GnxError> {
-    let bytes = serde_json::to_vec_pretty(&MachineOwnership::current())
+fn save_ownership(phase: OwnershipPhase) -> Result<(), GnxError> {
+    let bytes = serde_json::to_vec_pretty(&MachineOwnership::current(phase))
         .map_err(|error| GnxError::io("machine_ownership_encode", error.to_string()))?;
     crate::state::atomic_write(&ownership_path(), &bytes)
+}
+
+fn initialize_machine(
+    podman: &Path,
+    provider: &str,
+) -> Result<crate::process::ProcessOutput, GnxError> {
+    podman_command(podman)
+        .args([
+            "machine",
+            "init",
+            "--provider",
+            provider,
+            "--cpus",
+            "4",
+            "--memory",
+            "8192",
+            "--disk-size",
+            "100",
+            "--rootful",
+            MACHINE_NAME,
+        ])
+        .timeout(Duration::from_secs(1800))
+        .run("machine_init")
+}
+
+fn is_partial_hypervisor_conflict(stderr: &str) -> bool {
+    stderr
+        .to_ascii_lowercase()
+        .contains("already exists on hypervisor")
+}
+
+#[cfg(target_os = "windows")]
+fn recover_partial_machine(podman: &Path) -> Result<(), GnxError> {
+    crate::logs::event(
+        "warn",
+        "runtime",
+        "machine_partial_recovery",
+        "Retirando exclusivamente la distribución WSL parcial de GNX antes de reintentar",
+    );
+    let wsl = Path::new(r"C:\Windows\System32\wsl.exe");
+    let distribution = format!("podman-{MACHINE_NAME}");
+    podman_command(wsl)
+        .args(["--unregister", &distribution])
+        .timeout(Duration::from_secs(120))
+        .run_checked("machine_partial_unregister")?;
+
+    // Podman puede haber dejado metadatos locales aunque no haya podido crear
+    // la conexión. Su propio remove es seguro aquí: el marcador sigue en fase
+    // provisioning y la cuenta dedicada pertenece exclusivamente a GNX.
+    let _ = podman_command(podman)
+        .args(["machine", "rm", "--force", MACHINE_NAME])
+        .timeout(Duration::from_secs(120))
+        .run("machine_partial_metadata_remove");
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn recover_partial_machine(_podman: &Path) -> Result<(), GnxError> {
+    Err(machine_name_conflict(
+        "El hipervisor reportó una máquina parcial; la recuperación automática sólo está habilitada para la distribución WSL exclusiva de GNX.",
+    ))
 }
 
 fn machine_name_conflict(detail: impl Into<String>) -> GnxError {
@@ -569,14 +650,25 @@ mod tests {
 
     #[test]
     fn ownership_marker_is_strictly_greenfield() {
-        assert!(MachineOwnership::current().is_current());
+        assert!(MachineOwnership::current(OwnershipPhase::Ready).is_current());
         assert!(
             !MachineOwnership {
                 schema: OWNERSHIP_SCHEMA,
                 product: "legacy".to_string(),
                 machine_name: MACHINE_NAME.to_string(),
+                phase: OwnershipPhase::Ready,
             }
             .is_current()
         );
+    }
+
+    #[test]
+    fn only_exact_partial_hypervisor_conflict_is_recoverable() {
+        assert!(is_partial_hypervisor_conflict(
+            "Error: quetzalcoatl already exists on hypervisor"
+        ));
+        assert!(!is_partial_hypervisor_conflict(
+            "Error: existing machine contains user data"
+        ));
     }
 }

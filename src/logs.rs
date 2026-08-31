@@ -98,8 +98,11 @@ fn append(entry: LogEntry) {
     let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) else {
         return;
     };
-    if serde_json::to_writer(&mut file, &entry).is_ok() {
-        let _ = file.write_all(b"\n");
+    if let Ok(mut encoded) = serde_json::to_vec(&entry) {
+        encoded.push(b'\n');
+        // Una sola escritura evita intercalar fragmentos JSON entre el instalador,
+        // el servicio y el tray, que mantienen descriptores independientes.
+        let _ = file.write_all(&encoded);
         let _ = file.flush();
     }
 }
