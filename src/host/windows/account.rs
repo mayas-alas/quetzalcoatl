@@ -84,7 +84,7 @@ pub fn ensure_runtime_account() -> Result<RuntimeCredential, GnxError> {
 }
 
 pub fn grant_data_access(path: &Path) -> Result<(), GnxError> {
-    let grant = format!(r"{SERVICE_ACCOUNT}:(OI)(CI)M");
+    let grant = format!(r"{RUNTIME_ACCOUNT_NAME}:(OI)(CI)M");
     CommandSpec::new(r"C:\Windows\System32\icacls.exe")
         .arg(path)
         .args([
