@@ -113,17 +113,12 @@ pub fn run_service() -> Result<(), GnxError> {
         ..OperationalState::default()
     };
     state.save(&default_state_path())?;
-    let convergence = crate::config::Config::load(&default_config_path())
-        .and_then(|config| config.validate())
-        .and_then(|controller| {
-            crate::runtime::headscale::verify_controller(&controller)?;
-            Ok(controller)
-        })
-        .and_then(|controller| crate::runtime::machine::ensure(&controller));
+    let convergence = converge(&mut state);
     match convergence {
         Ok(()) => {
-            state.stage = Stage::Installed;
+            state.stage = Stage::Ready;
             state.machine = "ready".to_string();
+            state.mesh = "ready".to_string();
             state.docktail = "deployed".to_string();
             state.proxmox = "ready".to_string();
             state.infra = "applied".to_string();
@@ -133,12 +128,31 @@ pub fn run_service() -> Result<(), GnxError> {
         }
         Err(error) => {
             state.stage = Stage::Failed;
-            state.machine = "failed".to_string();
+            if state.machine != "ready" {
+                state.machine = "failed".to_string();
+            } else if error.component == "mesh" {
+                state.mesh = "failed".to_string();
+            }
             state.last_error = Some(error.code.to_string());
             state.save(&default_state_path())?;
             Err(error)
         }
     }
+}
+
+fn converge(state: &mut OperationalState) -> Result<(), GnxError> {
+    let config = crate::config::Config::load(&default_config_path())?;
+    let controller = config.validate()?;
+
+    crate::runtime::machine::prepare()?;
+    state.machine = "ready".to_string();
+    state.save(&default_state_path())?;
+
+    crate::runtime::headscale::verify_controller(&controller)?;
+    state.mesh = "controller_reachable".to_string();
+    state.save(&default_state_path())?;
+
+    crate::runtime::machine::deploy(&controller)
 }
 
 fn is_root() -> Result<bool, GnxError> {

@@ -217,6 +217,7 @@ fn run_worker() -> windows_service::Result<()> {
             Ok(()) => {
                 state.stage = Stage::Ready;
                 state.machine = "ready".to_string();
+                state.mesh = "ready".to_string();
                 state.docktail = "deployed".to_string();
                 state.proxmox = "ready".to_string();
                 state.infra = "applied".to_string();
