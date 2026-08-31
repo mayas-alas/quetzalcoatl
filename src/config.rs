@@ -145,6 +145,17 @@ impl Config {
         Ok(config)
     }
 
+    pub fn save(&self, path: &Path) -> Result<(), GnxError> {
+        self.validate()?;
+        let mut content = toml::to_string_pretty(self).map_err(|error| {
+            GnxError::config_invalid(format!("No se pudo serializar la configuración: {error}."))
+        })?;
+        if !content.ends_with('\n') {
+            content.push('\n');
+        }
+        crate::state::atomic_write(path, content.as_bytes())
+    }
+
     pub fn validate(&self) -> Result<ControllerUrl, GnxError> {
         if self.schema != CONFIG_SCHEMA {
             return Err(GnxError::config_invalid(format!(

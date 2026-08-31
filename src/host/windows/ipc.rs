@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 
@@ -13,51 +14,65 @@ use crate::process::CommandSpec;
 const ENTROPY: &[u8] = b"QuetzalcoatlNext/mesh-preauth/v1";
 const PENDING_FILE: &str = "mesh-auth.pending.dpapi";
 
-pub fn submit_mesh_auth(secret: &mut [u8]) -> Result<(), GnxError> {
-    validate(secret)?;
-    let result = if crate::host::windows::install::is_elevated() {
-        stage_machine_secret(secret)
-    } else {
-        let sealed = protect(secret, false)?;
-        let temporary = std::env::temp_dir().join(format!(
-            "gnx-mesh-auth-{}.dpapi",
-            crate::secrets::random_hex(16)?
-        ));
-        let write = crate::state::atomic_write(&temporary, &sealed);
-        let outcome = match write {
-            Ok(()) => {
-                let parameters = format!(
-                    "__mesh-auth --elevated --sealed \"{}\"",
-                    temporary.display()
-                );
-                let code = crate::host::windows::install::elevate(
-                    &parameters,
-                    "entregar de forma segura la credencial efímera de Headscale",
-                )?;
-                if code == 0 {
-                    Ok(())
-                } else {
-                    Err(GnxError::new(
-                        "MESH_AUTH_ELEVATED_CHILD_FAILED",
-                        "mesh",
-                        "auth_stage",
-                        format!("El proceso elevado terminó con código {code}."),
-                        "Vuelva a ejecutar gnx init --mesh-auth-stdin y acepte UAC.",
-                        true,
-                        16,
-                    ))
-                }
-            }
-            Err(error) => Err(error),
-        };
-        let _ = std::fs::remove_file(&temporary);
-        outcome
-    };
+pub fn submit_mesh_auth(secret: &mut [u8], bootstrap_addresses: &[IpAddr]) -> Result<(), GnxError> {
+    let result = submit_mesh_auth_inner(secret, bootstrap_addresses);
     secret.fill(0);
     result
 }
 
-pub fn complete_mesh_auth(elevated: bool, sealed: &Path) -> Result<(), GnxError> {
+fn submit_mesh_auth_inner(secret: &[u8], bootstrap_addresses: &[IpAddr]) -> Result<(), GnxError> {
+    validate(secret)?;
+    if crate::host::windows::install::is_elevated() {
+        if !bootstrap_addresses.is_empty() {
+            crate::host::windows::resolution::configure_elevated(
+                true,
+                bootstrap_addresses.to_vec(),
+            )?;
+        }
+        return stage_machine_secret(secret);
+    }
+
+    let sealed = protect(secret, false)?;
+    let temporary = std::env::temp_dir().join(format!(
+        "gnx-mesh-auth-{}.dpapi",
+        crate::secrets::random_hex(16)?
+    ));
+    let outcome = (|| {
+        crate::state::atomic_write(&temporary, &sealed)?;
+        let mut parameters = format!(
+            "__mesh-auth --elevated --sealed \"{}\"",
+            temporary.display()
+        );
+        for address in bootstrap_addresses {
+            parameters.push_str(&format!(" --address {address}"));
+        }
+        let code = crate::host::windows::install::elevate(
+            &parameters,
+            "entregar de forma segura la credencial efímera de Headscale",
+        )?;
+        if code == 0 {
+            Ok(())
+        } else {
+            Err(GnxError::new(
+                "MESH_AUTH_ELEVATED_CHILD_FAILED",
+                "mesh",
+                "auth_stage",
+                format!("El proceso elevado terminó con código {code}."),
+                "Vuelva a ejecutar gnx init --mesh-auth-stdin y acepte UAC.",
+                true,
+                16,
+            ))
+        }
+    })();
+    let _ = std::fs::remove_file(&temporary);
+    outcome
+}
+
+pub fn complete_mesh_auth(
+    elevated: bool,
+    sealed: &Path,
+    bootstrap_addresses: Vec<IpAddr>,
+) -> Result<(), GnxError> {
     if !elevated || !crate::host::windows::install::is_elevated() {
         return Err(GnxError::new(
             "HOST_ELEVATION_REQUIRED",
@@ -72,8 +87,13 @@ pub fn complete_mesh_auth(elevated: bool, sealed: &Path) -> Result<(), GnxError>
     let ciphertext = std::fs::read(sealed)
         .map_err(|error| GnxError::io("mesh_auth_sealed_read", error.to_string()))?;
     let mut secret = unprotect(&ciphertext)?;
-    validate(&secret)?;
-    let result = stage_machine_secret(&secret);
+    let result = (|| {
+        validate(&secret)?;
+        if !bootstrap_addresses.is_empty() {
+            crate::host::windows::resolution::configure_elevated(true, bootstrap_addresses)?;
+        }
+        stage_machine_secret(&secret)
+    })();
     secret.fill(0);
     result
 }

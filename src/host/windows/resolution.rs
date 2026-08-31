@@ -9,6 +9,74 @@ use crate::process::CommandSpec;
 const BEGIN: &str = "# BEGIN Quetzalcoatl Next controller bootstrap";
 const END: &str = "# END Quetzalcoatl Next controller bootstrap";
 
+pub fn configure(addresses: Vec<IpAddr>) -> Result<(), GnxError> {
+    if addresses.is_empty() {
+        return Err(GnxError::config_invalid(
+            "Indique al menos una dirección de bootstrap del controller.",
+        ));
+    }
+    let mut candidate = Config::load(&crate::config::default_config_path())?;
+    candidate.mesh.bootstrap_addresses = addresses.clone();
+    candidate.validate()?;
+    if !crate::host::windows::install::is_elevated() {
+        let parameters = addresses.iter().fold(
+            "__controller-bootstrap --elevated".to_string(),
+            |mut arguments, address| {
+                arguments.push_str(&format!(" --address {address}"));
+                arguments
+            },
+        );
+        let code = crate::host::windows::install::elevate(
+            &parameters,
+            "configurar la resolución inicial del control plane",
+        )?;
+        if code != 0 {
+            return Err(GnxError::new(
+                "MESH_BOOTSTRAP_ELEVATED_CHILD_FAILED",
+                "mesh",
+                "controller_bootstrap",
+                format!("El proceso elevado terminó con código {code}."),
+                "Vuelva a ejecutar gnx init --controller-address <IP> y acepte UAC.",
+                true,
+                16,
+            ));
+        }
+        return Ok(());
+    }
+    configure_elevated(true, addresses)
+}
+
+pub fn configure_elevated(elevated: bool, addresses: Vec<IpAddr>) -> Result<(), GnxError> {
+    if !elevated || !crate::host::windows::install::is_elevated() {
+        return Err(GnxError::new(
+            "HOST_ELEVATION_REQUIRED",
+            "mesh",
+            "controller_bootstrap",
+            "La configuración de resolución no recibió un token elevado.",
+            "Ejecute gnx init --controller-address <IP> y acepte UAC.",
+            false,
+            9,
+        ));
+    }
+    let path = crate::config::default_config_path();
+    let mut config = Config::load(&path)?;
+    config.mesh.bootstrap_addresses = addresses;
+    config.validate()?;
+    apply(&config)?;
+    config.save(&path)?;
+    crate::logs::event(
+        "info",
+        "mesh",
+        "controller_bootstrap_config",
+        format!(
+            "Configuración persistida para {} con {} dirección(es)",
+            config.mesh.controller_url,
+            config.mesh.bootstrap_addresses.len()
+        ),
+    );
+    Ok(())
+}
+
 pub fn apply(config: &Config) -> Result<(), GnxError> {
     let controller = config.validate()?;
     if config.mesh.bootstrap_addresses.is_empty() {

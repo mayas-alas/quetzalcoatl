@@ -129,7 +129,7 @@ impl DoctorReport {
                         Ok(status) => checks.push(DoctorCheck {
                             id: "mesh.controller_tls",
                             state: CheckState::Pass,
-                            detail: format!("HTTPS respondió con status {status}"),
+                            detail: format!("Headscale /health respondió con status {status}"),
                         }),
                         Err(error) => checks.push(DoctorCheck {
                             id: "mesh.controller_tls",

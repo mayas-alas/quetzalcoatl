@@ -6,6 +6,7 @@ mod uninstall;
 mod update;
 
 use std::ffi::OsString;
+use std::net::IpAddr;
 use std::path::PathBuf;
 
 use clap::{CommandFactory, Parser, Subcommand};
@@ -36,6 +37,9 @@ enum Command {
         /// Lee una pre-auth key reutilizable de Headscale exclusivamente desde stdin.
         #[arg(long)]
         mesh_auth_stdin: bool,
+        /// IP inicial de Headscale para resolver el controller antes del enrolamiento.
+        #[arg(long = "controller-address", value_name = "IP", action = clap::ArgAction::Append)]
+        controller_addresses: Vec<IpAddr>,
     },
     /// Muestra el estado observado sin mutar.
     Status {
@@ -93,6 +97,15 @@ enum Command {
         elevated: bool,
         #[arg(long, hide = true, value_name = "PATH")]
         sealed: PathBuf,
+        #[arg(long = "address", hide = true, value_name = "IP", action = clap::ArgAction::Append)]
+        addresses: Vec<IpAddr>,
+    },
+    #[command(hide = true, name = "__controller-bootstrap")]
+    InternalControllerBootstrap {
+        #[arg(long, hide = true)]
+        elevated: bool,
+        #[arg(long = "address", hide = true, value_name = "IP", action = clap::ArgAction::Append)]
+        addresses: Vec<IpAddr>,
     },
 }
 
@@ -116,7 +129,10 @@ where
     let config_path = cli.config.unwrap_or_else(default_config_path);
 
     match cli.command {
-        Some(Command::Init { mesh_auth_stdin }) => init::run(config_path, mesh_auth_stdin),
+        Some(Command::Init {
+            mesh_auth_stdin,
+            controller_addresses,
+        }) => init::run(config_path, mesh_auth_stdin, controller_addresses),
         Some(Command::Status { json }) => status::run(config_path, json),
         Some(Command::Doctor { json }) => doctor::run(config_path, json),
         Some(Command::Logs { tail, json }) => crate::logs::print_tail(tail, json),
@@ -133,28 +149,54 @@ where
         Some(Command::InternalInstall { elevated, resume }) => {
             install::run(elevated, resume).map(|_| ())
         }
-        Some(Command::InternalMeshAuth { elevated, sealed }) => {
-            complete_mesh_auth(elevated, sealed)
-        }
+        Some(Command::InternalMeshAuth {
+            elevated,
+            sealed,
+            addresses,
+        }) => complete_mesh_auth(elevated, sealed, addresses),
+        Some(Command::InternalControllerBootstrap {
+            elevated,
+            addresses,
+        }) => complete_controller_bootstrap(elevated, addresses),
         None => Ok(()),
     }
 }
 
 #[cfg(target_os = "windows")]
-fn complete_mesh_auth(elevated: bool, sealed: PathBuf) -> Result<(), GnxError> {
-    crate::host::windows::ipc::complete_mesh_auth(elevated, &sealed)
+fn complete_mesh_auth(
+    elevated: bool,
+    sealed: PathBuf,
+    addresses: Vec<IpAddr>,
+) -> Result<(), GnxError> {
+    crate::host::windows::ipc::complete_mesh_auth(elevated, &sealed, addresses)
 }
 
 #[cfg(not(target_os = "windows"))]
-fn complete_mesh_auth(_elevated: bool, _sealed: PathBuf) -> Result<(), GnxError> {
+fn complete_mesh_auth(
+    _elevated: bool,
+    _sealed: PathBuf,
+    _addresses: Vec<IpAddr>,
+) -> Result<(), GnxError> {
     Err(GnxError::unsupported_host(
         "El transporte DPAPI de enrolamiento sólo existe en Windows.",
     ))
 }
 
+#[cfg(target_os = "windows")]
+fn complete_controller_bootstrap(elevated: bool, addresses: Vec<IpAddr>) -> Result<(), GnxError> {
+    crate::host::windows::resolution::configure_elevated(elevated, addresses)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn complete_controller_bootstrap(_elevated: bool, _addresses: Vec<IpAddr>) -> Result<(), GnxError> {
+    Err(GnxError::unsupported_host(
+        "El bootstrap elevado sólo existe en Windows.",
+    ))
+}
+
 fn repair(config_path: PathBuf) -> Result<(), GnxError> {
     match install::run(false, true)? {
-        crate::host::InstallOutcome::Installed => init::run(config_path, false),
+        crate::host::InstallOutcome::Installed => init::run(config_path, false, Vec::new()),
         crate::host::InstallOutcome::RebootRequired
         | crate::host::InstallOutcome::RelaunchedElevated => Ok(()),
     }
@@ -199,6 +241,7 @@ mod tests {
         assert!(!help.contains("__resume"));
         assert!(!help.contains("__install"));
         assert!(!help.contains("__mesh-auth"));
+        assert!(!help.contains("__controller-bootstrap"));
     }
 
     #[test]
@@ -210,5 +253,26 @@ mod tests {
     #[test]
     fn install_is_not_a_public_command() {
         assert!(Cli::try_parse_from(["gnx", "install"]).is_err());
+    }
+
+    #[test]
+    fn init_accepts_repeatable_controller_addresses() {
+        let cli = Cli::try_parse_from([
+            "gnx",
+            "init",
+            "--controller-address",
+            "192.168.50.20",
+            "--controller-address",
+            "fd00::20",
+            "--mesh-auth-stdin",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Init {
+                mesh_auth_stdin: true,
+                controller_addresses,
+            }) if controller_addresses.len() == 2
+        ));
     }
 }
