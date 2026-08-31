@@ -74,10 +74,10 @@ Leyenda: `[x]` implementado y verificado localmente; `[ ]` pendiente;
 
 Evidencia local:
 
-- Tests: 26 Windows y 24 Linux, sin fallos.
-- Windows EXE: `40438b1605460b4d0b292260aab3d11e1cf2bce8ce52beef9de7a26db662fc4f`.
-- Linux ELF: `beb5bfb00c190296556db926c6917ca11c076ba238ecf52d94370d95f9f885c6`.
-- Linux AppImage: `ec50278951190e05df8f2ae8aaaebe08e5c1e2c99c27167315f3ecdbdae8b296`.
+- Tests: 27 Windows y 25 Linux, sin fallos.
+- Windows EXE: `1e2e8e09e9ad391219ef25a64f8669909efcfad8617c9e70c7a61085aa137589`.
+- Linux ELF: `3c44643cfa54713607bec24b1acdfeffb096b317bb7e097dd075f48a6d77143e`.
+- Linux AppImage: `a8bce8f1c95e6ec7e54f8cc4cc6b8401a923a18ddea553fe6180d57b5661ff4d`.
 - Quadlets runtime/guest aceptados por el generador; HCL válido con lock read-only.
 
 ## Riesgo de frontera aceptado para este MVP
