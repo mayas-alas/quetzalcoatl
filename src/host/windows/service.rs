@@ -272,6 +272,7 @@ fn converge(state: &mut OperationalState) -> Result<(), GnxError> {
     state.machine = "ready".to_string();
     let _ = state.save(&default_state_path());
 
+    crate::host::windows::resolution::verify(&config)?;
     crate::runtime::headscale::verify_controller(&controller)?;
     state.mesh = "controller_reachable".to_string();
     let _ = state.save(&default_state_path());

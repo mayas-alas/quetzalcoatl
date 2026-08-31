@@ -112,6 +112,20 @@ pub fn apply(config: &Config) -> Result<(), GnxError> {
 pub fn verify(config: &Config) -> Result<String, GnxError> {
     let controller = config.validate()?;
     if config.mesh.bootstrap_addresses.is_empty() {
+        if requires_managed_bootstrap(&controller) {
+            return Err(GnxError::new(
+                "MESH_BOOTSTRAP_REQUIRED",
+                "mesh",
+                "controller_hosts_verify",
+                format!(
+                    "{} es un alias soberano y aún no tiene una dirección inicial.",
+                    controller.host()
+                ),
+                "Ejecute gnx init --controller-address <IP_HEADSCALE>.",
+                false,
+                16,
+            ));
+        }
         return Ok("Resolución delegada al DNS del sistema".to_string());
     }
     let current = std::fs::read_to_string(hosts_path())
@@ -148,6 +162,13 @@ pub fn verify(config: &Config) -> Result<String, GnxError> {
             16,
         ))
     }
+}
+
+fn requires_managed_bootstrap(controller: &ControllerUrl) -> bool {
+    matches!(
+        controller.host(),
+        "controlplane.node.gnx" | "headscale.node.gnx"
+    )
 }
 
 pub fn remove_managed() -> Result<(), GnxError> {
@@ -348,5 +369,12 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.code, "MESH_BOOTSTRAP_CONFLICT");
+    }
+
+    #[test]
+    fn sovereign_alias_requires_an_explicit_bootstrap_address() {
+        let config = Config::parse(include_str!("../../../config.example.toml")).unwrap();
+        let error = verify(&config).unwrap_err();
+        assert_eq!(error.code, "MESH_BOOTSTRAP_REQUIRED");
     }
 }
