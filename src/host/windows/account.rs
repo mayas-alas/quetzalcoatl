@@ -84,6 +84,11 @@ pub fn ensure_runtime_account() -> Result<RuntimeCredential, GnxError> {
 }
 
 pub fn grant_data_access(path: &Path) -> Result<(), GnxError> {
+    CommandSpec::new(r"C:\Windows\System32\takeown.exe")
+        .args(["/F"])
+        .arg(path)
+        .args(["/A", "/R", "/SKIPSL"])
+        .run_checked("service_data_owner")?;
     let grant = format!(r"{RUNTIME_ACCOUNT_NAME}:(OI)(CI)M");
     CommandSpec::new(r"C:\Windows\System32\icacls.exe")
         .arg(path)
@@ -94,12 +99,11 @@ pub fn grant_data_access(path: &Path) -> Result<(), GnxError> {
             &grant,
             r"*S-1-5-32-545:(OI)(CI)RX",
             "/T",
-            "/C",
         ])
         .run_checked("service_data_acl")?;
     CommandSpec::new(r"C:\Windows\System32\icacls.exe")
         .arg(path)
-        .args(["/inheritance:r", "/T", "/C"])
+        .args(["/inheritance:r", "/T"])
         .run_checked("service_data_inheritance")?;
     Ok(())
 }
