@@ -8,6 +8,7 @@ pub fn validate_quadlet() -> bool {
         && QUADLET.contains("PodmanArgs=--privileged")
         && QUADLET.contains("/var/lib/gnx/proxmox/data:/var/lib/vz")
         && QUADLET.contains("127.0.0.1:8006:8006")
+        && QUADLET.contains("HealthCmd=/usr/bin/pvesh get /version")
         && !QUADLET.contains(":latest")
 }
 

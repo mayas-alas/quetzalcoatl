@@ -18,6 +18,11 @@ Volume=/var/lib/gnx/proxmox/data:/var/lib/vz
 Volume=/var/lib/gnx/proxmox/config:/var/lib/pve-cluster
 Volume=/opt/gnx/guest:/opt/gnx/guest:ro
 PodmanArgs=--privileged --stop-timeout=120 --shm-size=1g
+HealthCmd=/usr/bin/pvesh get /version --output-format json
+HealthInterval=10s
+HealthRetries=60
+HealthStartPeriod=30s
+HealthTimeout=10s
 
 [Service]
 Restart=always
