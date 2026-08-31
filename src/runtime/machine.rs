@@ -85,15 +85,10 @@ pub fn prepare() -> Result<(), GnxError> {
                 ));
             }
         }
-        let provider = if cfg!(target_os = "windows") {
-            "wsl"
-        } else {
-            "qemu"
-        };
-        let mut initialized = initialize_machine(&podman, provider)?;
+        let mut initialized = initialize_machine(&podman)?;
         if !initialized.success() && is_partial_hypervisor_conflict(&initialized.stderr) {
             recover_partial_machine(&podman)?;
-            initialized = initialize_machine(&podman, provider)?;
+            initialized = initialize_machine(&podman)?;
         }
         if !initialized.success() {
             return Err(GnxError::process(
@@ -191,16 +186,12 @@ fn save_ownership(phase: OwnershipPhase) -> Result<(), GnxError> {
     crate::state::atomic_write(&ownership_path(), &bytes)
 }
 
-fn initialize_machine(
-    podman: &Path,
-    provider: &str,
-) -> Result<crate::process::ProcessOutput, GnxError> {
-    podman_command(podman)
+fn initialize_machine(podman: &Path) -> Result<crate::process::ProcessOutput, GnxError> {
+    let command = podman_command(podman).args(["machine", "init"]);
+    #[cfg(target_os = "windows")]
+    let command = command.args(["--provider", "wsl"]);
+    command
         .args([
-            "machine",
-            "init",
-            "--provider",
-            provider,
             "--cpus",
             "4",
             "--memory",
