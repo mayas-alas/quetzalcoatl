@@ -2,6 +2,7 @@ use std::mem::{size_of, zeroed};
 use std::path::PathBuf;
 use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::Console::{FreeConsole, GetConsoleWindow};
@@ -11,8 +12,9 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowW, GetMessageW, LoadIconW,
-    MB_ICONINFORMATION, MB_OK, MSG, MessageBoxW, PostQuitMessage, RegisterClassW, SW_HIDE,
-    ShowWindow, TranslateMessage, WM_APP, WM_DESTROY, WM_LBUTTONDBLCLK, WM_RBUTTONUP, WNDCLASSW,
+    MB_ICONINFORMATION, MB_OK, MSG, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW,
+    SW_HIDE, ShowWindow, TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY, WM_LBUTTONDBLCLK,
+    WM_RBUTTONUP, WNDCLASSW,
 };
 
 use crate::error::GnxError;
@@ -24,6 +26,37 @@ const WM_GNX_TRAY: u32 = WM_APP + 1;
 const CLASS_NAME: &str = "QuetzalcoatlNextTrayWindow";
 
 static CONFIG_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn stop_running_instance() -> Result<(), GnxError> {
+    let class_name = wide(CLASS_NAME);
+    // SAFETY: class_name is a live, NUL-terminated UTF-16 buffer.
+    let window = unsafe { FindWindowW(class_name.as_ptr(), null()) };
+    if window.is_null() {
+        return Ok(());
+    }
+    // SAFETY: window was returned by FindWindowW; WM_CLOSE requests an orderly shutdown.
+    if unsafe { PostMessageW(window, WM_CLOSE, 0, 0) } == 0 {
+        return Err(last_error("tray_stop"));
+    }
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(100));
+        // SAFETY: class_name remains valid for each lookup.
+        if unsafe { FindWindowW(class_name.as_ptr(), null()) }.is_null() {
+            crate::logs::event("info", "tray", "stop", "Bandeja cerrada para actualización");
+            return Ok(());
+        }
+    }
+    Err(GnxError::new(
+        "TRAY_STOP_TIMEOUT",
+        "tray",
+        "tray_stop",
+        "La bandeja GNX no se cerró en 10 segundos.",
+        "Cierre el icono GNX y vuelva a ejecutar el instalador.",
+        true,
+        20,
+    ))
+}
 
 pub fn run(config_path: PathBuf) -> Result<(), GnxError> {
     crate::logs::event("info", "tray", "start", "Iniciando bandeja GNX");

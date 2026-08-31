@@ -18,7 +18,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::config::{data_root, default_config_path};
 use crate::error::GnxError;
-use crate::host::windows::{account, download, reboot, service, wsl};
+use crate::host::windows::{account, download, reboot, service, tray, wsl};
 use crate::host::{InstallOptions, InstallOutcome, UninstallOutcome};
 use crate::journal::{InstallCheckpoint, OperationJournal, default_journal_path};
 use crate::process::CommandSpec;
@@ -309,6 +309,7 @@ fn install_files() -> Result<PathBuf, GnxError> {
     let source = std::env::current_exe()
         .map_err(|error| GnxError::io("windows_files", error.to_string()))?;
     if !paths_equal(&source, &destination) {
+        tray::stop_running_instance()?;
         if destination.exists() {
             service::stop()?;
         }
@@ -329,18 +330,22 @@ fn install_files() -> Result<PathBuf, GnxError> {
 fn copy_executable_with_retry(source: &Path, destination: &Path) -> Result<(), GnxError> {
     let started = Instant::now();
     let timeout = Duration::from_secs(30);
+    let mut attempts = 0_u32;
     loop {
         match fs::copy(source, destination) {
             Ok(_) => return Ok(()),
             Err(error)
                 if started.elapsed() < timeout && matches!(error.raw_os_error(), Some(32 | 33)) =>
             {
-                crate::logs::event(
-                    "warn",
-                    "install",
-                    "windows_files_retry",
-                    format!("Esperando liberación de {}: {error}", destination.display()),
-                );
+                if attempts.is_multiple_of(10) {
+                    crate::logs::event(
+                        "warn",
+                        "install",
+                        "windows_files_retry",
+                        format!("Esperando liberación de {}: {error}", destination.display()),
+                    );
+                }
+                attempts += 1;
                 std::thread::sleep(Duration::from_millis(500));
             }
             Err(error) => return Err(GnxError::io("windows_files", error.to_string())),
