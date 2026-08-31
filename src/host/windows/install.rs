@@ -3,7 +3,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::ptr::{self, null_mut};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
 use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
@@ -312,8 +312,7 @@ fn install_files() -> Result<PathBuf, GnxError> {
         if destination.exists() {
             service::stop()?;
         }
-        fs::copy(&source, &destination)
-            .map_err(|error| GnxError::io("windows_files", error.to_string()))?;
+        copy_executable_with_retry(&source, &destination)?;
     }
 
     fs::create_dir_all(data_root())
@@ -325,6 +324,28 @@ fn install_files() -> Result<PathBuf, GnxError> {
     }
     add_to_machine_path(&install_directory)?;
     Ok(destination)
+}
+
+fn copy_executable_with_retry(source: &Path, destination: &Path) -> Result<(), GnxError> {
+    let started = Instant::now();
+    let timeout = Duration::from_secs(30);
+    loop {
+        match fs::copy(source, destination) {
+            Ok(_) => return Ok(()),
+            Err(error)
+                if started.elapsed() < timeout && matches!(error.raw_os_error(), Some(32 | 33)) =>
+            {
+                crate::logs::event(
+                    "warn",
+                    "install",
+                    "windows_files_retry",
+                    format!("Esperando liberación de {}: {error}", destination.display()),
+                );
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            Err(error) => return Err(GnxError::io("windows_files", error.to_string())),
+        }
+    }
 }
 
 fn paths_equal(left: &Path, right: &Path) -> bool {
