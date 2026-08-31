@@ -23,7 +23,7 @@ download_verified() {
   local url="$1"
   local sha256="$2"
   local destination="$3"
-  if [ -f "${destination}" ] && echo "${sha256}  ${destination}" | sha256sum -c -s; then
+  if [ -f "${destination}" ] && echo "${sha256}  ${destination}" | sha256sum -c --status; then
     return
   fi
   rm -f "${destination}.download"
@@ -64,6 +64,10 @@ if [ ! -x "${linux_binary}" ]; then
   exit 2
 fi
 
+install -m 0755 "${linux_binary}" "${distribution_directory}/gnx-linux-x86_64"
+sha256sum "${distribution_directory}/gnx-linux-x86_64" \
+  | sed 's#  .*/# *#' >"${distribution_directory}/SHA256SUMS.linux"
+
 rm -rf "${appdir}"
 install -d "${appdir}/usr/bin"
 install -d "${appdir}/usr/share/metainfo"
@@ -73,7 +77,7 @@ install -m 0644 "${repository_root}/packaging/appimage/gnx.desktop" "${appdir}/g
 install -m 0644 "${repository_root}/assets/tray-icon.png" "${appdir}/gnx.png"
 install -m 0644 "${repository_root}/assets/tray-icon.png" "${appdir}/.DirIcon"
 install -m 0644 "${repository_root}/packaging/appimage/gnx.metainfo.xml" \
-  "${appdir}/usr/share/metainfo/gnx.appdata.xml"
+  "${appdir}/usr/share/metainfo/org.gnx.QuetzalcoatlNext.metainfo.xml"
 
 appimagetool_url="$(lock_value build.appimagetool url)"
 appimagetool_sha256="$(lock_value build.appimagetool sha256)"
@@ -94,11 +98,15 @@ mkdir -p "${tool_extract_directory}"
   "${appimagetool}" --appimage-extract >/dev/null
 )
 
-version="$(cargo metadata --locked --no-deps --format-version 1 | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -n 1)"
+version="$("${linux_binary}" version | awk 'NR == 1 { print $2 }')"
+if [ -z "${version}" ]; then
+  echo "No se pudo obtener la versión desde ${linux_binary}." >&2
+  exit 2
+fi
 rm -f "${output}"
 ARCH=x86_64 VERSION="${version}" \
   "${tool_extract_directory}/squashfs-root/AppRun" \
-  --runtime-file "${runtime}" "${appdir}" "${output}"
+  --no-appstream --runtime-file "${runtime}" "${appdir}" "${output}"
 chmod 0755 "${output}"
 
 "${output}" --appimage-extract-and-run version
