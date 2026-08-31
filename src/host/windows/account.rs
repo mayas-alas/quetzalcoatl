@@ -102,7 +102,7 @@ pub fn grant_data_access(path: &Path) -> Result<(), GnxError> {
 }
 
 fn grant_account_rights() -> Result<(), GnxError> {
-    let account = wide(SERVICE_ACCOUNT);
+    let account = wide(RUNTIME_ACCOUNT_NAME);
     let mut sid_length = 0_u32;
     let mut domain_length = 0_u32;
     let mut sid_type: SID_NAME_USE = 0;
