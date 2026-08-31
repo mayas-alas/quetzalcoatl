@@ -14,6 +14,7 @@ registra el servicio de arranque. Después, una shell nueva dispone de:
 gnx
 gnx status
 gnx doctor
+gnx logs
 gnx init
 gnx repair
 gnx update --from <artefacto> --sha256 <sha256>
@@ -23,6 +24,12 @@ gnx uninstall
 El runtime usa Podman Machine `quetzalcoatl`, systemd, tailscaled, Docktail y
 Dockur Proxmox. OpenTofu corre dentro del LXC dedicado `gnx-infra-runner` y desde
 allí converge los LXC de workloads con el provider BPG/Proxmox.
+
+En Windows, el servicio corre bajo la cuenta local aislada `gnx-runtime`; WSL y
+Podman Machine pertenecen a ese perfil y no al usuario interactivo. El tray se
+inicia al terminar la instalación y vuelve al iniciar sesión. La trazabilidad
+persistente se consulta con `gnx logs` o en
+`C:\ProgramData\QuetzalcoatlNext\logs\gnx.jsonl`.
 
 Los endpoints de referencia son `https://headscale.node.gnx` y
 `https://controlplane.node.gnx`. GNX conserva el controller configurado y valida

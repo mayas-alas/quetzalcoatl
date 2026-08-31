@@ -16,7 +16,8 @@ Leyenda: `[x]` implementado y verificado localmente; `[ ]` pendiente;
 - [x] Abrir EXE/AppImage sin argumentos inicia el instalador.
 - [x] No existe un subcomando público de instalación.
 - [x] `gnx` queda en `PATH`; sin argumentos muestra ayuda.
-- [x] CLI: `init`, `status`, `doctor`, `repair`, `update`, `uninstall`, `version`.
+- [x] CLI: `init`, `status`, `doctor`, `logs`, `repair`, `update`, `uninstall`,
+  `version`.
 - [x] Controllers HTTPS configurables, incluidos los dos aliases `.gnx`, sin
   política de rechazo por marca.
 - [x] Desinstalación retira Podman CLI y conserva máquinas, LXC, volúmenes,
@@ -26,14 +27,19 @@ Leyenda: `[x]` implementado y verificado localmente; `[ ]` pendiente;
 
 - [x] Windows: UAC, WSL automático, Podman MSI verificado, PATH de máquina,
   reboot/resume con journal y Windows Service automático.
-- [x] Windows: identidad `NT SERVICE\QuetzalcoatlNext`, branding PE y tray de
-  estado registrado al logon.
+- [x] Windows: cuenta local `gnx-runtime` con perfil WSL propio, contraseña no
+  persistida, logon de servicio y denegación de logon interactivo/remoto/red.
+- [x] Windows: el proceso original espera UAC, inicia tray inmediatamente,
+  registra tray al logon y difunde el cambio de `PATH` a Explorer.
+- [x] Windows: JSONL persistente y `gnx logs`; checkpoints, servicio, runtime,
+  tray y errores quedan trazables.
+- [x] Windows: recuperación del servicio con reintentos SCM a 10/30/60 segundos.
 - [x] Linux: sudo automático y soporte de instalación con apt, dnf o pacman.
 - [x] Linux: Podman, QEMU y FUSE automáticos, CLI en `/usr/local/bin` y
   `gnx-host.service` habilitado.
 - [x] `repair` reconverge sin destruir datos; `update` exige artefacto local y
   SHA-256.
-- [PHYSICAL] `WIN-ID-01`: probar perfil WSL/Podman de la cuenta virtual en un
+- [PHYSICAL] `WIN-ID-01`: probar perfil WSL/Podman de la cuenta local dedicada en un
   Windows limpio y confirmar que el usuario host no posee ese perfil.
 - [PHYSICAL] `LINUX-INSTALL-01`: probar AppImage con FUSE, elevación y reboot en
   una distro limpia por cada familia de paquetes.
@@ -43,6 +49,8 @@ Leyenda: `[x]` implementado y verificado localmente; `[ ]` pendiente;
 - [x] Podman Machine fija `quetzalcoatl`, rootful, 4 CPU, 8 GiB y 100 GiB.
 - [x] Marcador de propiedad obligatorio; una máquina homónima ajena falla antes
   de arrancar o recibir archivos.
+- [x] Preparación de máquina separada del gate controller: una caída DNS/TLS no
+  marca la máquina como fallida ni impide reintentos observables.
 - [x] systemd y Quadlets fijados para `tailscaled`, Docktail y Dockur Proxmox.
 - [x] Tailscale y Docktail usan imágenes por digest y sockets locales por celda.
 - [x] Dockur Proxmox usa KVM/FUSE, persistencia y healthcheck.
@@ -74,8 +82,9 @@ Leyenda: `[x]` implementado y verificado localmente; `[ ]` pendiente;
 
 Evidencia local:
 
-- Tests: 27 Windows y 25 Linux, sin fallos.
-- Windows EXE: `1e2e8e09e9ad391219ef25a64f8669909efcfad8617c9e70c7a61085aa137589`.
+- Tests: 28 Windows, sin fallos; reconstrucción Linux pendiente tras el cambio de
+  trazabilidad multiplataforma.
+- Windows EXE: pendiente de reconstrucción y prueba de instalación física.
 - Linux ELF: `3c44643cfa54713607bec24b1acdfeffb096b317bb7e097dd075f48a6d77143e`.
 - Linux AppImage: `a8bce8f1c95e6ec7e54f8cc4cc6b8401a923a18ddea553fe6180d57b5661ff4d`.
 - Quadlets runtime/guest aceptados por el generador; HCL válido con lock read-only.
@@ -94,3 +103,4 @@ cerrada.
 - `159b088` — OpenTofu aislado en LXC dedicado.
 - `d3a0ee8` — branding de instalador y tray Windows.
 - `5a5dbc7` — AppImage y metadata de release portables.
+- `c7f3d85` — identidad Windows aislada, tray inmediato y logs persistentes.

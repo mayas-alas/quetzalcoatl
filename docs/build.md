@@ -139,8 +139,14 @@ Windows limpio:
 1. Abrir el EXE y aceptar UAC.
 2. Verificar instalación automática de WSL y Podman, incluido reboot/resume.
 3. Abrir una shell nueva y ejecutar `gnx`, `gnx status` y `gnx doctor`.
-4. Verificar servicio bajo `NT SERVICE\QuetzalcoatlNext` y tray al logon.
+4. Ejecutar `gnx logs`; verificar JSONL en `ProgramData`, servicio bajo
+   `.\gnx-runtime`, tray inmediato y tray después de un logon.
 5. Reiniciar y verificar recuperación de Podman Machine y unidades.
+
+La shell que abrió el instalador conserva su entorno anterior; `PATH` se difunde
+a Explorer para procesos nuevos, pero una shell ya abierta debe cerrarse y
+abrirse. La ausencia de reinicio es correcta cuando WSL y el MSI no devuelven
+`3010`/`1641`; el journal y `gnx logs` deben mostrar esa decisión.
 
 Linux limpio:
 

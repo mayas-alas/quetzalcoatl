@@ -68,23 +68,38 @@ token Proxmox dedicado y ejecuta la convergencia dentro del LXC.
 ```mermaid
 flowchart TD
     A["Abrir gnx-windows-x86_64.exe"] --> UAC["Elevación UAC"]
-    UAC --> FILES["Instalar gnx.exe y PATH de máquina"]
+    UAC --> WAIT["Instalador original espera el resultado"]
+    WAIT --> FILES["Instalar gnx.exe y PATH de máquina"]
     FILES --> WSL["Habilitar o instalar WSL"]
     WSL --> MSI["Descargar y verificar Podman MSI"]
     MSI --> REBOOT{"¿Windows exige reinicio?"}
     REBOOT -- "sí" --> JOURNAL["Guardar journal y reanudar al logon"]
     JOURNAL --> SERVICE["Registrar Windows Service"]
     REBOOT -- "no" --> SERVICE
-    SERVICE --> ID["NT SERVICE\\QuetzalcoatlNext"]
-    ID --> MACHINE["Crear y poseer Podman Machine"]
+    SERVICE --> ID["Cuenta local aislada .\\gnx-runtime"]
+    ID --> MACHINE["Crear y poseer WSL/Podman Machine"]
+    MACHINE --> CP{"Controller DNS/TLS disponible"}
+    CP -- "no" --> RETRY["Conservar machine y reintentar con log"]
+    CP -- "sí" --> QUADLETS["Converger Docktail, Proxmox y runner"]
+    FILES --> LOG["JSONL en ProgramData"]
     FILES --> TRAY["Registrar tray al logon"]
+    WAIT --> NOW["Iniciar tray en la sesión actual"]
 ```
 
 El EXE contiene dos recursos visuales: branding del instalador y un icono separado
 para la bandeja. La bandeja corre en la sesión interactiva, sólo lee el estado y
-no recibe el socket ni las credenciales del runtime. El servicio automático usa
-la identidad virtual dedicada y reintenta una convergencia fallida después del
-arranque.
+no recibe el socket ni las credenciales del runtime. Se inicia inmediatamente y
+queda registrada para los siguientes logons. El servicio automático usa una
+cuenta local real `gnx-runtime`, porque las distribuciones WSL y Podman Machine
+son por usuario. Windows carga el perfil de esa cuenta al iniciar el servicio.
+GNX le concede inicio como servicio y niega inicios interactivo, remoto y de red;
+la contraseña aleatoria se entrega al Service Control Manager y no se persiste.
+
+La preparación de la Podman Machine precede al gate DNS/TLS del controller. Una
+caída del endpoint deja `machine=ready`, registra el error exacto y reintenta; no
+confunde un fallo mesh con un fallo de máquina. Los eventos están disponibles con
+`gnx logs` y como JSONL en
+`C:\ProgramData\QuetzalcoatlNext\logs\gnx.jsonl`.
 
 ## Flujo Linux
 
@@ -133,7 +148,11 @@ quedan dentro del runner con permisos root-only.
 
 ## Fronteras de confianza
 
-- El usuario Windows opera `gnx`; no posee el perfil de la Podman Machine.
+- El usuario Windows opera `gnx`; WSL y Podman Machine pertenecen al perfil
+  `gnx-runtime`, no a su registro HKCU ni a su directorio de usuario.
+- Un administrador local de Windows conserva por definición capacidad de tomar
+  control del host; la cuenta dedicada aísla al usuario estándar, no protege
+  contra un administrador host comprometido.
 - Una máquina `quetzalcoatl` preexistente sin marcador de propiedad GNX falla
   como `MACHINE_NAME_CONFLICT`; nunca se adopta ni se modifica.
 - Cada celda usa sus propios sockets de Podman y `tailscaled`.
@@ -148,5 +167,6 @@ quedan dentro del runner con permisos root-only.
 
 `gnx uninstall` retira servicio, integración de arranque, binario, `PATH` y
 Podman CLI. Conserva configuración, journal, Podman Machine, volúmenes, discos,
-Proxmox, state de OpenTofu y LXC. No ejecuta operaciones de destrucción sobre
+Proxmox, state de OpenTofu, LXC y la cuenta `gnx-runtime` que los posee. No
+ejecuta operaciones de destrucción sobre
 infraestructura. Backup y recovery no forman parte de este alcance.
