@@ -3,4 +3,5 @@ pub mod download;
 pub mod install;
 pub mod reboot;
 pub mod service;
+pub mod tray;
 pub mod wsl;

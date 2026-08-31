@@ -19,6 +19,8 @@ use crate::state::{OperationalState, Stage, default_state_path};
 const DEFAULT_CONFIG: &str = include_str!("../../../config.example.toml");
 const REGISTRY_ENVIRONMENT: &str =
     r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
+const REGISTRY_RUN: &str = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
+const TRAY_VALUE: &str = "QuetzalcoatlNextTray";
 
 pub fn install(options: InstallOptions) -> Result<InstallOutcome, GnxError> {
     if !is_elevated() {
@@ -67,6 +69,7 @@ pub fn install(options: InstallOptions) -> Result<InstallOutcome, GnxError> {
     advance(&mut journal, InstallCheckpoint::Elevated, &journal_path)?;
 
     let installed_executable = install_files()?;
+    register_tray(&installed_executable)?;
     advance(
         &mut journal,
         InstallCheckpoint::FilesInstalled,
@@ -140,6 +143,7 @@ pub fn uninstall(elevated: bool) -> Result<UninstallOutcome, GnxError> {
     }
 
     service::remove()?;
+    unregister_tray()?;
     let podman_reboot = uninstall_podman()?;
     reboot::unregister_resume()?;
     let install_directory = install_directory();
@@ -325,6 +329,32 @@ fn remove_from_machine_path(install_directory: &Path) -> Result<(), GnxError> {
         write_machine_path(filtered)?;
     }
     Ok(())
+}
+
+fn register_tray(executable: &Path) -> Result<(), GnxError> {
+    let command = format!("\"{}\" __tray", executable.display());
+    CommandSpec::new(r"C:\Windows\System32\reg.exe")
+        .args(["ADD", REGISTRY_RUN, "/v", TRAY_VALUE, "/t", "REG_SZ", "/d"])
+        .arg(command)
+        .arg("/f")
+        .run_checked("tray_register")?;
+    Ok(())
+}
+
+fn unregister_tray() -> Result<(), GnxError> {
+    let output = CommandSpec::new(r"C:\Windows\System32\reg.exe")
+        .args(["DELETE", REGISTRY_RUN, "/v", TRAY_VALUE, "/f"])
+        .run("tray_unregister")?;
+    if output.success() || output.exit_code == Some(1) {
+        Ok(())
+    } else {
+        Err(GnxError::process(
+            "tray_unregister",
+            Path::new(r"C:\Windows\System32\reg.exe"),
+            output.stderr,
+            true,
+        ))
+    }
 }
 
 fn install_podman() -> Result<bool, GnxError> {

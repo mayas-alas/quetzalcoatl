@@ -59,7 +59,8 @@ install -d "${appdir}/usr/share/metainfo"
 install -m 0755 "${linux_binary}" "${appdir}/usr/bin/gnx"
 install -m 0755 "${repository_root}/packaging/appimage/AppRun" "${appdir}/AppRun"
 install -m 0644 "${repository_root}/packaging/appimage/gnx.desktop" "${appdir}/gnx.desktop"
-install -m 0644 "${repository_root}/packaging/appimage/gnx.svg" "${appdir}/gnx.svg"
+install -m 0644 "${repository_root}/assets/tray-icon.png" "${appdir}/gnx.png"
+install -m 0644 "${repository_root}/assets/tray-icon.png" "${appdir}/.DirIcon"
 install -m 0644 "${repository_root}/packaging/appimage/gnx.metainfo.xml" \
   "${appdir}/usr/share/metainfo/org.gnx.QuetzalcoatlNext.metainfo.xml"
 

@@ -107,7 +107,7 @@ where
         Some(Command::Update { from, sha256 }) => update::run(from, sha256),
         Some(Command::Uninstall { elevated }) => uninstall::run(elevated),
         Some(Command::Service) => run_service(),
-        Some(Command::Tray) => status::run(config_path, false),
+        Some(Command::Tray) => run_tray(config_path),
         Some(Command::Resume) => install::run(false, true).map(|_| ()),
         Some(Command::InternalInstall { elevated, resume }) => {
             install::run(elevated, resume).map(|_| ())
@@ -132,6 +132,16 @@ fn run_service() -> Result<(), GnxError> {
 #[cfg(not(target_os = "windows"))]
 fn run_service() -> Result<(), GnxError> {
     crate::host::linux::run_service()
+}
+
+#[cfg(target_os = "windows")]
+fn run_tray(config_path: PathBuf) -> Result<(), GnxError> {
+    crate::host::windows::tray::run(config_path)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_tray(config_path: PathBuf) -> Result<(), GnxError> {
+    status::run(config_path, false)
 }
 
 #[cfg(test)]
