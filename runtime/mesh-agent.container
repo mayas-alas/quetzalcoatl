@@ -1,23 +1,28 @@
 [Unit]
-Description=GNX tailscaled mesh daemon
-After=network-online.target
+Description=GNX shared mesh agent (tailscaled)
+After=network-online.target proxmox.service
 Wants=network-online.target
+Requires=proxmox.service
 
 [Container]
 Image=docker.io/tailscale/tailscale@sha256:51fec4863144d6ba0a22504cfb455d020ee0307d0c04eb48f5afee63390bdba0
-ContainerName=gnx-tailscale
+ContainerName=gnx-mesh-agent
 Network=host
+AddHost=controlplane.node.gnx:10.89.70.2
+AddHost=headscale.node.gnx:10.89.70.2
 AddCapability=NET_ADMIN
 AddCapability=NET_RAW
 AddDevice=/dev/net/tun
 Environment=TS_STATE_DIR=/var/lib/tailscale
 Environment=TS_SOCKET=/var/run/tailscale/tailscaled.sock
 Environment=TS_USERSPACE=false
-EnvironmentFile=/etc/gnx/tailscale-controller.env
-EnvironmentFile=/run/gnx/mesh/tailscale-auth.env
+Environment=SSL_CERT_DIR=/etc/ssl/certs:/run/gnx/control-plane
+EnvironmentFile=/etc/gnx/mesh-agent.env
+EnvironmentFile=/run/gnx/mesh/mesh-auth.env
 Volume=/var/lib/gnx/tailscale:/var/lib/tailscale
 Volume=/run/gnx/tailscale:/var/run/tailscale
 Volume=/run/gnx/mesh:/run/secrets/gnx:ro
+Volume=/run/gnx/control-plane:/run/gnx/control-plane:ro
 PodmanArgs=--security-opt=no-new-privileges
 
 [Service]

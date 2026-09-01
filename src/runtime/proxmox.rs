@@ -7,8 +7,11 @@ pub fn validate_quadlet() -> bool {
         && QUADLET.contains("ConditionPathExists=/dev/kvm")
         && QUADLET.contains("PodmanArgs=--privileged")
         && QUADLET.contains("/var/lib/gnx/proxmox/data:/var/lib/vz")
-        && QUADLET.contains("/run/gnx/mesh:/run/gnx/mesh:ro")
+        && QUADLET.contains("IP=10.89.70.2")
+        && QUADLET.contains("/run/gnx/control-plane:/run/gnx/control-plane")
+        && QUADLET.contains("control-plane-bootstrap.sh forward")
         && QUADLET.contains("127.0.0.1:8006:8006")
+        && QUADLET.contains("127.0.0.1:443:443")
         && QUADLET.contains("HealthCmd=/usr/bin/pvesh get /version")
         && !QUADLET.contains(":latest")
 }

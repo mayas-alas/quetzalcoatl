@@ -10,14 +10,17 @@ Image=docker.io/dockurr/proxmox@sha256:99e86ebf6b78b4e551bacabd414ec801a8fc1c308
 ContainerName=gnx-proxmox
 HostName=pve
 Network=gnx-runtime.network
+IP=10.89.70.2
 PublishPort=127.0.0.1:8006:8006
+PublishPort=127.0.0.1:443:443
 EnvironmentFile=/etc/gnx/proxmox.env
 AddDevice=/dev/kvm
 AddDevice=/dev/fuse
 Volume=/var/lib/gnx/proxmox/data:/var/lib/vz
 Volume=/var/lib/gnx/proxmox/config:/var/lib/pve-cluster
 Volume=/opt/gnx/guest:/opt/gnx/guest:ro
-Volume=/run/gnx/mesh:/run/gnx/mesh:ro
+Volume=/run/gnx/mesh:/run/gnx/mesh
+Volume=/run/gnx/control-plane:/run/gnx/control-plane
 PodmanArgs=--privileged --stop-timeout=120 --shm-size=1g
 HealthCmd=/usr/bin/pvesh get /version --output-format json
 HealthInterval=10s
@@ -26,6 +29,7 @@ HealthStartPeriod=30s
 HealthTimeout=10s
 
 [Service]
+ExecStartPost=/usr/bin/podman exec gnx-proxmox /opt/gnx/guest/control-plane-bootstrap.sh forward
 Restart=always
 RestartSec=10s
 TimeoutStartSec=10min

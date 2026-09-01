@@ -1,5 +1,4 @@
 use std::fs;
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -26,9 +25,6 @@ pub struct MeshConfig {
     pub controller_url: String,
     #[serde(default)]
     pub expected_domain: Option<String>,
-    /// Direcciones de bootstrap para resolver el controller antes del enrolamiento.
-    #[serde(default)]
-    pub bootstrap_addresses: Vec<IpAddr>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -181,24 +177,6 @@ impl Config {
             ));
         }
 
-        if self.mesh.bootstrap_addresses.len() > 4 {
-            return Err(GnxError::config_invalid(
-                "mesh.bootstrap_addresses admite como máximo cuatro direcciones.",
-            ));
-        }
-        for (index, address) in self.mesh.bootstrap_addresses.iter().enumerate() {
-            if address.is_unspecified() || address.is_multicast() || address.is_loopback() {
-                return Err(GnxError::config_invalid(format!(
-                    "mesh.bootstrap_addresses[{index}] no puede ser unspecified, multicast ni loopback."
-                )));
-            }
-            if self.mesh.bootstrap_addresses[..index].contains(address) {
-                return Err(GnxError::config_invalid(format!(
-                    "mesh.bootstrap_addresses contiene la dirección duplicada {address}."
-                )));
-            }
-        }
-
         ControllerUrl::parse(&self.mesh.controller_url)
     }
 }
@@ -245,7 +223,6 @@ schema = 1
 [mesh]
 controller_url = "{controller_url}"
 expected_domain = "node.gnx"
-bootstrap_addresses = []
 
 [runtime]
 machine_name = "quetzalcoatl"
@@ -325,28 +302,4 @@ profile = "lab"
         assert_eq!(error.code, "CONFIG_INVALID");
     }
 
-    #[test]
-    fn accepts_private_and_tailnet_bootstrap_addresses() {
-        let source = valid_config("https://controlplane.node.gnx").replace(
-            "bootstrap_addresses = []",
-            "bootstrap_addresses = [\"192.168.10.5\", \"100.64.10.5\"]",
-        );
-        let config = Config::parse(&source).unwrap();
-        assert_eq!(config.mesh.bootstrap_addresses.len(), 2);
-    }
-
-    #[test]
-    fn rejects_unsafe_or_duplicate_bootstrap_addresses() {
-        for addresses in [
-            "[\"127.0.0.1\"]",
-            "[\"224.0.0.1\"]",
-            "[\"192.168.10.5\", \"192.168.10.5\"]",
-        ] {
-            let source = valid_config("https://controlplane.node.gnx").replace(
-                "bootstrap_addresses = []",
-                &format!("bootstrap_addresses = {addresses}"),
-            );
-            assert!(Config::parse(&source).is_err());
-        }
-    }
 }

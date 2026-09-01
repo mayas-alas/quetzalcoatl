@@ -20,6 +20,12 @@ version = "1.102.3"
 image = "docker.io/tailscale/tailscale@sha256:51fec4863144d6ba0a22504cfb455d020ee0307d0c04eb48f5afee63390bdba0"
 source = "https://github.com/tailscale/tailscale/releases/tag/v1.102.3"
 
+[runtime.headscale]
+id = "headscale-linux-amd64"
+version = "0.29.3"
+image = "ghcr.io/juanfont/headscale@sha256:9a4d883997cbe9de8ff58e8e11c37c204a25bd76d4c0920d16e0d944bbe05fb8"
+source = "https://github.com/juanfont/headscale/releases/tag/v0.29.3"
+
 [runtime.proxmox]
 id = "dockur-proxmox-amd64"
 version = "2026-08-29"

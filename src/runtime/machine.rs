@@ -1,4 +1,3 @@
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -46,9 +45,9 @@ impl MachineOwnership {
     }
 }
 
-pub fn ensure(controller: &ControllerUrl, bootstrap_addresses: &[IpAddr]) -> Result<(), GnxError> {
+pub fn ensure(controller: &ControllerUrl) -> Result<(), GnxError> {
     prepare()?;
-    deploy(controller, bootstrap_addresses)
+    deploy(controller)
 }
 
 pub fn prepare() -> Result<(), GnxError> {
@@ -138,33 +137,59 @@ pub fn prepare() -> Result<(), GnxError> {
     Ok(())
 }
 
-pub fn deploy(controller: &ControllerUrl, bootstrap_addresses: &[IpAddr]) -> Result<(), GnxError> {
-    install_runtime(controller, bootstrap_addresses)?;
+pub fn deploy(controller: &ControllerUrl) -> Result<(), GnxError> {
+    install_runtime(controller)?;
+    converge_proxmox()?;
+    converge_control_plane(controller)?;
     converge_mesh(controller)?;
     converge_docktail()?;
-    converge_proxmox()?;
     converge_infra()?;
-    finalize_mesh_auth()?;
     Ok(())
 }
 
-pub fn install_runtime(
-    controller: &ControllerUrl,
-    bootstrap_addresses: &[IpAddr],
-) -> Result<(), GnxError> {
-    deploy_runtime(&podman_executable(), controller, bootstrap_addresses)
+pub fn install_runtime(controller: &ControllerUrl) -> Result<(), GnxError> {
+    deploy_runtime(&podman_executable(), controller)
 }
 
 pub fn converge_mesh(controller: &ControllerUrl) -> Result<(), GnxError> {
     let podman = podman_executable();
+    ensure_mesh_credentials(&podman)?;
     start_units(
         &podman,
-        &["podman.socket", "tailscale.service"],
+        &["podman.socket", "mesh-agent.service"],
         "mesh_start",
         Duration::from_secs(1200),
     )
     .map_err(|error| component_error("MESH_RUNTIME_START_FAILED", "mesh", "start", error, 16))?;
-    verify_mesh(&podman, controller)
+    verify_mesh(&podman, controller)?;
+    clear_runtime_mesh_key(&podman)
+}
+
+pub fn converge_control_plane(controller: &ControllerUrl) -> Result<(), GnxError> {
+    let podman = podman_executable();
+    remote_checked(
+        &podman,
+        &[
+            "sudo",
+            "podman",
+            "exec",
+            "gnx-proxmox",
+            "/opt/gnx/guest/control-plane-bootstrap.sh",
+            "bootstrap",
+        ],
+        "control_plane_bootstrap",
+        Duration::from_secs(2400),
+    )
+    .map_err(|error| {
+        component_error(
+            "CONTROL_PLANE_BOOTSTRAP_FAILED",
+            "control_plane",
+            "bootstrap",
+            error,
+            17,
+        )
+    })?;
+    verify_control_plane(&podman, controller)
 }
 
 pub fn converge_docktail() -> Result<(), GnxError> {
@@ -297,7 +322,7 @@ pub fn converge_infra() -> Result<(), GnxError> {
                 "systemctl",
                 "is-active",
                 "--quiet",
-                "tailscale.service",
+                "mesh-agent.service",
                 "docktail.service",
             ],
         ),
@@ -306,18 +331,6 @@ pub fn converge_infra() -> Result<(), GnxError> {
             |error| component_error("INFRA_HEALTH_FAILED", "infra", operation, error, 18),
         )?;
     }
-    Ok(())
-}
-
-pub fn finalize_mesh_auth() -> Result<(), GnxError> {
-    let podman = podman_executable();
-    remote_checked(
-        &podman,
-        &["sudo", "rm", "-f", "/run/gnx/mesh/auth.key"],
-        "mesh_auth_cleanup",
-        Duration::from_secs(30),
-    )?;
-    install_text(&podman, "", "/run/gnx/mesh/tailscale-auth.env", "0600")?;
     Ok(())
 }
 
@@ -439,7 +452,6 @@ fn machine_name_conflict(detail: impl Into<String>) -> GnxError {
 fn deploy_runtime(
     podman: &Path,
     controller: &ControllerUrl,
-    bootstrap_addresses: &[IpAddr],
 ) -> Result<(), GnxError> {
     remote_checked(
         podman,
@@ -457,6 +469,7 @@ fn deploy_runtime(
             "/var/lib/gnx/proxmox/config",
             "/var/lib/gnx/tailscale",
             "/run/gnx/tailscale",
+            "/run/gnx/control-plane",
         ],
         "runtime_directories",
         Duration::from_secs(60),
@@ -475,24 +488,14 @@ fn deploy_runtime(
     )?;
 
     ensure_proxmox_environment(podman)?;
-    ensure_tailscale_environment(podman, controller)?;
+    ensure_mesh_environment(podman, controller)?;
     ensure_opentofu_payload(podman)?;
-
-    let runtime_tailscale_quadlet = crate::runtime::tailscale::quadlet_with_bootstrap(
-        crate::runtime::tailscale::QUADLET,
-        controller,
-        bootstrap_addresses,
-    );
-    let guest_tailscale_quadlet = crate::runtime::tailscale::quadlet_with_bootstrap(
-        crate::runtime::tailscale::GUEST_QUADLET,
-        controller,
-        bootstrap_addresses,
-    );
+    let headscale_config = crate::runtime::headscale::config(controller)?;
 
     for (content, destination, mode) in [
         (
-            runtime_tailscale_quadlet.as_str(),
-            "/etc/containers/systemd/tailscale.container",
+            crate::runtime::mesh_agent::QUADLET,
+            "/etc/containers/systemd/mesh-agent.container",
             "0644",
         ),
         (
@@ -561,8 +564,8 @@ fn deploy_runtime(
             "0755",
         ),
         (
-            guest_tailscale_quadlet.as_str(),
-            "/opt/gnx/guest/units/tailscale.container",
+            crate::runtime::mesh_agent::GUEST_QUADLET,
+            "/opt/gnx/guest/units/mesh-agent.container",
             "0644",
         ),
         (
@@ -571,9 +574,29 @@ fn deploy_runtime(
             "0644",
         ),
         (
-            &tailscale_environment(controller, "gnx-cell-01"),
-            "/opt/gnx/guest/tailscale-controller.env",
+            &crate::runtime::mesh_agent::environment(controller, "gnx-cell-01")?,
+            "/opt/gnx/guest/mesh-agent.env",
             "0600",
+        ),
+        (
+            crate::runtime::headscale::BOOTSTRAP,
+            "/opt/gnx/guest/control-plane-bootstrap.sh",
+            "0755",
+        ),
+        (
+            crate::runtime::headscale::QUADLET,
+            "/opt/gnx/guest/units/headscale.container",
+            "0644",
+        ),
+        (
+            headscale_config.as_str(),
+            "/opt/gnx/guest/headscale-config.yaml",
+            "0644",
+        ),
+        (
+            crate::runtime::headscale::POLICY,
+            "/opt/gnx/guest/headscale-policy.hujson",
+            "0644",
         ),
     ] {
         install_text(podman, content, destination, mode)?;

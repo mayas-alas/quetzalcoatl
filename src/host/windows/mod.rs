@@ -1,9 +1,7 @@
 pub mod account;
 pub mod download;
 pub mod install;
-pub mod ipc;
 pub mod reboot;
-pub mod resolution;
 pub mod service;
 pub mod tray;
 pub mod wsl;

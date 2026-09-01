@@ -1,0 +1,27 @@
+[Unit]
+Description=GNX sovereign Headscale control plane
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/juanfont/headscale@sha256:9a4d883997cbe9de8ff58e8e11c37c204a25bd76d4c0920d16e0d944bbe05fb8
+ContainerName=gnx-headscale
+Network=host
+Exec=serve
+Volume=/etc/gnx/headscale:/etc/headscale:ro
+Volume=/var/lib/gnx/headscale:/var/lib/headscale
+Tmpfs=/var/run/headscale:rw,noexec,nosuid,size=16m
+PodmanArgs=--read-only --security-opt=no-new-privileges
+HealthCmd=headscale health
+HealthInterval=10s
+HealthRetries=30
+HealthStartPeriod=10s
+HealthTimeout=5s
+
+[Service]
+Restart=always
+RestartSec=5s
+TimeoutStartSec=10min
+
+[Install]
+WantedBy=multi-user.target

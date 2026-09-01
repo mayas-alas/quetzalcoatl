@@ -29,7 +29,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::config::{data_root, default_config_path};
 use crate::error::GnxError;
-use crate::host::windows::{account, download, reboot, resolution, service, tray, wsl};
+use crate::host::windows::{account, download, reboot, service, tray, wsl};
 use crate::host::{InstallOptions, InstallOutcome, UninstallOutcome};
 use crate::journal::{InstallCheckpoint, OperationJournal, default_journal_path};
 use crate::process::CommandSpec;
@@ -117,8 +117,7 @@ pub fn install(options: InstallOptions) -> Result<InstallOutcome, GnxError> {
     advance(&mut journal, InstallCheckpoint::Elevated, &journal_path)?;
 
     let installed_executable = install_files()?;
-    let config = crate::config::Config::load(&default_config_path())?;
-    resolution::apply(&config)?;
+    crate::config::Config::load(&default_config_path())?;
     register_tray(&installed_executable)?;
     advance(
         &mut journal,
@@ -153,7 +152,6 @@ pub fn install(options: InstallOptions) -> Result<InstallOutcome, GnxError> {
     let credential = account::ensure_runtime_account()?;
     service::register(&installed_executable, credential)?;
     account::grant_data_access(&data_root())?;
-    crate::host::windows::ipc::harden_secret_directory()?;
     advance(
         &mut journal,
         InstallCheckpoint::ServiceRegistered,
@@ -208,7 +206,6 @@ pub fn uninstall(elevated: bool) -> Result<UninstallOutcome, GnxError> {
 
     service::remove()?;
     unregister_tray()?;
-    resolution::remove_managed()?;
     let podman_reboot = uninstall_podman()?;
     reboot::unregister_resume()?;
     let install_directory = install_directory();
