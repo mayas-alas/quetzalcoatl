@@ -1,0 +1,2 @@
+/ops/control/*.sh text eol=lf
+/runtime/control/* text eol=lf

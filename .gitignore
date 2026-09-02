@@ -12,3 +12,5 @@
 /target/
 /dist/
 /runtime/artifacts/
+/ops/control/target/
+/ops/control/*.local.toml
