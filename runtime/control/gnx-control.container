@@ -1,0 +1,23 @@
+[Unit]
+Description=GNX control plane
+
+[Container]
+Image=docker.io/netbirdio/netbird-server@sha256:e71f39cefcd90956d818dc4179084fd47d39f0741d1211b818ec640766b5794d
+ContainerName=gnx-control
+Network=gnx-control.network
+PublishPort=3478:3478/udp
+Volume=/var/lib/gnx/control/server.yaml:/etc/netbird/config.yaml:ro
+Volume=/var/lib/gnx/control/state:/var/lib/netbird
+Volume=/var/lib/gnx/control/tls/root.crt:/etc/gnx/root.crt:ro
+Environment=SSL_CERT_FILE=/etc/gnx/root.crt
+EnvironmentFile=/var/lib/gnx/control/bootstrap.env
+Exec=--config /etc/netbird/config.yaml
+LogDriver=none
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

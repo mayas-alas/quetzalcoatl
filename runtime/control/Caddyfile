@@ -1,0 +1,27 @@
+{
+    admin off
+    auto_https off
+    servers {
+        protocols h1 h2
+    }
+    log {
+        level ERROR
+    }
+}
+
+http://mesh.gnx {
+    handle /pki/root.crl {
+        root * /srv/gnx
+        file_server
+    }
+    respond 404
+}
+
+https://mesh.gnx {
+    tls /etc/gnx/tls/server.crt /etc/gnx/tls/server.key
+    @grpc header Content-Type application/grpc*
+    reverse_proxy @grpc h2c://gnx-control:80
+    @backend path /relay* /ws-proxy/* /api/* /oauth2/*
+    reverse_proxy @backend gnx-control:80
+    reverse_proxy gnx-console:80
+}

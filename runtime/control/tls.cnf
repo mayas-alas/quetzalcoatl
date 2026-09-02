@@ -1,0 +1,26 @@
+[req]
+distinguished_name = name
+[name]
+[ca]
+basicConstraints = critical,CA:true,pathlen:0
+keyUsage = critical,keyCertSign,cRLSign
+nameConstraints = critical,permitted;DNS:mesh.gnx
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always
+[server]
+basicConstraints = critical,CA:false
+keyUsage = critical,digitalSignature
+extendedKeyUsage = serverAuth
+subjectAltName = DNS:mesh.gnx
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+crlDistributionPoints = URI:http://mesh.gnx/pki/root.crl
+[ca_config]
+default_ca = local_ca
+[local_ca]
+database = /var/lib/gnx/control/pki/index.txt
+private_key = /var/lib/gnx/control/pki/root.key
+certificate = /var/lib/gnx/control/tls/root.crt
+crlnumber = /var/lib/gnx/control/pki/crlnumber
+default_md = sha256
+default_crl_days = 30

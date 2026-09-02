@@ -1,0 +1,24 @@
+[Unit]
+Description=GNX HTTPS entry
+Wants=gnx-control.service gnx-console.service
+After=gnx-control.service gnx-console.service
+
+[Container]
+Image=docker.io/library/caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+ContainerName=gnx-entry
+Network=gnx-control.network
+PodmanArgs=--network-alias mesh.gnx
+PublishPort=443:443
+PublishPort=80:80
+Volume=/var/lib/gnx/control/Caddyfile:/etc/caddy/Caddyfile:ro
+Volume=/var/lib/gnx/control/tls:/etc/gnx/tls:ro
+Volume=/var/lib/gnx/control/public:/srv/gnx/pki:ro
+LogDriver=none
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target
