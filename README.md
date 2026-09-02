@@ -32,7 +32,7 @@ mientras Docktail sea requisito.
    Podman Machine.
 3. En Linux no se agrega otra VM: Podman y los Quadlets son nativos.
 4. `gnx-netd`, no Docktail, se registra mediante
-   `gnx connect --control-server=<HEADSCALE_URL>`.
+   `gnx connect --control-server=https://mesh.gnx`.
 5. Imágenes y artefactos se fijarán por versión, digest y checksum en cada
    release; no se usará `latest`.
 6. Ningún gate fallido se presenta como instalación lista.

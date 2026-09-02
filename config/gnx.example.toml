@@ -1,0 +1,4 @@
+version = 1
+
+[mesh]
+control_server = "https://mesh.gnx"

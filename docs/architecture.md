@@ -38,8 +38,9 @@ donde Proxmox necesita acceso directo y comprobable a `/dev/kvm`.
 ## Modelo Windows
 
 1. El usuario abre el EXE y acepta UAC.
-2. El instalador crea `quetzalcoatl-runtime`, cuenta local sin inicio de sesión
-   interactivo, y prepara su perfil con ACL exclusivas.
+2. El instalador crea una identidad local de servicio sin inicio de sesión
+   interactivo, sin exponer su nombre como parte del contrato del producto, y
+   prepara su perfil con ACL exclusivas.
 3. Instala Podman 6+ en alcance de máquina y habilita o actualiza WSL 2.
 4. Ejecuta `podman machine init --provider wsl --rootful quetzalcoatl` bajo la
    identidad dedicada. La máquina resultante es una distribución Fedora WSL con
@@ -75,7 +76,7 @@ flowchart TB
     HS --> HSD[("configuración + SQLite")]
     HS -->|"health OK"| BOOT["Bootstrap one-shot"]
     BOOT -->|"pre-auth key efímera"| TS["gnx-netd"]
-    TS -->|"control-server = URL de Headscale"| HS
+    TS -->|"control-server = https://mesh.gnx"| HS
     TS --> TSD[("identidad y estado de red")]
 
     PODMAN["API Podman rootful"] -.-> DT["Docktail condicionado"]
@@ -119,7 +120,7 @@ sequenceDiagram
     O->>O: Validar host, Podman, cgroup v2, KVM y puertos
     O->>H: Instalar configuración y arrancar Quadlet
     H-->>O: Health y TLS válidos
-    O->>H: Crear usuario y pre-auth key
+    O->>H: Crear identidad mesh y pre-auth key
     O->>T: Arrancar con control-server y key efímera
     T-->>O: Nodo registrado y conectado
     O->>P: Arrancar Quadlet privilegiado
@@ -142,24 +143,56 @@ El secreto de bootstrap se crea después de que Headscale esté sano, se entrega
 imágenes se fijan por digest. Las claves TLS, la base de Headscale y los discos
 de Proxmox nunca viven en la capa escribible del contenedor.
 
+## Nombre del control plane
+
+El nombre privado canónico es `https://mesh.gnx`. `mesh` identifica el servicio;
+la identidad del nodo no forma parte del dominio. No se usa `mesh.node.gnx`
+porque convertiría una implementación interna en jerarquía pública.
+
+```toml
+[mesh]
+control_server = "https://mesh.gnx"
+```
+
+`.gnx` no es un dominio público delegado. Antes del primer registro, el
+instalador debe entregar resolución privada y confianza en la CA de GNX. Un
+despliegue que necesite DNS o certificados públicos debe reemplazar este valor
+por un FQDN perteneciente al operador; no debe simular TLS público sobre `.gnx`.
+
 ## Árbol objetivo
 
 ```text
 quetzalcoatl/
+├── AGENTS.md
+├── .agent/
+│   └── gauntlet.md               # ciclo acotado de verificación
 ├── README.md
+├── Cargo.toml
 ├── docs/
 │   ├── architecture.md
 │   ├── audit.md
 │   └── decisions/
 │       └── 0001-network-daemon.md
 ├── src/
-│   ├── cli/                       # interfaz pública
-│   ├── host/
-│   │   ├── windows/               # UAC, cuenta, WSL, service
-│   │   └── linux/                 # systemd, paquetes, KVM
-│   ├── runtime/                   # convergencia común
-│   └── state/                     # journal y estados observados
+│   ├── main.rs                    # composición y dispatch, nada de negocio
+│   ├── bootstrap/                 # doctor + instalación inicial
+│   │   ├── mod.rs
+│   │   ├── preflight.rs
+│   │   └── install.rs
+│   ├── converge/                  # desired -> observed -> acción
+│   │   ├── mod.rs
+│   │   ├── desired.rs
+│   │   └── observed.rs
+│   ├── windows/                   # identidad, SCM, WSL y procesos
+│   │   ├── mod.rs
+│   │   ├── identity.rs
+│   │   └── lifecycle.rs
+│   └── linux/                     # systemd, paquetes y dispositivos
+│       └── mod.rs
+├── config/
+│   └── gnx.example.toml           # sólo valores no secretos
 ├── runtime/
+│   ├── manifest.toml              # versiones y digests
 │   ├── quadlets/
 │   │   ├── quetzalcoatl.network
 │   │   ├── headscale.container
@@ -175,6 +208,11 @@ quetzalcoatl/
     ├── contract/
     └── physical/
 ```
+
+La taxonomía sigue capacidades y transiciones, no dependencias concretas. Por
+eso `service`, `config` o `podman` no son módulos raíz: son detalles de
+`windows`, `bootstrap` o `converge`. Se abre un módulo nuevo sólo cuando existe
+comportamiento propio que probar.
 
 OpenTofu, automatización de LXC, tray, UI y catálogo de workloads no pertenecen
 a esta primera arquitectura. Se agregarán sólo con una decisión explícita y un

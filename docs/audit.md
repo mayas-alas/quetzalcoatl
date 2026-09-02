@@ -63,8 +63,10 @@ certificado y cómo confían en él los clientes. En Windows, WSL usa NAT por de
 el acceso desde LAN requiere red mirrored y firewall o un port proxy mantenido.
 También falta probar el hairpin desde la propia Podman Machine al FQDN público.
 
-**Gate `M-01`:** un dispositivo externo nuevo abre `/health`, valida TLS y se
-registra con `gnx connect --control-server=<URL>` sin entradas manuales de hosts.
+**Gate `M-01`:** un dispositivo externo nuevo recibe la CA y resolución privada,
+abre `/health` en `https://mesh.gnx`, valida TLS y se registra con
+`gnx connect --control-server=https://mesh.gnx` sin edición manual del archivo
+de hosts.
 
 ### P0.4 — KVM en Windows
 
@@ -126,6 +128,7 @@ ese riesgo. El socket permanece deshabilitado mientras tanto.
 - [Quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html)
 - [Seguridad de la API Podman](https://docs.podman.io/en/latest/markdown/podman-system-service.1.html)
 - [Red de WSL](https://learn.microsoft.com/en-us/windows/wsl/networking)
+- [Root Zone Database de IANA](https://www.iana.org/domains/root/db)
 - [Headscale: inicio](https://headscale.net/stable/usage/getting-started/),
   [contenedor](https://headscale.net/stable/setup/install/container/) y
   [funciones](https://headscale.net/stable/about/features/)
