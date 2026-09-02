@@ -22,10 +22,6 @@ impl NativeMesh {
             command.env_remove(name);
         }
         command
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        command
     }
 }
 
@@ -51,14 +47,18 @@ impl Mesh for NativeMesh {
             return Err(Error::ReleaseEvidence);
         }
         verify_digest(&artifact.package, &artifact.sha256)?;
-        let package = artifact
-            .package
-            .canonicalize()
-            .map_err(Error::PackageRead)?;
+        let package = if artifact.package.is_absolute() {
+            artifact.package.clone()
+        } else {
+            std::env::current_dir()
+                .map_err(Error::PackageRead)?
+                .join(&artifact.package)
+        };
         let status = Command::new("msiexec.exe")
             .arg("/i")
             .arg(package)
-            .args(["/quiet", "/norestart"])
+            .args(["/quiet", "/norestart", "/L*v"])
+            .arg(std::env::temp_dir().join("gnx-mesh-client-install.log"))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -75,7 +75,11 @@ impl Mesh for NativeMesh {
 
     fn connect(&self, endpoint: &str, setup_key_file: Option<&Path>) -> Result<()> {
         let mut command = self.command();
-        command.args(connect_args(endpoint, setup_key_file));
+        command
+            .args(connect_args(endpoint, setup_key_file))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         let status = command.status().map_err(Error::Spawn)?;
         if status.success() {
             Ok(())
@@ -91,6 +95,9 @@ impl Mesh for NativeMesh {
         let status = self
             .command()
             .args(["status", "--check", "startup"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status()
             .map_err(Error::Spawn)?;
         if status.success() {
