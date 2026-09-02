@@ -22,7 +22,7 @@ flowchart LR
     end
     M -->|mesh.gnx| E
     B -->|hosts local + HTTPS| E
-    A["Android — pendiente"] -->|VPN SaaS| X
+    A["Android"] -->|VPN SaaS| X
     X -->|DNS privado :53| D
 ```
 
@@ -47,7 +47,7 @@ control_server = "https://mesh.gnx"
 ```
 
 - El control plane es un prerrequisito de `connect`; `ops/control` lo prepara
-  aparte en WSL. Windows conserva un único cliente nativo.
+  aparte en WSL. GNX no instala otro cliente nativo para la capa de acceso.
 - El endpoint se conserva exactamente y nunca cae a un servicio distinto.
 - El login es interactivo o usa `--setup-key-file`; la clave nunca viaja en argv.
 
@@ -60,6 +60,9 @@ Quadlets. `ops/control` prepara la mesh y `ops/compute` prepara un único servic
 Rust compartido alimenta `gnx access configure/apply/dns`, sin cambiar el
 adaptador mesh. La clave la introduce el humano sin eco y GNX gestiona su copia
 temporal en RAM. [Contrato y gates](access.md).
+El servicio `gnx-access-network` aplica la MTU configurada antes del nodo VPN.
+`gnx credentials control/compute` presenta las cuentas DPAPI existentes sólo
+en una consola temporal del humano; no es un almacén genérico ni una rotación.
 La ejecución de agentes queda fuera del producto.
 
 La entrada HTTPS comparte el puerto 443 y selecciona el servicio por nombre.
@@ -75,6 +78,7 @@ gnx/
 ├── src/
 │   ├── main.rs                 # composición y salida
 │   ├── config.rs               # configuración del cliente
+│   ├── credentials.rs          # consulta humana de dos cuentas DPAPI
 │   ├── app/
 │   │   ├── install.rs
 │   │   ├── connect.rs

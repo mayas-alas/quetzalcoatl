@@ -6,7 +6,8 @@
 
 - Un binario Rust y un archivo de configuración gobiernan el flujo.
 - Windows conserva el cliente; WSL aloja el control plane local.
-- El host ejecuta un solo cliente mesh nativo.
+- GNX gestiona un cliente mesh nativo; el operador añadió un cliente de acceso
+  Windows para probar el nodo WSL, sin sustituir la identidad gestionada.
 - El control plane es un prerrequisito, no un caso parcial del binario.
 - La dependencia mesh actual queda detrás de `port::mesh`.
 - El primer servicio se prepara con `ops/compute` y un Quadlet independiente.
@@ -33,7 +34,7 @@ otro host siguen pendientes. Un fallo nunca se sustituye por una prueba simulada
 
 | Comprobación | Resultado 2026-09-02 |
 |---|---|
-| Tests Rust | `PASS` — 16 del CLI/cliente + 3 del bootstrap + 2 del cifrado + 2 de cómputo + 6 de acceso |
+| Tests Rust | `PASS` — 21 del CLI/cliente/credenciales + 3 del bootstrap + 2 del cifrado + 2 de cómputo + 9 de acceso |
 | Clippy con warnings como error | `PASS` |
 | RustSec sobre los cuatro lockfiles | `PASS` — sin vulnerabilidades conocidas en dependencias Rust |
 | Build release y checksum del EXE | `PASS` |
@@ -62,8 +63,12 @@ otro host siguen pendientes. Un fallo nunca se sustituye por una prueba simulada
 | DNS de acceso aislado | `PASS` — UDP/TCP, wildcard, AAAA y límites de resolución; puertos loopback temporales retirados |
 | Claves de acceso | `PASS` — entrada de consola sin eco; rechazo de argv/redirección; archivo tmpfs `0600` eliminado tras éxito/fallo simulado |
 | Formulario DNS en CLI | `PASS` — dominio/switches correctos; nameserver pendiente sin conexión; no publica una IP ficticia |
-| Enrolamiento de acceso | `PENDIENTE` — gate explícito `ACCESS_ENROLLMENT_REQUIRED`; no se recibió clave |
-| Acceso Android / reboot / respaldo de acceso | `PENDIENTE` — no hay prueba por VPN externa ni DNS/políticas SaaS aplicados |
+| Enrolamiento de acceso | `PASS` — humano enroló el nodo; IP e identidad guardadas, sin reenrolamiento |
+| Política y DNS SaaS | `PASS` — regla mínima recibida; Split DNS privado y consultas UDP/TCP verificadas |
+| MTU y HTTPS remoto | `PASS` — fallo reproducido con uplink 1280, tres descargas completas de ambos HTTPS con 1500; servicio de arranque habilitado y ordenado antes de la VPN |
+| Android | Operador confirmó ambos dominios; peer observado en Wi-Fi. Datos móviles y confianza TLS completa pendientes |
+| Consulta de credenciales | `PASS` — fixture DPAPI y pantalla alternativa en consola, revelado/ocultado con Enter; rechazo de redirección; cuentas reales presentes sin imprimir contraseñas |
+| Reboot / respaldo de acceso | `PENDIENTE` — no los cubre el reboot ni la copia USB anteriores |
 
 El bundle contiene un MSI 0.77.1 cuyo digest y firma Authenticode se validaron,
 y el cliente quedó instalado. Los intentos previos fallaron con código MSI 2:
@@ -85,11 +90,19 @@ revocación. Ambos reintentos pasaron. [Operación y límites](control.md).
 En acceso se corrigieron el manejo de IPs nulas antes del login y la aplicación
 de ACL sin `SeSecurityPrivilege`. Las pruebas iniciales también detectaron una
 aserción de plantillas demasiado amplia y el uso de `.invalid`, que no prueba
-forwarding público; se corrigieron y repitieron. El fallo de enrolamiento por
-falta de clave permanece explícito. [Estado de acceso](access.md).
+forwarding público; se corrigieron y repitieron. El humano completó luego el
+enrolamiento. [Estado de acceso](access.md).
 El ingreso manual mediante archivo se sustituyó por `gnx access configure`:
 la clave queda bajo control humano y su custodia temporal es automática. No
 se usaron credenciales reales para comprobar el prompt ni la limpieza.
+
+La sonda DNS se movió a la red del host para evitar el hairpin del contenedor.
+La política vacía se reportó y el operador la sustituyó por una regla mínima.
+Después se reprodujeron pérdidas de paquetes grandes por MTU WSL 1280;
+uplink 1500 resolvió las descargas remotas sin cambiar MTU del túnel, DNS ni CA.
+El primer apply tras reiniciar el nodo leyó un estado transitorio: ahora espera
+un estado utilizable. El helper DPAPI fija módulos de Windows PowerShell para
+no heredar módulos incompatibles de PowerShell 7, fallo detectado con fixture.
 
 ## Riesgos concretos
 
@@ -97,14 +110,14 @@ se usaron credenciales reales para comprobar el prompt ni la limpieza.
 - Custodia de la clave fuera del host y restauración operativa aún pendientes.
 - Cómputo privilegiado y control plane comparten WSL y red de contenedores.
 - Falta respaldo del estado de cómputo y rotación coordinada de su credencial.
-- La nueva identidad de acceso no está cubierta por el respaldo USB; políticas
-  SaaS, confianza Android y renovación de identidad siguen pendientes.
+- La identidad de acceso no está cubierta por el respaldo USB; confianza TLS
+  Android, datos móviles y renovación de identidad siguen pendientes.
 - El login automatizado cubre bootstrap del control y API de cómputo locales.
   No se declara una solución genérica de custodia de secretos.
 
 ## No evaluado todavía
 
-Cliente Linux, otro host, routing, publicación genérica de aplicaciones, HA,
+Cliente Linux, routing, publicación genérica de aplicaciones, HA,
 VMs/LXC, consola WebSocket, restore, reboot con cómputo y actualización
 automática. La interfaz web no tiene un recorrido interactivo completo
 verificado. [Alcance de cómputo](compute.md). La revisión de

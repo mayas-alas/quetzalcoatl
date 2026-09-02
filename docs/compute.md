@@ -2,7 +2,8 @@
 
 `https://proxmox.mesh.gnx` abre Proxmox VE mediante el Quadlet `gnx-compute`
 en WSL. La entrada GNX usa 443 y valida TLS también hacia `gnx-compute:8006`;
-el contenedor no publica puertos al host. Resolución local por `hosts`.
+el contenedor no publica puertos al host. Resolución local por `hosts` y remota
+mediante la [capa de acceso](access.md).
 
 ## Preparar
 
@@ -33,6 +34,10 @@ comprueba que el cliente siga conectado al control plane.
 
 Cuenta `root@pam`: en la interfaz, usuario `root` y realm Linux PAM.
 La contraseña procede del archivo protegido; no se documenta su valor.
+Para verla manualmente: `.\dist\windows\gnx.exe credentials compute`, desde
+PowerShell con el mismo usuario Windows. Enter revela usuario/contraseña y
+otro Enter oculta la pantalla. No grabar, transcribir ni compartir la terminal.
+No acepta redirección ni copia automática al portapapeles; no rota la cuenta.
 Windows elimina su copia temporal al terminar la preparación. El arranque
 aplica la contraseña del archivo WSL; cambiarla sólo en la interfaz no persiste
 al recrear el contenedor. La rotación coordinada todavía no está implementada.
@@ -49,7 +54,9 @@ Verificados: KVM API 12, cuatro servicios activos, HTTPS 200 con TLS válido,
 login API y recuperación después de reiniciar `gnx-compute`.
 
 Pendientes: reboot Windows con cómputo instalado, consola WebSocket interactiva,
-VMs/LXC, acceso desde otro peer, respaldo y restauración del estado de cómputo.
+VMs/LXC, prueba por datos móviles, respaldo y restauración del estado de cómputo.
+El operador confirmó resolución en Android y Windows descargó el HTML completo
+por VPN con TLS validado; eso no verifica todavía el login web ni WebSocket.
 El backup USB actual sólo cubre el control plane. Este despliegue comparte WSL
 y red de contenedores con el control; no ofrece aislamiento para cargas hostiles.
 

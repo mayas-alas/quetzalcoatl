@@ -46,3 +46,15 @@ fn configure_rejects_redirected_input_before_mutation() {
     );
     assert!(output.stdout.is_empty());
 }
+#[test]
+fn credentials_cannot_be_revealed_into_captured_streams() {
+    for account in ["control", "compute"] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_gnx"))
+            .args(["credentials", account])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert_eq!(output.stderr, b"FAILED CREDENTIAL_TERMINAL_REQUIRED\n");
+    }
+}

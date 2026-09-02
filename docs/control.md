@@ -32,6 +32,13 @@ No sobreescribe una instancia cuyo propietario ya exista sin evidencia local.
 | Respaldo cifrado y evidencia | `%LOCALAPPDATA%/GNX/backups` |
 | Clave de recuperación separada | `%LOCALAPPDATA%/GNX/recovery/control.agekey`, ACL del usuario/admin/SYSTEM |
 
+Para consultar usuario y contraseña, en tu PowerShell local y con el mismo
+usuario Windows: `.\dist\windows\gnx.exe credentials control`.
+Enter revela en pantalla temporal; otro Enter limpia y vuelve al shell.
+No usar durante grabación/transcripción ni compartir esa pantalla. Rechaza
+redirecciones, no copia al portapapeles ni cambia la contraseña. DPAPI sigue
+ligado al usuario y equipo originales; no se leen claves de recuperación.
+
 La tarea de sesión mantiene WSL activo y actualiza la línea marcada por GNX en
 `hosts`: `mesh.gnx` y, si está instalado el Quadlet de cómputo,
 `proxmox.mesh.gnx`. Comprueba HTTPS del control y conserva un `hosts.before` para
@@ -63,8 +70,8 @@ fallos durante la revocación final requieren revisar el estado antes de reinten
 El reboot de Windows del 2026-09-02 recuperó servicios, HTTPS y conexión;
 se verificó un solo peer con el mismo ID original protegido. El respaldo
 cifrado y su copia USB se verificaron por SHA-256 y descifrado completo.
-Faltan custodia externa de la clave y restauración operativa. `mesh.gnx` sólo
-resuelve en este host; no se publicaron puertos del router ni acceso de terceros.
+Faltan custodia externa de la clave y restauración operativa. El acceso Android
+usa ahora la [capa VPN y DNS privado](access.md); no se publicaron puertos del router.
 El antiguo `gnx-host.service` quedó deshabilitado, conservando su archivo;
 `legacy` no se modificó.
 

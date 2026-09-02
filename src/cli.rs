@@ -21,6 +21,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Action {
+    /// Reveal a saved account to the human in a temporary console screen.
+    Credentials {
+        #[arg(value_enum)]
+        account: crate::credentials::Account,
+    },
     /// Configure private access or show the nameserver form values.
     Access {
         #[command(subcommand)]
@@ -65,6 +70,9 @@ pub fn run() -> Result<String> {
 }
 
 fn run_with(cli: Cli) -> Result<String> {
+    if let Action::Credentials { account } = cli.command {
+        return crate::credentials::show(account);
+    }
     if let Action::Access { command } = cli.command {
         let path = match cli.config {
             Some(path) => path,
@@ -97,6 +105,7 @@ fn run_with(cli: Cli) -> Result<String> {
     };
     match cli.command {
         Action::Access { .. } => unreachable!("access has its own configuration"),
+        Action::Credentials { .. } => unreachable!("credentials do not use mesh configuration"),
         Action::Doctor => app.doctor(),
         Action::Install { release } => app.install(&Artifact::load(&release)?),
         Action::Connect { setup_key_file } => {
@@ -140,5 +149,18 @@ mod tests {
                 assert!(Cli::try_parse_from(["gnx", "access", action, flag, "example"]).is_err());
             }
         }
+    }
+
+    #[test]
+    fn credentials_are_limited_to_the_two_saved_accounts() {
+        for account in ["control", "compute"] {
+            assert!(Cli::try_parse_from(["gnx", "credentials", account]).is_ok());
+            for flag in ["--password", "--output", "--copy", "--file"] {
+                assert!(
+                    Cli::try_parse_from(["gnx", "credentials", account, flag, "example"]).is_err()
+                );
+            }
+        }
+        assert!(Cli::try_parse_from(["gnx", "credentials", "recovery"]).is_err());
     }
 }

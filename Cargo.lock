@@ -191,6 +191,7 @@ dependencies = [
  "toml",
  "url",
  "windows-sys",
+ "zeroize",
 ]
 
 [[package]]
