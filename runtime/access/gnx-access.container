@@ -11,10 +11,9 @@ ContainerName=gnx-access
 Network=host
 AddDevice=/dev/net/tun
 AddCapability=NET_ADMIN NET_RAW
-PodmanArgs=--entrypoint=/usr/local/bin/tailscaled
+PodmanArgs=--entrypoint=/usr/local/bin/tailscaled --tmpfs=/run/gnx:rw,nosuid,nodev,noexec,size=1m,mode=0700
 Exec=--state=/var/lib/gnx/state/node.state --socket=/run/gnx/access.sock --tun=gnx-access --no-logs-no-support
 Volume=@STATE@/state:/var/lib/gnx/state
-Volume=@STATE@/bootstrap:/run/gnx/bootstrap:ro
 LogDriver=none
 
 [Service]

@@ -1,0 +1,547 @@
+// Shared operational core for the GNX CLI and standalone host helper.
+use std::{
+    fs,
+    io::{IsTerminal, Write},
+    net::Ipv4Addr,
+    path::Path,
+    process::{Command, Stdio},
+    thread,
+    time::Duration,
+};
+
+use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
+
+pub type Result<T> = std::result::Result<T, &'static str>;
+const ACCESS: &str = include_str!("../../../runtime/access/gnx-access.container");
+const DNS: &str = include_str!("../../../runtime/access/gnx-dns.container");
+const RESOLVER: &str = include_str!("../../../runtime/access/dns.toml");
+const ENROLL: &str = include_str!("../../../runtime/access/enroll.sh");
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Config {
+    distribution: String,
+    zone: String,
+    wildcard: bool,
+    state_dir: String,
+}
+
+fn config(source: &str) -> Result<Config> {
+    let c: Config = toml::from_str(source).map_err(|_| "CONFIG")?;
+    if c.distribution != "Ubuntu-24.04"
+        || c.zone != "mesh.gnx"
+        || !c.wildcard
+        || c.state_dir != "/var/lib/gnx/access"
+    {
+        return Err("CONFIG_SCOPE");
+    }
+    Ok(c)
+}
+
+// Never forward subprocess output: authentication can return credentials or URLs.
+fn wsl(c: &Config, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
+    let mut child = Command::new("wsl.exe")
+        .args(["-d", &c.distribution, "--user", "root", "--exec"])
+        .args(args)
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| "WSL_START")?;
+    if let Some(bytes) = input {
+        let result = child.stdin.take().ok_or("WSL_INPUT")?.write_all(bytes);
+        if result.is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("WSL_INPUT");
+        }
+    }
+    let output = child.wait_with_output().map_err(|_| "WSL_WAIT")?;
+    if !output.status.success() {
+        return Err("WSL_COMMAND");
+    }
+    Ok(output.stdout)
+}
+
+fn render(template: &str, c: &Config, ip: Ipv4Addr) -> String {
+    template
+        .replace("@STATE@", &c.state_dir)
+        .replace("@ZONE@", &c.zone)
+        .replace("@IP@", &ip.to_string())
+}
+
+fn read(c: &Config, path: &str) -> Result<Vec<u8>> {
+    wsl(
+        c,
+        &[
+            "sh",
+            "-ec",
+            "if test -f \"$1\"; then cat -- \"$1\"; fi",
+            "gnx",
+            path,
+        ],
+        None,
+    )
+}
+
+fn write(c: &Config, path: &str, content: &[u8], mode: &str) -> Result<bool> {
+    let previous = read(c, path)?;
+    if previous == content {
+        return Ok(false);
+    }
+    // Only our managed unit names may be replaced. Never overwrite foreign units.
+    if path.starts_with("/etc/containers/")
+        && !previous.is_empty()
+        && !previous.starts_with(b"# Managed by GNX access")
+    {
+        return Err("UNIT_OWNERSHIP");
+    }
+    wsl(
+        c,
+        &[
+            "sh",
+            "-ec",
+            "umask 077; cat > \"$1.new\"; chmod \"$2\" \"$1.new\"; mv -- \"$1.new\" \"$1\"",
+            "gnx",
+            path,
+            mode,
+        ],
+        Some(content),
+    )?;
+    Ok(true)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct Status {
+    backend_state: String,
+    #[serde(rename = "Self")]
+    node: Option<Node>,
+}
+
+#[derive(Deserialize)]
+struct Node {
+    #[serde(rename = "ID")]
+    id: String,
+    #[serde(rename = "TailscaleIPs")]
+    ips: Option<Vec<String>>,
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Debug)]
+struct Identity {
+    id: String,
+    ipv4: Ipv4Addr,
+}
+
+fn identity(status: Status) -> Result<Identity> {
+    if status.backend_state != "Running" {
+        return Err("ACCESS_NOT_CONNECTED");
+    }
+    let node = status.node.ok_or("ACCESS_IDENTITY")?;
+    if node.id.is_empty() || !node.id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return Err("ACCESS_IDENTITY");
+    }
+    let ip = node
+        .ips
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| s.parse::<Ipv4Addr>().ok())
+        .find(|ip| ip.octets()[0] == 100 && (64..=127).contains(&ip.octets()[1]))
+        .ok_or("ACCESS_ADDRESS")?;
+    Ok(Identity {
+        id: node.id,
+        ipv4: ip,
+    })
+}
+
+fn client(c: &Config, args: &[&str]) -> Result<Vec<u8>> {
+    let mut command = vec![
+        "podman",
+        "exec",
+        "gnx-access",
+        "/usr/local/bin/tailscale",
+        "--socket=/run/gnx/access.sock",
+    ];
+    command.extend_from_slice(args);
+    wsl(c, &command, None)
+}
+
+fn status(c: &Config) -> Result<Status> {
+    serde_json::from_slice(&client(c, &["status", "--json"])?).map_err(|_| "ACCESS_STATUS")
+}
+
+fn enrollment(text: &str) -> Result<&str> {
+    let key = text.trim_start_matches('\u{feff}').trim();
+    if !key.starts_with("tskey-auth-")
+        || !(24..=512).contains(&key.len())
+        || !key
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err("KEY_FORMAT");
+    }
+    Ok(key)
+}
+
+fn enroll(c: &Config, key: Option<&str>) -> Result<()> {
+    let args = [
+        "up",
+        "--reset",
+        "--accept-dns=false",
+        "--accept-routes=false",
+        "--hostname=gnx-access",
+        "--ssh=false",
+        "--timeout=45s",
+    ];
+    let result = if let Some(key) = key {
+        let mut command = vec![
+            "podman",
+            "exec",
+            "-i",
+            "gnx-access",
+            "sh",
+            "-ec",
+            ENROLL,
+            "gnx",
+            "/usr/local/bin/tailscale",
+            "--socket=/run/gnx/access.sock",
+        ];
+        command.extend_from_slice(&args);
+        wsl(c, &command, Some(key.as_bytes()))
+    } else {
+        client(c, &args)
+    };
+    result.map(|_| ()).map_err(|_| "ACCESS_ENROLLMENT")
+}
+
+fn service(c: &Config, name: &str, changed: bool) -> Result<()> {
+    wsl(
+        c,
+        &["systemctl", if changed { "restart" } else { "start" }, name],
+        None,
+    )?;
+    wsl(c, &["systemctl", "is-active", "--quiet", name], None)?;
+    Ok(())
+}
+
+fn verify(c: &Config, ip: Ipv4Addr) -> Result<()> {
+    let address = format!("@{ip}");
+    for transport in ["+notcp", "+tcp"] {
+        for name in ["mesh.gnx", "proxmox.mesh.gnx", "wildcard-check.mesh.gnx"] {
+            let answer = wsl(
+                c,
+                &[
+                    "podman", "exec", "gnx-dns", "dig", &address, name, "A", "+short", "+time=2",
+                    "+tries=1", transport,
+                ],
+                None,
+            )?;
+            if String::from_utf8_lossy(&answer).trim() != ip.to_string() {
+                return Err("DNS_ANSWER");
+            }
+        }
+    }
+    for name in ["mesh.gnx", "proxmox.mesh.gnx"] {
+        let mapping = format!("{name}:443:{ip}");
+        let url = format!("https://{name}/");
+        let code = wsl(
+            c,
+            &[
+                "curl",
+                "--silent",
+                "--show-error",
+                "--noproxy",
+                "*",
+                "--max-time",
+                "15",
+                "--cacert",
+                "/var/lib/gnx/control/tls/root.crt",
+                "--resolve",
+                &mapping,
+                "--output",
+                "/dev/null",
+                "--write-out",
+                "%{http_code}",
+                &url,
+            ],
+            None,
+        )?;
+        if code != b"200" {
+            return Err("HTTPS_ENDPOINT");
+        }
+    }
+    Ok(())
+}
+
+pub fn apply(path: &Path) -> Result<String> {
+    apply_with(path, || Err("ACCESS_ENROLLMENT_REQUIRED"))
+}
+
+pub fn configure(path: &Path) -> Result<String> {
+    // Never read credentials from redirected input or a shell argument.
+    config(&fs::read_to_string(path).map_err(|_| "CONFIG_FILE")?)?;
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        return Err("ACCESS_TERMINAL_REQUIRED");
+    }
+    apply_with(path, || {
+        let secret = Zeroizing::new(
+            rpassword::prompt_password("GNX enrollment key (hidden; Enter cancels): ")
+                .map_err(|_| "ACCESS_SECRET_INPUT")?,
+        );
+        if secret.trim().is_empty() {
+            return Err("ACCESS_CANCELLED");
+        }
+        enrollment(&secret)?;
+        Ok(secret)
+    })
+}
+
+fn apply_with(path: &Path, prompt: impl FnOnce() -> Result<Zeroizing<String>>) -> Result<String> {
+    let c = config(&fs::read_to_string(path).map_err(|_| "CONFIG_FILE")?)?;
+    wsl(&c, &["test", "-c", "/dev/net/tun"], None).map_err(|_| "TUN_REQUIRED")?;
+    for unit in [
+        "gnx-entry.service",
+        "gnx-control.service",
+        "gnx-compute.service",
+    ] {
+        wsl(&c, &["systemctl", "is-active", "--quiet", unit], None)
+            .map_err(|_| "INFRASTRUCTURE_REQUIRED")?;
+    }
+    // No shell substitution of configuration or credentials; arguments stay separate.
+    for suffix in ["", "/state"] {
+        wsl(
+            &c,
+            &[
+                "install",
+                "-d",
+                "-m",
+                "700",
+                &format!("{}{suffix}", c.state_dir),
+            ],
+            None,
+        )?;
+    }
+    let unit = render(ACCESS, &c, Ipv4Addr::UNSPECIFIED);
+    let changed = write(
+        &c,
+        "/etc/containers/systemd/gnx-access.container",
+        unit.as_bytes(),
+        "644",
+    )?;
+    wsl(&c, &["systemctl", "daemon-reload"], None)?;
+    service(&c, "gnx-access.service", changed).map_err(|_| "ACCESS_SERVICE")?;
+    let mut observed = status(&c);
+    for _ in 0..20 {
+        if observed.is_ok() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(500));
+        observed = status(&c);
+    }
+    let observed = observed?;
+    let key = match observed.backend_state.as_str() {
+        "Running" | "Stopped" => None,
+        "NeedsLogin" => Some(prompt()?),
+        "NeedsMachineAuth" => return Err("ACCESS_DEVICE_APPROVAL_REQUIRED"),
+        _ => return Err("ACCESS_NOT_CONNECTED"),
+    };
+    enroll(&c, key.as_ref().map(|key| enrollment(key)).transpose()?)?;
+    drop(key);
+    let current = identity(status(&c)?)?;
+    let identity_path = format!("{}/identity.json", c.state_dir);
+    let previous = read(&c, &identity_path)?;
+    if !previous.is_empty() {
+        let previous: Identity = serde_json::from_slice(&previous).map_err(|_| "SAVED_IDENTITY")?;
+        if previous != current {
+            return Err("ACCESS_IDENTITY_CHANGED");
+        }
+    }
+    write(
+        &c,
+        &identity_path,
+        &serde_json::to_vec(&current).map_err(|_| "SAVED_IDENTITY")?,
+        "600",
+    )?;
+    let dns = render(RESOLVER, &c, current.ipv4);
+    let changed_config = write(
+        &c,
+        &format!("{}/dns.toml", c.state_dir),
+        dns.as_bytes(),
+        "644",
+    )?;
+    let unit = render(DNS, &c, current.ipv4);
+    let changed_unit = write(
+        &c,
+        "/etc/containers/systemd/gnx-dns.container",
+        unit.as_bytes(),
+        "644",
+    )?;
+    wsl(&c, &["systemctl", "daemon-reload"], None)?;
+    service(&c, "gnx-dns.service", changed_config || changed_unit).map_err(|_| "DNS_SERVICE")?;
+    let mut checks = verify(&c, current.ipv4);
+    for _ in 0..5 {
+        if checks.is_ok() {
+            break;
+        }
+        thread::sleep(Duration::from_secs(1));
+        checks = verify(&c, current.ipv4);
+    }
+    checks?;
+    Ok(format!(
+        "access-local\n{}\nPENDING saas-dns-policy android-cellular reboot backup",
+        dns_fields(&c, Some(current.ipv4))
+    ))
+}
+
+fn dns_fields(c: &Config, ip: Option<Ipv4Addr>) -> String {
+    let address = ip
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| "PENDING (gnx access configure)".into());
+    format!(
+        "Nameserver: {address}\nRestrict to domain (Split DNS): ON\nDomain: {}\nUse with exit node: OFF\nSearch domain (optional): {}",
+        c.zone, c.zone
+    )
+}
+
+pub struct DnsReport {
+    pub fields: String,
+    pub checks: Result<()>,
+}
+
+pub fn dns(path: &Path) -> Result<DnsReport> {
+    let c = config(&fs::read_to_string(path).map_err(|_| "CONFIG_FILE")?)?;
+    let current = status(&c).and_then(|status| {
+        if status.backend_state == "NeedsLogin" {
+            Err("ACCESS_ENROLLMENT_REQUIRED")
+        } else {
+            identity(status)
+        }
+    });
+    let fields = dns_fields(&c, current.as_ref().ok().map(|node| node.ipv4));
+    let checks = current.and_then(|current| {
+        let saved = read(&c, &format!("{}/identity.json", c.state_dir))?;
+        let saved: Identity = serde_json::from_slice(&saved).map_err(|_| "SAVED_IDENTITY")?;
+        if saved != current {
+            return Err("ACCESS_IDENTITY_CHANGED");
+        }
+        wsl(
+            &c,
+            &["systemctl", "is-active", "--quiet", "gnx-dns.service"],
+            None,
+        )
+        .map_err(|_| "DNS_SERVICE")?;
+        verify(&c, current.ipv4)
+    });
+    Ok(DnsReport { fields, checks })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const CONFIG: &str = include_str!("../../../runtime/access/access.toml");
+
+    #[test]
+    fn bounds_configuration_before_host_changes() {
+        assert!(config(CONFIG).is_ok());
+        for invalid in [
+            CONFIG.replace("mesh.gnx", "gnx"),
+            CONFIG.replace("true", "false"),
+            CONFIG.replace("/var/lib/gnx/access", "/"),
+            format!("{CONFIG}\nsecret = 'forbidden'"),
+            CONFIG.replace("Ubuntu-24.04", "another-host"),
+        ] {
+            assert!(config(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn validates_human_input_without_reflecting_it() {
+        let example = "tskey-auth-example-not-a-real-key";
+        assert_eq!(enrollment(&format!("\u{feff} {example}\r\n")), Ok(example));
+        for input in [
+            "",
+            "wrong-kind",
+            "tskey-auth-not valid",
+            "tskey-api-example-not-a-real-key",
+        ] {
+            assert_eq!(enrollment(input), Err("KEY_FORMAT"));
+        }
+        assert_eq!(
+            enrollment(&format!("tskey-auth-{}", "x".repeat(513))),
+            Err("KEY_FORMAT")
+        );
+    }
+
+    #[test]
+    fn renders_only_private_dns_without_global_forwarding() {
+        let c = config(CONFIG).unwrap();
+        let ip = "100.100.100.10".parse().unwrap();
+        let dns = render(RESOLVER, &c, ip);
+        let parsed: toml::Value = toml::from_str(&dns).unwrap();
+        assert!(parsed["dns"]["upstreams"].as_array().unwrap().is_empty());
+        assert_eq!(parsed["webserver"]["port"].as_str(), Some(""));
+        assert!(dns.contains("address=/mesh.gnx/100.100.100.10"));
+        assert!(dns.contains("local=/mesh.gnx/"));
+        for template in [ACCESS, DNS, RESOLVER] {
+            for marker in ["@STATE@", "@ZONE@", "@IP@"] {
+                assert!(!render(template, &c, ip).contains(marker));
+            }
+        }
+        let unit = render(DNS, &c, ip);
+        assert!(unit.contains("PublishPort=100.100.100.10:53:53/udp"));
+        assert!(unit.contains("PublishPort=100.100.100.10:53:53/tcp"));
+        assert!(!unit.contains("8006"));
+    }
+
+    #[test]
+    fn requires_a_running_stable_overlay_identity() {
+        let parse = |state: &str, ip: &str| {
+            identity(Status {
+                backend_state: state.into(),
+                node: Some(Node {
+                    id: "n123".into(),
+                    ips: Some(vec![ip.into()]),
+                }),
+            })
+        };
+        assert!(parse("Running", "100.68.68.10").is_ok());
+        for (state, ip) in [
+            ("NeedsLogin", "100.68.68.10"),
+            ("Stopped", "100.68.68.10"),
+            ("Running", "192.168.1.1"),
+            ("Running", "100.128.0.1"),
+        ] {
+            assert!(parse(state, ip).is_err());
+        }
+    }
+
+    #[test]
+    fn unenrolled_status_allows_null_addresses_without_exposing_login_data() {
+        let status: Status = serde_json::from_str(r#"{"BackendState":"NeedsLogin","Self":{"ID":"","TailscaleIPs":null},"AuthURL":"not-retained"}"#).unwrap();
+        assert_eq!(status.backend_state, "NeedsLogin");
+        assert!(identity(status).is_err());
+    }
+
+    #[test]
+    fn dns_form_never_invents_a_nameserver() {
+        let c = config(CONFIG).unwrap();
+        let pending = dns_fields(&c, None);
+        assert!(pending.contains("Nameserver: PENDING"));
+        assert!(!pending.contains("100."));
+        let ready = dns_fields(&c, Some("100.100.100.10".parse().unwrap()));
+        for field in [
+            "Nameserver: 100.100.100.10",
+            "Restrict to domain (Split DNS): ON",
+            "Domain: mesh.gnx",
+            "Use with exit node: OFF",
+        ] {
+            assert!(ready.contains(field));
+        }
+        assert!(!ready.contains("*.mesh.gnx"));
+    }
+}

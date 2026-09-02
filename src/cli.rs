@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, error::ErrorKind};
 
 use crate::{
     Result,
@@ -21,6 +21,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Action {
+    /// Configure private access or show the nameserver form values.
+    Access {
+        #[command(subcommand)]
+        command: AccessAction,
+    },
     /// Validate the host and installed mesh client without mutation.
     Doctor,
     /// Install the pinned local mesh client package.
@@ -35,11 +40,55 @@ enum Action {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum AccessAction {
+    /// Prompt for enrollment only when needed; input is hidden and temporary.
+    Configure,
+    /// Reconcile access without prompting or accepting credentials.
+    Apply,
+    /// Show exact DNS form values and verify local readiness; no changes.
+    Dns,
+}
+
 pub fn run() -> Result<String> {
-    run_with(Cli::parse())
+    let cli = Cli::try_parse().map_err(|error| {
+        if matches!(
+            error.kind(),
+            ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+        ) {
+            error.exit();
+        }
+        // A misplaced secret must not be echoed by the argument parser.
+        crate::Error::Arguments
+    })?;
+    run_with(cli)
 }
 
 fn run_with(cli: Cli) -> Result<String> {
+    if let Action::Access { command } = cli.command {
+        let path = match cli.config {
+            Some(path) => path,
+            None => std::env::current_exe()
+                .map_err(crate::Error::Spawn)?
+                .with_file_name("access.toml"),
+        };
+        let result = match command {
+            AccessAction::Configure => gnx_access::configure(&path),
+            AccessAction::Apply => gnx_access::apply(&path),
+            AccessAction::Dns => {
+                let report = gnx_access::dns(&path)
+                    .map_err(|operation| crate::Error::External { operation, code: 1 })?;
+                return match report.checks {
+                    Ok(()) => Ok(format!("access-dns\n{}", report.fields)),
+                    Err(operation) => Err(crate::Error::AccessReport {
+                        operation,
+                        fields: report.fields,
+                    }),
+                };
+            }
+        };
+        return result.map_err(|operation| crate::Error::External { operation, code: 1 });
+    }
     let config_path = cli.config.ok_or(crate::Error::ConfigRequired)?;
     let config = Config::load(&config_path)?;
     let app = App {
@@ -47,6 +96,7 @@ fn run_with(cli: Cli) -> Result<String> {
         mesh: NativeMesh,
     };
     match cli.command {
+        Action::Access { .. } => unreachable!("access has its own configuration"),
         Action::Doctor => app.doctor(),
         Action::Install { release } => app.install(&Artifact::load(&release)?),
         Action::Connect { setup_key_file } => {
@@ -80,5 +130,15 @@ mod tests {
             ])
             .is_ok()
         );
+    }
+
+    #[test]
+    fn access_has_a_human_prompt_and_read_only_dns_without_key_arguments() {
+        for action in ["configure", "apply", "dns"] {
+            assert!(Cli::try_parse_from(["gnx", "access", action]).is_ok());
+            for flag in ["--key", "--key-file", "--setup-key-file"] {
+                assert!(Cli::try_parse_from(["gnx", "access", action, flag, "example"]).is_err());
+            }
+        }
     }
 }

@@ -6,6 +6,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("invalid CLI arguments")]
+    Arguments,
     #[error("--config is required")]
     ConfigRequired,
     #[error("configuration could not be read")]
@@ -42,11 +44,17 @@ pub enum Error {
     Spawn(#[source] io::Error),
     #[error("an external operation failed")]
     External { operation: &'static str, code: i32 },
+    #[error("access DNS checks failed")]
+    AccessReport {
+        operation: &'static str,
+        fields: String,
+    },
 }
 
 impl Error {
     pub fn label(&self) -> &'static str {
         match self {
+            Self::Arguments => "ARGUMENTS",
             Self::ConfigRequired => "CONFIG_REQUIRED",
             Self::ConfigRead(_) => "CONFIG_READ",
             Self::ConfigParse(_) => "CONFIG_PARSE",
@@ -64,13 +72,14 @@ impl Error {
             Self::PackageDigest => "PACKAGE_DIGEST",
             Self::SetupKeyFile => "SETUP_KEY_FILE",
             Self::Spawn(_) => "PROCESS_START",
-            Self::External { operation, .. } => operation,
+            Self::External { operation, .. } | Self::AccessReport { operation, .. } => operation,
         }
     }
 
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::ConfigRequired
+            Self::Arguments
+            | Self::ConfigRequired
             | Self::ConfigRead(_)
             | Self::ConfigParse(_)
             | Self::ConfigVersion
@@ -83,7 +92,7 @@ impl Error {
             | Self::PackageDigest => 3,
             Self::HostUnsupported | Self::ElevationRequired => 4,
             Self::ClientMissing | Self::ClientVersion | Self::SetupKeyFile => 5,
-            Self::Spawn(_) | Self::External { .. } => 6,
+            Self::Spawn(_) | Self::External { .. } | Self::AccessReport { .. } => 6,
         }
     }
 }

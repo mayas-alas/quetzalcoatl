@@ -1,4 +1,4 @@
-use std::process::ExitCode;
+use std::{io::Write, process::ExitCode};
 
 fn main() -> ExitCode {
     match gnx::cli::run() {
@@ -7,7 +7,12 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("FAILED {}", error.label());
+            let context = match &error {
+                gnx::Error::AccessReport { fields, .. } => format!("{fields}\n"),
+                _ => String::new(),
+            };
+            let message = format!("{context}FAILED {}\n", error.label());
+            let _ = std::io::stderr().write_all(message.as_bytes());
             ExitCode::from(error.exit_code())
         }
     }
