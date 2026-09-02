@@ -47,13 +47,7 @@ impl Mesh for NativeMesh {
             return Err(Error::ReleaseEvidence);
         }
         verify_digest(&artifact.package, &artifact.sha256)?;
-        let package = if artifact.package.is_absolute() {
-            artifact.package.clone()
-        } else {
-            std::env::current_dir()
-                .map_err(Error::PackageRead)?
-                .join(&artifact.package)
-        };
+        let package = installer_path(&artifact.package)?;
         let status = Command::new("msiexec.exe")
             .arg("/i")
             .arg(package)
@@ -111,6 +105,18 @@ impl Mesh for NativeMesh {
     }
 }
 
+fn installer_path(path: &Path) -> Result<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(Error::PackageRead)?
+            .join(path)
+    };
+    // Rebuild native separators without canonicalize's Windows verbatim prefix.
+    Ok(absolute.components().collect())
+}
+
 fn verify_digest(path: &Path, expected: &str) -> Result<()> {
     let file = File::open(path).map_err(Error::PackageRead)?;
     let mut reader = BufReader::new(file);
@@ -157,6 +163,18 @@ fn connect_args(endpoint: &str, setup_key_file: Option<&Path>) -> Vec<OsString> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn installer_receives_native_absolute_paths() {
+        let path = installer_path(Path::new(r"C:\GNX bundle\artifacts/mesh-client.msi")).unwrap();
+        assert_eq!(path.as_os_str(), r"C:\GNX bundle\artifacts\mesh-client.msi");
+        let relative = installer_path(Path::new("dist/windows/artifacts/mesh-client.msi")).unwrap();
+        assert!(relative.is_absolute());
+        let text = relative.to_str().unwrap();
+        assert!(!text.contains('/'));
+        assert!(!text.starts_with(r"\\?\"));
+    }
 
     #[test]
     fn extracts_only_a_version_token() {
