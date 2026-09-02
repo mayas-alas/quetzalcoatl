@@ -38,8 +38,8 @@ Services entre sus funciones soportadas y mantiene el issue `#2845` abierto con
 la etiqueta de feature gap. También siguen abiertos los prerrequisitos de
 certificados y publicación HTTPS administrados por el daemon.
 
-El fork adoptado conserva una LocalAPI madura, pero no añade esas capacidades al
-servidor Headscale. Por tanto, el daemon nuevo no elimina este bloqueo.
+Conservar la LocalAPI del daemon upstream no añade esas capacidades a Headscale.
+Por tanto, la decisión sobre `gnx-netd` no resuelve este bloqueo.
 
 **Consecuencia:** se puede empaquetar Docktail, pero no prometer la función ni
 habilitarla por defecto. El gate `D-01` exige crear, resolver y alcanzar un
