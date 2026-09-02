@@ -67,6 +67,14 @@ original, sin redirección ni portapapeles. No grabar ni transcribir la terminal
 insumos del cliente genera un bundle instalable; sin ellos produce sólo el
 bundle de desarrollo y no simula que la dependencia esté lista.
 
+Para registrar esa CLI en el host, ejecutar
+`packaging/windows/install-host.ps1` desde PowerShell **como administrador**.
+Verifica el SHA-256, instala en `C:/Program Files/GNX`, conserva la configuración
+existente y actualiza el PATH. Retira el servicio y las carpetas de la instalación
+anterior a un respaldo restringido en `C:/ProgramData/GNX/retired-host`;
+no borra discos ni modifica la VPN o el WSL actuales. Abrir una terminal nueva
+y comprobar `gnx access dns`. Las actualizaciones usan el mismo instalador.
+
 ## Documentos
 
 - [Arquitectura](docs/architecture.md)
