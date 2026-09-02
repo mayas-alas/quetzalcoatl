@@ -33,7 +33,7 @@ otro host siguen pendientes. Un fallo nunca se sustituye por una prueba simulada
 
 | Comprobación | Resultado 2026-09-02 |
 |---|---|
-| Tests Rust | `PASS` — 13 del cliente + 3 del bootstrap + 2 del cifrado + 2 de cómputo + 5 de acceso |
+| Tests Rust | `PASS` — 16 del CLI/cliente + 3 del bootstrap + 2 del cifrado + 2 de cómputo + 6 de acceso |
 | Clippy con warnings como error | `PASS` |
 | RustSec sobre los cuatro lockfiles | `PASS` — sin vulnerabilidades conocidas en dependencias Rust |
 | Build release y checksum del EXE | `PASS` |
@@ -60,6 +60,8 @@ otro host siguen pendientes. Un fallo nunca se sustituye por una prueba simulada
 | Respaldo de cómputo | `PENDIENTE` — la copia USB verificada sólo cubre el control plane |
 | Operador de acceso | `PASS` — build, validación y nodo Quadlet activo sin alterar los HTTPS existentes |
 | DNS de acceso aislado | `PASS` — UDP/TCP, wildcard, AAAA y límites de resolución; puertos loopback temporales retirados |
+| Claves de acceso | `PASS` — entrada de consola sin eco; rechazo de argv/redirección; archivo tmpfs `0600` eliminado tras éxito/fallo simulado |
+| Formulario DNS en CLI | `PASS` — dominio/switches correctos; nameserver pendiente sin conexión; no publica una IP ficticia |
 | Enrolamiento de acceso | `PENDIENTE` — gate explícito `ACCESS_ENROLLMENT_REQUIRED`; no se recibió clave |
 | Acceso Android / reboot / respaldo de acceso | `PENDIENTE` — no hay prueba por VPN externa ni DNS/políticas SaaS aplicados |
 
@@ -85,6 +87,9 @@ de ACL sin `SeSecurityPrivilege`. Las pruebas iniciales también detectaron una
 aserción de plantillas demasiado amplia y el uso de `.invalid`, que no prueba
 forwarding público; se corrigieron y repitieron. El fallo de enrolamiento por
 falta de clave permanece explícito. [Estado de acceso](access.md).
+El ingreso manual mediante archivo se sustituyó por `gnx access configure`:
+la clave queda bajo control humano y su custodia temporal es automática. No
+se usaron credenciales reales para comprobar el prompt ni la limpieza.
 
 ## Riesgos concretos
 

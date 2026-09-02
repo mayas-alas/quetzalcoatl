@@ -25,8 +25,9 @@ Ambas direcciones resuelven mediante `hosts` en este Windows. El acceso desde
 otro equipo por la mesh todavía no se ha probado. El respaldo cifrado en USB
 cubre el control plane; faltan respaldo de cómputo y restauración operativa.
 
-La [capa de acceso Android](docs/access.md) ya tiene operador Rust, nodo WSL y
-plantillas DNS privado; falta enrolarlo y validar SaaS, teléfono y reinicio.
+La [capa de acceso Android](docs/access.md) tiene nodo WSL, DNS privado y dos
+comandos: `gnx access configure` pide la clave al humano sin eco; `gnx access dns`
+muestra los campos del nameserver. Falta enrolar y validar SaaS, teléfono y reinicio.
 No sustituye la infraestructura existente.
 
 ## Reglas
@@ -46,11 +47,15 @@ cargo build --release --locked
 gnx.exe install --config config/gnx.toml --release runtime/release.toml
 gnx.exe doctor --config config/gnx.toml
 gnx.exe connect --config config/gnx.toml
+gnx.exe access configure
+gnx.exe access dns
 ```
 
 `release.toml` referencia un MSI local, su SHA-256 y licencia. No contiene
 URLs de descarga. Para enrolamiento desatendido, `connect` acepta
 `--setup-key-file`; nunca acepta la clave como valor.
+Ese contrato corresponde al cliente mesh Windows. Acceso usa sólo el prompt
+humano y toma `access.toml` junto al EXE; no solicita archivos de claves.
 
 `packaging/windows/build.ps1` produce `dist/windows/gnx.exe`. Con los tres
 insumos del cliente genera un bundle instalable; sin ellos produce sólo el

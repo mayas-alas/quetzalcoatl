@@ -10,30 +10,46 @@ La VPN, la resolución y la confianza TLS son tres requisitos distintos.
 
 ## Aplicar
 
+Desde la raíz del repo, usando el EXE actualizado (no otro `gnx` en el PATH):
+
 ```powershell
-cargo build --release --locked --manifest-path ops/access/Cargo.toml
-powershell.exe -NoProfile -File ops/access/prepare-host.ps1
+.\dist\windows\gnx.exe access configure
+.\dist\windows\gnx.exe access dns
 ```
 
-El preparador protege `%LOCALAPPDATA%\GNX\access` para usuario, SYSTEM y
-administradores. Guardar allí `enrollment.key`: una **Auth key** de Tailscale,
-one-off, para un nodo no efímero; no una API key. Repetir el preparador.
-Nunca pegarla en chat, argumentos o configuración. El original permanece
-protegido en Windows; la copia temporal root-only en WSL se elimina al terminar
-el intento. No se necesita otro cliente Windows ni nuevo UAC.
+La configuración por defecto es `access.toml` junto al EXE; `--config` permite
+seleccionar otro archivo del mismo corte. `configure` pide al **humano** una
+Auth key one-off, no efímera, sólo cuando hace falta enrolar. Entrada oculta;
+Enter vacío cancela. No admite claves por argumentos, archivos ni redirección.
+No enviarlas al agente. No se crea un archivo de credenciales en Windows.
 
-El operador Rust acepta sólo este contrato:
+GNX limita la copia temporal a un archivo `0600` en tmpfs del contenedor,
+la elimina tras éxito o fallo y limpia el buffer Rust. Un corte forzado puede
+requerir reiniciar el contenedor para descartar residuos RAM. La identidad del
+nodo sí persiste. No necesita otro cliente Windows ni nuevo UAC.
 
-```text
-gnx-access apply --config runtime/access/access.toml [--key-file <archivo-protegido>]
-```
+`gnx access apply` reaplica sin pedir credenciales. `gnx access dns` sólo
+consulta el estado; devuelve fallo explícito si falta conexión o salud local.
+El núcleo `ops/access` se comparte con el EXE; no se duplica el flujo.
 
-Valida el corte, arranca Quadlet, enrola por archivo, conserva ID/IP y genera
+Valida el corte, arranca Quadlet, enrola con su archivo temporal, conserva ID/IP y genera
 DNS con la IP observada. Las imágenes están fijadas por digest. No acepta DNS
 ni rutas del SaaS, no anuncia subredes, no activa SSH ni exit node. Reaplicar
 no vuelve a enrolar un nodo conectado; un cambio de identidad falla cerrado.
 `READY access-local` exige DNS UDP/TCP y ambos HTTPS con CA/nombre válidos;
 **no acredita acceso remoto**. La salida externa de autenticación no se publica.
+
+## Campos de «Add nameserver»
+
+| Campo | Valor que muestra `gnx access dns` |
+|---|---|
+| Nameserver | IP VPN observada; `PENDING` si aún no está conectado |
+| Restrict to domain / Split DNS | ON |
+| Domain | `mesh.gnx`, sin asterisco |
+| Use with exit node | OFF |
+| Search domain (fuera de ese formulario) | `mesh.gnx`, opcional |
+
+No usar la IP WSL, `127.0.0.1` ni una IP de ejemplo como nameserver del teléfono.
 
 ## Cerrar la conexión del teléfono
 
@@ -53,11 +69,13 @@ no vuelve a enrolar un nodo conectado; un cambio de identidad falla cerrado.
 
 | Gate | Resultado |
 |---|---|
-| Rust | 5 tests, Clippy, release y RustSec pasan |
+| Rust | 6 tests de acceso + 16 del CLI/cliente; Clippy, release y RustSec pasan |
+| Entrada humana | Consola real: sonda no secreta sin eco, rechazada por formato; entrada redirigida y valores en argv rechazados |
+| Custodia temporal | stdin, tmpfs, permiso `0600` y eliminación tras éxito/fallo pasan con sonda no secreta |
 | Imagen DNS | UDP/TCP, apex, wildcard anidado, AAAA vacío y sin upstream pasan; publicación loopback verificada y retirada |
 | Nodo WSL | Quadlet activo; `NeedsLogin`; reaplicar retorna `FAILED ACCESS_ENROLLMENT_REQUIRED` |
 | Infraestructura previa | Ambos HTTPS siguen respondiendo 200 con TLS validado |
-| Enrolamiento / DNS productivo | Pendientes de la clave; no se publica DNS con una IP inventada |
+| Enrolamiento / DNS productivo | Pendientes del humano en la CLI; `dns` muestra el formulario sin inventar la IP |
 | SaaS / Android / reboot | Pendientes; no se han modificado DNS ni políticas del SaaS |
 
 Estado privado: `/var/lib/gnx/access`, root-only. El respaldo USB existente

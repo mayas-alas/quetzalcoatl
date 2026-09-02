@@ -56,8 +56,10 @@ control_server = "https://mesh.gnx"
 Rust genera credenciales, valida el login y cifra el respaldo. PowerShell cubre
 UAC, DPAPI, certificados, hosts, tareas y copia USB; systemd y Podman reciben
 Quadlets. `ops/control` prepara la mesh y `ops/compute` prepara un único servicio.
-`ops/access` añade transporte operativo y DNS privado para Android; no cambia
-el adaptador mesh del producto. [Contrato y gates](access.md).
+`ops/access` añade transporte operativo y DNS privado para Android; su núcleo
+Rust compartido alimenta `gnx access configure/apply/dns`, sin cambiar el
+adaptador mesh. La clave la introduce el humano sin eco y GNX gestiona su copia
+temporal en RAM. [Contrato y gates](access.md).
 La ejecución de agentes queda fuera del producto.
 
 La entrada HTTPS comparte el puerto 443 y selecciona el servicio por nombre.
@@ -93,7 +95,7 @@ gnx/
 ├── ops/
 │   ├── control/                # bootstrap/cifrado Rust y rutinas del host
 │   ├── compute/                # credenciales/login Rust y despliegue local
-│   └── access/                 # aplicación Rust, ACL Windows y prueba DNS
+│   └── access/                 # núcleo Rust, entrada humana y pruebas
 ├── packaging/
 │   └── windows/
 │       └── build.ps1
