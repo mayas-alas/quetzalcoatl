@@ -57,11 +57,11 @@ No borrar datos ni CA para reiniciar. Repetir la preparación no recrea la cuent
 Los fallos indican un gate y conservan material protegido para diagnóstico;
 fallos durante la revocación final requieren revisar el estado antes de reintentar.
 
-El reboot de Windows del 2026-09-02 recuperó los servicios, HTTPS y la conexión
-con la misma IP. Falta comparar el ID protegido del peer tras ese reboot.
-La rutina de backup está implementada; su ejecución quedó pendiente por UAC
-cancelado, y faltan copia USB y restauración. `mesh.gnx` sólo resuelve en este
-host; no se publicaron puertos del router ni acceso de terceros.
+El reboot de Windows del 2026-09-02 recuperó servicios, HTTPS y conexión;
+se verificó un solo peer con el mismo ID original protegido. El respaldo
+cifrado y su copia USB se verificaron por SHA-256 y descifrado completo.
+Faltan custodia externa de la clave y restauración operativa. `mesh.gnx` sólo
+resuelve en este host; no se publicaron puertos del router ni acceso de terceros.
 El antiguo `gnx-host.service` quedó deshabilitado, conservando su archivo;
 `legacy` no se modificó.
 

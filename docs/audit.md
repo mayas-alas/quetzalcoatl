@@ -25,9 +25,8 @@
 | `S-02` | Git, argv, entorno, logs y evidencia no contienen secretos. |
 
 `READY` sólo describe la operación cuyos checks se ejecutaron. No equivale a
-cerrar todos los gates de producto: comparar el ID tras reboot, backup físico,
-restore y otro host siguen pendientes. Un fallo nunca se sustituye por una
-prueba simulada.
+cerrar todos los gates de producto: custodia externa de la clave, restore y
+otro host siguen pendientes. Un fallo nunca se sustituye por una prueba simulada.
 
 ## Evidencia local
 
@@ -48,9 +47,11 @@ prueba simulada.
 | Reinicio de cliente | `PASS` — mismo peer tras reiniciar el servicio |
 | Credenciales de bootstrap | `PASS` — PAT y clave eliminados en servidor y archivo; propietario protegido por DPAPI |
 | Rutinas del host | `PASS` — tarea de sesión y temporizador de identidad registrados |
-| Reboot Windows | `PASS` parcial — arranque 2026-09-02 10:46:36 UTC−06; servicios, HTTPS y misma IP recuperados; ID pendiente |
+| Reboot Windows | `PASS` — arranque 2026-09-02 10:46:36 UTC−06; servicios, HTTPS y conexión recuperados; un peer con el ID original protegido |
 | Cifrado y detección de corrupción | `PASS` unitario — roundtrip; rechazo de clave incorrecta, truncado y modificación |
-| Respaldo físico | `PENDIENTE` — UAC cancelado antes de ejecutar; USB no conectada |
+| Respaldo físico | `PASS` — captura consistente cifrada a las 17:46:32 UTC; descifrado completo y SHA-256 verificados |
+| Copia USB | `PASS` — 33 731 662 bytes en `D:/GNX-backups`; SHA-256 idéntico y descifrado completo desde USB; sin clave en la unidad |
+| Salud tras respaldo | `PASS` — tres servicios activos, cliente conectado y HTTPS 200 con validación TLS |
 
 El bundle contiene un MSI 0.77.1 cuyo digest y firma Authenticode se validaron,
 y el cliente quedó instalado. Los intentos previos fallaron con código MSI 2:
@@ -60,8 +61,9 @@ El diagnóstico del MSI permanece fuera de Git en
 `%TEMP%/gnx-mesh-client-install.log` y no recibe credenciales de enrolamiento.
 Se ejecutó `connect` contra `mesh.gnx`, también después de reiniciar el cliente.
 Tras reboot completo se recuperaron servicios, HTTPS y conexión con la misma
-IP. La comparación con el ID original protegido sigue pendiente de elevación;
-el gate `M-02` todavía no se declara cerrado.
+IP. La comprobación elevada confirmó un solo peer con el ID original protegido;
+el gate `M-02` pasó en este host. El primer UAC de respaldo se canceló antes de
+ejecutar; el reintento autorizado terminó con código 0 y copia USB verificada.
 
 La primera entrada HTTPS falló por una directiva no soportada por Podman 4.9.3;
 se sustituyó por su argumento compatible. Windows también detectó ausencia de
@@ -71,7 +73,6 @@ revocación. Ambos reintentos pasaron. [Operación y límites](control.md).
 ## Riesgos concretos
 
 - Instalación y recuperación del cliente nativo sin sesión abierta.
-- Backup cifrado implementado, pendiente de ejecución física y copia USB.
 - Custodia de la clave fuera del host y restauración operativa aún pendientes.
 - El login automatizado validado sólo cubre el bootstrap local por TLS y archivo
   protegido. No se declara una solución genérica de custodia de secretos.
@@ -79,8 +80,8 @@ revocación. Ambos reintentos pasaron. [Operación y límites](control.md).
 ## No evaluado todavía
 
 Cliente Linux, otro host, Proxmox, routing, publicación de aplicaciones, HA,
-identidad exacta tras reboot, restore y actualización automática. La consola
-HTTP se prueba por respuesta, no mediante un recorrido interactivo completo. La revisión de
+restore y actualización automática. La consola HTTP se prueba por respuesta,
+no mediante un recorrido interactivo completo. La revisión de
 dependencias Rust no sustituye un escaneo de vulnerabilidades de las imágenes.
 
 ## Fuentes primarias
