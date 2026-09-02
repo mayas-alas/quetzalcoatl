@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 umask 077
+exec 9>/run/gnx-control-maintenance.lock
+flock -x 9
 state=/var/lib/gnx/control
 config="$state/tls.cnf"
 openssl x509 -checkend 2592000 -noout -in "$state/tls/root.crt" >/dev/null
