@@ -159,16 +159,23 @@ instalador debe entregar resolución privada y confianza en la CA de GNX. Un
 despliegue que necesite DNS o certificados públicos debe reemplazar este valor
 por un FQDN perteneciente al operador; no debe simular TLS público sobre `.gnx`.
 
+## Tooling de agentes
+
+La ejecución de agentes de desarrollo queda fuera del runtime común. Sus CLIs
+pueden conectarse a un gateway GNX ligado a `127.0.0.1`, con rutas `/v1/*` y una
+familia `/*` limitada por allowlist. Ese gateway no es `gnx-netd`, no usa
+`/run/gnx/netd.sock` y no se instala mediante los flujos Windows o Linux. El
+contrato mínimo está en [agent-gateway.md](agent-gateway.md).
+
 ## Árbol objetivo
 
 ```text
 quetzalcoatl/
 ├── AGENTS.md
-├── .agent/
-│   └── gauntlet.md               # ciclo acotado de verificación
 ├── README.md
 ├── Cargo.toml
 ├── docs/
+│   ├── agent-gateway.md
 │   ├── architecture.md
 │   ├── audit.md
 │   └── decisions/

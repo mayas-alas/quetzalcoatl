@@ -24,6 +24,8 @@ mientras Docktail sea requisito.
 - [Arquitectura](docs/architecture.md): modelo objetivo, flujos y árbol futuro.
 - [Auditoría](docs/audit.md): hechos comprobados, bloqueos y preguntas abiertas.
 - [ADR-0001](docs/decisions/0001-network-daemon.md): decisión sobre `gnx-netd`.
+- [Gateway de agentes](docs/agent-gateway.md): acceso local para CLIs, fuera del
+  runtime distribuido.
 
 ## Principios de esta base
 
