@@ -36,10 +36,13 @@ simulada.
 | RustSec sobre `Cargo.lock` | `PASS` — sin vulnerabilidades conocidas |
 | Build release y checksum del EXE | `PASS` |
 | `gnx doctor` físico | `FAIL` — `CLIENT_MISSING` |
-| Instalación elevada | `BLOCKED` — UAC cancelado por el usuario |
+| Instalación elevada | `FAIL` — MSI devolvió 2 al recibir una ruta extendida; reintento corregido pendiente de UAC |
 
 El bundle contiene un MSI 0.77.1 cuyo digest y firma Authenticode se validaron,
-pero el cliente no quedó instalado después de cancelarse la elevación.
+pero el cliente todavía no quedó instalado. Se corrigieron la ruta entregada
+al MSI y la captura de versión; el resultado físico sigue pendiente.
+El diagnóstico del MSI permanece fuera de Git en
+`%TEMP%/gnx-mesh-client-install.log` y no recibe credenciales de enrolamiento.
 
 ## Riesgos concretos
 
