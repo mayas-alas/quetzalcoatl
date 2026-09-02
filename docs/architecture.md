@@ -57,6 +57,7 @@ No se abre otra plataforma o workload antes de cerrar estos cinco puntos.
 ```text
 gnx/
 ├── Cargo.toml
+├── Cargo.lock
 ├── src/
 │   ├── main.rs                 # composición y salida
 │   ├── config.rs               # único esquema público
@@ -76,6 +77,7 @@ gnx/
 │   └── release.example.toml    # MSI, versión, digest, licencia y SBOM
 ├── packaging/
 │   └── windows/
+│       └── build.ps1
 └── tests/
     ├── contract.rs
     └── windows.rs

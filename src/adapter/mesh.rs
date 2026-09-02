@@ -13,12 +13,7 @@ pub struct NativeMesh;
 
 impl NativeMesh {
     fn program(&self) -> PathBuf {
-        let installed = PathBuf::from(r"C:\Program Files\NetBird\netbird.exe");
-        if installed.is_file() {
-            installed
-        } else {
-            "netbird.exe".into()
-        }
+        PathBuf::from(r"C:\Program Files\NetBird\netbird.exe")
     }
 
     fn command(&self) -> Command {

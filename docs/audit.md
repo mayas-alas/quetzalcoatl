@@ -15,7 +15,7 @@
 
 | ID | Evidencia mínima |
 |---|---|
-| `R-01` | `gnx.exe` compila reproduciblemente y carga `gnx.toml`. |
+| `R-01` | `gnx.exe` compila con lockfile y carga `gnx.toml`. |
 | `C-01` | Configuración inválida falla antes de mutar el host. |
 | `W-01` | `doctor` valida Windows, privilegios y runtime sin mutar. |
 | `M-01` | `connect` conserva el endpoint exacto y reporta el estado real. |
@@ -26,6 +26,19 @@
 
 Fallar cualquiera de estos gates impide `READY`; no se sustituye por una prueba
 simulada.
+
+## Evidencia local
+
+| Comprobación | Resultado 2026-09-02 |
+|---|---|
+| Tests Rust | `PASS` — 12 pruebas |
+| Clippy con warnings como error | `PASS` |
+| RustSec sobre `Cargo.lock` | `PASS` — sin vulnerabilidades conocidas |
+| Build release y checksum del EXE | `PASS` |
+| `gnx doctor` físico | `FAIL` — `CLIENT_MISSING` |
+
+No se solicitó elevación: sin el MSI firmado, licencia y SBOM de un release
+concreto no existe una instalación autorizada que ejecutar.
 
 ## Riesgos concretos
 

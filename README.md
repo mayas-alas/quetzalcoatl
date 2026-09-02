@@ -37,6 +37,10 @@ gnx.exe connect --config config/gnx.toml
 URLs de descarga. Para enrolamiento desatendido, `connect` acepta
 `--setup-key-file`; nunca acepta la clave como valor.
 
+`packaging/windows/build.ps1` produce `dist/windows/gnx.exe`. Con los cuatro
+insumos del cliente genera un bundle instalable; sin ellos produce sólo el
+bundle de desarrollo y no simula que la dependencia esté lista.
+
 ## Documentos
 
 - [Arquitectura](docs/architecture.md)
