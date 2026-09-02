@@ -1,6 +1,6 @@
 # Arquitectura GNX
 
-**Corte:** Windows-first, Rust-first.
+**Corte:** Windows + control plane local en WSL; Rust-first.
 
 ## Resultado único
 
@@ -23,7 +23,7 @@ diagnósticos técnicos, no en la interfaz pública ni en la taxonomía.
 ## Contrato mínimo
 
 ```text
-gnx install --config <archivo>
+gnx install --config <archivo> --release <manifest>
 gnx connect --config <archivo>
 gnx doctor --config <archivo>
 ```
@@ -31,14 +31,12 @@ gnx doctor --config <archivo>
 ```toml
 version = 1
 
-[node]
-mode = "join" # create | join
-
 [mesh]
 control_server = "https://mesh.gnx"
 ```
 
-- El control plane es un prerrequisito y GNX no lo despliega en este corte.
+- El control plane es un prerrequisito de `connect`; `ops/control` lo prepara
+  aparte en WSL. Windows conserva un único cliente nativo.
 - El endpoint se conserva exactamente y nunca cae a un servicio distinto.
 - El login es interactivo o usa `--setup-key-file`; la clave nunca viaja en argv.
 
@@ -50,7 +48,9 @@ control_server = "https://mesh.gnx"
 4. Implementar `install` idempotente desde un release local verificado.
 5. Empaquetar el mismo binario como `gnx.exe`.
 
-No se abre otra plataforma o workload antes de cerrar estos cinco puntos.
+El bootstrap de operación también es Rust. PowerShell cubre UAC, certificados,
+hosts y tareas; systemd y Podman reciben archivos declarativos. No hay daemon
+VPN propio ni agentes dentro del runtime.
 
 ## Taxonomía
 
@@ -74,13 +74,15 @@ gnx/
 ├── config/
 │   └── gnx.example.toml
 ├── runtime/
-│   └── release.example.toml    # MSI, versión, digest y licencia
+│   ├── release.example.toml    # MSI, versión, digest y licencia
+│   └── control/                # servicios, HTTPS y plantillas sin secretos
+├── ops/
+│   └── control/                # bootstrap Rust y rutinas nativas del host
 ├── packaging/
 │   └── windows/
 │       └── build.ps1
 └── tests/
-    ├── contract.rs
-    └── windows.rs
+    └── contract.rs
 ```
 
 `app` contiene los tres casos de uso. `port` define lo que necesitan. `adapter`
@@ -89,6 +91,6 @@ proveedores, versiones, daemons o servicios concretos.
 
 ## Fuera del corte
 
-Control plane, WSL, contenedores, Linux, Proxmox, routing, proxy, UI, HA y
-actualización automática. Cada uno necesitará un caso probado antes de añadir
-módulos o configuración.
+Cliente Linux, otros hosts, Proxmox, routing, publicación de aplicaciones, HA y
+actualización automática. La consola administrativa del proveedor conserva su
+atribución. [Operación local](control.md) y [evidencia](audit.md).

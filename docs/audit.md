@@ -5,13 +5,13 @@
 ## Decisiones cerradas
 
 - Un binario Rust y un archivo de configuración gobiernan el flujo.
-- Windows es la única plataforma del primer corte.
+- Windows conserva el cliente; WSL aloja el control plane local.
 - El host ejecuta un solo cliente mesh nativo.
 - El control plane es un prerrequisito, no un caso parcial del binario.
 - La dependencia mesh actual queda detrás de `port::mesh`.
 - `legacy` es referencia de lectura y no se modifica.
 
-## Gates pendientes
+## Gates de producto
 
 | ID | Evidencia mínima |
 |---|---|
@@ -24,21 +24,29 @@
 | `S-01` | Artefactos, versiones, digests y licencias están fijados. |
 | `S-02` | Git, argv, entorno, logs y evidencia no contienen secretos. |
 
-Fallar cualquiera de estos gates impide `READY`; no se sustituye por una prueba
-simulada.
+`READY` sólo describe la operación cuyos checks se ejecutaron. No equivale a
+cerrar todos los gates de producto: reboot completo, restore y otro host siguen
+pendientes. Un fallo nunca se sustituye por una prueba simulada.
 
 ## Evidencia local
 
 | Comprobación | Resultado 2026-09-02 |
 |---|---|
-| Tests Rust | `PASS` — 13 pruebas, incluida regresión de rutas MSI |
+| Tests Rust | `PASS` — 13 del cliente + 3 del bootstrap |
 | Clippy con warnings como error | `PASS` |
-| RustSec sobre `Cargo.lock` | `PASS` — sin vulnerabilidades conocidas |
+| RustSec sobre ambos lockfiles | `PASS` — sin vulnerabilidades conocidas en dependencias Rust |
 | Build release y checksum del EXE | `PASS` |
 | `gnx doctor` físico | `PASS` — cliente 0.77.1, sin elevación |
 | Instalación elevada | `PASS` — MSI y GNX devolvieron 0 |
 | Servicio local | `PASS` — activo y con arranque automático |
 | Instalación repetida | `PASS` — no reinstala ni requiere elevación |
+| Control plane WSL | `PASS` — tres servicios activos e imágenes por digest |
+| DNS local y TLS Windows | `PASS` — `mesh.gnx`, HTTP 200, cadena/nombre/revocación válidos |
+| Enrolamiento | `PASS` — cuenta local, clave one-off y un peer conectado |
+| Gestión, señal y transporte | `PASS` — gestión y señal conectadas; STUN y relay disponibles |
+| Reinicio de cliente | `PASS` — mismo peer tras reiniciar el servicio |
+| Credenciales de bootstrap | `PASS` — PAT y clave eliminados en servidor y archivo; propietario protegido por DPAPI |
+| Rutinas del host | `PASS` — tarea de sesión y temporizador de identidad registrados |
 
 El bundle contiene un MSI 0.77.1 cuyo digest y firma Authenticode se validaron,
 y el cliente quedó instalado. Los intentos previos fallaron con código MSI 2:
@@ -46,20 +54,27 @@ primero por el prefijo de ruta extendida y después por separadores mezclados.
 Se corrigieron ambos casos y la captura de versión; el reintento físico pasó.
 El diagnóstico del MSI permanece fuera de Git en
 `%TEMP%/gnx-mesh-client-install.log` y no recibe credenciales de enrolamiento.
-No se ejecutó `connect`; enrolamiento, conectividad y persistencia tras reboot
-siguen sin validar.
+Se ejecutó `connect` contra `mesh.gnx`, también después de reiniciar el cliente.
+La persistencia tras reboot completo sigue sin validar.
+
+La primera entrada HTTPS falló por una directiva no soportada por Podman 4.9.3;
+se sustituyó por su argumento compatible. Windows también detectó ausencia de
+CRL: se añadió publicación y renovación, sin omitir la comprobación de
+revocación. Ambos reintentos pasaron. [Operación y límites](control.md).
 
 ## Riesgos concretos
 
 - Instalación y recuperación del cliente nativo sin sesión abierta.
-- Login automatizado sin exponer material sensible; queda deshabilitado hasta
-  demostrar un canal seguro.
+- Backup cifrado y restauración del estado y de la CA aún no implementados.
+- El login automatizado validado sólo cubre el bootstrap local por TLS y archivo
+  protegido. No se declara una solución genérica de custodia de secretos.
 
 ## No evaluado todavía
 
-Control plane, WSL, contenedores, Linux, Proxmox, routing, proxy, UI, HA y
-actualización automática. No generan módulos, flags ni configuración hasta
-entrar explícitamente al corte.
+Cliente Linux, otro host, Proxmox, routing, publicación de aplicaciones, HA,
+reboot completo, restore y actualización automática. La consola HTTP se prueba
+por respuesta, no mediante un recorrido interactivo completo. La revisión de
+dependencias Rust no sustituye un escaneo de vulnerabilidades de las imágenes.
 
 ## Fuentes primarias
 

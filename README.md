@@ -12,8 +12,10 @@ Sólo cubre cuatro resultados en Windows x86_64:
 3. verificar e instalar un paquete MSI local del cliente de mesh;
 4. conectar el nodo local al `control_server` y reportar su estado real.
 
-El control plane debe existir antes. Su despliegue, Linux, Proxmox, routing,
-proxy y UI quedan fuera hasta cerrar este corte.
+El control plane local vive en WSL; Windows conserva el cliente nativo.
+`ops/control` prepara exclusivamente `mesh.gnx`, separado del binario cliente.
+Proxmox, acceso desde otros hosts, routing y publicación de aplicaciones quedan
+fuera de este corte.
 
 ## Reglas
 
@@ -45,5 +47,6 @@ bundle de desarrollo y no simula que la dependencia esté lista.
 
 - [Arquitectura](docs/architecture.md)
 - [Auditoría](docs/audit.md)
+- [Control plane local y rutinas del host](docs/control.md)
 - [ADR de plataforma mesh](docs/decisions/0001-mesh-platform.md)
 - [ADR de identidad y endpoint](docs/decisions/0002-mesh-identity-and-endpoint.md)

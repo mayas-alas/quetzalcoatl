@@ -6,7 +6,8 @@
 ## Decisión
 
 GNX usa un cliente mesh mantenido por su proveedor e instalado de forma nativa
-en Windows. El control plane es un prerrequisito externo en este corte. GNX no
+en Windows. El control plane local se prepara aparte en WSL con `ops/control`.
+Sigue siendo un prerrequisito de `gnx connect`. GNX no
 implementa VPN, criptografía, relay ni traversal.
 
 NetBird es la implementación elegida hoy, pero no forma parte del contrato
@@ -28,8 +29,9 @@ licencias, SBOM y diagnóstico técnico.
 - Login interactivo o setup-key file; ningún secreto por argv.
 - Recuperación de identidad y conexión tras reboot.
 
-Control plane, Linux, workloads, routing, proxy, HA y actualizaciones automáticas
-no pertenecen a esta decisión.
+Linux cliente, workloads, routing, publicación de aplicaciones, HA y
+actualizaciones automáticas no pertenecen a esta decisión. El despliegue local
+del control plane se limita al procedimiento de [operación](../control.md).
 
 ## Gates
 

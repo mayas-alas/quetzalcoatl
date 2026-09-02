@@ -1,6 +1,6 @@
 # ADR-0002: identidad y endpoint de la mesh
 
-**Estado:** aceptado; implementación pendiente
+**Estado:** implementado para un host Windows y control plane local WSL
 
 **Revisado:** 2026-09-02
 
@@ -25,6 +25,9 @@ endpoint ni usar un servicio predeterminado.
 - Producción usa un FQDN HTTPS controlado por el operador.
 - `https://mesh.gnx` sólo funciona con DNS y CA privados preparados antes de
   conectar.
+- En el corte local, la rutina elevada del host mantiene una entrada `hosts`
+  hacia WSL; no es un servicio DNS distribuido. La CA privada y su CRL se
+  preparan sin desactivar la validación de certificados.
 - Cada FQDN tiene un escritor; los miembros no reciben la credencial DDNS.
 
 ## Custodia
