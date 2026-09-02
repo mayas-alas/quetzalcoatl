@@ -88,21 +88,7 @@ ese riesgo. El socket permanece deshabilitado mientras tanto.
 
 ## Riesgos P1
 
-- La cuenta Windows dedicada necesita perfil cargado, derechos de servicio y
-  propiedad estable de la distribución WSL. Debe validarse en un host limpio.
-- WSL comparte kernel y límites globales entre distribuciones; CPU y memoria no
-  son aislamiento exclusivo de la Podman Machine.
-- Proxmox privilegiado domina la frontera Linux donde corre. No debe describirse
-  como sandbox de seguridad.
-- Headscale, gnx-netd y Proxmox en un mismo host comparten dominio de fallo.
-- Mantener un fork del daemon de red obliga a seguir seguridad y protocolo
-  upstream; un patch set grande convertiría la ventaja inicial en deuda crítica.
-- Falta definir backup/restore para SQLite, claves TLS y ambos volúmenes Proxmox
-  antes de diseñar update o uninstall.
-- Falta una política de puertos y firewall: Headscale 443 debe ser externo;
-  Proxmox 8006 debe comenzar host-local.
-- La entrega Linux no está decidida: paquete nativo, binario autocontenido o
-  AppImage. No se hereda AppImage sólo porque existía en legacy.
+- Falta crear flujos de seguridad para un primer release no dev or QA.
 
 ## Gates de aceptación mínimos
 
