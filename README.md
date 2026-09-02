@@ -5,15 +5,15 @@ configuración y con integraciones externas detrás de contratos GNX.
 
 ## Primer corte
 
-Sólo cubre cuatro resultados:
+Sólo cubre cuatro resultados en Windows x86_64:
 
 1. leer y validar la configuración;
 2. comprobar el host Windows;
-3. instalar o localizar el cliente de mesh nativo;
+3. verificar e instalar un paquete MSI local del cliente de mesh;
 4. conectar el nodo local al `control_server` y reportar su estado real.
 
-El modo `create` añade un único control plane autocontenido. `join` nunca lo
-inicia. Linux, Proxmox, routing, proxy y UI quedan fuera hasta cerrar este corte.
+El control plane debe existir antes. Su despliegue, Linux, Proxmox, routing,
+proxy y UI quedan fuera hasta cerrar este corte.
 
 ## Reglas
 
@@ -23,6 +23,19 @@ inicia. Linux, Proxmox, routing, proxy y UI quedan fuera hasta cerrar este corte
   licencias y atribuciones.
 - No hay daemon VPN propio, fallback oculto ni secretos en Git, argv o logs.
 - Un gate fallido nunca produce `READY`.
+
+## Uso
+
+```text
+cargo build --release --locked
+gnx.exe install --config config/gnx.toml --release runtime/release.toml
+gnx.exe doctor --config config/gnx.toml
+gnx.exe connect --config config/gnx.toml
+```
+
+`release.toml` referencia un MSI local, su SHA-256, licencia y SBOM. No contiene
+URLs de descarga. Para enrolamiento desatendido, `connect` acepta
+`--setup-key-file`; nunca acepta la clave como valor.
 
 ## Documentos
 

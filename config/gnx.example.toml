@@ -1,10 +1,7 @@
 version = 1
 
-[node]
-# `create` inicia el único control plane; `join` sólo conecta este nodo.
-mode = "join"
-
 [mesh]
+# El primer corte conecta este nodo a un control plane ya existente.
 # El ejemplo privado requiere DNS y CA preparados antes de conectar.
 control_server = "https://mesh.gnx"
 

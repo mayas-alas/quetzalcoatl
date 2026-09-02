@@ -8,7 +8,7 @@
 
 Una mesh tiene un `control_server` estable y un solo control plane. Cada host
 genera y conserva una identidad distinta. El estado del cliente nunca se copia
-a otro host o al runtime WSL.
+a otro host o runtime.
 
 ```mermaid
 flowchart LR
@@ -17,8 +17,8 @@ flowchart LR
     E --> C["control plane"]
 ```
 
-`create` es dueño del control plane. `join` sólo registra el nodo local. Una
-caída no autoriza cambiar el endpoint ni usar un servicio predeterminado.
+El control plane existe antes de ejecutar GNX. Una caída no autoriza cambiar el
+endpoint ni usar un servicio predeterminado.
 
 ## Endpoint
 

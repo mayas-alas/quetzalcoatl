@@ -9,3 +9,6 @@
 *.key
 *.p12
 *.pfx
+/target/
+/dist/
+/runtime/artifacts/
