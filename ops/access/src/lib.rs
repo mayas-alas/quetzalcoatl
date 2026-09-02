@@ -17,6 +17,7 @@ const ACCESS: &str = include_str!("../../../runtime/access/gnx-access.container"
 const DNS: &str = include_str!("../../../runtime/access/gnx-dns.container");
 const RESOLVER: &str = include_str!("../../../runtime/access/dns.toml");
 const ENROLL: &str = include_str!("../../../runtime/access/enroll.sh");
+const DNS_PROBE: &str = include_str!("../../../runtime/access/probe-dns.sh");
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -229,23 +230,32 @@ fn service(c: &Config, name: &str, changed: bool) -> Result<()> {
     Ok(())
 }
 
+fn dns_probe_args(ip: &str) -> Vec<&str> {
+    let image = DNS
+        .lines()
+        .find_map(|line| line.strip_prefix("Image="))
+        .expect("pinned DNS image in compiled template");
+    vec![
+        "podman",
+        "run",
+        "--rm",
+        "--pull=never",
+        "--network=host",
+        "--log-driver=none",
+        "--entrypoint=/bin/sh",
+        image,
+        "-ec",
+        DNS_PROBE,
+        "gnx",
+        ip,
+        "53",
+        ip,
+    ]
+}
+
 fn verify(c: &Config, ip: Ipv4Addr) -> Result<()> {
-    let address = format!("@{ip}");
-    for transport in ["+notcp", "+tcp"] {
-        for name in ["mesh.gnx", "proxmox.mesh.gnx", "wildcard-check.mesh.gnx"] {
-            let answer = wsl(
-                c,
-                &[
-                    "podman", "exec", "gnx-dns", "dig", &address, name, "A", "+short", "+time=2",
-                    "+tries=1", transport,
-                ],
-                None,
-            )?;
-            if String::from_utf8_lossy(&answer).trim() != ip.to_string() {
-                return Err("DNS_ANSWER");
-            }
-        }
-    }
+    // A bridge container cannot reliably reach its own published port (hairpin).
+    wsl(c, &dns_probe_args(&ip.to_string()), None).map_err(|_| "DNS_QUERY")?;
     for name in ["mesh.gnx", "proxmox.mesh.gnx"] {
         let mapping = format!("{name}:443:{ip}");
         let url = format!("https://{name}/");
@@ -270,12 +280,38 @@ fn verify(c: &Config, ip: Ipv4Addr) -> Result<()> {
                 &url,
             ],
             None,
-        )?;
+        )
+        .map_err(|_| "HTTPS_TRANSPORT")?;
         if code != b"200" {
             return Err("HTTPS_ENDPOINT");
         }
     }
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct AccessPolicy {
+    #[serde(rename = "Cached")]
+    cached: bool,
+    #[serde(rename = "PacketFilter")]
+    matches: Option<Vec<serde::de::IgnoredAny>>,
+}
+
+fn check_policy(source: &[u8]) -> Result<()> {
+    let policy: AccessPolicy = serde_json::from_slice(source).map_err(|_| "ACCESS_POLICY_READ")?;
+    if policy.cached {
+        return Err("ACCESS_POLICY_STALE");
+    }
+    match policy.matches {
+        Some(matches) if matches.is_empty() => Err("ACCESS_POLICY_EMPTY"),
+        Some(_) => Ok(()), // Nonempty is necessary, not proof of remote port access.
+        None => Err("ACCESS_POLICY_READ"),
+    }
+}
+
+fn verify_policy(c: &Config) -> Result<()> {
+    let data = client(c, &["debug", "netmap"]).map_err(|_| "ACCESS_POLICY_READ")?;
+    check_policy(&data)
 }
 
 pub fn apply(path: &Path) -> Result<String> {
@@ -392,6 +428,7 @@ fn apply_with(path: &Path, prompt: impl FnOnce() -> Result<Zeroizing<String>>) -
         checks = verify(&c, current.ipv4);
     }
     checks?;
+    verify_policy(&c)?;
     Ok(format!(
         "access-local\n{}\nPENDING saas-dns-policy android-cellular reboot backup",
         dns_fields(&c, Some(current.ipv4))
@@ -422,8 +459,8 @@ pub fn dns(path: &Path) -> Result<DnsReport> {
             identity(status)
         }
     });
-    let fields = dns_fields(&c, current.as_ref().ok().map(|node| node.ipv4));
-    let checks = current.and_then(|current| {
+    let mut fields = dns_fields(&c, current.as_ref().ok().map(|node| node.ipv4));
+    let mut checks = current.and_then(|current| {
         let saved = read(&c, &format!("{}/identity.json", c.state_dir))?;
         let saved: Identity = serde_json::from_slice(&saved).map_err(|_| "SAVED_IDENTITY")?;
         if saved != current {
@@ -437,6 +474,10 @@ pub fn dns(path: &Path) -> Result<DnsReport> {
         .map_err(|_| "DNS_SERVICE")?;
         verify(&c, current.ipv4)
     });
+    if checks.is_ok() {
+        fields.push_str("\nLocal DNS/HTTPS: PASS");
+        checks = verify_policy(&c);
+    }
     Ok(DnsReport { fields, checks })
 }
 
@@ -543,5 +584,39 @@ mod tests {
             assert!(ready.contains(field));
         }
         assert!(!ready.contains("*.mesh.gnx"));
+    }
+
+    #[test]
+    fn dns_probe_uses_host_namespace_and_the_pinned_image() {
+        let args = dns_probe_args("100.91.239.31");
+        assert!(args.contains(&"--network=host"));
+        assert!(args.contains(&"--pull=never"));
+        assert!(!args.contains(&"exec"));
+        assert!(args.iter().any(|arg| arg.contains("@sha256:")));
+        assert_eq!(
+            &args[args.len() - 3..],
+            &["100.91.239.31", "53", "100.91.239.31"]
+        );
+    }
+
+    #[test]
+    fn an_empty_or_unavailable_policy_never_passes_as_ready() {
+        assert_eq!(
+            check_policy(br#"{"Cached":false,"PacketFilter":[]}"#),
+            Err("ACCESS_POLICY_EMPTY")
+        );
+        assert_eq!(
+            check_policy(br#"{"Cached":true,"PacketFilter":[{}]}"#),
+            Err("ACCESS_POLICY_STALE")
+        );
+        assert_eq!(
+            check_policy(br#"{"Cached":false,"PacketFilter":null}"#),
+            Err("ACCESS_POLICY_READ")
+        );
+        assert_eq!(check_policy(b"not-json"), Err("ACCESS_POLICY_READ"));
+        assert!(
+            check_policy(br#"{"Cached":false,"PacketFilter":[{}],"ignored":"not-retained"}"#)
+                .is_ok()
+        );
     }
 }
