@@ -1,0 +1,10 @@
+https://proxmox.mesh.gnx {
+    tls /etc/gnx/tls/server.crt /etc/gnx/tls/server.key
+    reverse_proxy https://gnx-compute:8006 {
+        header_up Host {host}
+        transport http {
+            tls_trust_pool file /etc/gnx/tls/compute-ca.crt
+            tls_server_name gnx-compute
+        }
+    }
+}

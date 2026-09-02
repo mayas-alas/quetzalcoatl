@@ -5,7 +5,7 @@ test "$(id -u)" = 0
 templates=$(realpath "$1")
 source_state=$(realpath "$2")
 state=/var/lib/gnx/control
-install -d -m 700 "$state" "$state/pki" "$state/tls" "$state/state" "$state/public"
+install -d -m 700 "$state" "$state/pki" "$state/tls" "$state/state" "$state/public" "$state/sites"
 if test -f "$state/server.yaml"; then
     cmp -s "$source_state/server.yaml" "$state/server.yaml" || {
         printf 'FAILED EXISTING_CONTROL_CONFIG\n'; exit 1;

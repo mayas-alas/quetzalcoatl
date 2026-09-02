@@ -1,0 +1,30 @@
+[Unit]
+Description=GNX local compute
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/gnx/compute
+
+[Container]
+Image=docker.io/dockurr/proxmox@sha256:99e86ebf6b78b4e551bacabd414ec801a8fc1c3082e76e16ea7fab0f15adb8cc
+ContainerName=gnx-compute
+HostName=gnx-compute
+Network=gnx-control.network
+PodmanArgs=--privileged --systemd=always --entrypoint=/usr/local/lib/gnx/entrypoint.sh --memory=3g --cpus=2 --stop-timeout=120
+Exec=/sbin/init --log-target=console --log-level=warning
+PidsLimit=2048
+ShmSize=1g
+Volume=/var/lib/gnx/compute/storage:/var/lib/vz
+Volume=/var/lib/gnx/compute/config:/var/lib/pve-cluster
+Volume=/var/lib/gnx/compute/root.password:/run/gnx/password:ro
+Volume=/usr/local/lib/gnx/compute/entrypoint.sh:/usr/local/lib/gnx/entrypoint.sh:ro
+Volume=/dev/null:/var/log/pveproxy/access.log
+LogDriver=none
+
+[Service]
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=900
+TimeoutStopSec=150
+
+[Install]
+WantedBy=multi-user.target

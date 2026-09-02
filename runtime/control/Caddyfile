@@ -5,7 +5,7 @@
         protocols h1 h2
     }
     log {
-        level ERROR
+        output discard
     }
 }
 
@@ -25,3 +25,5 @@ https://mesh.gnx {
     reverse_proxy @backend gnx-control:80
     reverse_proxy gnx-console:80
 }
+
+import /etc/gnx/sites/*.caddy

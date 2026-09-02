@@ -8,6 +8,7 @@ config="$state/tls.cnf"
 openssl x509 -checkend 2592000 -noout -in "$state/tls/root.crt" >/dev/null
 renew=false
 if ! openssl x509 -checkend 2592000 -noout -in "$state/tls/server.crt" >/dev/null 2>&1 \
+    || ! openssl verify -CAfile "$state/tls/root.crt" -verify_hostname proxmox.mesh.gnx "$state/tls/server.crt" >/dev/null 2>&1 \
     || ! openssl x509 -in "$state/tls/server.crt" -noout -ext crlDistributionPoints 2>/dev/null | grep -q 'http://mesh.gnx/pki/root.crl'; then
     renew=true
     if ! test -f "$state/tls/server.key"; then
@@ -23,6 +24,6 @@ test -f "$state/pki/crlnumber" || printf '1000\n' > "$state/pki/crlnumber"
 openssl ca -gencrl -name local_ca -config "$config" -out "$state/pki/root.crl.pem" 2>/dev/null
 openssl crl -in "$state/pki/root.crl.pem" -outform DER -out "$state/public/root.crl.new"
 mv "$state/public/root.crl.new" "$state/public/root.crl"
-if $renew && systemctl --quiet is-active gnx-entry.service; then
+if $renew && test "${1:-}" != '--no-restart' && systemctl --quiet is-active gnx-entry.service; then
     systemctl --no-block try-restart gnx-entry.service
 fi

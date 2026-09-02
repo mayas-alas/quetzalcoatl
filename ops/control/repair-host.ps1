@@ -12,6 +12,9 @@ if ($LASTEXITCODE -ne 0) { throw 'GNX control services did not start.' }
 $address = (& wsl.exe -d $Distribution --exec ip -4 -o addr show dev eth0) -join ' '
 if ($address -notmatch 'inet (\d+\.\d+\.\d+\.\d+)/') { throw 'WSL address unavailable.' }
 $ip = $Matches[1]
+$names = @('mesh.gnx')
+& wsl.exe -d $Distribution --user root --exec test -f /etc/containers/systemd/gnx-compute.container
+if ($LASTEXITCODE -eq 0) { $names += 'proxmox.mesh.gnx' }
 $hostsFile = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
 $content = [IO.File]::ReadAllText($hostsFile)
 $marker = '# GNX control'
@@ -22,7 +25,7 @@ if ($lines | Where-Object { $_ -notmatch '^\s*#' -and $_ -match '\bmesh\.gnx\b' 
 $backup = Join-Path $state 'hosts.before'
 if (-not (Test-Path -LiteralPath $backup)) { Copy-Item -LiteralPath $hostsFile -Destination $backup }
 $kept = @($lines | Where-Object { -not $_.EndsWith($marker) })
-$updated = ($kept -join "`r`n").TrimEnd("`r", "`n") + "`r`n$ip mesh.gnx $marker`r`n"
+$updated = ($kept -join "`r`n").TrimEnd("`r", "`n") + "`r`n$ip $($names -join ' ') $marker`r`n"
 if ($updated -ne $content) { [IO.File]::WriteAllText($hostsFile, $updated, [Text.UTF8Encoding]::new($false)) }
 Clear-DnsClientCache
 $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new((Join-Path $state 'root.crt'))

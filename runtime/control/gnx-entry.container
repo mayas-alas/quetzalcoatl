@@ -13,6 +13,7 @@ PublishPort=80:80
 Volume=/var/lib/gnx/control/Caddyfile:/etc/caddy/Caddyfile:ro
 Volume=/var/lib/gnx/control/tls:/etc/gnx/tls:ro
 Volume=/var/lib/gnx/control/public:/srv/gnx/pki:ro
+Volume=/var/lib/gnx/control/sites:/etc/gnx/sites:ro
 LogDriver=none
 
 [Service]
