@@ -75,12 +75,13 @@ flowchart TB
     HS --> HSD[("configuración + SQLite")]
     HS -->|"health OK"| BOOT["Bootstrap one-shot"]
     BOOT -->|"pre-auth key efímera"| TS["gnx-netd"]
-    TS -->|"login-server = URL de Headscale"| HS
+    TS -->|"control-server = URL de Headscale"| HS
     TS --> TSD[("identidad y estado de red")]
 
     PODMAN["API Podman rootful"] -.-> DT["Docktail condicionado"]
-    TS -.->|"socket local"| DT
-    DT -.->|"bloqueado: Tailscale Services"| HS
+    TS -->|"/run/gnx/netd.sock"| CLI["gnx CLI"]
+    TS -.->|"socket GNX"| DT
+    DT -.->|"bloqueado: Services API"| HS
 
     KVM["/dev/kvm + /dev/fuse"] --> PVE["Dockur/Proxmox privilegiado"]
     PVE --> PVED[("configuración + discos")]
@@ -89,7 +90,7 @@ flowchart TB
 ```
 
 Headscale debe ser alcanzable antes de que exista la mesh; por eso su endpoint
-443 no puede depender de Docktail ni de Tailscale. Proxmox queda limitado al host
+443 no puede depender de Docktail ni de la mesh. Proxmox queda limitado al host
 hasta resolver la exposición por mesh.
 
 Docktail no registra el nodo: observa el socket del motor y usa la LocalAPI de
@@ -98,11 +99,12 @@ defecto hasta pasar `D-01`. Montar el socket Podman con `:ro` no limita los
 métodos de su API: antes de habilitarlo también debe pasar `D-02`, con una
 restricción comprobable o una aceptación explícita del control total del motor.
 
-`gnx-netd` será un fork mínimo del `tailscaled` oficial. Escucha en
-`/run/gnx/netd.sock` y conserva compatibilidad LocalAPI. Dentro del directorio
-compartido se publica `tailscaled.sock -> netd.sock` para herramientas que aún
-esperan el nombre upstream. Esto es compatibilidad local; no concede a
-Headscale capacidades nuevas de control plane.
+`gnx-netd` será un fork mínimo de un daemon BSD-3 maduro y será el único
+propietario de `/run/gnx/netd.sock`. La CLI `gnx` se conecta a ese socket; no lo
+crea. Docktail monta el mismo socket y, mediante un adaptador GNX, invoca la CLI
+`gnx`. No se publican nombres ni aliases heredados en paths, configuración o
+interfaces del producto. La compatibilidad LocalAPI no concede a Headscale
+capacidades nuevas de control plane.
 
 ## Orden de convergencia
 
@@ -118,7 +120,7 @@ sequenceDiagram
     O->>H: Instalar configuración y arrancar Quadlet
     H-->>O: Health y TLS válidos
     O->>H: Crear usuario y pre-auth key
-    O->>T: Arrancar con login-server y key efímera
+    O->>T: Arrancar con control-server y key efímera
     T-->>O: Nodo registrado y conectado
     O->>P: Arrancar Quadlet privilegiado
     P-->>O: API 8006 saludable
@@ -163,6 +165,7 @@ quetzalcoatl/
 │   │   ├── headscale.container
 │   │   ├── gnx-netd.container
 │   │   ├── docktail.container     # condicionado por D-01
+│   │   ├── docktail-adapter.container
 │   │   └── proxmox.container
 │   └── headscale/                 # plantilla config y policy mínima
 ├── packaging/

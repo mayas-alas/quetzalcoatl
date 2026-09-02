@@ -23,9 +23,9 @@ contradictorio donde Headscale era a la vez externo y creado dentro de Proxmox.
 |---|---|
 | “WSL dentro de Podman Machine” | En Windows, la Podman Machine está respaldada por una distribución WSL Fedora. |
 | “Linux hace exactamente lo mismo” | Reutiliza Quadlets, pero Podman es nativo; una Podman Machine Linux sólo agregaría virtualización. |
-| “Docktail se registra con login-server” | `gnx-netd` se registra; Docktail consume su LocalAPI y el API del motor. |
+| “Docktail registra el nodo de red” | `gnx-netd` se registra; Docktail consume su LocalAPI y el API del motor. |
 | “Headscale puede quedar sólo en la mesh” | El control plane debe ser accesible antes del primer registro. |
-| “Docktail + Headscale ya es una ruta válida” | Docktail requiere Tailscale Services; Headscale mantiene esa función como brecha abierta. |
+| “Docktail + Headscale ya es una ruta válida” | Docktail requiere una API de Services; Headscale mantiene esa función como brecha abierta. |
 | “Proxmox es otro contenedor normal” | Dockur/Proxmox es comunitario, privilegiado y requiere KVM/FUSE y persistencia. |
 
 ## Bloqueos P0
@@ -33,14 +33,13 @@ contradictorio donde Headscale era a la vez externo y creado dentro de Proxmox.
 ### P0.1 — Docktail y Headscale
 
 Docktail anuncia servicios nativos, sincroniza definiciones con el control plane
-y documenta credenciales OAuth/API de Tailscale. Headscale no lista Tailscale
+y documenta credenciales OAuth/API externas. Headscale no lista esa API de
 Services entre sus funciones soportadas y mantiene el issue `#2845` abierto con
 la etiqueta de feature gap. También siguen abiertos los prerrequisitos de
-`tailscale cert` y `tailscale serve` HTTPS.
+certificados y publicación HTTPS administrados por el daemon.
 
-Un fork de `tailscaled` conserva una LocalAPI madura, pero no añade esas
-capacidades al servidor Headscale. Por tanto, el daemon nuevo no elimina este
-bloqueo.
+El fork adoptado conserva una LocalAPI madura, pero no añade esas capacidades al
+servidor Headscale. Por tanto, el daemon nuevo no elimina este bloqueo.
 
 **Consecuencia:** se puede empaquetar Docktail, pero no prometer la función ni
 habilitarla por defecto. El gate `D-01` exige crear, resolver y alcanzar un
@@ -65,7 +64,7 @@ el acceso desde LAN requiere red mirrored y firewall o un port proxy mantenido.
 También falta probar el hairpin desde la propia Podman Machine al FQDN público.
 
 **Gate `M-01`:** un dispositivo externo nuevo abre `/health`, valida TLS y se
-registra con `tailscale up --login-server=<URL>` sin entradas manuales de hosts.
+registra con `gnx connect --control-server=<URL>` sin entradas manuales de hosts.
 
 ### P0.4 — KVM en Windows
 
@@ -96,7 +95,7 @@ ese riesgo. El socket permanece deshabilitado mientras tanto.
 - Proxmox privilegiado domina la frontera Linux donde corre. No debe describirse
   como sandbox de seguridad.
 - Headscale, gnx-netd y Proxmox en un mismo host comparten dominio de fallo.
-- Mantener un fork de `tailscaled` obliga a seguir seguridad y protocolo
+- Mantener un fork del daemon de red obliga a seguir seguridad y protocolo
   upstream; un patch set grande convertiría la ventaja inicial en deuda crítica.
 - Falta definir backup/restore para SQLite, claves TLS y ambos volúmenes Proxmox
   antes de diseñar update o uninstall.
@@ -115,7 +114,7 @@ ese riesgo. El socket permanece deshabilitado mientras tanto.
 | `L-01` | Instalación y recuperación en una distro limpia con systemd, cgroup v2, Podman 6+ y KVM. |
 | `M-01` | Registro remoto contra el FQDN Headscale con TLS válido y key efímera. |
 | `N-01` | `gnx-netd` pasa la matriz upstream, conserva LocalAPI y sincroniza actualizaciones de seguridad. |
-| `D-01` | Docktail crea y sirve un servicio real usando Headscale, sin API de Tailscale SaaS. |
+| `D-01` | Docktail crea y sirve un servicio real usando Headscale, sin una API SaaS externa. |
 | `D-02` | Docktail no obtiene control irrestricto del motor rootful, o el riesgo queda aceptado explícitamente. |
 | `S-01` | Imágenes por digest, secretos fuera de logs/argv y permisos de persistencia verificados. |
 | `R-01` | Backup y restore probado antes del primer upgrade destructivo. |
@@ -144,8 +143,6 @@ ese riesgo. El socket permanece deshabilitado mientras tanto.
 - [Headscale: inicio](https://headscale.net/stable/usage/getting-started/),
   [contenedor](https://headscale.net/stable/setup/install/container/) y
   [funciones](https://headscale.net/stable/about/features/)
-- [Brecha Tailscale Services en Headscale](https://github.com/juanfont/headscale/issues/2845)
-- [`tailscaled` y CLI oficiales, BSD-3-Clause](https://github.com/tailscale/tailscale)
-- [`tailscaled-rs`, experimental](https://github.com/GeiserX/tailscaled-rs)
+- [Brecha de Services en Headscale](https://github.com/juanfont/headscale/issues/2845)
 - [Docktail](https://github.com/marvinvr/docktail)
 - [Dockur/Proxmox](https://github.com/dockur/proxmox)

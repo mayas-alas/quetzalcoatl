@@ -13,11 +13,11 @@ arquitectura y auditoría; todavía no hay implementación.
 ## Estado
 
 La topología Headscale + `gnx-netd` + Dockur/Proxmox es viable con gates físicos
-y de red. `gnx-netd` será un fork mínimo del `tailscaled` oficial; la alternativa
-Rust `tailscaled-rs` queda sólo como investigación. Docktail no puede considerarse
-integrado: depende de Tailscale
-Services y esa capacidad sigue abierta como brecha de compatibilidad en
-Headscale. El producto no debe reportar `READY` mientras Docktail sea requisito.
+y de red. `gnx-netd` será un fork mínimo de un daemon BSD-3 maduro; la
+reimplementación Rust queda sólo como investigación. Docktail no puede
+considerarse integrado: depende de una API de Services que sigue abierta como
+brecha de compatibilidad en Headscale. El producto no debe reportar `READY`
+mientras Docktail sea requisito.
 
 ## Documentos
 
@@ -31,8 +31,8 @@ Headscale. El producto no debe reportar `READY` mientras Docktail sea requisito.
 2. En Windows, Podman Machine es la distribución WSL; WSL no vive dentro de
    Podman Machine.
 3. En Linux no se agrega otra VM: Podman y los Quadlets son nativos.
-4. `gnx-netd`, no Docktail, se registra con
-   `--login-server=<HEADSCALE_URL>`.
+4. `gnx-netd`, no Docktail, se registra mediante
+   `gnx connect --control-server=<HEADSCALE_URL>`.
 5. Imágenes y artefactos se fijarán por versión, digest y checksum en cada
    release; no se usará `latest`.
 6. Ningún gate fallido se presenta como instalación lista.

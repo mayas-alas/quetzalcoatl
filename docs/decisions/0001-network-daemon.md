@@ -5,27 +5,25 @@
 
 ## Decisión
 
-El daemon de red del producto será `gnx-netd`, un fork mínimo y trazable del
-`tailscaled` incluido en `tailscale/tailscale`. `tailscaled-rs` se mantiene como
-referencia y laboratorio para una posible migración futura, no como dependencia
-de producción.
+El daemon de red del producto será `gnx-netd`, un fork mínimo y trazable de un
+daemon BSD-3 maduro. La reimplementación Rust se mantiene como referencia y
+laboratorio para una posible migración futura, no como dependencia de
+producción.
 
 ```mermaid
 flowchart LR
-    UP["tailscale/tailscale upstream"] -->|"BSD-3-Clause"| FORK["fork mínimo gnx-netd"]
-    FORK --> ENG["wgengine + magicsock + disco + DERP"]
+    UP["daemon upstream"] -->|"BSD-3-Clause"| FORK["fork mínimo gnx-netd"]
+    FORK --> ENG["WireGuard + NAT traversal + relay"]
     FORK --> API["LocalAPI compatible"]
     API --> SOCK["/run/gnx/netd.sock"]
-    SOCK --> CLI["CLI Quetzalcoatl"]
-    SOCK --> COMPAT["tailscaled.sock compatible"]
-    COMPAT --> DT["Docktail condicionado"]
+    SOCK --> CLI["gnx CLI"]
+    SOCK --> DT["Docktail mediante adaptador GNX"]
     ENG -->|"Noise/HTTPS"| HS["Headscale"]
 ```
 
 ## Por qué
 
-- El repositorio oficial confirma que `tailscaled` y la CLI están incluidos en
-  el código abierto y bajo BSD-3-Clause.
+- El daemon y su CLI upstream están disponibles bajo BSD-3-Clause.
 - Reutiliza una implementación madura de WireGuard, DERP, NAT traversal,
   roaming, routing, DNS y LocalAPI.
 - Reduce el riesgo criptográfico y operativo frente a reimplementar el data
@@ -39,10 +37,11 @@ Cambios permitidos inicialmente:
 
 1. nombre de binario, servicio y paths de estado;
 2. socket principal `/run/gnx/netd.sock`;
-3. alias local `tailscaled.sock` para consumidores compatibles;
-4. Headscale como único control URL permitido por configuración;
-5. telemetría deshabilitada salvo consentimiento explícito;
-6. branding y mensajes sin sugerir afiliación o endorsement de Tailscale.
+3. CLI `gnx` como único cliente público del daemon;
+4. adaptador Docktail configurado con el socket y la CLI GNX;
+5. Headscale como único control URL permitido por configuración;
+6. telemetría deshabilitada salvo consentimiento explícito;
+7. interfaces y mensajes públicos sin nombres ni marcas upstream.
 
 No se modifican criptografía, WireGuard, DERP, magicsock, disco, Noise ni el
 formato del protocolo salvo que exista un caso probado, tests de interoperabilidad
@@ -51,10 +50,10 @@ rebasarse sobre releases upstream.
 
 ## Lo que esta decisión no resuelve
 
-Docktail no depende únicamente del socket local. Usa Tailscale Services y
-sincroniza definiciones con el control plane. Headscale mantiene Tailscale
-Services como feature gap abierto. Renombrar o extender `tailscaled` no hace que
-Headscale almacene, autorice, distribuya o resuelva esos servicios.
+Docktail no depende únicamente del socket local. Usa una API de Services y
+sincroniza definiciones con el control plane. Headscale mantiene esa capacidad
+como feature gap abierto. Renombrar o extender el daemon no hace que Headscale
+almacene, autorice, distribuya o resuelva esos servicios.
 
 La integración Docktail necesita una decisión separada entre:
 
@@ -67,7 +66,7 @@ La integración Docktail necesita una decisión separada entre:
 Hasta entonces, el Quadlet de Docktail permanece deshabilitado y el producto no
 reporta `READY` completo.
 
-## Por qué no `tailscaled-rs` todavía
+## Por qué no la reimplementación Rust todavía
 
 El proyecto aporta el modelo correcto —daemon Rust, preferencias persistentes y
 LocalAPI sobre Unix socket—, pero declara explícitamente:
@@ -85,7 +84,7 @@ de la LocalAPI consumida por Quetzalcoatl.
 ## Obligaciones del fork
 
 - conservar `LICENSE`, copyrights, disclaimer y avisos de terceros;
-- no usar Tailscale ni sus contribuidores como endorsement;
+- no usar nombres o contribuidores upstream como endorsement;
 - documentar el commit upstream base en cada release;
 - automatizar comparación de patches, CVEs, tests upstream y actualización;
 - publicar código fuente y SBOM del binario distribuido.
@@ -98,15 +97,12 @@ Esto es una lectura de la licencia, no asesoría legal.
 |---|---|
 | `N-01` | Build reproducible desde commit upstream fijado y patch set enumerado. |
 | `N-02` | Registro, reconexión, DERP, conexión directa, DNS y routing en Headscale. |
-| `N-03` | LocalAPI usada por CLI y compatibilidad de socket usada por Docktail. |
+| `N-03` | LocalAPI usada por `gnx` y socket GNX consumido por el adaptador Docktail. |
 | `N-04` | Rebase sobre una release upstream con suite completa y rollback probado. |
 | `N-05` | NOTICE/licencias/SBOM incluidos en artefactos Windows y Linux. |
 
 ## Fuentes
 
-- [Tailscale OSS](https://github.com/tailscale/tailscale)
-- [Licencia BSD-3-Clause](https://github.com/tailscale/tailscale/blob/main/LICENSE)
-- [tailscaled-rs](https://github.com/GeiserX/tailscaled-rs)
-- [tailscale-rs y advertencias de seguridad](https://github.com/GeiserX/tailscale-rs)
-- [Feature gap de Tailscale Services en Headscale](https://github.com/juanfont/headscale/issues/2845)
+- [Feature gap de Services en Headscale](https://github.com/juanfont/headscale/issues/2845)
+- [Docktail](https://github.com/marvinvr/docktail)
 
