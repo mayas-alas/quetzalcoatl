@@ -29,6 +29,8 @@ No sobreescribe una instancia cuyo propietario ya exista sin evidencia local.
 | Arranque y resolución tras cambio de IP | tarea Windows `GNX Control Host`, al iniciar sesión |
 | Reinicio de procesos | servicios `gnx-control`, `gnx-console`, `gnx-entry` en WSL |
 | Certificado y CRL | `gnx-identity.timer`, diariamente y tras arranque |
+| Respaldo cifrado y evidencia | `%LOCALAPPDATA%/GNX/backups` |
+| Clave de recuperación separada | `%LOCALAPPDATA%/GNX/recovery/control.agekey`, ACL del usuario/admin/SYSTEM |
 
 La tarea de sesión mantiene WSL activo, actualiza sólo la línea `mesh.gnx`
 marcada por GNX en `hosts` y comprueba HTTPS. Conserva un `hosts.before` para
@@ -55,10 +57,35 @@ No borrar datos ni CA para reiniciar. Repetir la preparación no recrea la cuent
 Los fallos indican un gate y conservan material protegido para diagnóstico;
 fallos durante la revocación final requieren revisar el estado antes de reintentar.
 
-Faltan prueba de reboot completo, backup cifrado y restauración. `mesh.gnx` sólo
-resuelve en este host; no se publicaron puertos del router ni acceso de terceros.
+El reboot de Windows del 2026-09-02 recuperó los servicios, HTTPS y la conexión
+con la misma IP. Falta comparar el ID protegido del peer tras ese reboot.
+La rutina de backup está implementada; su ejecución quedó pendiente por UAC
+cancelado, y faltan copia USB y restauración. `mesh.gnx` sólo resuelve en este
+host; no se publicaron puertos del router ni acceso de terceros.
 El antiguo `gnx-host.service` quedó deshabilitado, conservando su archivo;
 `legacy` no se modificó.
+
+## Respaldo puntual
+
+```powershell
+# PowerShell elevado; requiere el build de ops/control:
+.\ops\control\backup-host.ps1
+# Sólo después de identificar la letra de una USB conectada (ejemplo E):
+.\ops\control\export-backup.ps1 -DriveLetter E
+```
+
+El helper Rust `gnx-snapshot` cifra en formato age estándar. Pausa el servidor
+para copiar bases consistentes y CA en memoria temporal de WSL; lo reanuda
+antes de cifrar el flujo en Windows, sin archivo plano en disco. Comprueba el
+descifrado completo mediante SHA-256, la identidad del peer y HTTPS.
+La copia USB verifica SHA-256, no formatea ni reemplaza archivos distintos.
+
+La USB contiene únicamente respaldo cifrado y evidencia, nunca la clave.
+Guardar también la clave fuera del host, en **otra** ubicación segura: perder
+el host y su única clave vuelve inútil el respaldo USB. No imprimirla ni
+pegarla en chat. El respaldo cubre estado/CA/configuración del control plane,
+no el cliente Windows ni su almacén DPAPI. El readback criptográfico no es
+una restauración operativa; esa prueba sigue pendiente.
 
 ## Fuentes
 
@@ -66,3 +93,5 @@ El antiguo `gnx-host.service` quedó deshabilitado, conservando su archivo;
 - [Bootstrap con PAT](https://docs.netbird.io/selfhosted/automated-setup)
 - [Entrada HTTPS y gRPC](https://docs.netbird.io/selfhosted/external-reverse-proxy)
 - [Ciclo de vida de systemd en WSL](https://learn.microsoft.com/en-us/windows/wsl/systemd)
+- [Respaldo consistente del servidor](https://docs.netbird.io/selfhosted/maintenance/backup)
+- [Formato age desde Rust](https://docs.rs/age/0.12.1/age/)

@@ -48,9 +48,9 @@ control_server = "https://mesh.gnx"
 4. Implementar `install` idempotente desde un release local verificado.
 5. Empaquetar el mismo binario como `gnx.exe`.
 
-El bootstrap de operación también es Rust. PowerShell cubre UAC, certificados,
-hosts y tareas; systemd y Podman reciben archivos declarativos. No hay daemon
-VPN propio ni agentes dentro del runtime.
+El bootstrap y cifrado del respaldo también son Rust. PowerShell cubre UAC,
+certificados, hosts, tareas y copia USB; systemd y Podman reciben archivos
+declarativos. No hay daemon VPN propio ni agentes dentro del runtime.
 
 ## Taxonomía
 
@@ -77,7 +77,7 @@ gnx/
 │   ├── release.example.toml    # MSI, versión, digest y licencia
 │   └── control/                # servicios, HTTPS y plantillas sin secretos
 ├── ops/
-│   └── control/                # bootstrap Rust y rutinas nativas del host
+│   └── control/                # bootstrap/cifrado Rust y rutinas del host
 ├── packaging/
 │   └── windows/
 │       └── build.ps1

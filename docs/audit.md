@@ -25,14 +25,15 @@
 | `S-02` | Git, argv, entorno, logs y evidencia no contienen secretos. |
 
 `READY` sólo describe la operación cuyos checks se ejecutaron. No equivale a
-cerrar todos los gates de producto: reboot completo, restore y otro host siguen
-pendientes. Un fallo nunca se sustituye por una prueba simulada.
+cerrar todos los gates de producto: comparar el ID tras reboot, backup físico,
+restore y otro host siguen pendientes. Un fallo nunca se sustituye por una
+prueba simulada.
 
 ## Evidencia local
 
 | Comprobación | Resultado 2026-09-02 |
 |---|---|
-| Tests Rust | `PASS` — 13 del cliente + 3 del bootstrap |
+| Tests Rust | `PASS` — 13 del cliente + 3 del bootstrap + 2 del cifrado |
 | Clippy con warnings como error | `PASS` |
 | RustSec sobre ambos lockfiles | `PASS` — sin vulnerabilidades conocidas en dependencias Rust |
 | Build release y checksum del EXE | `PASS` |
@@ -47,6 +48,9 @@ pendientes. Un fallo nunca se sustituye por una prueba simulada.
 | Reinicio de cliente | `PASS` — mismo peer tras reiniciar el servicio |
 | Credenciales de bootstrap | `PASS` — PAT y clave eliminados en servidor y archivo; propietario protegido por DPAPI |
 | Rutinas del host | `PASS` — tarea de sesión y temporizador de identidad registrados |
+| Reboot Windows | `PASS` parcial — arranque 2026-09-02 10:46:36 UTC−06; servicios, HTTPS y misma IP recuperados; ID pendiente |
+| Cifrado y detección de corrupción | `PASS` unitario — roundtrip; rechazo de clave incorrecta, truncado y modificación |
+| Respaldo físico | `PENDIENTE` — UAC cancelado antes de ejecutar; USB no conectada |
 
 El bundle contiene un MSI 0.77.1 cuyo digest y firma Authenticode se validaron,
 y el cliente quedó instalado. Los intentos previos fallaron con código MSI 2:
@@ -55,7 +59,9 @@ Se corrigieron ambos casos y la captura de versión; el reintento físico pasó.
 El diagnóstico del MSI permanece fuera de Git en
 `%TEMP%/gnx-mesh-client-install.log` y no recibe credenciales de enrolamiento.
 Se ejecutó `connect` contra `mesh.gnx`, también después de reiniciar el cliente.
-La persistencia tras reboot completo sigue sin validar.
+Tras reboot completo se recuperaron servicios, HTTPS y conexión con la misma
+IP. La comparación con el ID original protegido sigue pendiente de elevación;
+el gate `M-02` todavía no se declara cerrado.
 
 La primera entrada HTTPS falló por una directiva no soportada por Podman 4.9.3;
 se sustituyó por su argumento compatible. Windows también detectó ausencia de
@@ -65,15 +71,16 @@ revocación. Ambos reintentos pasaron. [Operación y límites](control.md).
 ## Riesgos concretos
 
 - Instalación y recuperación del cliente nativo sin sesión abierta.
-- Backup cifrado y restauración del estado y de la CA aún no implementados.
+- Backup cifrado implementado, pendiente de ejecución física y copia USB.
+- Custodia de la clave fuera del host y restauración operativa aún pendientes.
 - El login automatizado validado sólo cubre el bootstrap local por TLS y archivo
   protegido. No se declara una solución genérica de custodia de secretos.
 
 ## No evaluado todavía
 
 Cliente Linux, otro host, Proxmox, routing, publicación de aplicaciones, HA,
-reboot completo, restore y actualización automática. La consola HTTP se prueba
-por respuesta, no mediante un recorrido interactivo completo. La revisión de
+identidad exacta tras reboot, restore y actualización automática. La consola
+HTTP se prueba por respuesta, no mediante un recorrido interactivo completo. La revisión de
 dependencias Rust no sustituye un escaneo de vulnerabilidades de las imágenes.
 
 ## Fuentes primarias
