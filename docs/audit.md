@@ -68,6 +68,8 @@ otro host siguen pendientes. Un fallo nunca se sustituye por una prueba simulada
 | MTU y HTTPS remoto | `PASS` — fallo reproducido con uplink 1280, tres descargas completas de ambos HTTPS con 1500; servicio de arranque habilitado y ordenado antes de la VPN |
 | Android | Operador confirmó ambos dominios; peer observado en Wi-Fi. Datos móviles y confianza TLS completa pendientes |
 | Consulta de credenciales | `PASS` — fixture DPAPI y pantalla alternativa en consola, revelado/ocultado con Enter; rechazo de redirección; cuentas reales presentes sin imprimir contraseñas |
+| CLI global del host | `PASS` — `C:/Program Files/GNX/gnx.exe`, SHA-256 idéntico al bundle; PATH único, instalación repetida, `doctor` con configuración explícita y `access dns` |
+| Retiro de instalación anterior | Servicio, bandeja automática y carpetas retirados; copia restringida de EXE/configuración/logs. VM antigua apagada por ID y discos eliminados con autorización. Perfil y cuenta deshabilitada: `PENDIENTE` de reinicio |
 | Reboot / respaldo de acceso | `PENDIENTE` — no los cubre el reboot ni la copia USB anteriores |
 
 El bundle contiene un MSI 0.77.1 cuyo digest y firma Authenticode se validaron,
@@ -103,6 +105,20 @@ uplink 1500 resolvió las descargas remotas sin cambiar MTU del túnel, DNS ni C
 El primer apply tras reiniciar el nodo leyó un estado transitorio: ahora espera
 un estado utilizable. El helper DPAPI fija módulos de Windows PowerShell para
 no heredar módulos incompatibles de PowerShell 7, fallo detectado con fixture.
+
+La migración de CLI se detuvo ante ACL antiguas restrictivas; se recuperó acceso
+sólo a las rutas retiradas, sin seguir enlaces. Su respaldo quedó limitado a
+SYSTEM y administradores. Se verificó la VM por usuario e ID antes de apagarla;
+la VM actual, los siete servicios y ambos HTTPS permanecieron operativos.
+Windows mantuvo cargado el perfil retirado y rechazó descargar su registro:
+no se declaró eliminado. Se borraron únicamente sus discos ya desconectados,
+con autorización expresa y sin copia; el perfil queda para después del reboot.
+Con reinicio autorizado, una tarea local de un solo intento hará esa limpieza
+al arrancar; su script está restringido a SYSTEM/administradores. El resultado
+queda en `C:/ProgramData/GNX/host-retirement-status.json`; hasta comprobarlo
+sigue pendiente, al igual que la salud posterior al reinicio.
+`doctor` devolvió `CONFIG_READ` al apuntar al archivo local inexistente;
+pasó con `gnx.example.toml` instalado. Las credenciales DPAPI actuales se conservaron.
 
 ## Riesgos concretos
 
