@@ -1,0 +1,11 @@
+# Configuración local y material sensible
+/config/gnx.toml
+/config/*.local.toml
+/secrets/
+/credentials/
+.env
+.env.*
+!.env.example
+*.key
+*.p12
+*.pfx

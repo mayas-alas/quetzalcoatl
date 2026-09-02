@@ -46,22 +46,26 @@ habilitarla por defecto. El gate `D-01` exige crear, resolver y alcanzar un
 servicio real usando exclusivamente Headscale. Hoy se espera que falle y puede
 requerir cambios coordinados en Headscale y Docktail.
 
-### P0.2 — ¿Un Headscale por host o uno compartido?
+### P0.2 — Multiinstalación: decisión cerrada, prueba pendiente
 
-La descripción actual instala Headscale en cada host. Eso crea meshes separadas:
-un Windows y un Linux instalados independientemente no se descubren entre sí.
+[ADR-0002](decisions/0002-mesh-identity-and-endpoint.md) fija un Headscale y un
+`control_server` por mesh. La primera instalación usa `create`; las siguientes
+usan `join`, generan identidades propias y dejan Headscale deshabilitado. Varias
+instancias activas serían meshes distintas, no redundancia.
 
-**Decisión requerida:** confirmar si Quetzalcoatl es una appliance autónoma por
-host o si todos los hosts deben entrar a una misma mesh. Para una mesh compartida
-debe existir un solo endpoint Headscale estable fuera del ciclo de vida de los
-clientes, o una elección explícita de nodo controlador.
+Falta demostrar `M-02` y `M-03` en Windows y Linux.
 
 ### P0.3 — Endpoint, DNS y TLS de Headscale
 
-Falta definir quién entrega el FQDN, cómo apunta al host, quién emite/renueva el
-certificado y cómo confían en él los clientes. En Windows, WSL usa NAT por defecto;
-el acceso desde LAN requiere red mirrored y firewall o un port proxy mantenido.
-También falta probar el hairpin desde la propia Podman Machine al FQDN público.
+El proveedor DDNS actual usa una credencial de cuenta capaz de modificar todos
+sus nombres; no ofrece alcance por instalación. Distribuirla crearía una llave
+maestra en cada host. ADR-0002 exige un solo escritor y un servicio GNX que
+entregue credenciales individuales con una asignación fija de FQDN.
+
+Todavía falta implementar ese servicio y definir emisión/renovación TLS. En
+Windows, WSL usa NAT por defecto; el acceso desde LAN requiere red mirrored y
+firewall o un port proxy mantenido. También falta probar el hairpin desde la
+propia Podman Machine al FQDN público.
 
 **Gate `M-01`:** un dispositivo externo nuevo recibe la CA y resolución privada,
 abre `/health` en `https://mesh.gnx`, valida TLS y se registra con
@@ -101,23 +105,24 @@ ese riesgo. El socket permanece deshabilitado mientras tanto.
 | `W-03` | Un cliente LAN alcanza Headscale 443 a través de WSL y firewall después de reboot. |
 | `L-01` | Instalación y recuperación en una distro limpia con systemd, cgroup v2, Podman 6+ y KVM. |
 | `M-01` | Registro remoto contra el FQDN Headscale con TLS válido y key efímera. |
+| `M-02` | Dos instalaciones conservan identidades distintas y el mismo control plane tras reinicios. |
+| `M-03` | Un miembro no puede arrancar Headscale ni modificar el endpoint del control plane. |
+| `E-01` | Existe un solo escritor por FQDN y el cliente no puede alterar su asignación. |
 | `N-01` | `gnx-netd` pasa la matriz upstream, conserva LocalAPI y sincroniza actualizaciones de seguridad. |
 | `D-01` | Docktail crea y sirve un servicio real usando Headscale, sin una API SaaS externa. |
 | `D-02` | Docktail no obtiene control irrestricto del motor rootful, o el riesgo queda aceptado explícitamente. |
 | `S-01` | Imágenes por digest, secretos fuera de logs/argv y permisos de persistencia verificados. |
+| `S-02` | Config, entorno, logs, capturas y evidencia no contienen tokens ni URLs de actualización. |
 | `R-01` | Backup y restore probado antes del primer upgrade destructivo. |
+| `R-02` | Restore del controlador detrás del mismo FQDN sin dos escritores activos. |
 
 ## Preguntas que necesito cerrar contigo
 
-1. ¿Cada instalación debe tener su propia mesh o Windows y Linux deben compartir
-   un solo Headscale?
-2. ¿El endpoint Headscale será público en Internet, sólo LAN o accesible mediante
-   un dominio privado y una CA corporativa?
-3. ¿Windows 11 x86_64 con nested virtualization puede ser el mínimo oficial?
-4. Si Docktail sigue bloqueado por upstream, ¿se pausa el release o aceptamos un
+1. ¿Windows 11 x86_64 con nested virtualization puede ser el mínimo oficial?
+2. Si Docktail sigue bloqueado por upstream, ¿se pausa el release o aceptamos un
    reemplazo compatible con Headscale?
-5. ¿La UI de Proxmox debe ser sólo local al principio o accesible desde la mesh?
-6. ¿Qué distribución Linux es la primera referencia de aceptación?
+3. ¿La UI de Proxmox debe ser sólo local al principio o accesible desde la mesh?
+4. ¿Qué distribución Linux es la primera referencia de aceptación?
 
 ## Fuentes primarias
 
@@ -135,3 +140,5 @@ ese riesgo. El socket permanece deshabilitado mientras tanto.
 - [Brecha de Services en Headscale](https://github.com/juanfont/headscale/issues/2845)
 - [Docktail](https://github.com/marvinvr/docktail)
 - [Dockur/Proxmox](https://github.com/dockur/proxmox)
+- [API DDNS actual](https://www.duckdns.org/spec.jsp) y
+  [rotación del token](https://www.duckdns.org/faqs.jsp)

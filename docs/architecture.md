@@ -10,6 +10,9 @@ Las diferencias terminan en la preparación del host. Windows necesita una
 Podman Machine respaldada por WSL; Linux usa el motor nativo. Después de ese
 límite, ambos reciben el mismo conjunto versionado de Quadlets.
 
+El conjunto es común, pero su activación depende del modo: `create` levanta el
+único control plane de una mesh y `join` deja ese Quadlet deshabilitado.
+
 ```mermaid
 flowchart LR
     subgraph W["Windows 11 x86_64"]
@@ -71,28 +74,23 @@ los permisos y montajes indispensables.
 ## Runtime común
 
 ```mermaid
-flowchart TB
-    DNS["FQDN estable + TLS confiable"] --> HS["Headscale"]
-    HS --> HSD[("configuración + SQLite")]
-    HS -->|"health OK"| BOOT["Bootstrap one-shot"]
-    BOOT -->|"pre-auth key efímera"| TS["gnx-netd"]
-    TS -->|"control-server = https://mesh.gnx"| HS
-    TS --> TSD[("identidad y estado de red")]
-
-    PODMAN["API Podman rootful"] -.-> DT["Docktail condicionado"]
-    TS -->|"/run/gnx/netd.sock"| CLI["gnx CLI"]
-    TS -.->|"socket GNX"| DT
-    DT -.->|"bloqueado: Services API"| HS
-
-    KVM["/dev/kvm + /dev/fuse"] --> PVE["Dockur/Proxmox privilegiado"]
-    PVE --> PVED[("configuración + discos")]
-    LOCAL["Acceso administrativo local"] -->|"8006/TLS"| PVE
-    REMOTE["Clientes externos"] -->|"443/TLS, fuera de la mesh"| HS
+flowchart LR
+    C["gnx-netd controlador"] --> E["control_server estable"]
+    W["gnx-netd Windows"] --> E
+    L["gnx-netd Linux"] --> E
+    D["Único escritor DNS"] --> E
+    E --> H["Headscale del controlador"]
 ```
 
+Una mesh no agrega ni replica servidores Headscale. La instalación controladora
+es la única que lo arranca; los miembros se registran contra el mismo endpoint.
+Otro servidor implica otra mesh y otro FQDN. La identidad y el estado de
+`gnx-netd` son únicos por instalación y nunca se clonan.
+
 Headscale debe ser alcanzable antes de que exista la mesh; por eso su endpoint
-443 no puede depender de Docktail ni de la mesh. Proxmox queda limitado al host
-hasta resolver la exposición por mesh.
+443 no puede depender de Docktail ni de la mesh. Un único actualizador posee el
+FQDN. Las instalaciones miembro no reciben la credencial DDNS ni modifican el
+registro. Proxmox queda limitado al host hasta resolver su exposición por mesh.
 
 Docktail no registra el nodo: observa el socket del motor y usa la LocalAPI de
 `gnx-netd`. Su Quadlet puede estar empaquetado, pero no debe habilitarse por
@@ -110,30 +108,25 @@ capacidades nuevas de control plane.
 ## Orden de convergencia
 
 ```mermaid
-sequenceDiagram
-    participant O as Orquestador
-    participant H as Headscale
-    participant T as gnx-netd
-    participant P as Proxmox
-    participant D as Docktail
-
-    O->>O: Validar host, Podman, cgroup v2, KVM y puertos
-    O->>H: Instalar configuración y arrancar Quadlet
-    H-->>O: Health y TLS válidos
-    O->>H: Crear identidad mesh y pre-auth key
-    O->>T: Arrancar con control-server y key efímera
-    T-->>O: Nodo registrado y conectado
-    O->>P: Arrancar Quadlet privilegiado
-    P-->>O: API 8006 saludable
-    O-xD: Mantener deshabilitado mientras falle D-01
-    O->>O: Reportar BLOCKED, nunca READY completo
+flowchart LR
+    A["Preflight"] --> M{"Modo"}
+    M -->|"create"| C["Control plane sano"]
+    M -->|"join"| J["Endpoint validado"]
+    C --> K["Key de un uso"]
+    J --> K
+    K --> N["Identidad gnx-netd única"]
+    N --> P["Proxmox sano"]
+    P -.-> D["Docktail condicionado"]
 ```
+
+`create` falla si ya existe otro dueño de la mesh. `join` falla si intenta
+activar Headscale localmente. Ninguno cambia de endpoint para ocultar una caída.
 
 ## Fronteras y persistencia
 
 | Recurso | Persistencia | Exposición inicial |
 |---|---|---|
-| Headscale | configuración, base SQLite, claves TLS | `443/tcp` mediante FQDN estable |
+| Headscale | configuración, base SQLite, claves TLS | sólo controlador; `443/tcp` mediante FQDN estable |
 | gnx-netd | identidad, claves y preferencias del nodo | puerto mesh según su modo de red |
 | Docktail | sin estado propio | ninguna; condicionado |
 | Proxmox | `/var/lib/vz` y `/var/lib/pve-cluster` | `127.0.0.1:8006` o equivalente host-local |
@@ -143,11 +136,20 @@ El secreto de bootstrap se crea después de que Headscale esté sano, se entrega
 imágenes se fijan por digest. Las claves TLS, la base de Headscale y los discos
 de Proxmox nunca viven en la capa escribible del contenedor.
 
+La credencial maestra DDNS queda fuera de los miembros y de los archivos TOML.
+En Windows, una credencial GNX individual se protege para la identidad dedicada
+mediante DPAPI; en Linux se entrega como credencial systemd. El hostname y su IP
+son públicos por diseño y se protegen por integridad, no como contraseña. El
+detalle completo está en [ADR-0002](decisions/0002-mesh-identity-and-endpoint.md).
+
 ## Nombre del control plane
 
 El nombre privado canónico es `https://mesh.gnx`. `mesh` identifica el servicio;
 la identidad del nodo no forma parte del dominio. No se usa `mesh.node.gnx`
 porque convertiría una implementación interna en jerarquía pública.
+
+Todos los miembros de una mesh conservan exactamente el mismo valor. Un nombre
+por nodo no es un control plane y no debe escribirse en `control_server`.
 
 ```toml
 [mesh]
@@ -171,6 +173,7 @@ contrato mínimo está en [agent-gateway.md](agent-gateway.md).
 
 ```text
 quetzalcoatl/
+├── .gitignore
 ├── AGENTS.md
 ├── README.md
 ├── Cargo.toml
@@ -179,7 +182,8 @@ quetzalcoatl/
 │   ├── architecture.md
 │   ├── audit.md
 │   └── decisions/
-│       └── 0001-network-daemon.md
+│       ├── 0001-network-daemon.md
+│       └── 0002-mesh-identity-and-endpoint.md
 ├── src/
 │   ├── main.rs                    # composición y dispatch, nada de negocio
 │   ├── bootstrap/                 # doctor + instalación inicial

@@ -12,18 +12,19 @@ arquitectura y auditoría; todavía no hay implementación.
 
 ## Estado
 
-La topología Headscale + `gnx-netd` + Dockur/Proxmox es viable con gates físicos
-y de red. `gnx-netd` será un fork mínimo de un daemon BSD-3 maduro; la
-reimplementación Rust queda sólo como investigación. Docktail no puede
-considerarse integrado: depende de una API de Services que sigue abierta como
-brecha de compatibilidad en Headscale. El producto no debe reportar `READY`
-mientras Docktail sea requisito.
+Cada mesh tendrá un solo control plane y un `control_server` estable. La primera
+instalación usa `create`; Windows y Linux posteriores usan `join`, conservan una
+identidad propia y no arrancan otro Headscale. `gnx-netd` será un fork mínimo de
+un daemon BSD-3 maduro. Docktail sigue condicionado por su brecha de Services y
+el producto no debe reportar `READY` mientras sea requisito.
 
 ## Documentos
 
 - [Arquitectura](docs/architecture.md): modelo objetivo, flujos y árbol futuro.
 - [Auditoría](docs/audit.md): hechos comprobados, bloqueos y preguntas abiertas.
 - [ADR-0001](docs/decisions/0001-network-daemon.md): decisión sobre `gnx-netd`.
+- [ADR-0002](docs/decisions/0002-mesh-identity-and-endpoint.md): identidad,
+  multiinstalación, endpoint y custodia de credenciales.
 - [Gateway de agentes](docs/agent-gateway.md): acceso local para CLIs, fuera del
   runtime distribuido.
 
@@ -38,3 +39,5 @@ mientras Docktail sea requisito.
 5. Imágenes y artefactos se fijarán por versión, digest y checksum en cada
    release; no se usará `latest`.
 6. Ningún gate fallido se presenta como instalación lista.
+7. Cada FQDN tiene un solo escritor; una credencial DDNS maestra nunca llega a
+   las instalaciones miembro.
