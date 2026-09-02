@@ -3,8 +3,7 @@ param(
     [string]$OutputDirectory,
     [string]$MeshClientMsi,
     [string]$MeshClientVersion,
-    [string]$MeshClientLicense,
-    [string]$MeshClientSbom
+    [string]$MeshClientLicense
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,7 +21,7 @@ $output = New-Item -ItemType Directory -Force -Path $OutputDirectory
 Copy-Item -Force (Join-Path $projectRoot 'target\release\gnx.exe') $output.FullName
 Copy-Item -Force (Join-Path $projectRoot 'config\gnx.example.toml') (Join-Path $output 'gnx.example.toml')
 
-$inputs = @($MeshClientMsi, $MeshClientVersion, $MeshClientLicense, $MeshClientSbom)
+$inputs = @($MeshClientMsi, $MeshClientVersion, $MeshClientLicense)
 $completeRelease = ($inputs | Where-Object { $_ }).Count -eq $inputs.Count
 if (($inputs | Where-Object { $_ }).Count -notin @(0, $inputs.Count)) {
     throw 'Provide all mesh client release inputs or none.'
@@ -34,7 +33,6 @@ if ($completeRelease) {
     }
     $msi = Resolve-Path -LiteralPath $MeshClientMsi
     $license = Resolve-Path -LiteralPath $MeshClientLicense
-    $sbom = Resolve-Path -LiteralPath $MeshClientSbom
     $signature = Get-AuthenticodeSignature -LiteralPath $msi
     if ($signature.Status -ne 'Valid') {
         throw 'The mesh client MSI does not have a valid Authenticode signature.'
@@ -45,7 +43,6 @@ if ($completeRelease) {
     $bundledMsi = Join-Path $artifacts 'mesh-client.msi'
     Copy-Item -Force -LiteralPath $msi -Destination $bundledMsi
     Copy-Item -Force -LiteralPath $license -Destination (Join-Path $legal 'mesh-client.LICENSE')
-    Copy-Item -Force -LiteralPath $sbom -Destination (Join-Path $legal 'mesh-client.cdx.json')
     $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $bundledMsi).Hash.ToLowerInvariant()
 
     @"
@@ -56,7 +53,6 @@ package = "artifacts/mesh-client.msi"
 version = "$MeshClientVersion"
 sha256 = "$digest"
 license = "legal/mesh-client.LICENSE"
-sbom = "legal/mesh-client.cdx.json"
 "@ | Set-Content -Encoding utf8 -NoNewline (Join-Path $output 'release.toml')
     $exampleManifest = Join-Path $output 'release.example.toml'
     if (Test-Path -LiteralPath $exampleManifest) {

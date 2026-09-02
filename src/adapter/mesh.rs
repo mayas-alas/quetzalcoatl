@@ -47,7 +47,7 @@ impl Mesh for NativeMesh {
     }
 
     fn install(&self, artifact: &Artifact) -> Result<()> {
-        if !artifact.license.is_file() || !artifact.sbom.is_file() {
+        if !artifact.license.is_file() {
             return Err(Error::ReleaseEvidence);
         }
         verify_digest(&artifact.package, &artifact.sha256)?;

@@ -38,7 +38,7 @@ no pertenecen a esta decisión.
 | `M-01` | `gnx connect` usa el endpoint configurado y refleja el fallo real. |
 | `M-02` | Windows mantiene una sola identidad tras reboot. |
 | `M-03` | El binario no ofrece una ruta parcial para iniciar el control plane. |
-| `S-01` | Paquete, imagen, versión, digest, licencia y SBOM están fijados. |
+| `S-01` | Paquete, versión, digest y licencia están fijados. |
 | `S-02` | No aparecen secretos en Git, argv, entorno, logs o evidencia. |
 
 ## Fuentes

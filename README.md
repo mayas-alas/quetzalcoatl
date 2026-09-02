@@ -33,11 +33,11 @@ gnx.exe doctor --config config/gnx.toml
 gnx.exe connect --config config/gnx.toml
 ```
 
-`release.toml` referencia un MSI local, su SHA-256, licencia y SBOM. No contiene
+`release.toml` referencia un MSI local, su SHA-256 y licencia. No contiene
 URLs de descarga. Para enrolamiento desatendido, `connect` acepta
 `--setup-key-file`; nunca acepta la clave como valor.
 
-`packaging/windows/build.ps1` produce `dist/windows/gnx.exe`. Con los cuatro
+`packaging/windows/build.ps1` produce `dist/windows/gnx.exe`. Con los tres
 insumos del cliente genera un bundle instalable; sin ellos produce sólo el
 bundle de desarrollo y no simula que la dependencia esté lista.
 

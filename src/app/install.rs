@@ -71,7 +71,6 @@ mod tests {
             version: "1.2.3".into(),
             sha256: "0".repeat(64),
             license: "client.LICENSE".into(),
-            sbom: "client.cdx.json".into(),
         }
     }
 

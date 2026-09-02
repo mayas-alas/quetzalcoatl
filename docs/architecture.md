@@ -74,7 +74,7 @@ gnx/
 ├── config/
 │   └── gnx.example.toml
 ├── runtime/
-│   └── release.example.toml    # MSI, versión, digest, licencia y SBOM
+│   └── release.example.toml    # MSI, versión, digest y licencia
 ├── packaging/
 │   └── windows/
 │       └── build.ps1

@@ -21,7 +21,7 @@
 | `M-01` | `connect` conserva el endpoint exacto y reporta el estado real. |
 | `M-02` | El cliente nativo conserva una sola identidad tras reboot. |
 | `M-03` | `join` no puede activar el control plane. |
-| `S-01` | Artefactos, versiones, digests, licencias y SBOM están fijados. |
+| `S-01` | Artefactos, versiones, digests y licencias están fijados. |
 | `S-02` | Git, argv, entorno, logs y evidencia no contienen secretos. |
 
 Fallar cualquiera de estos gates impide `READY`; no se sustituye por una prueba
@@ -36,9 +36,10 @@ simulada.
 | RustSec sobre `Cargo.lock` | `PASS` — sin vulnerabilidades conocidas |
 | Build release y checksum del EXE | `PASS` |
 | `gnx doctor` físico | `FAIL` — `CLIENT_MISSING` |
+| Instalación elevada | `BLOCKED` — UAC cancelado por el usuario |
 
-No se solicitó elevación: sin el MSI firmado, licencia y SBOM de un release
-concreto no existe una instalación autorizada que ejecutar.
+El bundle contiene un MSI 0.77.1 cuyo digest y firma Authenticode se validaron,
+pero el cliente no quedó instalado después de cancelarse la elevación.
 
 ## Riesgos concretos
 

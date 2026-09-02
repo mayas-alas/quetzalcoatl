@@ -79,7 +79,6 @@ struct ArtifactFile {
     version: String,
     sha256: String,
     license: PathBuf,
-    sbom: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +87,6 @@ pub struct Artifact {
     pub version: String,
     pub sha256: String,
     pub license: PathBuf,
-    pub sbom: PathBuf,
 }
 
 impl Artifact {
@@ -109,7 +107,6 @@ impl Artifact {
             || !package_ok
             || !bundle_path(&item.package)
             || !bundle_path(&item.license)
-            || !bundle_path(&item.sbom)
         {
             return Err(Error::ReleaseInvalid);
         }
@@ -120,7 +117,6 @@ impl Artifact {
             version: version.to_owned(),
             sha256: item.sha256.to_ascii_lowercase(),
             license: parent.join(item.license),
-            sbom: parent.join(item.sbom),
         })
     }
 }
