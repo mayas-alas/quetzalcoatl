@@ -1,9 +1,11 @@
 version = 1
 
-[mesh]
-# `create` inicia un control plane nuevo; las instalaciones posteriores usan
-# `join` y conservan exactamente este endpoint.
+[node]
+# `create` inicia el único control plane; `join` sólo conecta este nodo.
 mode = "join"
+
+[mesh]
+# El ejemplo privado requiere DNS y CA preparados antes de conectar.
 control_server = "https://mesh.gnx"
 
-# `installation_id`, claves y tokens se generan o reciben fuera de este archivo.
+# Identidades, claves y tokens nunca viven en este archivo.
