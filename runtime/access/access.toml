@@ -1,0 +1,4 @@
+distribution = "Ubuntu-24.04"
+zone = "mesh.gnx"
+wildcard = true
+state_dir = "/var/lib/gnx/access"

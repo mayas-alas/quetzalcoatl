@@ -1,0 +1,26 @@
+# Managed by GNX access
+[Unit]
+Description=GNX private access
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Container]
+Image=docker.io/tailscale/tailscale@sha256:51fec4863144d6ba0a22504cfb455d020ee0307d0c04eb48f5afee63390bdba0
+ContainerName=gnx-access
+Network=host
+AddDevice=/dev/net/tun
+AddCapability=NET_ADMIN NET_RAW
+PodmanArgs=--entrypoint=/usr/local/bin/tailscaled
+Exec=--state=/var/lib/gnx/state/node.state --socket=/run/gnx/access.sock --tun=gnx-access --no-logs-no-support
+Volume=@STATE@/state:/var/lib/gnx/state
+Volume=@STATE@/bootstrap:/run/gnx/bootstrap:ro
+LogDriver=none
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,25 @@
+# Managed by GNX access
+[Unit]
+Description=GNX private name resolution
+Wants=gnx-access.service
+After=gnx-access.service
+StartLimitIntervalSec=0
+
+[Container]
+Image=docker.io/pihole/pihole@sha256:7c96327ecfb96dbc74b0a47d073dbef7d60526e0aa87519b2a2f7a0007cb5c88
+ContainerName=gnx-dns
+Network=gnx-control.network
+PublishPort=@IP@:53:53/udp
+PublishPort=@IP@:53:53/tcp
+PodmanArgs=--entrypoint=/usr/bin/pihole-FTL
+Exec=no-daemon
+Volume=@STATE@/dns.toml:/etc/pihole/pihole.toml:ro
+LogDriver=none
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

@@ -2,3 +2,5 @@
 /runtime/control/* text eol=lf
 /ops/compute/*.sh text eol=lf
 /runtime/compute/* text eol=lf
+/runtime/access/* text eol=lf
+/ops/access/*.sh text eol=lf

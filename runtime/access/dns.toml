@@ -1,0 +1,40 @@
+# Managed by GNX access; private zone only, not a global resolver.
+[dns]
+upstreams = []
+listeningMode = "ALL"
+queryLogging = false
+
+[dns.blocking]
+active = false
+
+[dhcp]
+active = false
+
+[ntp.ipv4]
+active = false
+[ntp.ipv6]
+active = false
+[ntp.sync]
+active = false
+
+[resolver]
+resolveIPv4 = false
+resolveIPv6 = false
+networkNames = false
+
+[database]
+DBimport = false
+maxDBdays = 0
+
+[webserver]
+port = ""
+
+[files.log]
+ftl = "/dev/null"
+dnsmasq = "/dev/null"
+webserver = "/dev/null"
+
+[misc]
+readOnly = true
+privacylevel = 4
+dnsmasq_lines = ["address=/@ZONE@/@IP@", "local=/@ZONE@/"]
