@@ -25,6 +25,10 @@ Ambas direcciones resuelven mediante `hosts` en este Windows. El acceso desde
 otro equipo por la mesh todavía no se ha probado. El respaldo cifrado en USB
 cubre el control plane; faltan respaldo de cómputo y restauración operativa.
 
+La [capa de acceso Android](docs/access.md) ya tiene operador Rust, nodo WSL y
+plantillas DNS privado; falta enrolarlo y validar SaaS, teléfono y reinicio.
+No sustituye la infraestructura existente.
+
 ## Reglas
 
 - Rust compone el flujo; la configuración contiene la intención.
@@ -58,5 +62,6 @@ bundle de desarrollo y no simula que la dependencia esté lista.
 - [Auditoría](docs/audit.md)
 - [Control plane local y rutinas del host](docs/control.md)
 - [Primer servicio de cómputo](docs/compute.md)
+- [Acceso privado desde Android](docs/access.md)
 - [ADR de plataforma mesh](docs/decisions/0001-mesh-platform.md)
 - [ADR de identidad y endpoint](docs/decisions/0002-mesh-identity-and-endpoint.md)

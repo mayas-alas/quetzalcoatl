@@ -33,9 +33,9 @@ otro host siguen pendientes. Un fallo nunca se sustituye por una prueba simulada
 
 | Comprobación | Resultado 2026-09-02 |
 |---|---|
-| Tests Rust | `PASS` — 13 del cliente + 3 del bootstrap + 2 del cifrado + 2 de cómputo |
+| Tests Rust | `PASS` — 13 del cliente + 3 del bootstrap + 2 del cifrado + 2 de cómputo + 5 de acceso |
 | Clippy con warnings como error | `PASS` |
-| RustSec sobre los tres lockfiles | `PASS` — sin vulnerabilidades conocidas en dependencias Rust |
+| RustSec sobre los cuatro lockfiles | `PASS` — sin vulnerabilidades conocidas en dependencias Rust |
 | Build release y checksum del EXE | `PASS` |
 | `gnx doctor` físico | `PASS` — cliente 0.77.1, sin elevación |
 | Instalación elevada | `PASS` — MSI y GNX devolvieron 0 |
@@ -58,6 +58,10 @@ otro host siguen pendientes. Un fallo nunca se sustituye por una prueba simulada
 | Login y reinicio de cómputo | `PASS` — API autenticada antes y después de reiniciar el servicio; ejecución elevada con código 0 |
 | Reboot completo con cómputo | `PENDIENTE` — no lo cubre el reboot previo del control |
 | Respaldo de cómputo | `PENDIENTE` — la copia USB verificada sólo cubre el control plane |
+| Operador de acceso | `PASS` — build, validación y nodo Quadlet activo sin alterar los HTTPS existentes |
+| DNS de acceso aislado | `PASS` — UDP/TCP, wildcard, AAAA y límites de resolución; puertos loopback temporales retirados |
+| Enrolamiento de acceso | `PENDIENTE` — gate explícito `ACCESS_ENROLLMENT_REQUIRED`; no se recibió clave |
+| Acceso Android / reboot / respaldo de acceso | `PENDIENTE` — no hay prueba por VPN externa ni DNS/políticas SaaS aplicados |
 
 El bundle contiene un MSI 0.77.1 cuyo digest y firma Authenticode se validaron,
 y el cliente quedó instalado. Los intentos previos fallaron con código MSI 2:
@@ -76,12 +80,20 @@ se sustituyó por su argumento compatible. Windows también detectó ausencia de
 CRL: se añadió publicación y renovación, sin omitir la comprobación de
 revocación. Ambos reintentos pasaron. [Operación y límites](control.md).
 
+En acceso se corrigieron el manejo de IPs nulas antes del login y la aplicación
+de ACL sin `SeSecurityPrivilege`. Las pruebas iniciales también detectaron una
+aserción de plantillas demasiado amplia y el uso de `.invalid`, que no prueba
+forwarding público; se corrigieron y repitieron. El fallo de enrolamiento por
+falta de clave permanece explícito. [Estado de acceso](access.md).
+
 ## Riesgos concretos
 
 - Instalación y recuperación del cliente nativo sin sesión abierta.
 - Custodia de la clave fuera del host y restauración operativa aún pendientes.
 - Cómputo privilegiado y control plane comparten WSL y red de contenedores.
 - Falta respaldo del estado de cómputo y rotación coordinada de su credencial.
+- La nueva identidad de acceso no está cubierta por el respaldo USB; políticas
+  SaaS, confianza Android y renovación de identidad siguen pendientes.
 - El login automatizado cubre bootstrap del control y API de cómputo locales.
   No se declara una solución genérica de custodia de secretos.
 

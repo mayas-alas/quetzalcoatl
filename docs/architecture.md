@@ -15,11 +15,15 @@ flowchart LR
         B["navegador"]
     end
     subgraph WSL
+        X["gnx-access — nodo VPN"] --> E
+        D["gnx-dns — zona mesh.gnx"]
         E["gnx-entry :443"] --> C["gnx-control / gnx-console"]
         E --> P["gnx-compute :8006"]
     end
     M -->|mesh.gnx| E
     B -->|hosts local + HTTPS| E
+    A["Android — pendiente"] -->|VPN SaaS| X
+    X -->|DNS privado :53| D
 ```
 
 El proveedor actual de mesh es NetBird. Su nombre, comandos y formatos quedan
@@ -52,6 +56,8 @@ control_server = "https://mesh.gnx"
 Rust genera credenciales, valida el login y cifra el respaldo. PowerShell cubre
 UAC, DPAPI, certificados, hosts, tareas y copia USB; systemd y Podman reciben
 Quadlets. `ops/control` prepara la mesh y `ops/compute` prepara un único servicio.
+`ops/access` añade transporte operativo y DNS privado para Android; no cambia
+el adaptador mesh del producto. [Contrato y gates](access.md).
 La ejecución de agentes queda fuera del producto.
 
 La entrada HTTPS comparte el puerto 443 y selecciona el servicio por nombre.
@@ -82,10 +88,12 @@ gnx/
 ├── runtime/
 │   ├── release.example.toml    # MSI, versión, digest y licencia
 │   ├── control/                # control plane, HTTPS y plantillas
-│   └── compute/                # Quadlet, endpoint y ruta del primer servicio
+│   ├── compute/                # Quadlet, endpoint y ruta del primer servicio
+│   └── access/                 # nodo de acceso, zona privada y Quadlets
 ├── ops/
 │   ├── control/                # bootstrap/cifrado Rust y rutinas del host
-│   └── compute/                # credenciales/login Rust y despliegue local
+│   ├── compute/                # credenciales/login Rust y despliegue local
+│   └── access/                 # aplicación Rust, ACL Windows y prueba DNS
 ├── packaging/
 │   └── windows/
 │       └── build.ps1
