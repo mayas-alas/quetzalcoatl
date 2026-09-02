@@ -32,13 +32,15 @@ No sobreescribe una instancia cuyo propietario ya exista sin evidencia local.
 | Respaldo cifrado y evidencia | `%LOCALAPPDATA%/GNX/backups` |
 | Clave de recuperación separada | `%LOCALAPPDATA%/GNX/recovery/control.agekey`, ACL del usuario/admin/SYSTEM |
 
-La tarea de sesión mantiene WSL activo, actualiza sólo la línea `mesh.gnx`
-marcada por GNX en `hosts` y comprueba HTTPS. Conserva un `hosts.before` para
+La tarea de sesión mantiene WSL activo y actualiza la línea marcada por GNX en
+`hosts`: `mesh.gnx` y, si está instalado el Quadlet de cómputo,
+`proxmox.mesh.gnx`. Comprueba HTTPS del control y conserva un `hosts.before` para
 recuperación; no reemplaza entradas ajenas. Arranque sin sesión Windows aún no
 validado. La tarea reintenta si su sesión WSL termina.
 
-La CA queda restringida a `mesh.gnx`; se instala únicamente su certificado
-público en Windows. La clave CA permanece en WSL. HTTPS valida cadena, nombre
+La CA queda restringida al espacio DNS `mesh.gnx`; el certificado de entrada
+cubre `mesh.gnx` y `proxmox.mesh.gnx`. Se instala únicamente el certificado
+público de la CA en Windows. La clave CA permanece en WSL. HTTPS valida cadena, nombre
 y revocación; HTTP sólo publica `/pki/root.crl`. No se usan excepciones TLS.
 El certificado se renueva a menos de 30 días de caducar; la CRL dura 30 días y
 se actualiza diariamente. La renovación de la propia CA requiere intervención.
@@ -52,7 +54,8 @@ en su consola administrativa.
 
 ## Límites y recuperación
 
-Para parar: detener la tarea `GNX Control Host` y los tres servicios WSL.
+Para parar el control: detener la tarea `GNX Control Host` y sus tres servicios
+WSL. Si está instalado, `gnx-compute` se detiene por separado.
 No borrar datos ni CA para reiniciar. Repetir la preparación no recrea la cuenta.
 Los fallos indican un gate y conservan material protegido para diagnóstico;
 fallos durante la revocación final requieren revisar el estado antes de reintentar.
@@ -83,9 +86,11 @@ La copia USB verifica SHA-256, no formatea ni reemplaza archivos distintos.
 La USB contiene únicamente respaldo cifrado y evidencia, nunca la clave.
 Guardar también la clave fuera del host, en **otra** ubicación segura: perder
 el host y su única clave vuelve inútil el respaldo USB. No imprimirla ni
-pegarla en chat. El respaldo cubre estado/CA/configuración del control plane,
-no el cliente Windows ni su almacén DPAPI. El readback criptográfico no es
-una restauración operativa; esa prueba sigue pendiente.
+pegarla en chat. El respaldo cubre estado/CA/configuración del control plane.
+Excluye el cliente Windows, DPAPI y `/var/lib/gnx/compute` (configuración,
+credencial y discos del servicio). La copia USB verificada precede al despliegue
+de cómputo. El readback criptográfico no es una restauración operativa;
+esa prueba sigue pendiente. [Alcance del servicio](compute.md).
 
 ## Fuentes
 

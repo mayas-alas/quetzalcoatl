@@ -1,28 +1,37 @@
 # GNX
 
-Base Windows-first para un ejecutable Rust pequeño, gobernado por archivos de
-configuración y con integraciones externas detrás de contratos GNX.
+GNX es una base de infraestructura privada local: un ejecutable Rust pequeño
+conecta Windows a una mesh propia, mientras WSL aloja el control y los servicios
+mediante Quadlet. Archivos de configuración expresan la intención y contratos
+GNX encapsulan las integraciones.
 
 ## Primer corte
 
-Sólo cubre cuatro resultados en Windows x86_64:
+El cliente cubre cuatro resultados en Windows x86_64:
 
 1. leer y validar la configuración;
 2. comprobar el host Windows;
 3. verificar e instalar un paquete MSI local del cliente de mesh;
 4. conectar el nodo local al `control_server` y reportar su estado real.
 
-El control plane local vive en WSL; Windows conserva el cliente nativo.
-`ops/control` prepara exclusivamente `mesh.gnx`, separado del binario cliente.
-Proxmox, acceso desde otros hosts, routing y publicación de aplicaciones quedan
-fuera de este corte.
+La operación local añade dos servicios, separados del binario cliente:
+
+| Dirección | Función | Estado comprobado |
+|---|---|---|
+| `https://mesh.gnx` | Control plane y consola | TLS, conexión y misma identidad tras reboot Windows |
+| `https://proxmox.mesh.gnx` | Primer servicio de cómputo | TLS, login API y reinicio del servicio; `8006` interno |
+
+Ambas direcciones resuelven mediante `hosts` en este Windows. El acceso desde
+otro equipo por la mesh todavía no se ha probado. El respaldo cifrado en USB
+cubre el control plane; faltan respaldo de cómputo y restauración operativa.
 
 ## Reglas
 
 - Rust compone el flujo; la configuración contiene la intención.
 - Comandos, módulos, archivos y servicios propios usan nombres GNX.
-- El proveedor actual sólo aparece dentro del adaptador, manifest, SBOM,
-  licencias y atribuciones.
+- Las dependencias se identifican en adaptadores, imágenes, manifest, SBOM,
+  licencias y documentación técnica. Se conserva el alias de servicio
+  `proxmox.mesh.gnx` elegido por el operador.
 - No hay daemon VPN propio, fallback oculto ni secretos en Git, argv o logs.
 - Un gate fallido nunca produce `READY`.
 
@@ -48,5 +57,6 @@ bundle de desarrollo y no simula que la dependencia esté lista.
 - [Arquitectura](docs/architecture.md)
 - [Auditoría](docs/audit.md)
 - [Control plane local y rutinas del host](docs/control.md)
+- [Primer servicio de cómputo](docs/compute.md)
 - [ADR de plataforma mesh](docs/decisions/0001-mesh-platform.md)
 - [ADR de identidad y endpoint](docs/decisions/0002-mesh-identity-and-endpoint.md)

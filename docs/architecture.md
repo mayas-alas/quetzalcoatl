@@ -1,6 +1,6 @@
 # Arquitectura GNX
 
-**Corte:** Windows + control plane local en WSL; Rust-first.
+**Corte:** cliente Windows + control plane y primer servicio en WSL; Rust-first.
 
 ## Resultado único
 
@@ -10,15 +10,22 @@ observado coincide con la configuración.
 
 ```mermaid
 flowchart LR
-    C["gnx.toml"] --> R["gnx.exe"]
-    R --> H["host"]
-    R --> M["mesh"]
-    M --> E["control_server"]
+    subgraph Windows
+        R["gnx.exe + gnx.toml"] --> M["cliente mesh nativo"]
+        B["navegador"]
+    end
+    subgraph WSL
+        E["gnx-entry :443"] --> C["gnx-control / gnx-console"]
+        E --> P["gnx-compute :8006"]
+    end
+    M -->|mesh.gnx| E
+    B -->|hosts local + HTTPS| E
 ```
 
 El proveedor actual de mesh es NetBird. Su nombre, comandos y formatos quedan
 encapsulados en el adaptador; se conservan en licencias, manifest, SBOM y
-diagnósticos técnicos, no en la interfaz pública ni en la taxonomía.
+diagnósticos técnicos. La taxonomía propia usa capacidades GNX; el alias
+`proxmox.mesh.gnx` es el nombre de servicio solicitado por el operador.
 
 ## Contrato mínimo
 
@@ -40,17 +47,16 @@ control_server = "https://mesh.gnx"
 - El endpoint se conserva exactamente y nunca cae a un servicio distinto.
 - El login es interactivo o usa `--setup-key-file`; la clave nunca viaja en argv.
 
-## Orden de implementación
+## Operación
 
-1. Parsear y validar `gnx.toml` en Rust.
-2. Implementar `doctor` de Windows sin mutaciones.
-3. Implementar `connect` contra el cliente nativo.
-4. Implementar `install` idempotente desde un release local verificado.
-5. Empaquetar el mismo binario como `gnx.exe`.
+Rust genera credenciales, valida el login y cifra el respaldo. PowerShell cubre
+UAC, DPAPI, certificados, hosts, tareas y copia USB; systemd y Podman reciben
+Quadlets. `ops/control` prepara la mesh y `ops/compute` prepara un único servicio.
+La ejecución de agentes queda fuera del producto.
 
-El bootstrap y cifrado del respaldo también son Rust. PowerShell cubre UAC,
-certificados, hosts, tareas y copia USB; systemd y Podman reciben archivos
-declarativos. No hay daemon VPN propio ni agentes dentro del runtime.
+La entrada HTTPS comparte el puerto 443 y selecciona el servicio por nombre.
+El salto a cómputo también valida TLS contra su CA. `8006` no se publica al host.
+El acceso del navegador por `hosts` local no acredita transporte VPN entre pares.
 
 ## Taxonomía
 
@@ -60,7 +66,7 @@ gnx/
 ├── Cargo.lock
 ├── src/
 │   ├── main.rs                 # composición y salida
-│   ├── config.rs               # único esquema público
+│   ├── config.rs               # configuración del cliente
 │   ├── app/
 │   │   ├── install.rs
 │   │   ├── connect.rs
@@ -75,9 +81,11 @@ gnx/
 │   └── gnx.example.toml
 ├── runtime/
 │   ├── release.example.toml    # MSI, versión, digest y licencia
-│   └── control/                # servicios, HTTPS y plantillas sin secretos
+│   ├── control/                # control plane, HTTPS y plantillas
+│   └── compute/                # Quadlet, endpoint y ruta del primer servicio
 ├── ops/
-│   └── control/                # bootstrap/cifrado Rust y rutinas del host
+│   ├── control/                # bootstrap/cifrado Rust y rutinas del host
+│   └── compute/                # credenciales/login Rust y despliegue local
 ├── packaging/
 │   └── windows/
 │       └── build.ps1
@@ -91,6 +99,7 @@ proveedores, versiones, daemons o servicios concretos.
 
 ## Fuera del corte
 
-Cliente Linux, otros hosts, Proxmox, routing, publicación de aplicaciones, HA y
-actualización automática. La consola administrativa del proveedor conserva su
-atribución. [Operación local](control.md) y [evidencia](audit.md).
+Cliente Linux, otros hosts, routing, publicación genérica de aplicaciones, HA,
+creación de VMs y actualización automática. El cómputo actual es un laboratorio
+privilegiado en el mismo WSL, autorizado por el operador. Las consolas conservan
+su atribución. [Control](control.md), [cómputo](compute.md) y [evidencia](audit.md).

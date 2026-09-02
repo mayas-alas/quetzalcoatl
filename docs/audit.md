@@ -9,6 +9,7 @@
 - El host ejecuta un solo cliente mesh nativo.
 - El control plane es un prerrequisito, no un caso parcial del binario.
 - La dependencia mesh actual queda detrás de `port::mesh`.
+- El primer servicio se prepara con `ops/compute` y un Quadlet independiente.
 - `legacy` es referencia de lectura y no se modifica.
 
 ## Gates de producto
@@ -32,9 +33,9 @@ otro host siguen pendientes. Un fallo nunca se sustituye por una prueba simulada
 
 | Comprobación | Resultado 2026-09-02 |
 |---|---|
-| Tests Rust | `PASS` — 13 del cliente + 3 del bootstrap + 2 del cifrado |
+| Tests Rust | `PASS` — 13 del cliente + 3 del bootstrap + 2 del cifrado + 2 de cómputo |
 | Clippy con warnings como error | `PASS` |
-| RustSec sobre ambos lockfiles | `PASS` — sin vulnerabilidades conocidas en dependencias Rust |
+| RustSec sobre los tres lockfiles | `PASS` — sin vulnerabilidades conocidas en dependencias Rust |
 | Build release y checksum del EXE | `PASS` |
 | `gnx doctor` físico | `PASS` — cliente 0.77.1, sin elevación |
 | Instalación elevada | `PASS` — MSI y GNX devolvieron 0 |
@@ -52,6 +53,11 @@ otro host siguen pendientes. Un fallo nunca se sustituye por una prueba simulada
 | Respaldo físico | `PASS` — captura consistente cifrada a las 17:46:32 UTC; descifrado completo y SHA-256 verificados |
 | Copia USB | `PASS` — 33 731 662 bytes en `D:/GNX-backups`; SHA-256 idéntico y descifrado completo desde USB; sin clave en la unidad |
 | Salud tras respaldo | `PASS` — tres servicios activos, cliente conectado y HTTPS 200 con validación TLS |
+| Servicio de cómputo | `PASS` — Quadlet activo, imagen por digest, KVM API 12; `pve-manager` 9.2.11 |
+| HTTPS de cómputo | `PASS` — `proxmox.mesh.gnx`, HTTP 200, TLS válido y upstream con CA verificada; sin puertos publicados por cómputo |
+| Login y reinicio de cómputo | `PASS` — API autenticada antes y después de reiniciar el servicio; ejecución elevada con código 0 |
+| Reboot completo con cómputo | `PENDIENTE` — no lo cubre el reboot previo del control |
+| Respaldo de cómputo | `PENDIENTE` — la copia USB verificada sólo cubre el control plane |
 
 El bundle contiene un MSI 0.77.1 cuyo digest y firma Authenticode se validaron,
 y el cliente quedó instalado. Los intentos previos fallaron con código MSI 2:
@@ -74,14 +80,17 @@ revocación. Ambos reintentos pasaron. [Operación y límites](control.md).
 
 - Instalación y recuperación del cliente nativo sin sesión abierta.
 - Custodia de la clave fuera del host y restauración operativa aún pendientes.
-- El login automatizado validado sólo cubre el bootstrap local por TLS y archivo
-  protegido. No se declara una solución genérica de custodia de secretos.
+- Cómputo privilegiado y control plane comparten WSL y red de contenedores.
+- Falta respaldo del estado de cómputo y rotación coordinada de su credencial.
+- El login automatizado cubre bootstrap del control y API de cómputo locales.
+  No se declara una solución genérica de custodia de secretos.
 
 ## No evaluado todavía
 
-Cliente Linux, otro host, Proxmox, routing, publicación de aplicaciones, HA,
-restore y actualización automática. La consola HTTP se prueba por respuesta,
-no mediante un recorrido interactivo completo. La revisión de
+Cliente Linux, otro host, routing, publicación genérica de aplicaciones, HA,
+VMs/LXC, consola WebSocket, restore, reboot con cómputo y actualización
+automática. La interfaz web no tiene un recorrido interactivo completo
+verificado. [Alcance de cómputo](compute.md). La revisión de
 dependencias Rust no sustituye un escaneo de vulnerabilidades de las imágenes.
 
 ## Fuentes primarias
