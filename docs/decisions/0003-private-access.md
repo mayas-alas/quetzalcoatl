@@ -1,6 +1,6 @@
 # ADR-0003: acceso operativo independiente
 
-**Estado:** aceptado; conexión remota pendiente de validación.  
+**Estado:** aceptado; Android confirmado por el operador, datos móviles/reboot pendientes.
 **Fecha:** 2026-09-02
 
 Se añade un nodo Tailscale SaaS en WSL y un resolver Pi-hole privado. Android
@@ -11,6 +11,8 @@ control plane privado. NetBird conserva su función actual; no se reemplazan
 `ops/access` es el núcleo Rust compartido por `gnx access configure/apply/dns`;
 `runtime/access` declara el corte y contiene
 plantillas Quadlet/DNS. Nombres propios por capacidad: `gnx-access`, `gnx-dns`.
+El uplink WSL (`eth0`, MTU 1500) se declara en configuración y un servicio de
+arranque lo aplica antes de la VPN; el túnel mantiene MTU 1280.
 No se desarrolla otro protocolo VPN ni un gestor genérico de proveedores.
 
 DNS responde el apex y wildcard de `mesh.gnx`; Caddy sólo sirve los dos sitios

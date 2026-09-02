@@ -18,6 +18,7 @@ const DNS: &str = include_str!("../../../runtime/access/gnx-dns.container");
 const RESOLVER: &str = include_str!("../../../runtime/access/dns.toml");
 const ENROLL: &str = include_str!("../../../runtime/access/enroll.sh");
 const DNS_PROBE: &str = include_str!("../../../runtime/access/probe-dns.sh");
+const NETWORK: &str = include_str!("../../../runtime/access/gnx-access-network.service");
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -26,6 +27,8 @@ struct Config {
     zone: String,
     wildcard: bool,
     state_dir: String,
+    uplink: String,
+    uplink_mtu: u16,
 }
 
 fn config(source: &str) -> Result<Config> {
@@ -34,6 +37,8 @@ fn config(source: &str) -> Result<Config> {
         || c.zone != "mesh.gnx"
         || !c.wildcard
         || c.state_dir != "/var/lib/gnx/access"
+        || c.uplink != "eth0"
+        || c.uplink_mtu != 1500
     {
         return Err("CONFIG_SCOPE");
     }
@@ -74,6 +79,8 @@ fn render(template: &str, c: &Config, ip: Ipv4Addr) -> String {
         .replace("@STATE@", &c.state_dir)
         .replace("@ZONE@", &c.zone)
         .replace("@IP@", &ip.to_string())
+        .replace("@UPLINK@", &c.uplink)
+        .replace("@MTU@", &c.uplink_mtu.to_string())
 }
 
 fn read(c: &Config, path: &str) -> Result<Vec<u8>> {
@@ -96,7 +103,7 @@ fn write(c: &Config, path: &str, content: &[u8], mode: &str) -> Result<bool> {
         return Ok(false);
     }
     // Only our managed unit names may be replaced. Never overwrite foreign units.
-    if path.starts_with("/etc/containers/")
+    if (path.starts_with("/etc/containers/") || path.starts_with("/etc/systemd/system/"))
         && !previous.is_empty()
         && !previous.starts_with(b"# Managed by GNX access")
     {
@@ -254,6 +261,9 @@ fn dns_probe_args(ip: &str) -> Vec<&str> {
 }
 
 fn verify(c: &Config, ip: Ipv4Addr) -> Result<()> {
+    let links =
+        wsl(c, &["ip", "-json", "link", "show", &c.uplink], None).map_err(|_| "UPLINK_READ")?;
+    check_uplink(&links, c)?;
     // A bridge container cannot reliably reach its own published port (hairpin).
     wsl(c, &dns_probe_args(&ip.to_string()), None).map_err(|_| "DNS_QUERY")?;
     for name in ["mesh.gnx", "proxmox.mesh.gnx"] {
@@ -287,6 +297,20 @@ fn verify(c: &Config, ip: Ipv4Addr) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct Link {
+    ifname: String,
+    mtu: u16,
+}
+
+fn check_uplink(source: &[u8], c: &Config) -> Result<()> {
+    let links: Vec<Link> = serde_json::from_slice(source).map_err(|_| "UPLINK_READ")?;
+    match links.as_slice() {
+        [link] if link.ifname == c.uplink && link.mtu == c.uplink_mtu => Ok(()),
+        _ => Err("UPLINK_MTU"),
+    }
 }
 
 #[derive(Deserialize)]
@@ -348,6 +372,28 @@ fn apply_with(path: &Path, prompt: impl FnOnce() -> Result<Zeroizing<String>>) -
         wsl(&c, &["systemctl", "is-active", "--quiet", unit], None)
             .map_err(|_| "INFRASTRUCTURE_REQUIRED")?;
     }
+    let network = render(NETWORK, &c, Ipv4Addr::UNSPECIFIED);
+    let network_changed = write(
+        &c,
+        "/etc/systemd/system/gnx-access-network.service",
+        network.as_bytes(),
+        "644",
+    )?;
+    wsl(&c, &["systemctl", "daemon-reload"], None)?;
+    wsl(
+        &c,
+        &["systemctl", "enable", "gnx-access-network.service"],
+        None,
+    )
+    .map_err(|_| "UPLINK_ENABLE")?;
+    // Reapply the oneshot if the host's MTU drifted, even with unchanged config.
+    let links = wsl(&c, &["ip", "-json", "link", "show", &c.uplink], None)?;
+    service(
+        &c,
+        "gnx-access-network.service",
+        network_changed || check_uplink(&links, &c).is_err(),
+    )
+    .map_err(|_| "UPLINK_SERVICE")?;
     // No shell substitution of configuration or credentials; arguments stay separate.
     for suffix in ["", "/state"] {
         wsl(
@@ -373,7 +419,12 @@ fn apply_with(path: &Path, prompt: impl FnOnce() -> Result<Zeroizing<String>>) -
     service(&c, "gnx-access.service", changed).map_err(|_| "ACCESS_SERVICE")?;
     let mut observed = status(&c);
     for _ in 0..20 {
-        if observed.is_ok() {
+        if observed.as_ref().is_ok_and(|state| {
+            matches!(
+                state.backend_state.as_str(),
+                "Running" | "Stopped" | "NeedsLogin" | "NeedsMachineAuth"
+            )
+        }) {
             break;
         }
         thread::sleep(Duration::from_millis(500));
@@ -430,7 +481,7 @@ fn apply_with(path: &Path, prompt: impl FnOnce() -> Result<Zeroizing<String>>) -
     checks?;
     verify_policy(&c)?;
     Ok(format!(
-        "access-local\n{}\nPENDING saas-dns-policy android-cellular reboot backup",
+        "access-local\n{}\nPENDING remote-client-check reboot backup",
         dns_fields(&c, Some(current.ipv4))
     ))
 }
@@ -440,8 +491,8 @@ fn dns_fields(c: &Config, ip: Option<Ipv4Addr>) -> String {
         .map(|ip| ip.to_string())
         .unwrap_or_else(|| "PENDING (gnx access configure)".into());
     format!(
-        "Nameserver: {address}\nRestrict to domain (Split DNS): ON\nDomain: {}\nUse with exit node: OFF\nSearch domain (optional): {}",
-        c.zone, c.zone
+        "Nameserver: {address}\nRestrict to domain (Split DNS): ON\nDomain: {}\nUse with exit node: OFF\nSearch domain (optional): {}\nUplink target: {} MTU {}",
+        c.zone, c.zone, c.uplink, c.uplink_mtu
     )
 }
 
@@ -495,6 +546,8 @@ mod tests {
             CONFIG.replace("/var/lib/gnx/access", "/"),
             format!("{CONFIG}\nsecret = 'forbidden'"),
             CONFIG.replace("Ubuntu-24.04", "another-host"),
+            CONFIG.replace("1500", "1280"),
+            CONFIG.replace("eth0", "gnx-access"),
         ] {
             assert!(config(&invalid).is_err());
         }
@@ -528,8 +581,8 @@ mod tests {
         assert_eq!(parsed["webserver"]["port"].as_str(), Some(""));
         assert!(dns.contains("address=/mesh.gnx/100.100.100.10"));
         assert!(dns.contains("local=/mesh.gnx/"));
-        for template in [ACCESS, DNS, RESOLVER] {
-            for marker in ["@STATE@", "@ZONE@", "@IP@"] {
+        for template in [ACCESS, DNS, RESOLVER, NETWORK] {
+            for marker in ["@STATE@", "@ZONE@", "@IP@", "@UPLINK@", "@MTU@"] {
                 assert!(!render(template, &c, ip).contains(marker));
             }
         }
@@ -597,6 +650,24 @@ mod tests {
             &args[args.len() - 3..],
             &["100.91.239.31", "53", "100.91.239.31"]
         );
+    }
+
+    #[test]
+    fn uplink_is_persistent_and_drift_never_passes_as_ready() {
+        let c = config(CONFIG).unwrap();
+        assert!(check_uplink(br#"[{"ifname":"eth0","mtu":1500}]"#, &c).is_ok());
+        for source in [
+            br#"[{"ifname":"eth0","mtu":1280}]"#.as_slice(),
+            br#"[{"ifname":"gnx-access","mtu":1500}]"#,
+            b"[]",
+        ] {
+            assert_eq!(check_uplink(source, &c), Err("UPLINK_MTU"));
+        }
+        assert_eq!(check_uplink(b"invalid", &c), Err("UPLINK_READ"));
+        let unit = render(NETWORK, &c, Ipv4Addr::UNSPECIFIED);
+        assert!(unit.contains("ExecStart=/usr/sbin/ip link set dev eth0 mtu 1500"));
+        assert!(unit.contains("WantedBy=multi-user.target"));
+        assert!(ACCESS.contains("Requires=gnx-access-network.service"));
     }
 
     #[test]

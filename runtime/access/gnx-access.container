@@ -3,6 +3,8 @@
 Description=GNX private access
 Wants=network-online.target
 After=network-online.target
+Requires=gnx-access-network.service
+After=gnx-access-network.service
 StartLimitIntervalSec=0
 
 [Container]

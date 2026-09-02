@@ -32,12 +32,20 @@ nodo sí persiste. No necesita otro cliente Windows ni nuevo UAC.
 consulta el estado; devuelve fallo explícito si falta conexión o salud local.
 El núcleo `ops/access` se comparte con el EXE; no se duplica el flujo.
 
+`access.toml` declara `uplink = "eth0"` y `uplink_mtu = 1500`.
+`apply` instala y habilita `gnx-access-network.service` antes del nodo VPN;
+el túnel conserva MTU 1280. `dns` falla con `UPLINK_MTU` si el valor observado
+no coincide. Configuraciones anteriores deben añadir esos dos campos.
+
 Valida el corte, arranca Quadlet, enrola con su archivo temporal, conserva ID/IP y genera
 DNS con la IP observada. Las imágenes están fijadas por digest. No acepta DNS
 ni rutas del SaaS, no anuncia subredes, no activa SSH ni exit node. Reaplicar
 no vuelve a enrolar un nodo conectado; un cambio de identidad falla cerrado.
-`READY access-local` exige DNS UDP/TCP y ambos HTTPS con CA/nombre válidos;
+`READY access-local` exige MTU, DNS UDP/TCP desde la red del host, ambos HTTPS
+con CA/nombre válidos y una política recibida no vacía;
 **no acredita acceso remoto**. La salida externa de autenticación no se publica.
+`ACCESS_POLICY_EMPTY` señala una política que no permite tráfico entrante;
+una política no vacía tampoco prueba todos los permisos del teléfono.
 
 ## Campos de «Add nameserver»
 
@@ -69,14 +77,16 @@ No usar la IP WSL, `127.0.0.1` ni una IP de ejemplo como nameserver del teléfon
 
 | Gate | Resultado |
 |---|---|
-| Rust | 6 tests de acceso + 16 del CLI/cliente; Clippy, release y RustSec pasan |
+| Rust | 9 tests de acceso; Clippy y release pasan |
 | Entrada humana | Consola real: sonda no secreta sin eco, rechazada por formato; entrada redirigida y valores en argv rechazados |
 | Custodia temporal | stdin, tmpfs, permiso `0600` y eliminación tras éxito/fallo pasan con sonda no secreta |
 | Imagen DNS | UDP/TCP, apex, wildcard anidado, AAAA vacío y sin upstream pasan; publicación loopback verificada y retirada |
-| Nodo WSL | Quadlet activo; `NeedsLogin`; reaplicar retorna `FAILED ACCESS_ENROLLMENT_REQUIRED` |
+| Nodo WSL | Enrolado por el humano; identidad persistida y nameserver `100.91.239.31` |
 | Infraestructura previa | Ambos HTTPS siguen respondiendo 200 con TLS validado |
-| Enrolamiento / DNS productivo | Pendientes del humano en la CLI; `dns` muestra el formulario sin inventar la IP |
-| SaaS / Android / reboot | Pendientes; no se han modificado DNS ni políticas del SaaS |
+| DNS / política SaaS | Split DNS `mesh.gnx`; regla por usuario hacia DNS 53, HTTPS 443 y CRL 80; política recibida comprobada |
+| Transporte | MTU WSL 1280 reproducía esperas; con 1500 ambos cuerpos HTTPS completos pasan tres veces desde Windows por VPN |
+| Android | El operador confirmó ambos dominios; el peer observado estaba en Wi-Fi. Datos móviles y ausencia de advertencias TLS aún no comprobados |
+| Persistencia | Servicio de uplink habilitado y ordenado antes del nodo; reboot completo todavía pendiente |
 
 Estado privado: `/var/lib/gnx/access`, root-only. El respaldo USB existente
 **no lo incluye**. Faltan respaldo/restauración y verificar renovación/expiración
@@ -86,4 +96,5 @@ Windows, el arranque conserva la limitación de la tarea actual del host.
 ## Dependencias y referencias
 
 - Tailscale 1.102.3: [código y licencia BSD-3-Clause](https://github.com/tailscale/tailscale/tree/v1.102.3), [clave por archivo](https://tailscale.com/docs/reference/tailscale-cli/up), [split DNS](https://tailscale.com/docs/reference/dns-in-tailscale).
+- [MTU de WSL y encapsulado VPN](https://tailscale.com/docs/install/windows/wsl2).
 - Pi-hole FTL 6.7: [código y licencia EUPL-1.2](https://github.com/pi-hole/FTL/tree/v6.7), [configuración DNS](https://docs.pi-hole.net/ftldns/configfile/). Se usa el motor sin UI, DHCP, NTP ni registro de consultas; se conservan atribuciones de las imágenes.
