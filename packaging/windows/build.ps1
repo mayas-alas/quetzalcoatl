@@ -1,76 +1,47 @@
 [CmdletBinding()]
-param(
-    [string]$OutputDirectory,
-    [string]$MeshClientMsi,
-    [string]$MeshClientVersion,
-    [string]$MeshClientLicense
-)
+param([string]$OutputDirectory)
 
 $ErrorActionPreference = 'Stop'
-$projectRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
-if (-not $OutputDirectory) {
-    $OutputDirectory = Join-Path $projectRoot 'dist\windows'
-}
-
-& cargo build --locked --release --manifest-path (Join-Path $projectRoot 'Cargo.toml')
-if ($LASTEXITCODE -ne 0) {
-    throw 'Rust release build failed.'
-}
-
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+if (-not $OutputDirectory) { $OutputDirectory = Join-Path $root 'dist' }
 $output = New-Item -ItemType Directory -Force -Path $OutputDirectory
-Copy-Item -Force (Join-Path $projectRoot 'target\release\gnx.exe') $output.FullName
-Copy-Item -Force -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Path $output 'LICENSE')
-Copy-Item -Force (Join-Path $projectRoot 'config\gnx.example.toml') (Join-Path $output 'gnx.example.toml')
-$accessConfig = Join-Path $output 'access.toml'
-if (-not (Test-Path -LiteralPath $accessConfig)) {
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'runtime\access\access.toml') -Destination $accessConfig
+
+$gates = @(
+    [pscustomobject]@{ Name = 'TEST'; Args = @('test', '--locked') },
+    [pscustomobject]@{ Name = 'CLIPPY'; Args = @('clippy', '--locked', '--all-targets', '--', '-D', 'warnings') },
+    [pscustomobject]@{ Name = 'BUILD'; Args = @('build', '--locked', '--release') }
+)
+foreach ($gate in $gates) {
+    & cargo @($gate.Args)
+    if ($LASTEXITCODE -ne 0) { throw "FAILED WINDOWS_$($gate.Name)" }
 }
 
-$inputs = @($MeshClientMsi, $MeshClientVersion, $MeshClientLicense)
-$completeRelease = ($inputs | Where-Object { $_ }).Count -eq $inputs.Count
-if (($inputs | Where-Object { $_ }).Count -notin @(0, $inputs.Count)) {
-    throw 'Provide all mesh client release inputs or none.'
+$repo = (& wsl.exe -d Ubuntu-24.04 --exec wslpath -u $root).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $repo.StartsWith('/')) { throw 'FAILED WSL_PATH' }
+$outputWsl = (& wsl.exe -d Ubuntu-24.04 --exec wslpath -u $output.FullName).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $outputWsl.StartsWith('/')) { throw 'FAILED OUTPUT_PATH' }
+$container = 'gnx-build-' + [Guid]::NewGuid().ToString('N')
+$image = 'docker.io/library/rust@sha256:3ffeca71d0e4fc30f5537f76b7243e87ac99726b6d3d66591dfc5e497078b9fc'
+try {
+    & wsl.exe -d Ubuntu-24.04 --user root --exec podman run --name $container --pull=missing `
+        -v "${repo}:/work" -v gnx-build-registry:/usr/local/cargo/registry `
+        -v gnx-build-linux:/work/target -w /work $image sh -c `
+        'rustup component add clippy && cargo test --locked && cargo clippy --locked --all-targets -- -D warnings && cargo build --locked --release'
+    if ($LASTEXITCODE -ne 0) { throw 'FAILED LINUX_BUILD' }
+    & wsl.exe -d Ubuntu-24.04 --user root --exec podman cp "${container}:/work/target/release/gnx" "$outputWsl/gnx"
+    if ($LASTEXITCODE -ne 0) { throw 'FAILED LINUX_COPY' }
+} finally {
+    & wsl.exe -d Ubuntu-24.04 --user root --exec podman rm -f $container 2>$null | Out-Null
 }
 
-if ($completeRelease) {
-    if ($MeshClientVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
-        throw 'The mesh client version must be SemVer.'
-    }
-    $msi = Resolve-Path -LiteralPath $MeshClientMsi
-    $license = Resolve-Path -LiteralPath $MeshClientLicense
-    $signature = Get-AuthenticodeSignature -LiteralPath $msi
-    if ($signature.Status -ne 'Valid') {
-        throw 'The mesh client MSI does not have a valid Authenticode signature.'
-    }
+Copy-Item -LiteralPath (Join-Path $root 'target\release\gnx.exe') -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $root 'config\gnx.example.toml') -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $root 'runtime') -Destination $output -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $root 'packaging\linux\install.sh') -Destination (Join-Path $output 'install-linux.sh') -Force
 
-    $artifacts = New-Item -ItemType Directory -Force -Path (Join-Path $output 'artifacts')
-    $legal = New-Item -ItemType Directory -Force -Path (Join-Path $output 'legal')
-    $bundledMsi = Join-Path $artifacts 'mesh-client.msi'
-    Copy-Item -Force -LiteralPath $msi -Destination $bundledMsi
-    Copy-Item -Force -LiteralPath $license -Destination (Join-Path $legal 'mesh-client.LICENSE')
-    $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $bundledMsi).Hash.ToLowerInvariant()
-
-    @"
-version = 1
-
-[windows.mesh_client]
-package = "artifacts/mesh-client.msi"
-version = "$MeshClientVersion"
-sha256 = "$digest"
-license = "legal/mesh-client.LICENSE"
-"@ | Set-Content -Encoding utf8 -NoNewline (Join-Path $output 'release.toml')
-    $exampleManifest = Join-Path $output 'release.example.toml'
-    if (Test-Path -LiteralPath $exampleManifest) {
-        Remove-Item -LiteralPath $exampleManifest
-    }
-} else {
-    $releaseManifest = Join-Path $output 'release.toml'
-    if (Test-Path -LiteralPath $releaseManifest) {
-        Remove-Item -LiteralPath $releaseManifest
-    }
-    Copy-Item -Force (Join-Path $projectRoot 'runtime\release.example.toml') $output.FullName
+foreach ($name in @('gnx.exe', 'gnx')) {
+    (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $output $name)).Hash.ToLowerInvariant() |
+        Set-Content -Encoding ascii -NoNewline -LiteralPath (Join-Path $output "$name.sha256")
 }
-
-$exeDigest = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $output 'gnx.exe')).Hash.ToLowerInvariant()
-Set-Content -Encoding ascii -NoNewline -Path (Join-Path $output 'gnx.exe.sha256') -Value $exeDigest
-Write-Output $output.FullName
+Write-Output "READY $($output.FullName)"

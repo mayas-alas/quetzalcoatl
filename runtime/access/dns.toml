@@ -1,4 +1,4 @@
-# Managed by GNX access; private zone only, not a global resolver.
+# Managed by GNX access; Pi-hole is authoritative only for the split zone.
 [dns]
 upstreams = []
 listeningMode = "ALL"
@@ -37,4 +37,4 @@ webserver = "/dev/null"
 [misc]
 readOnly = true
 privacylevel = 4
-dnsmasq_lines = ["address=/@ZONE@/@IP@", "local=/@ZONE@/"]
+dnsmasq_lines = [@RECORDS@]

@@ -1,0 +1,25 @@
+# Managed by GNX controller
+[Unit]
+Description=GNX controller
+After=network-online.target gnx-compute.service
+Wants=network-online.target
+Requires=gnx-compute.service
+
+[Container]
+Image=docker.io/library/caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+ContainerName=gnx-controller
+Network=host
+Exec=caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+Volume=/var/lib/gnx/controller/Caddyfile:/etc/caddy/Caddyfile:ro
+Volume=/var/lib/gnx/controller/tls:/etc/gnx/tls:ro
+Volume=/var/lib/gnx/controller/public:/srv/gnx:ro
+Volume=/var/lib/gnx/compute/upstream-ca.crt:/etc/gnx/upstream-ca.crt:ro
+LogDriver=none
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

@@ -1,8 +1,0 @@
-version = 1
-
-[windows.mesh_client]
-# El release sustituye estos valores y coloca los tres archivos junto al manifest.
-package = "artifacts/mesh-client.msi"
-version = "0.0.0"
-sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
-license = "legal/mesh-client.LICENSE"

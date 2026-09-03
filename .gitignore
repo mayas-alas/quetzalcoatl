@@ -12,9 +12,4 @@
 /target/
 /dist/
 /runtime/artifacts/
-/ops/control/target/
-/ops/control/*.local.toml
-/ops/compute/target/
-/ops/compute/*.local.toml
-/ops/access/target/
-/ops/access/*.local.toml
+/ops/**/target/

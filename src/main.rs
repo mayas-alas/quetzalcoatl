@@ -11,8 +11,8 @@ fn main() -> ExitCode {
                 gnx::Error::AccessReport { fields, .. } => format!("{fields}\n"),
                 _ => String::new(),
             };
-            let message = format!("{context}FAILED {}\n", error.label());
-            let _ = std::io::stderr().write_all(message.as_bytes());
+            let _ = std::io::stderr()
+                .write_all(format!("{context}FAILED {}\n", error.label()).as_bytes());
             ExitCode::from(error.exit_code())
         }
     }

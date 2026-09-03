@@ -1,3 +1,0 @@
-endpoint = "https://proxmox.mesh.gnx"
-node = "gnx-compute"
-username = "root@pam"
