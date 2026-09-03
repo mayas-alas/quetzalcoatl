@@ -33,6 +33,9 @@ flowchart TD
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 packaging/windows/build.ps1
+packaging/validate.ps1 -DistPath dist
 ```
 
-El build es válido sólo si genera `gnx.exe`, `gnx` y sus SHA-256.
+El build es válido sólo si genera `gnx.exe`, `gnx`, sus SHA-256 y pasa el
+contract smoke de `validate.ps1` (`WINDOWS_CONTRACT`, `LINUX_CONTRACT`,
+`ARGUMENTS_CONTRACT`).

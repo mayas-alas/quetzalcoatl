@@ -55,3 +55,17 @@ La arquitectura completa, las decisiones y la operación están en
 GNX usa `AGPL-3.0-only`; las dependencias conservan sus licencias y
 atribuciones. La rama histórica `legacy` queda archivada y separada, sin
 modificaciones.
+
+## Release gate
+
+```powershell
+# Construir
+.\packaging\windows\build.ps1
+
+# Validar contrato sobre artefactos release
+.\packaging\validate.ps1 -DistPath dist
+```
+
+`validate.ps1` ejecuta los 3 contract-smoke (`WINDOWS_CONTRACT`,
+`LINUX_CONTRACT`, `ARGUMENTS_CONTRACT`) contra los binarios de `dist/`.
+Salida: `READY VALIDATION` o `FAILED <ETIQUETA>`.
