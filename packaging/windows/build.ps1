@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$OutputDirectory,
-    [string]$BuildDistribution = 'Ubuntu-24.04'
+    [string]$BuildDistribution = 'Ubuntu-24.04',
+    [switch]$Validate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,4 +52,10 @@ foreach ($name in @('gnx.exe', 'gnx')) {
     (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $output $name)).Hash.ToLowerInvariant() |
         Set-Content -Encoding ascii -NoNewline -LiteralPath (Join-Path $output "$name.sha256")
 }
+
+if ($Validate) {
+    & (Join-Path $root 'packaging\validate.ps1') -DistPath $output.FullName -Distribution $BuildDistribution
+    if ($LASTEXITCODE -ne 0) { throw 'FAILED RELEASE_VALIDATION' }
+}
+
 Write-Output "READY $($output.FullName)"
