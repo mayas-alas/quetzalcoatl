@@ -5,6 +5,9 @@ conecta Windows a una mesh propia, mientras WSL aloja el control y los servicios
 mediante Quadlet. Archivos de configuración expresan la intención y contratos
 GNX encapsulan las integraciones.
 
+El [corte de código del 2026-09-02](docs/audit.md#corte-de-código-del-2026-09-02)
+queda identificado por la etiqueta `gnx-cut-2026-09-02`.
+
 ## Primer corte
 
 El cliente cubre cuatro resultados en Windows x86_64:
@@ -74,6 +77,17 @@ existente y actualiza el PATH. Retira el servicio y las carpetas de la instalaci
 anterior a un respaldo restringido en `C:/ProgramData/GNX/retired-host`;
 no borra discos ni modifica la VPN o el WSL actuales. Abrir una terminal nueva
 y comprobar `gnx access dns`. Las actualizaciones usan el mismo instalador.
+
+## Licencia
+
+El código propio de GNX se distribuye bajo GNU Affero General Public License,
+versión 3 exclusivamente (`AGPL-3.0-only`). El texto completo está en
+[LICENSE](LICENSE); el bundle Windows y la instalación del host también lo
+incluyen. El programa se ofrece sin garantía, según los términos de la licencia.
+
+Las dependencias y los componentes de terceros conservan sus licencias y
+atribuciones. Esta declaración no cambia las condiciones del archivo histórico
+`legacy` ni de versiones anteriores.
 
 ## Documentos
 

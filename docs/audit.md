@@ -2,6 +2,31 @@
 
 **Corte:** 2026-09-02
 
+## Corte de código del 2026-09-02
+
+Etiqueta: `gnx-cut-2026-09-02`. Este corte conserva la versión `0.1.0` de GNX
+y reúne la instalación global del CLI Windows (`2f7d075`), su evidencia y
+pendientes (`146439b`), y la declaración de licencia `AGPL-3.0-only`.
+El texto completo está en `LICENSE`, los cuatro paquetes Rust declaran el
+mismo identificador y el empaquetado y el instalador del host incluyen la licencia.
+Se conservan las atribuciones y licencias de terceros; `legacy` no se modifica.
+
+Verificación repetida para este corte:
+
+| Comprobación | Resultado |
+|---|---|
+| Tests Rust con lockfiles | `PASS` — 37 pruebas: 21 del CLI, 9 de acceso, 5 de control/cifrado y 2 de cómputo |
+| Formato y Clippy con warnings como error | `PASS` — los cuatro paquetes |
+| Metadatos de licencia | `PASS` — `AGPL-3.0-only` en los cuatro paquetes |
+| Sintaxis PowerShell | `PASS` — empaquetado e instalación del host |
+| Bundle Windows de desarrollo en directorio temporal | `PASS` — build release, versión del CLI, SHA-256 del EXE y copia exacta de `LICENSE` |
+
+La comprobación del bundle no reinstala el host ni vuelve a validar el MSI.
+Las comprobaciones físicas de las secciones siguientes son evidencia anterior;
+este corte no cierra los pendientes de reboot con cómputo/acceso, limpieza del
+perfil retirado, respaldos de cómputo/acceso, restauración ni acceso móvil/TLS
+Android. No se publica un nuevo instalador binario en este corte de código.
+
 ## Decisiones cerradas
 
 - Un binario Rust y un archivo de configuración gobiernan el flujo.

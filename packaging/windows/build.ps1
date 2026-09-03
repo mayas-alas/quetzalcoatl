@@ -19,6 +19,7 @@ if ($LASTEXITCODE -ne 0) {
 
 $output = New-Item -ItemType Directory -Force -Path $OutputDirectory
 Copy-Item -Force (Join-Path $projectRoot 'target\release\gnx.exe') $output.FullName
+Copy-Item -Force -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Path $output 'LICENSE')
 Copy-Item -Force (Join-Path $projectRoot 'config\gnx.example.toml') (Join-Path $output 'gnx.example.toml')
 $accessConfig = Join-Path $output 'access.toml'
 if (-not (Test-Path -LiteralPath $accessConfig)) {
