@@ -105,6 +105,20 @@ pub fn status(config: &Config) -> Result<String> {
         "CONTROLLER_ROUTE",
     )?;
     if config.controller.autonomous_ca {
+        let server = Path::new(&config.controller.state_dir).join("tls/server.crt");
+        crate::platform::run(
+            &[
+                "openssl",
+                "x509",
+                "-checkend",
+                "2592000",
+                "-noout",
+                "-in",
+                server.to_str().ok_or(Error::ConfigInvalid)?,
+            ],
+            None,
+            "CA_SERVER_EXPIRY",
+        )?;
         for service in &config.access.services {
             let alias = &service.alias;
             let resolve = format!("{alias}:443:127.0.0.1");
