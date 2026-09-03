@@ -73,6 +73,10 @@ pub fn apply(config: &Config) -> Result<String> {
         None,
         "COMPUTE_CA_COPY",
     )?;
+    if fs::metadata(&temporary).map_err(Error::ConfigRead)?.len() == 0 {
+        let _ = fs::remove_file(&temporary);
+        return Err(Error::Operation("COMPUTE_CA_EMPTY"));
+    }
     fs::rename(temporary, certificate).map_err(Error::ConfigRead)?;
     Ok("compute".into())
 }
