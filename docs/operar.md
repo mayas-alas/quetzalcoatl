@@ -20,8 +20,12 @@ flowchart TD
   configuración, argumentos, logs o Git.
 - `controller.autonomous_ca = true` genera la raíz dentro de
   `/var/lib/gnx/controller`. No la instala en Windows ni en otro cliente.
+- `packaging/windows/trust-ca.ps1` es la única acción que confía esa raíz en
+  Windows; requiere administrador y debe invocarse de forma deliberada.
 - El nombre canónico con TLS administrado es `compute.<tailnet>.ts.net`.
   `compute.gnx` depende de Pi-hole y, para HTTPS, del CA autónomo.
+- El CA es una capacidad experimental: antes de declararlo PKI de producción
+  faltan revocación, ceremonia/backup de raíz y pruebas de restauración.
 
 ## Gate de release
 

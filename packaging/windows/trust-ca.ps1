@@ -9,6 +9,10 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 $source = "\\wsl.localhost\$Distribution\var\lib\gnx\controller\public\root.crt"
 if (-not (Test-Path -LiteralPath $source)) { throw 'FAILED CA_MISSING' }
 $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new($source)
+if ($certificate.Subject -ne 'CN=GNX Autonomous Root' -or $certificate.HasPrivateKey) {
+    $certificate.Dispose()
+    throw 'FAILED CA_IDENTITY'
+}
 $store = [Security.Cryptography.X509Certificates.X509Store]::new('Root', 'LocalMachine')
 try {
     $store.Open('ReadWrite')

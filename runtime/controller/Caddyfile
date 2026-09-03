@@ -1,23 +1,23 @@
 # Managed by GNX controller
 {
-    admin off
-    auto_https off
-    log {
-        output discard
-    }
+	admin off
+	auto_https off
+	log {
+		output discard
+	}
 }
 
 (compute) {
-    reverse_proxy https://127.0.0.1:8006 {
-        transport http {
-            tls_trust_pool file /etc/gnx/upstream-ca.crt
-            tls_server_name gnx-compute
-        }
-    }
+	reverse_proxy https://127.0.0.1:8006 {
+		transport http {
+			tls_trust_pool file /etc/gnx/upstream-ca.crt
+			tls_server_name gnx-compute
+		}
+	}
 }
 
 http://127.0.0.1:8443 {
-    import compute
+	import compute
 }
 
 @PRIVATE_SITES@

@@ -102,7 +102,7 @@ pub fn dns(config: &Config) -> Result<DnsReport> {
         }
     };
     let fields = fields(config, access_ip, &services);
-    let checks = dns_checks(config, access_ip, &services);
+    let checks = dns_checks(config, access_ip);
     Ok(DnsReport { fields, checks })
 }
 
@@ -163,7 +163,7 @@ fn finish(config: &Config) -> Result<String> {
             });
         }
     };
-    let records = records(config, access_ip, &services);
+    let records = records(config, access_ip);
     let dns = DNS_CONFIG.replace("@RECORDS@", &records);
     let unit = DNS_UNIT
         .replace("@STATE@", &config.access.state_dir)
@@ -180,7 +180,7 @@ fn finish(config: &Config) -> Result<String> {
     )?;
     systemctl(&["daemon-reload"], "DNS_INSTALL")?;
     systemctl(&["enable", "--now", "gnx-dns.service"], "DNS_SERVICE")?;
-    dns_checks(config, access_ip, &services)?;
+    dns_checks(config, access_ip)?;
     Ok(format!("access\n{}", fields(config, access_ip, &services)))
 }
 
@@ -242,13 +242,12 @@ fn is_tailnet_ip(ip: &Ipv4Addr) -> bool {
     bytes[0] == 100 && (64..=127).contains(&bytes[1])
 }
 
-fn records(config: &Config, access_ip: Ipv4Addr, services: &[Ipv4Addr]) -> String {
+fn records(config: &Config, access_ip: Ipv4Addr) -> String {
     let mut records = config
         .access
         .services
         .iter()
-        .zip(services)
-        .map(|(service, ip)| format!("\"address=/{}/{ip}\"", service.alias))
+        .map(|service| format!("\"address=/{}/{access_ip}\"", service.alias))
         .collect::<Vec<_>>();
     if config.controller.autonomous_ca {
         records.push(format!("\"address=/pki.gnx/{access_ip}\""));
@@ -263,7 +262,12 @@ fn fields(config: &Config, access_ip: Ipv4Addr, services: &[Ipv4Addr]) -> String
         .services
         .iter()
         .zip(services)
-        .map(|(service, ip)| format!("{} -> {} ({ip})", service.alias, service.fqdn))
+        .map(|(service, ip)| {
+            format!(
+                "{} -> {access_ip}\n{} -> {ip} (Tailscale Service)",
+                service.alias, service.fqdn
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
     format!(
@@ -272,9 +276,9 @@ fn fields(config: &Config, access_ip: Ipv4Addr, services: &[Ipv4Addr]) -> String
     )
 }
 
-fn dns_checks(config: &Config, access_ip: Ipv4Addr, services: &[Ipv4Addr]) -> Result<()> {
+fn dns_checks(config: &Config, access_ip: Ipv4Addr) -> Result<()> {
     systemctl(&["is-active", "--quiet", "gnx-dns.service"], "DNS_SERVICE")?;
-    for (service, expected) in config.access.services.iter().zip(services) {
+    for service in &config.access.services {
         for transport in ["+notcp", "+tcp"] {
             let server = format!("@{access_ip}");
             let answer = crate::platform::run(
@@ -298,9 +302,50 @@ fn dns_checks(config: &Config, access_ip: Ipv4Addr, services: &[Ipv4Addr]) -> Re
                 None,
                 "DNS_QUERY",
             )?;
-            if String::from_utf8_lossy(&answer).trim() != expected.to_string() {
+            if String::from_utf8_lossy(&answer).trim() != access_ip.to_string() {
                 return Err(Error::Operation("DNS_ANSWER"));
             }
+        }
+        let url = format!("https://{}/", service.fqdn);
+        crate::platform::run(
+            &[
+                "curl",
+                "--fail",
+                "--silent",
+                "--max-time",
+                "15",
+                "--output",
+                "/dev/null",
+                &url,
+            ],
+            None,
+            "TAILSCALE_SERVICE_TLS",
+        )?;
+    }
+    if config.controller.autonomous_ca {
+        let server = format!("@{access_ip}");
+        let answer = crate::platform::run(
+            &[
+                "podman",
+                "run",
+                "--rm",
+                "--pull=never",
+                "--network=host",
+                "--log-driver=none",
+                "--entrypoint=dig",
+                DNS_IMAGE,
+                &server,
+                "pki.gnx",
+                "A",
+                "+short",
+                "+time=2",
+                "+tries=1",
+            ],
+            None,
+            "DNS_QUERY",
+        )?;
+        if String::from_utf8_lossy(&answer).trim() != access_ip.to_string() {
+            return Err(Error::Operation("DNS_ANSWER"));
         }
     }
     Ok(())
@@ -341,5 +386,14 @@ mod tests {
     fn enrollment_never_accepts_a_shell_expression() {
         assert!(enrollment("tskey-auth-GNX_TEST_1234567890").is_ok());
         assert!(enrollment("tskey-auth-$(forbidden)").is_err());
+    }
+
+    #[test]
+    fn private_names_resolve_to_the_controller_not_the_service_vip() {
+        let config: Config = toml::from_str(include_str!("../config/gnx.example.toml")).unwrap();
+        let access_ip = "100.64.0.1".parse().unwrap();
+        let rendered = records(&config, access_ip);
+        assert!(rendered.contains("address=/compute.gnx/100.64.0.1"));
+        assert!(rendered.contains("address=/pki.gnx/100.64.0.1"));
     }
 }

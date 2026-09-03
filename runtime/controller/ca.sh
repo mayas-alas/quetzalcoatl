@@ -26,11 +26,15 @@ if test ! -e "$root_key"; then
 fi
 
 san=
+domains="$state/pki/domains"
+pending="$state/pki/domains.gnx-new"
+: > "$pending"
 for host in "$@"; do
     case "$host" in *[!A-Za-z0-9.-]*|'') exit 2;; esac
     san="${san:+$san,}DNS:$host"
+    printf '%s\n' "$host" >> "$pending"
 done
-if test ! -s "$server_crt" || ! openssl x509 -checkend 2592000 -noout -in "$server_crt" >/dev/null 2>&1; then
+if test ! -s "$server_crt" || ! cmp -s "$pending" "$domains" || ! openssl x509 -checkend 2592000 -noout -in "$server_crt" >/dev/null 2>&1; then
     csr="$state/pki/server.csr"
     openssl req -new -newkey rsa:2048 -sha256 -nodes \
         -subj '/CN=GNX Private Services' -addext "subjectAltName=$san" \
@@ -40,5 +44,6 @@ if test ! -s "$server_crt" || ! openssl x509 -checkend 2592000 -noout -in "$serv
         -copy_extensions copy -out "$server_crt" >/dev/null 2>&1
     rm -f -- "$csr"
 fi
+mv -f -- "$pending" "$domains"
 chmod 600 "$root_key" "$server_key"
 chmod 644 "$root_crt" "$server_crt"

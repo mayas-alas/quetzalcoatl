@@ -32,26 +32,7 @@ pub fn apply(config: &Config) -> Result<String> {
         crate::platform::run(&command, None, "CA_GENERATION")?;
     }
 
-    let private_sites = if config.controller.autonomous_ca {
-        config
-            .access
-            .services
-            .iter()
-            .map(|service| {
-                format!(
-                    "https://{} {{\n    tls /etc/gnx/tls/server.crt /etc/gnx/tls/server.key\n    import compute\n}}",
-                    service.alias
-                )
-            })
-            .chain(std::iter::once(
-                "http://pki.gnx {\n    root * /srv/gnx\n    file_server\n}".into(),
-            ))
-            .collect::<Vec<String>>()
-            .join("\n\n")
-    } else {
-        String::new()
-    };
-    let caddy = CADDY.replace("@PRIVATE_SITES@", &private_sites);
+    let caddy = CADDY.replace("@PRIVATE_SITES@", &private_sites(config));
     crate::platform::install(&state.join("Caddyfile"), &caddy, 0o600)?;
     crate::platform::install(
         Path::new("/etc/containers/systemd/gnx-controller.container"),
@@ -64,6 +45,29 @@ pub fn apply(config: &Config) -> Result<String> {
         "CONTROLLER_SERVICE",
     )?;
     status(config)
+}
+
+fn private_sites(config: &Config) -> String {
+    let scheme = if config.controller.autonomous_ca {
+        "https"
+    } else {
+        "http"
+    };
+    let tls = if config.controller.autonomous_ca {
+        "\n\ttls /etc/gnx/tls/server.crt /etc/gnx/tls/server.key"
+    } else {
+        ""
+    };
+    let mut sites = config
+        .access
+        .services
+        .iter()
+        .map(|service| format!("{scheme}://{} {{{tls}\n\timport compute\n}}", service.alias,))
+        .collect::<Vec<String>>();
+    if config.controller.autonomous_ca {
+        sites.push("http://pki.gnx {\n\troot * /srv/gnx\n\tfile_server\n}".into());
+    }
+    sites.join("\n\n")
 }
 
 pub fn status(config: &Config) -> Result<String> {
@@ -86,28 +90,30 @@ pub fn status(config: &Config) -> Result<String> {
         "CONTROLLER_ROUTE",
     )?;
     if config.controller.autonomous_ca {
-        let alias = &config.access.services[0].alias;
-        let resolve = format!("{alias}:443:127.0.0.1");
-        let url = format!("https://{alias}/");
-        let root = Path::new(&config.controller.state_dir).join("public/root.crt");
-        crate::platform::run(
-            &[
-                "curl",
-                "--fail",
-                "--silent",
-                "--max-time",
-                "15",
-                "--output",
-                "/dev/null",
-                "--cacert",
-                root.to_str().ok_or(Error::ConfigInvalid)?,
-                "--resolve",
-                &resolve,
-                &url,
-            ],
-            None,
-            "AUTONOMOUS_CA_ROUTE",
-        )?;
+        for service in &config.access.services {
+            let alias = &service.alias;
+            let resolve = format!("{alias}:443:127.0.0.1");
+            let url = format!("https://{alias}/");
+            let root = Path::new(&config.controller.state_dir).join("public/root.crt");
+            crate::platform::run(
+                &[
+                    "curl",
+                    "--fail",
+                    "--silent",
+                    "--max-time",
+                    "15",
+                    "--output",
+                    "/dev/null",
+                    "--cacert",
+                    root.to_str().ok_or(Error::ConfigInvalid)?,
+                    "--resolve",
+                    &resolve,
+                    &url,
+                ],
+                None,
+                "AUTONOMOUS_CA_ROUTE",
+            )?;
+        }
     }
     Ok(format!(
         "controller\nAutonomous CA: {}",
@@ -134,5 +140,13 @@ mod tests {
         assert!(!CA.contains("BEGIN PRIVATE KEY"));
         assert!(!CADDY.contains("BEGIN PRIVATE KEY"));
         assert!(CADDY.contains("@PRIVATE_SITES@"));
+    }
+
+    #[test]
+    fn autonomous_ca_is_explicit_in_the_rendered_route() {
+        let config: Config = toml::from_str(include_str!("../config/gnx.example.toml")).unwrap();
+        let sites = private_sites(&config);
+        assert!(sites.contains("https://compute.gnx"));
+        assert!(sites.contains("tls /etc/gnx/tls/server.crt"));
     }
 }

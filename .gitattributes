@@ -1,6 +1,9 @@
-/ops/control/*.sh text eol=lf
-/runtime/control/* text eol=lf
-/ops/compute/*.sh text eol=lf
-/runtime/compute/* text eol=lf
-/runtime/access/* text eol=lf
-/ops/access/*.sh text eol=lf
+* text=auto
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.service text eol=lf
+*.container text eol=lf
+*.ps1 text eol=crlf
+Caddyfile text eol=lf
