@@ -1,0 +1,9 @@
+# Managed by GNX controller
+[Unit]
+Description=GNX autonomous CA renewal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gnx controller apply

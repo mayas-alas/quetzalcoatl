@@ -5,6 +5,8 @@ use crate::{Error, Result, config::Config};
 const CA: &str = include_str!("../runtime/controller/ca.sh");
 const CADDY: &str = include_str!("../runtime/controller/Caddyfile");
 const UNIT: &str = include_str!("../runtime/controller/gnx-controller.container");
+const RENEW_SERVICE: &str = include_str!("../runtime/controller/gnx-ca-renew.service");
+const RENEW_TIMER: &str = include_str!("../runtime/controller/gnx-ca-renew.timer");
 
 pub fn apply(config: &Config) -> Result<String> {
     crate::platform::root()?;
@@ -30,6 +32,16 @@ pub fn apply(config: &Config) -> Result<String> {
                 .map(|service| service.alias.as_str()),
         );
         crate::platform::run(&command, None, "CA_GENERATION")?;
+        crate::platform::install(
+            Path::new("/etc/systemd/system/gnx-ca-renew.service"),
+            RENEW_SERVICE,
+            0o644,
+        )?;
+        crate::platform::install(
+            Path::new("/etc/systemd/system/gnx-ca-renew.timer"),
+            RENEW_TIMER,
+            0o644,
+        )?;
     }
 
     let caddy = CADDY.replace("@PRIVATE_SITES@", &private_sites(config));
@@ -44,6 +56,9 @@ pub fn apply(config: &Config) -> Result<String> {
         &["enable", "--now", "gnx-controller.service"],
         "CONTROLLER_SERVICE",
     )?;
+    if config.controller.autonomous_ca {
+        systemctl(&["enable", "--now", "gnx-ca-renew.timer"], "CA_RENEW_TIMER")?;
+    }
     status(config)
 }
 
@@ -140,6 +155,14 @@ mod tests {
         assert!(!CA.contains("BEGIN PRIVATE KEY"));
         assert!(!CADDY.contains("BEGIN PRIVATE KEY"));
         assert!(CADDY.contains("@PRIVATE_SITES@"));
+    }
+
+    #[test]
+    fn renewal_units_are_gnx_managed_and_self_healing() {
+        assert!(RENEW_SERVICE.starts_with("# Managed by GNX"));
+        assert!(RENEW_TIMER.starts_with("# Managed by GNX"));
+        assert!(RENEW_TIMER.contains("Persistent=true"));
+        assert!(RENEW_SERVICE.contains("controller apply"));
     }
 
     #[test]

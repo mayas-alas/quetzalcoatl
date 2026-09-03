@@ -1,0 +1,11 @@
+# Managed by GNX controller
+[Unit]
+Description=Daily GNX autonomous CA renewal
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=3600
+
+[Install]
+WantedBy=timers.target
