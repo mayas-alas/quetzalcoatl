@@ -11,43 +11,43 @@ en disco.
 
 ```mermaid
 flowchart TB
-    subgraph "Operador (host)"
-        OP[terminal gnx.exe / gnx]
-        CFG[/gnx.toml\n(sin secretos)/]
+    subgraph OPHOST["Operador (host)"]
+        OP["terminal gnx.exe / gnx"]
+        CFG["gnx.toml<br/>(sin secretos)"]
     end
 
-    subgraph "WSL2 / Linux (root)"
-        BIN[gnx]
-        PLAT[platform.rs\nroot() private_dir() install()]
+    subgraph WSLROOT["WSL2 / Linux (root)"]
+        BIN["gnx"]
+        PLAT["platform.rs<br/>root() private_dir() install()"]
     end
 
-    subgraph "Podman Quadlets"
-        ACC[gnx-access\nTailscale + socket /run/gnx/access.sock]
-        DNS[gnx-dns\nPi-hole .gnx autoridad]
-        CMP[gnx-compute\nProxmox 127.0.0.1:8006]
-        CTRL[gnx-controller\nCaddy + CA autónoma]
+    subgraph QUADLETS["Podman Quadlets"]
+        ACC["gnx-access<br/>Tailscale + socket /run/gnx/access.sock"]
+        DNS["gnx-dns<br/>Pi-hole .gnx autoridad"]
+        CMP["gnx-compute<br/>Proxmox 127.0.0.1:8006"]
+        CTRL["gnx-controller<br/>Caddy + CA autónoma"]
     end
 
-    subgraph "Externo (tailnet)"
-        CLI[Tailscale CLI]
-        TAIL[Tailscale control plane *.ts.net]
+    subgraph EXTERNAL["Externo (tailnet)"]
+        CLI["Tailscale CLI"]
+        TAIL["Tailscale control plane *.ts.net"]
     end
 
-    OP -->|delega exec| BIN
-    BIN -->|valida + forward| PLAT
-    PLAT -->|systemd enable/run| ACC
-    PLAT -->|systemd enable/run| DNS
-    PLAT -->|systemd enable/run| CMP
-    PLAT -->|systemd enable/run| CTRL
+    OP -->|"delega exec"| BIN
+    BIN -->|"valida + forward"| PLAT
+    PLAT -->|"systemd enable/run"| ACC
+    PLAT -->|"systemd enable/run"| DNS
+    PLAT -->|"systemd enable/run"| CMP
+    PLAT -->|"systemd enable/run"| CTRL
 
-    ACC -->|Tailscale IPs| CLI
-    CLI -->|enroll key (stdin, mktemp, trap rm)| ACC
-    ACC <-->|serve svc:compute| TAIL
-    DNS -->|Split DNS .gnx| ACC
-    CMP -->|upstream-ca.crt| CTRL
-    CTRL -->|reverse_proxy https| CMP
+    ACC -->|"Tailscale IPs"| CLI
+    CLI -->|"enroll key (stdin, mktemp, trap rm)"| ACC
+    ACC <-->|"serve svc:compute"| TAIL
+    DNS -->|"Split DNS .gnx"| ACC
+    CMP -->|"upstream-ca.crt"| CTRL
+    CTRL -->|"reverse_proxy https"| CMP
 
-    CFG -.->|config única| BIN
+    CFG -.->|"config única"| BIN
     style OP fill:#1e293b,stroke:#0f172a,color:#f1f5f9
     style CFG fill:#0f1f2e,stroke:#1e3a5f,color:#cbd5e1
     style ACC fill:#0f172a,stroke:#0ea5e9,color:#e2e8f0
@@ -74,20 +74,20 @@ flowchart TB
 sequenceDiagram
     participant OP as Operador
     participant CLI as gnx CLI / WSL bridge
-    participant SYS as systemd (Linux)
-    participant TS as gnx-access (Tailscale)
-    participant PH as gnx-dns (Pi-hole)
+    participant SYS as systemd - Linux
+    participant TS as gnx-access - Tailscale
+    participant PH as gnx-dns - Pi-hole
     participant TSCTRL as Tailscale control
-    participant DNSCHK as podman(dig)+curl
+    participant DNSCHK as podman dig + curl
 
     OP->>CLI: gnx access configure
     CLI->>SYS: foundation: private_dir, install quadlets, daemon-reload, enable --now
-    Note right of TS: enroll key (stdin/mktemp/trap rm)
+    Note right of TS: enroll key via stdin, mktemp and trap rm
     TS->>TSCTRL: tailscale up --auth-key=file:$key --hostname --advertise-tags
-    TS-->>TSCTRL: Tailscale IP (100.x.x.x)
+    TS-->>TSCTRL: Tailscale IP 100.x.x.x
     OP->>CLI: gnx access dns
     CLI->>SYS: status() + identity() → 100.x.x.x
-    CLI->>PH: build dns.toml (address=/<alias>/IP, pki.gnx, local=/gnx/)
+    CLI->>PH: build dns.toml for alias, pki.gnx and local gnx
     CLI->>SYS: install dns quadlet, enable --now
     CLI->>DNSCHK: podman run dig @IP alias A + curl --fail https://fqdn
     DNSCHK-->>CLI: READY access + Split DNS → Pi-hole
@@ -102,20 +102,20 @@ consulta el IP del `svc:compute` aprobado en el tailnet.
 
 ```mermaid
 flowchart LR
-    OP[Operador] -->|gnx compute apply| BIN[gnx\n(root)]
-    BIN -->|install entrypoint.sh + quadlet\nprivate_dir(0700)| CMP[gnx-compute\nProxmox dockurr]
-    BIN -->|password() = getrandom(32)\nwrite_new(0600)| PWD[/root.password/]
-    PWD -.->>|injected|\nro mount| CMP
-    CMP -->|pve-root-ca.pem → upstream-ca.crt| BIN
-    BIN -->|READY compute| OP
+    OP["Operador"] -->|"gnx compute apply"| BIN["gnx<br/>(root)"]
+    BIN -->|"install entrypoint.sh + quadlet<br/>private_dir(0700)"| CMP["gnx-compute<br/>Proxmox dockurr"]
+    BIN -->|"password() = getrandom(32)<br/>write_new(0600)"| PWD["root.password"]
+    PWD -.->|"injected<br/>read-only mount"| CMP
+    CMP -->|"pve-root-ca.pem → upstream-ca.crt"| BIN
+    BIN -->|"READY compute"| OP
 
-    subgraph healthcheck
-        OP -->|gnx compute status| BIN
-        BIN -->|is-active svc| SYS[systemd]
-        BIN -->|POST /access/ticket (username/password)| CMP
-        BIN -->|GET /nodes/X/status (cookie)| CMP
-        CMP -->|uptime>0| BIN
-        BIN -->|READY compute\nNode uptime| OP
+    subgraph HEALTH["healthcheck"]
+        OP -->|"gnx compute status"| BIN
+        BIN -->|"is-active svc"| SYS["systemd"]
+        BIN -->|"POST /access/ticket (username/password)"| CMP
+        BIN -->|"GET /nodes/X/status (cookie)"| CMP
+        CMP -->|"uptime > 0"| BIN
+        BIN -->|"READY compute<br/>Node uptime"| OP
     end
 
     style PWD fill:#0f1f2e,stroke:#ef4444,color:#fecaca
@@ -132,24 +132,26 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    subgraph "Linux root"
-        CTRL[gnx-controller\nCaddy]
-        CA[ca.sh\nopenssl root.key/root.crt\nNameConstraints DNS:.gnx\npathlen:0]
-        TLS[/tls/server.key server.crt\n0600/]
-        PUB[/public/root.crt\n0644/]
-    end
-    subgraph "Cliente"
-        WIN[Windows\nopcional trust-ca.ps1\n(requiere admin)]
-    end
-    subgraph "Upstream"
-        CMP[gnx-compute 127.0.0.1:8006\n(tls_trust_pool upstream-ca.crt)]
+    subgraph LINUXROOT["Linux root"]
+        CTRL["gnx-controller<br/>Caddy"]
+        CA["ca.sh<br/>openssl root.key/root.crt<br/>NameConstraints DNS:.gnx<br/>pathlen:0"]
+        TLS["tls/server.key + server.crt<br/>0600"]
+        PUB["public/root.crt<br/>0644"]
     end
 
-    CA -->|firma| TLS
-    CA -->|root.crt| PUB
-    CTRL -->|reverse_proxy| CMP
-    CTRL -->|serve .gnx {tls server.crt}| PUB
-    PUB -.->>|confianza explícita| WIN
+    subgraph CLIENT["Cliente"]
+        WIN["Windows<br/>trust-ca.ps1 opcional<br/>(requiere admin)"]
+    end
+
+    subgraph UPSTREAM["Upstream"]
+        CMP["gnx-compute 127.0.0.1:8006<br/>tls_trust_pool upstream-ca.crt"]
+    end
+
+    CA -->|"firma"| TLS
+    CA -->|"root.crt"| PUB
+    CTRL -->|"reverse_proxy"| CMP
+    CTRL -->|"serve .gnx with server.crt"| PUB
+    PUB -.->|"confianza explícita"| WIN
     style CA fill:#0f172a,stroke:#8b5cf6,color:#ddd
     style PUB fill:#0f1f2e,stroke:#f59e0b,color:#ddd
 ```
@@ -168,29 +170,50 @@ flowchart TB
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Operador: terminal
-    Operador --> CLI: (nada de secretos por argv)\nCLI rechaza positional secret (test)
-    CLI --> WSL: forward(config, action)
-    WSL --> GnxLinux: /usr/local/bin/gnx
-    GnxLinux --> Platform: platform.rs\nenv_remove(TS_AUTHKEY, NB_SETUP_KEY*)
-    Platform --> Systemd: install() marca "# Managed by GNX"\nanti-clobber sobre archivos no-managados
-    Systemd --> Container: enable --now
+    state "Operador terminal" as Operador
+    state "CLI sin secretos por argv" as CLI
+    state "WSL bridge" as WSL
+    state "Gnx Linux /usr/local/bin/gnx" as GnxLinux
+    state "platform.rs" as Platform
+    state "systemd" as Systemd
+    state "Public output" as PublicOut
+
+    [*] --> Operador
+    Operador --> CLI: invoke
+    CLI --> WSL: forward config and action
+    WSL --> GnxLinux: exec
+    GnxLinux --> Platform: clean secret env
+    Platform --> Systemd: install managed units
+    Systemd --> Container: enable and start
+
     state Container {
-    [*] --> Enroll
-    Enroll --> mktemp: key=$(mktemp /run/gnx/...XXXXXX)
-    mktemp --> tailscale: --auth-key=file:$key\n(trap rm)
-    [*] --> ComputePW
-    ComputePW --> getrandom: 32 bytes\nZeroizing
-    [*] --> CAKey
-    CAKey --> openssl: umask 077\nroot.key 0600
+        state "Enroll" as Enroll
+        state "Temporary key file" as KeyFile
+        state "tailscale" as Tailscale
+        state "Compute password" as ComputePW
+        state "Kernel entropy" as GetRandom
+        state "CA key" as CAKey
+        state "openssl" as OpenSSL
+
+        [*] --> Enroll
+        Enroll --> KeyFile: mktemp under /run/gnx
+        KeyFile --> Tailscale: auth key from file
+        [*] --> ComputePW
+        ComputePW --> GetRandom: 32 bytes and zeroizing
+        [*] --> CAKey
+        CAKey --> OpenSSL: umask 077 and root.key 0600
     }
-    Container --> ContainerFS: 0700/0600 validated\nread_secret checks symlink+uid
+
+    Container --> ContainerFS: validate permissions
+
     state ContainerFS {
-    [*] --> PrivateDirs
-    PrivateDirs --> [*]: /var/lib/gnx/{access,compute,controller}\n0700 root:root
+        state "Private dirs 0700 root root" as PrivateDirs
+        [*] --> PrivateDirs
+        PrivateDirs --> [*]
     }
-    ContainerFS --> PublicOut: root.crt 0644 (CA pública)\nupstream-ca.crt (compute)
-    PublicOut --> [*]: consumido por controller / trust-ca.ps1
+
+    ContainerFS --> PublicOut: root.crt and upstream-ca.crt
+    PublicOut --> [*]: controller or trust-ca.ps1
 ```
 
 Contrato de secretos (AGENTS.md §3): los tokens, claves privadas y URLs de
@@ -201,17 +224,19 @@ ejemplos contienen sólo valores no secretos.
 
 ```mermaid
 flowchart LR
-    SRC[src/ + runtime/ + Cargo.toml] -->|cargo| LINUX[Linux native\ngnx (release, LTO thin)\npanic=abort, strip=symbols]
-    SRC -->|cargo| WIN[gnx.exe (Windows)]
-    subgraph "build.ps1 (Windows)"
-        GATES["cargo test --locked\ncargo clippy -- -D warnings\ncargo build --release"]
-        WSLBUILD["wsl podman rust@sha256\ntest+clippy+release (Linux)"]
+    SRC["src/ + runtime/ + Cargo.toml"] -->|"cargo"| LINUX["Linux native<br/>gnx release, LTO thin<br/>panic=abort, strip=symbols"]
+    SRC -->|"cargo"| WIN["gnx.exe (Windows)"]
+
+    subgraph BUILD["build.ps1 (Windows)"]
+        GATES["cargo test --locked<br/>cargo clippy -- -D warnings<br/>cargo build --release"]
+        WSLBUILD["wsl podman rust@sha256<br/>test + clippy + release (Linux)"]
         HASH["SHA-256 gnx.exe / gnx"]
         DIST["dist/: gnx.exe gnx *.sha256 runtime/ install.sh LICENSE"]
     end
+
     LINUX --> WSLBUILD
     WIN --> GATES --> WSLBUILD --> HASH --> DIST
-    DIST --> INST["install-host.ps1\n(checksum 0/0, PATH machine)\ninstall-linux.sh\n(sha256sum -c)"]
+    DIST --> INST["install-host.ps1<br/>(checksum 0/0, PATH machine)<br/>install-linux.sh<br/>(sha256sum -c)"]
     style DIST fill:#0f172a,stroke:#2563eb,color:#ddd
 ```
 
