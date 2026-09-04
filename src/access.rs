@@ -1,4 +1,4 @@
-use std::{io::IsTerminal, net::Ipv4Addr, path::Path, thread, time::Duration};
+use std::{io::{IsTerminal, Read}, net::Ipv4Addr, path::Path, thread, time::Duration};
 
 use serde::Deserialize;
 use zeroize::Zeroizing;
@@ -35,18 +35,31 @@ pub struct DnsReport {
 }
 
 pub fn configure(config: &Config) -> Result<String> {
-    if !std::io::stdin().is_terminal()
-        || !std::io::stdout().is_terminal()
-        || !std::io::stderr().is_terminal()
+    let broker = std::env::var_os("GNX_BROKER_STDIN").is_some();
+    if !broker
+        && (!std::io::stdin().is_terminal()
+            || !std::io::stdout().is_terminal()
+            || !std::io::stderr().is_terminal())
     {
         return Err(Error::Operation("ACCESS_TERMINAL_REQUIRED"));
     }
     foundation(config)?;
     if status().and_then(identity).is_err() {
-        let secret = Zeroizing::new(
-            rpassword::prompt_password("Tailscale auth key (hidden; Enter cancels): ")
-                .map_err(|_| Error::Operation("ACCESS_SECRET_INPUT"))?,
-        );
+        let secret = if broker {
+            let mut secret = Zeroizing::new(String::new());
+            std::io::stdin()
+                .read_to_string(&mut *secret)
+                .map_err(|_| Error::Operation("ACCESS_SECRET_INPUT"))?;
+            if secret.trim().is_empty() {
+                return Err(Error::Operation("ACCESS_SECRET_REQUIRED"));
+            }
+            secret
+        } else {
+            Zeroizing::new(
+                rpassword::prompt_password("Tailscale auth key (hidden; Enter cancels): ")
+                    .map_err(|_| Error::Operation("ACCESS_SECRET_INPUT"))?,
+            )
+        };
         let key = enrollment(&secret)?;
         let hostname = format!("--hostname={}", config.access.hostname);
         let tag = format!("--advertise-tags={}", config.access.tag);

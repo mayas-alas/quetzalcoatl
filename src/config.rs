@@ -18,7 +18,6 @@ pub struct Config {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Host {
-    pub distribution: String,
     pub runtime_dir: String,
 }
 
@@ -114,7 +113,6 @@ impl Config {
             .is_some_and(|(name, realm)| token(name) && token(realm));
 
         if self.version != 1
-            || !token(&self.host.distribution)
             || self.host.runtime_dir != "/usr/local/share/gnx/runtime"
             || self.access.state_dir != "/var/lib/gnx/access"
             || self.access.zone != "gnx"

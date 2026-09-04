@@ -132,12 +132,20 @@ pub fn status(config: &Config) -> Result<String> {
 }
 
 pub fn credentials(config: &Config) -> Result<String> {
-    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+    let broker = std::env::var_os("GNX_BROKER_STDIN").is_some();
+    if !broker && (!std::io::stdin().is_terminal() || !std::io::stdout().is_terminal()) {
         return Err(Error::Operation("CREDENTIAL_TERMINAL_REQUIRED"));
     }
     let secret = Zeroizing::new(read_secret(
         &Path::new(&config.compute.state_dir).join("root.password"),
     )?);
+    if broker {
+        return Ok(format!(
+            "broker-credentials\nUser: {}\nPassword: {}",
+            config.compute.username,
+            secret.trim()
+        ));
+    }
     println!(
         "\x1b[?1049h\x1b[2J\x1b[HGNX compute\nUser: {}\nPassword: {}\n\nEnter hides this screen.",
         config.compute.username,

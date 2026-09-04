@@ -1,12 +1,12 @@
 [CmdletBinding()]
-param([string]$Distribution = 'Ubuntu-24.04')
+param()
 
 $ErrorActionPreference = 'Stop'
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Run this explicit trust action from an elevated PowerShell.'
 }
-$source = "\\wsl.localhost\$Distribution\var\lib\gnx\controller\public\root.crt"
+$source = 'C:\ProgramData\GNX\public\root.crt'
 if (-not (Test-Path -LiteralPath $source)) { throw 'FAILED CA_MISSING' }
 $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new($source)
 if ($certificate.Subject -ne 'CN=GNX Autonomous Root' -or $certificate.HasPrivateKey) {

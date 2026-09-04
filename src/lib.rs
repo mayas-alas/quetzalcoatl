@@ -3,6 +3,9 @@ pub mod config;
 pub mod error;
 pub mod platform;
 
+#[cfg(windows)]
+pub mod windows;
+
 #[cfg(target_os = "linux")]
 pub mod access;
 #[cfg(target_os = "linux")]

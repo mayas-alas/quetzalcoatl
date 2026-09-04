@@ -65,9 +65,12 @@ pub fn run() -> Result<String> {
         .map(PathBuf::from)
         .unwrap_or_else(default_config);
     let config = Config::load(&path)?;
+    // The client validates before sending; the runtime validates again before acting.
+    #[cfg(windows)]
+    drop(config);
 
     #[cfg(windows)]
-    return crate::platform::forward(&config.host.distribution, &path, &cli.command_args());
+    return crate::platform::forward(&path, &cli.command_args());
 
     #[cfg(target_os = "linux")]
     return match cli.command {

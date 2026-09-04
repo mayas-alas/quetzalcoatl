@@ -1,381 +1,466 @@
 # Arquitectura
 
-GNX es un orquestador escrito en Rust que despliega, configura y verifica una infraestructura privada sobre Linux.
+GNX mantiene un único runtime Linux para `access`, `compute` y `controller`.
 
-Linux es la plataforma de ejecución nativa. En Windows, `gnx.exe` funciona como un puente delgado hacia el mismo binario Linux dentro de WSL2; no existe una segunda implementación del runtime para Windows.
+En un host Linux, `gnx` ejecuta directamente contra systemd y Podman. En Windows, el usuario opera `gnx.exe`, pero el runtime Linux pertenece a una cuenta local dedicada: `gnx-runtime`.
 
-Los servicios administrados por GNX se ejecutan con systemd y Podman Quadlets.
+La separación de Windows busca reducir la superficie visible y mutable desde la sesión cotidiana del operador sin reintroducir Podman Machine, tray, un runtime Windows paralelo ni componentes del producto legacy.
 
-## Alcance
+## Principios
 
-La arquitectura actual se divide en tres capacidades:
-
-- **Access** — conectividad privada con Tailscale y Split DNS con dnsmasq mínimo.
-- **Compute** — ciclo de vida y verificación del servicio Proxmox.
-- **Controller** — proxy HTTP/TLS con Caddy y CA `.gnx` opcional.
-
-El binario `gnx` es la superficie de control común para las tres.
-
-## Modelo de ejecución
-
-```mermaid
-flowchart TB
-    subgraph LINUX["Linux host"]
-        GNXL["gnx"]
-        SYSTEMD["systemd"]
-        PODMAN["Podman Quadlets"]
-    end
-
-    subgraph WINDOWS["Windows host"]
-        GNXW["gnx.exe"]
-        WSL["WSL2"]
-    end
-
-    GNXW -->|"forward"| WSL
-    WSL --> GNXL
-    GNXL --> SYSTEMD
-    SYSTEMD --> PODMAN
-```
-
-En Linux, `gnx` ejecuta las operaciones directamente.
-
-En Windows:
-
-1. `gnx.exe` valida la invocación.
-2. Convierte las rutas Windows a rutas WSL cuando es necesario.
-3. Ejecuta `/usr/local/bin/gnx` dentro de la distribución WSL configurada.
-4. El binario Linux realiza la operación real.
-
-Esta separación mantiene un único runtime y evita duplicar lógica de infraestructura entre plataformas.
+1. **Un solo runtime Linux.** La lógica real de infraestructura vive en `gnx` Linux.
+2. **Windows es cliente + broker.** `gnx.exe` no ejecuta `wsl.exe` directamente.
+3. **Identidad dedicada.** `GNXRuntime` corre como `gnx-runtime` y esa identidad posee la distro WSL `GNX`.
+4. **Sin shell genérica.** El broker acepta únicamente acciones GNX conocidas.
+5. **Podman nativo.** Dentro de WSL se usa Podman Linux; no existe Podman Machine.
+6. **Config driven.** La configuración declarativa cruza el broker; los secretos siguen otro canal.
+7. **Verificación explícita.** Cada capacidad conserva sus gates `READY` / `FAILED`.
 
 ## Vista general
 
 ```mermaid
 flowchart TB
-    subgraph HOST["Operador"]
-        CLI["gnx / gnx.exe"]
-        CFG["gnx.toml<br/>sin secretos"]
+    subgraph LINUX["Linux host"]
+        LCLI["gnx"]
+        LRUNTIME["systemd + Podman"]
+        LCLI --> LRUNTIME
     end
 
-    subgraph CORE["GNX Linux runtime"]
-        BIN["gnx"]
-        PLATFORM["platform.rs<br/>permisos + install + execution"]
+    subgraph WINDOWS["Windows host"]
+        OP["Operator"]
+        WCLI["gnx.exe"]
+        PIPE["\\\\.\\pipe\\GNX"]
+        SVC["GNXRuntime<br/>account: gnx-runtime"]
+        WSL["WSL2 distro: GNX"]
+        WRUNTIME["gnx + systemd + Podman"]
+
+        OP --> WCLI
+        WCLI --> PIPE
+        PIPE --> SVC
+        SVC --> WSL
+        WSL --> WRUNTIME
     end
-
-    subgraph SERVICES["Servicios administrados"]
-        ACCESS["gnx-access<br/>Tailscale"]
-        DNS["gnx-dns<br/>dnsmasq"]
-        COMPUTE["gnx-compute<br/>Proxmox"]
-        CONTROLLER["gnx-controller<br/>Caddy"]
-    end
-
-    subgraph TAILNET["Tailnet"]
-        TSCTRL["Tailscale control plane"]
-        TSSVC["Tailscale Services"]
-    end
-
-    CLI --> BIN
-    CFG -.-> BIN
-    BIN --> PLATFORM
-
-    PLATFORM --> ACCESS
-    PLATFORM --> DNS
-    PLATFORM --> COMPUTE
-    PLATFORM --> CONTROLLER
-
-    ACCESS <--> TSCTRL
-    ACCESS <--> TSSVC
-    DNS --> ACCESS
-    CONTROLLER --> COMPUTE
 ```
 
-## Frontera de confianza
+`access`, `compute` y `controller` son iguales después de entrar al runtime Linux. La diferencia de plataforma termina en la frontera del broker.
 
-La frontera principal es el binario `gnx`.
+## Linux nativo
 
-Antes de modificar estado persistente, GNX aplica controles explícitos sobre rutas y permisos:
-
-- directorios privados con modo `0700`;
-- secretos persistentes con modo `0600`;
-- rechazo de symlinks en rutas sensibles;
-- validación de ownership;
-- rechazo de sobrescritura de archivos no administrados por GNX.
-
-Los archivos administrados utilizan el marcador:
+En Linux no existe broker Windows ni cuenta `gnx-runtime` del host.
 
 ```text
-# Managed by GNX
+gnx
+└── Linux host
+    ├── /etc/gnx/gnx.toml
+    ├── /var/lib/gnx/
+    ├── systemd
+    └── Podman Quadlets
 ```
 
-Si un archivo existente no contiene ese marcador, `platform::install()` rechaza reemplazarlo.
+`src/platform.rs` ejecuta comandos nativos y conserva las validaciones de permisos, ownership y archivos administrados.
 
-## Configuración y secretos
+## Windows aislado
 
-`gnx.toml` contiene configuración declarativa, no secretos.
+### Identidades
 
-El flujo de enrolamiento de Tailscale solicita la clave mediante prompt oculto. La clave:
+La instalación crea una cuenta local estándar:
 
-1. entra por `stdin`;
-2. se mantiene en memoria protegida durante la operación;
-3. se escribe temporalmente dentro del contenedor mediante `mktemp`;
-4. se elimina con `trap`;
-5. no se pasa como argumento visible del proceso.
+```text
+.\gnx-runtime
+```
 
-`platform::linux_command()` también elimina `TS_AUTHKEY` del entorno antes de ejecutar procesos hijos.
+La cuenta recibe únicamente los derechos necesarios para el servicio y, al mismo tiempo, derechos explícitos de denegación para uso humano:
 
-Las credenciales de compute se generan localmente con entropía del kernel y se almacenan con permisos restrictivos.
+```text
+SeServiceLogonRight
+SeDenyInteractiveLogonRight
+SeDenyRemoteInteractiveLogonRight
+SeDenyNetworkLogonRight
+```
+
+También se oculta de la pantalla normal de inicio de sesión.
+
+El servicio SCM se registra como:
+
+```text
+Service:  GNXRuntime
+Account:  .\gnx-runtime
+Startup:  Automatic
+```
+
+El Service Control Manager carga el perfil del usuario de servicio. Por ello, las operaciones WSL realizadas por el proceso quedan en el contexto de `gnx-runtime`, no en el HKCU del operador.
+
+### Propiedad de la distro
+
+La distro del producto tiene nombre interno fijo:
+
+```text
+GNX
+```
+
+El operador no ejecuta `wsl --import` para esa distro. La importación la realiza `GNXRuntime` después de iniciar como `gnx-runtime`:
+
+```text
+operator/elevated installer
+        │
+        ├── enable WSL engine if required
+        ├── install gnx.exe + gnx-service.exe
+        ├── create gnx-runtime
+        └── start GNXRuntime
+                 │
+                 └── wsl --import GNX ...
+                         executed as gnx-runtime
+```
+
+WSL mantiene el registro de distros por usuario. En consecuencia, la distro `GNX` no pertenece al contexto WSL habitual del operador y no aparece en su `wsl -l` normal.
+
+Esto es aislamiento frente al contexto operativo cotidiano, **no frente a un administrador local elevado ni frente a SYSTEM**, que siguen siendo trust principals del host.
+
+### Filesystem Windows
+
+El estado Windows del runtime vive bajo:
+
+```text
+C:\ProgramData\GNX\
+├── operator.sid
+├── bootstrap\
+├── public\
+└── wsl\
+    └── ext4.vhdx
+```
+
+La ACL elimina herencia y concede acceso al runtime únicamente a:
+
+```text
+SYSTEM          Full Control
+Administrators  Full Control
+gnx-runtime     Full Control
+```
+
+El operador normal no necesita acceso al state directory. Su superficie de producto es `C:\Program Files\GNX\gnx.exe` y `gnx.toml`.
+
+## Named Pipe broker
+
+La frontera entre la CLI Windows y el runtime es:
+
+```text
+\\.\pipe\GNX
+```
+
+El pipe usa byte mode, rechaza clientes remotos y aplica una DACL protegida para:
+
+- SYSTEM;
+- Administrators;
+- el SID exacto del operador que realizó la instalación.
+
+El SID se captura durante la instalación y se guarda dentro del state directory privado.
+
+### Allowlist
+
+El protocolo no transporta argv arbitrario. Un byte de operación representa únicamente una de estas acciones:
+
+```text
+access configure
+access apply
+access dns
+compute apply
+compute status
+compute credentials
+controller apply
+controller status
+```
+
+No existe una operación `exec`, `shell`, `sh -c` ni passthrough de comandos Windows/WSL.
+
+### Framing
+
+El protocolo local tiene framing binario mínimo:
+
+```text
+GNX1
+operation
+config_length
+secret_length
+config
+secret
+```
+
+Límites actuales:
+
+```text
+config    <= 1 MiB
+secret    <= 64 KiB
+response  <= 4 MiB por stream
+```
+
+El servicio valida el opcode antes de ejecutar cualquier operación.
+
+## Configuración Windows → Linux
+
+`gnx.toml` sigue siendo la fuente declarativa del operador.
+
+```mermaid
+sequenceDiagram
+    participant O as Operator
+    participant C as gnx.exe
+    participant B as GNXRuntime
+    participant L as gnx Linux
+
+    O->>C: gnx compute status
+    C->>C: parse + validate gnx.toml
+    C->>B: allowlisted opcode + config
+    B->>B: write /etc/gnx/gnx.toml
+    B->>L: compute status
+    L-->>B: READY / FAILED
+    B-->>C: exact result
+    C-->>O: exact result
+```
+
+La configuración se sincroniza a `/etc/gnx/gnx.toml` antes de la acción. El broker no acepta rutas Windows para ejecutar ni convierte paths con `wslpath`.
+
+`host.distribution` desaparece de `gnx.toml`: la distro `GNX` es un detalle interno de packaging, no una opción de producto.
+
+## Handling de secretos
+
+Los secretos no viajan dentro del bloque de configuración.
+
+### Tailscale enrollment
+
+En Linux nativo se conserva el prompt oculto existente.
+
+En Windows:
+
+1. `gnx.exe` envía `access configure` sin secret.
+2. El runtime comprueba si `gnx-access` ya está enrolado.
+3. Sólo si falta identidad devuelve `ACCESS_SECRET_REQUIRED`.
+4. `gnx.exe` solicita la auth key mediante prompt oculto.
+5. La key cruza el named pipe como payload secreto.
+6. `GNXRuntime` la entrega a `gnx` Linux por `stdin`.
+7. `enroll.sh` crea un archivo temporal dentro del contenedor, ejecuta `tailscale up --auth-key=file:...` y elimina el archivo con `trap`.
+
+La key no entra en:
+
+```text
+gnx.toml
+argv
+Windows environment
+Linux environment
+logs
+Git
+```
+
+### Compute credentials
+
+La contraseña de Proxmox permanece en `/var/lib/gnx/compute/root.password` dentro de la distro aislada.
+
+Cuando Windows solicita `gnx compute credentials`, la lectura la realiza Linux y el valor cruza únicamente el pipe autorizado. `gnx.exe` lo muestra en pantalla alternativa y limpia la pantalla al confirmar el operador. El broker no lo persiste en Windows.
+
+## WSL runtime
+
+### Rootfs
+
+La distro se importa desde el rootfs Ubuntu 24.04 declarado en:
+
+```text
+packaging/windows/runtime.lock.json
+```
+
+El manifest fija URL y SHA-256. `install-host.ps1` descarga el archivo sólo cuando no existe todavía el VHD de GNX y verifica el digest antes de dejarlo en el área `bootstrap`.
+
+La cuenta `gnx-runtime` consume el rootfs después de iniciar el servicio.
+
+### Aislamiento dentro de WSL
+
+GNX escribe `/etc/wsl.conf` con:
+
+```ini
+[boot]
+systemd=true
+
+[automount]
+enabled=false
+
+[interop]
+enabled=false
+appendWindowsPath=false
+```
+
+Por diseño, el runtime no monta automáticamente `C:` ni hereda el Windows PATH, y los procesos Linux no usan interop para lanzar ejecutables Windows.
+
+### Podman
+
+Después del import, el servicio instala únicamente los prerequisitos Linux necesarios:
+
+```text
+podman
+openssl
+curl
+iproute2
+ca-certificates
+```
+
+Podman corre directamente en Ubuntu WSL. No existe una VM Fedora/Podman Machine dentro del runtime.
+
+## Linux bundle
+
+El build genera un bundle Linux independiente:
+
+```text
+gnx-linux-bundle.tar
+├── gnx
+├── gnx.sha256
+├── gnx.example.toml
+├── LICENSE
+├── install-linux.sh
+└── runtime/
+```
+
+En Windows, el bundle se copia al state privado y el servicio lo introduce a la distro por `stdin` hacia `tar`; no depende de `/mnt/c`.
+
+Después de una instalación correcta, los artefactos bootstrap descargados se eliminan del state Windows.
+
+## Runtime administrado
+
+```mermaid
+flowchart LR
+    GNX["gnx Linux"] --> ACCESS["gnx-access<br/>Tailscale"]
+    GNX --> DNS["gnx-dns<br/>dnsmasq"]
+    GNX --> COMPUTE["gnx-compute<br/>Proxmox"]
+    GNX --> CTRL["gnx-controller<br/>Caddy"]
+
+    DNS --> ACCESS
+    CTRL --> COMPUTE
+```
+
+Los servicios continúan administrados mediante systemd y Podman Quadlets. El aislamiento Windows no cambia esta arquitectura.
 
 ## Access
 
-`gnx access` administra dos componentes:
+`gnx access` conserva dos componentes:
 
 ```text
 gnx-access    Tailscale
 gnx-dns       dnsmasq
 ```
 
-### Flujo
+`gnx-dns` publica TCP/UDP 53 únicamente sobre la IP Tailscale del runtime. `runtime/access/dnsmasq.conf` contiene la configuración mínima y GNX genera los registros `.gnx` desde `gnx.toml`.
 
-```mermaid
-sequenceDiagram
-    participant OP as Operador
-    participant GNX as gnx
-    participant SYS as systemd
-    participant TS as gnx-access
-    participant DNS as gnx-dns
-    participant CTRL as Tailscale control
-
-    OP->>GNX: gnx access configure
-    GNX->>SYS: instalar y habilitar Quadlets
-    GNX->>TS: enrolar mediante stdin
-    TS->>CTRL: tailscale up
-    CTRL-->>TS: identidad y Tailscale IP
-    GNX->>DNS: generar configuración Split DNS
-    GNX->>SYS: habilitar gnx-dns
-    GNX-->>OP: READY access
-```
-
-Tailscale se ejecuta dentro del contenedor `gnx-access`, usando:
-
-```text
-/run/gnx/access.sock
-```
-
-GNX utiliza ese socket para consultar estado, identidad, DNS y Tailscale Services.
-
-`gnx-dns` conserva la misma frontera de servicio y publica TCP/UDP 53 únicamente sobre la IP Tailscale del runtime. Su configuración se genera desde `runtime/access/dnsmasq.conf`; no hay lógica DNS paralela en el host Windows.
-
-dnsmasq responde únicamente la zona privada `.gnx` con los aliases generados por GNX. No actúa como DNS general, DHCP, bloqueador ni resolver recursivo.
+No hay DHCP, bloqueo de anuncios, UI DNS ni resolver general.
 
 ## Compute
 
-`gnx compute` administra el servicio Proxmox.
-
-```mermaid
-flowchart LR
-    OP["Operador"] -->|"gnx compute apply"| GNX["gnx"]
-    GNX -->|"install Quadlet"| CMP["gnx-compute"]
-    GNX -->|"generate secret"| PWD["root.password<br/>0600"]
-    PWD -.->|"read-only mount"| CMP
-    CMP -->|"CA upstream"| GNX
-    GNX -->|"READY compute"| OP
-```
+`gnx compute` administra Proxmox mediante el Quadlet `gnx-compute`.
 
 El password root:
 
-- se genera con entropía del kernel;
-- utiliza 32 bytes aleatorios;
-- no se registra en logs;
-- se guarda dentro del state directory privado;
-- se lee sólo después de validar permisos y ownership.
+- se genera con entropía del sistema;
+- usa 32 bytes aleatorios;
+- se almacena en el state Linux con permisos restrictivos;
+- no aparece en configuración ni logs.
 
-`gnx compute status` usa la API de Proxmox para validar identidad y uptime. `gnx compute apply` se limita a instalar el Quadlet, esperar la inicialización necesaria y extraer la CA del upstream.
-
-El endpoint de verificación queda restringido a loopback:
-
-```text
-http://127.0.0.1:*
-```
+`compute status` autentica contra la API de Proxmox y verifica identidad y uptime.
 
 ## Controller
 
-`gnx controller` administra Caddy y, opcionalmente, una CA autónoma para `.gnx`.
+`gnx controller` administra Caddy y la CA `.gnx` opcional.
+
+La private root key permanece exclusivamente en:
+
+```text
+/var/lib/gnx/controller/pki/root.key
+```
+
+En Windows, cuando existe la CA, el servicio puede copiar únicamente el certificado público a:
+
+```text
+C:\ProgramData\GNX\public\root.crt
+```
+
+`packaging/windows/trust-ca.ps1` consume ese certificado público mediante una acción elevada y explícita. Ya no depende de `\\wsl.localhost`, porque la distro pertenece a otra identidad Windows.
+
+## Frontera de archivos Linux
+
+Antes de modificar estado persistente, GNX conserva los controles actuales:
+
+- directorios privados `0700`;
+- secretos persistentes `0600`;
+- ownership validado;
+- rechazo de symlinks en rutas sensibles;
+- rechazo de sobrescritura de archivos no administrados.
+
+Los archivos administrados empiezan con:
+
+```text
+# Managed by GNX
+```
+
+## Build Windows
 
 ```mermaid
 flowchart LR
-    CLIENT["Cliente"] --> CTRL["gnx-controller<br/>Caddy"]
-    CTRL --> CMP["gnx-compute<br/>127.0.0.1:8006"]
-
-    CA["GNX Autonomous CA<br/>opcional"] -.-> CTRL
+    SRC["Rust + runtime"] --> WIN["gnx.exe"]
+    SRC --> SVC["gnx-service.exe"]
+    SRC --> LIN["gnx Linux"]
+    LIN --> BUNDLE["gnx-linux-bundle.tar"]
+    WIN --> HASH["SHA-256"]
+    SVC --> HASH
+    BUNDLE --> HASH
+    HASH --> DIST["dist/"]
 ```
 
-La ruta primaria de acceso privado utiliza TLS gestionado por Tailscale.
+`packaging/windows/build.ps1` usa la distro WSL del **equipo de desarrollo** únicamente para construir el binario Linux. Esa `BuildDistribution` no forma parte del runtime instalado y no se copia a la configuración del producto.
 
-La CA autónoma `.gnx` es una capacidad secundaria y explícita. GNX puede generar:
+## Instalación Windows
+
+El corte de instalación es:
 
 ```text
-root.key
-root.crt
-server.key
-server.crt
+1. verify release hashes
+2. ensure machine-wide WSL engine
+3. stop existing GNXRuntime if present
+4. install gnx.exe + gnx-service.exe
+5. create/update gnx-runtime
+6. grant service/deny-logon rights
+7. restrict C:\ProgramData\GNX ACL
+8. stage verified Linux bundle/rootfs
+9. start GNXRuntime
+10. service imports/updates isolated GNX distro
+11. wait for broker PONG
 ```
 
-La clave raíz permanece privada.
-
-El certificado raíz público puede exportarse para confianza manual, pero GNX no instala automáticamente esa CA en Windows ni en otros clientes.
-
-`packaging/windows/trust-ca.ps1` es una acción separada y deliberada.
-
-## Estado persistente
-
-GNX mantiene estado únicamente en las rutas que administra el runtime.
-
-Ejemplos:
-
-```text
-/var/lib/gnx/access/
-/var/lib/gnx/compute/
-/var/lib/gnx/controller/
-```
-
-Los directorios privados se validan como `root:root` y `0700`.
-
-Los secretos persistentes se validan como `0600`.
-
-## Assets de runtime
-
-Los assets versionados bajo `runtime/` incluyen Quadlets, scripts y archivos de configuración utilizados por el binario.
-
-Los módulos Rust los incorporan en tiempo de compilación mediante `include_str!`, por ejemplo:
-
-```rust
-const ACCESS_UNIT: &str =
-    include_str!("../runtime/access/gnx-access.container");
-```
-
-El release bundle también conserva `runtime/` como material de packaging y auditoría.
-
-No se utilizan plantillas `.in`; las sustituciones se realizan con marcadores explícitos como:
-
-```text
-@STATE@
-@IP@
-@UPLINK@
-@MTU@
-```
+No se instala una distro bajo el usuario humano y no se instala Podman en su entorno Windows o WSL.
 
 ## Contrato de salida
 
-La CLI mantiene un contrato de salida simple:
+La CLI conserva:
 
 ```text
 READY <payload>
-```
-
-para éxito, y:
-
-```text
 FAILED <LABEL>
 ```
 
-para error.
+El broker devuelve stdout, stderr y exit code del binario Linux para que Windows mantenga el mismo contrato observable.
 
-Los códigos de salida distinguen errores de argumentos/configuración, host no soportado y fallos de runtime.
+## Límites de confianza
 
-Este contrato se valida en `tests/contract.rs`.
+La frontera Windows reduce acceso accidental y acoplamiento con el perfil del operador, pero no pretende resistir a un administrador local hostil.
 
-## Build y packaging
-
-```mermaid
-flowchart LR
-    SRC["src/ + runtime/ + Cargo.toml"] --> WIN["gnx.exe"]
-    SRC --> LINUX["gnx"]
-
-    WIN --> GATES["test + clippy + release"]
-    LINUX --> WSLBUILD["Linux build<br/>WSL2 + Podman"]
-
-    GATES --> DIST["dist/"]
-    WSLBUILD --> DIST
-
-    DIST --> HASH["SHA-256"]
-    HASH --> INSTALL["Windows / Linux install"]
-```
-
-El build de Windows genera:
+Trust principals del host:
 
 ```text
-gnx.exe
-gnx
-gnx.exe.sha256
-gnx.sha256
-gnx.example.toml
-runtime/
-LICENSE
-install-linux.sh
+SYSTEM
+local Administrators
+gnx-runtime    para su runtime
+operator SID   únicamente para conectar al pipe
 ```
 
-El instalador Windows valida hashes antes de copiar los artefactos y después delega la instalación Linux a WSL2.
-
-El instalador Linux:
-
-- exige ejecución como root;
-- verifica prerequisitos;
-- valida `gnx.sha256`;
-- instala `/usr/local/bin/gnx`;
-- instala la configuración inicial si aún no existe.
-
-## Árbol del repositorio
+El aislamiento buscado es que el usuario cotidiano no posea ni administre directamente:
 
 ```text
-gnx/
-├── src/
-│   ├── main.rs
-│   ├── cli.rs
-│   ├── config.rs
-│   ├── platform.rs
-│   ├── access.rs
-│   ├── compute.rs
-│   ├── controller.rs
-│   ├── error.rs
-│   └── lib.rs
-│
-├── runtime/
-│   ├── access/
-│   ├── compute/
-│   └── controller/
-│
-├── config/
-│   └── gnx.example.toml
-│
-├── packaging/
-│   ├── linux/
-│   │   └── install.sh
-│   └── windows/
-│       ├── build.ps1
-│       ├── install-host.ps1
-│       └── trust-ca.ps1
-│
-├── tests/
-│   └── contract.rs
-│
-├── docs/
-│   ├── arquitectura.md
-│   └── operar.md
-│
-├── Cargo.toml
-├── Cargo.lock
-├── LICENSE
-├── README.md
-└── AGENTS.md
+GNX WSL distro
+Podman runtime
+Linux state
+runtime secrets
 ```
 
-## Principios actuales
-
-La arquitectura mantiene cuatro decisiones simples:
-
-1. **Un solo runtime Linux.** Windows delega; Linux ejecuta nativamente.
-2. **Infraestructura declarativa y verificable.** Cada capacidad mantiene gates explícitos sin introducir un subsistema adicional de estado.
-3. **Secretos fuera de configuración y argumentos.**
-4. **Servicios del producto administrados mediante systemd + Podman Quadlets.**
-
-La documentación de arquitectura describe únicamente capacidades implementadas en el código actual.
+mientras conserva una CLI única y pequeña.

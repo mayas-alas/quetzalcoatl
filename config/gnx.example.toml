@@ -1,7 +1,6 @@
 version = 1
 
 [host]
-distribution = "Ubuntu-24.04"
 runtime_dir = "/usr/local/share/gnx/runtime"
 
 [access]

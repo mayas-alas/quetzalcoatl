@@ -2,65 +2,66 @@
 
 - **Estado:** aceptada
 - **Contexto:** rama `legacy` (snapshot 2026-08-31), AGENTS.md §5
-- **Tags:** legacy, parity, scope, roadmap
+- **Tags:** legacy, parity, scope, isolation
 
 ## Contexto
 
-La rama `legacy` conserva el producto anterior (Quetzalcoatl Next, corte
-2026-08-31): instalador autoextraíble (EXE/AppImage), CLI de ocho subcomandos,
-servicio Windows con cuenta aislada y tray, journal JSONL, **Headscale soberano**
-como `login-server`, Docktail, OpenTofu dentro de un LXC runner y Podman
-Machine. La base activa (GNX 0.2) es deliberadamente más pequeña: tres
-capacidades, Tailscale SaaS como source of truth, dnsmasq Split DNS, Caddy con
-CA opcional y un puente Windows delgado.
+La rama `legacy` conserva el producto anterior: servicio Windows, cuenta aislada, tray, journal JSONL, Headscale, Docktail, OpenTofu y Podman Machine.
 
-La pregunta de paridad: qué extraña el legacy a la nueva base y qué se recupera.
+GNX 0.2 mantiene sólo tres capacidades de runtime (`access`, `compute`, `controller`) y un runtime Linux común. La revisión de Windows recupera una sola propiedad del legacy que sí sigue siendo útil: **la sesión cotidiana del operador no debe poseer la distro WSL ni Podman**.
 
-## Matriz de brechas
+## Matriz
 
-| Capacidad (legacy) | Estado en GNX 0.2 | Decisión |
+| Capacidad legacy | GNX 0.2 | Decisión |
 |---|---|---|
-| Instalador EXE/AppImage sin argumentos | bundle `dist/` + `install-host.ps1`/`install.sh` con checksums | **Suficiente.** No portar el empaquetador. |
-| `gnx doctor` (diagnóstico global) | `compute status`, `controller status`, `access dns` (gates por capacidad) | **Recuperar sin código nuevo:** un `doctor` futuro compone los tres gates existentes. |
-| `gnx logs` (journal JSONL propio) | systemd journal + `LogDriver=none` en contenedores | **No portar.** `journalctl -u gnx-*` ya cubre la trazabilidad; menos código, integración nativa. |
-| `gnx repair` | `apply` idempotente (`install()` con marcador `# Managed by GNX`, `ca.sh` idempotente) | **Ya existe:** reparar = reejecutar `apply`. Documentar, no implementar. |
-| `gnx update --from --sha256` | ausente | **Fuera de alcance** por AGENTS.md §3 (URLs de actualización no entran al producto). Distribución = reinstalar bundle verificado. |
-| `gnx uninstall` | ausente | **Diferido** (ADR futura si se requiere). Los Quadlets son marcados y removibles sin estado huérfano. |
-| Servicio Windows + cuenta `gnx-runtime` + tray | puente delgado sin estado | **Descartado por diseño:** Windows no mantiene runtime; la superficie de ataque y el código desaparecen. |
-| Headscale soberano (`*.node.gnx` propio) | Tailscale SaaS + Services (`*.ts.net`) | **Descartado para el MVP:** Tailscale es el source of truth de identidad, TLS y transporte (decisión del operador, coherente con ADR 0001). Headscale puede reabrirse como ADR independiente si exigir soberanía total. |
-| OpenTofu + provider bpg/proxmox en LXC runner | ausente | **Diferido:** el MVP gestiona un nodo; los workloads declarativos son un producto distinto. Requiere ADR propia. |
-| Podman Machine (Windows) | Podman nativo en WSL2 | **Mejorado:** una capa menos, mismos gates. |
-| Docktail dentro de Proxmox | Tailscale Services en el host | **Sustituido:** TLS administrado y nombres estables sin self-hosting. |
-| Split DNS `.gnx` (dnsmasq) | presente | **Nuevo** en 0.2. |
-| CA autónomo `.gnx` explícito | presente | **Nuevo** en 0.2 (ver ADR 0001). |
-| Imágenes fijadas por digest | presente | **Nuevo** en 0.2. |
-| Contrato de salida `READY`/`FAILED` con tests | presente | **Nuevo** en 0.2. |
+| Cuenta `gnx-runtime` | recuperada | **Sí.** Es la identidad propietaria del runtime Windows. |
+| Servicio Windows | recuperado como `GNXRuntime` | **Sí, pero mínimo.** Sólo bootstrap + broker allowlisted. |
+| Named Pipe | `\\.\pipe\GNX` | **Sí.** Única frontera CLI → runtime en Windows. |
+| Tray | ausente | **No portar.** |
+| Podman Machine Fedora | ausente | **No portar.** Podman corre nativo en Ubuntu WSL. |
+| Journal JSONL | ausente | **No portar.** Runtime Linux usa systemd. |
+| `gnx repair` dedicado | ausente | **No portar.** Reaplicar operaciones idempotentes. |
+| Headscale | ausente | **Fuera del MVP actual.** |
+| OpenTofu runner | ausente | **Fuera del MVP actual.** |
+| Docktail | ausente | **Sustituido por la superficie actual.** |
+| Split DNS `.gnx` | dnsmasq mínimo | **Mantener.** |
+| CA `.gnx` opcional | presente | **Mantener.** |
 
 ## Decisión
 
-1. **No portar código legacy a la base activa** (AGENTS.md §5). La paridad se
-   evalúa por comportamiento observable, no por equivalencia de superficie.
-2. **Recuperar lo que falta con integraciones, no con paradigmas nuevos:**
-   - `doctor` = composición de los tres gates existentes (una función, sin
-     subsistema nuevo).
-   - `repair` = reejecución de `apply` (idempotencia ya garantizada).
-   - `logs` = `journalctl` (systemd ya es el journal).
-3. **Aceptar los descartes:** sin tray, sin servicio Windows, sin update
-   automático, sin Headscale ni OpenTofu en el MVP. Cada descarte reduce
-   superficie de mantenimiento; cada uno puede reabrirse con su propia ADR.
+1. **Recuperar el security boundary, no el runtime legacy.**
+   `gnx-runtime` vuelve únicamente para poseer `GNXRuntime`, la distro WSL `GNX` y Podman Linux.
+
+2. **El operador usa sólo la CLI.**
+
+   ```text
+   gnx.exe → named pipe → GNXRuntime → WSL GNX → gnx Linux
+   ```
+
+   `gnx.exe` no invoca `wsl.exe` directamente.
+
+3. **El servicio no converge infraestructura por su cuenta.**
+   No contiene scheduler, state machine de producto ni loops de reparación. Hace bootstrap del substrate y ejecuta únicamente requests allowlisted.
+
+4. **No recuperar Podman Machine.**
+   WSL ya proporciona el substrate Linux; añadir otra VM volvería a introducir una capa sin aportar al boundary de usuario.
+
+5. **No recuperar tray, updater ni journal propio.**
+   No son necesarios para ocultar el runtime de la sesión del operador.
 
 ## Consecuencias
 
-- El gap real de paridad se reduce a **un `doctor` sintáctico** (~20 líneas de
-  composición) y a **documentación** de repair/logs.
-- La base activa permanece < 1 200 LOC de orquestación.
-- Las capacidades soberanas (Headscale, OpenTofu) quedan archivadas en `legacy`
-  como referencia de diseño, no como deuda.
+- La distro WSL queda registrada en el perfil de `gnx-runtime`, no en el del operador.
+- Podman existe únicamente dentro de esa distro.
+- Windows vuelve a tener un servicio, pero su responsabilidad es estrecha y comprobable.
+- El pipe no es un shell privilegiado: ocho opcodes cubren exactamente la CLI actual.
+- Administradores locales y SYSTEM siguen siendo trust principals del host; el boundary no pretende protegerse de ellos.
+- La arquitectura Linux de `access`, `compute` y `controller` permanece sin cambios.
 
 ## References
 
-- `legacy:IMPLEMENTATION-TRACKER.md` — corte y evidencia del producto anterior.
-- `legacy:README.md` — superficie CLI del legacy.
-- ADR 0001 — CA autónomo: renovación automática, raíz inmutable.
-- AGENTS.md §5 — la rama `legacy` no se modifica; la base activa no carga su
-  código.
+- `src/windows/account.rs` — identidad dedicada y derechos de logon.
+- `src/windows/service.rs` — servicio `GNXRuntime`.
+- `src/windows/broker.rs` — pipe y allowlist.
+- `src/windows/runtime.rs` — distro `GNX` y bootstrap Linux.
+- `docs/arquitectura.md` — modelo actualizado.

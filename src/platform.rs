@@ -1,68 +1,60 @@
-use std::{path::Path, process::Command};
+use std::path::Path;
 
 use crate::{Error, Result};
 
 #[cfg(windows)]
-pub fn forward(distribution: &str, config: &Path, action: &[&str]) -> Result<String> {
-    use std::process::Stdio;
+pub fn forward(config: &Path, action: &[&str]) -> Result<String> {
+    use std::io::{Read, Write};
+    use zeroize::Zeroizing;
 
-    let config = wsl_path(distribution, config)?;
-    let status = linux_command(
-        Some(distribution),
-        &[
-            "/usr/local/bin/gnx",
-            "--config",
-            &config,
-            action[0],
-            action[1],
-        ],
-    )
-    .stdin(Stdio::inherit())
-    .stdout(Stdio::inherit())
-    .stderr(Stdio::inherit())
-    .status()
-    .map_err(Error::Spawn)?;
-    std::process::exit(status.code().unwrap_or(1));
-}
-
-#[cfg(windows)]
-fn wsl_path(distribution: &str, path: &Path) -> Result<String> {
-    use std::process::Stdio;
-
-    let path = path.canonicalize().map_err(Error::ConfigRead)?;
-    let value = path.to_str().ok_or(Error::ConfigInvalid)?;
-    let output = linux_command(Some(distribution), &["wslpath", "-u", value])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .map_err(Error::Spawn)?;
-    if !output.status.success() {
-        return Err(Error::Operation("WSL_PATH"));
+    if action.len() != 2 {
+        return Err(Error::Arguments);
     }
-    String::from_utf8(output.stdout)
-        .ok()
-        .map(|text| text.trim().to_owned())
-        .filter(|text| text.starts_with('/'))
-        .ok_or(Error::Operation("WSL_PATH"))
+    let config = std::fs::read(config).map_err(Error::ConfigRead)?;
+    let action = [action[0], action[1]];
+    let mut response = crate::windows::broker::request(action, &config, None)?;
+
+    if action == ["access", "configure"]
+        && String::from_utf8_lossy(&response.stderr).contains("FAILED ACCESS_SECRET_REQUIRED")
+    {
+        let secret = Zeroizing::new(
+            rpassword::prompt_password("Tailscale auth key (hidden; Enter cancels): ")
+                .map_err(|_| Error::Operation("ACCESS_SECRET_INPUT"))?,
+        );
+        if secret.trim().is_empty() {
+            return Err(Error::Operation("ACCESS_SECRET_INPUT"));
+        }
+        response = crate::windows::broker::request(action, &config, Some(secret.as_bytes()))?;
+    }
+
+    if action == ["compute", "credentials"] && response.exit_code == 0 {
+        let output = Zeroizing::new(String::from_utf8_lossy(&response.stdout).into_owned());
+        if let Some(payload) = output.strip_prefix("READY broker-credentials\n") {
+            print!(
+                "\x1b[?1049h\x1b[2J\x1b[HGNX compute\n{payload}\n\nEnter hides this screen."
+            );
+            std::io::stdout().flush().map_err(Error::Spawn)?;
+            let mut input = [0_u8; 1];
+            let _ = std::io::stdin().read(&mut input);
+            println!("\x1b[2J\x1b[H\x1b[?1049lREADY credentials-hidden");
+            std::io::stdout().flush().map_err(Error::Spawn)?;
+            std::process::exit(0);
+        }
+    }
+
+    std::io::stdout()
+        .write_all(&response.stdout)
+        .map_err(Error::Spawn)?;
+    std::io::stderr()
+        .write_all(&response.stderr)
+        .map_err(Error::Spawn)?;
+    std::process::exit(response.exit_code as i32);
 }
 
-pub fn linux_command(distribution: Option<&str>, args: &[&str]) -> Command {
-    #[cfg(windows)]
-    let mut command = {
-        let mut command = Command::new("wsl.exe");
-        if let Some(name) = distribution {
-            command.args(["-d", name]);
-        }
-        command.args(["--user", "root", "--exec"]).args(args);
-        command
-    };
-    #[cfg(not(windows))]
-    let mut command = {
-        let _ = distribution;
-        let mut command = Command::new(args.first().copied().unwrap_or("false"));
-        command.args(args.get(1..).unwrap_or_default());
-        command
-    };
+#[cfg(target_os = "linux")]
+pub fn linux_command(args: &[&str]) -> std::process::Command {
+    let mut command = std::process::Command::new(args.first().copied().unwrap_or("false"));
+    command.args(args.get(1..).unwrap_or_default());
     command.env_remove("TS_AUTHKEY");
     command
 }
@@ -137,7 +129,7 @@ pub fn install(path: &Path, data: &str, mode: u32) -> Result<bool> {
 pub fn run(args: &[&str], input: Option<&[u8]>, operation: &'static str) -> Result<Vec<u8>> {
     use std::{io::Write, process::Stdio};
 
-    let mut child = linux_command(None, args)
+    let mut child = linux_command(args)
         .stdin(if input.is_some() {
             Stdio::piped()
         } else {
@@ -163,16 +155,13 @@ pub fn run(args: &[&str], input: Option<&[u8]>, operation: &'static str) -> Resu
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 
     #[test]
-    fn command_is_local_or_an_explicit_wsl_bridge() {
-        let command = linux_command(Some("GNX-Test"), &["sh", "-c", "exit 0"]);
-        #[cfg(windows)]
-        assert_eq!(command.get_program(), "wsl.exe");
-        #[cfg(target_os = "linux")]
+    fn linux_commands_are_native() {
+        let command = linux_command(&["sh", "-c", "exit 0"]);
         assert_eq!(command.get_program(), "sh");
     }
 }

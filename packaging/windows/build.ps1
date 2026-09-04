@@ -8,6 +8,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $root 'dist' }
+if (Test-Path -LiteralPath $OutputDirectory) {
+    Remove-Item -LiteralPath $OutputDirectory -Recurse -Force
+}
 $output = New-Item -ItemType Directory -Force -Path $OutputDirectory
 
 $gates = @(
@@ -39,18 +42,39 @@ try {
 }
 
 Copy-Item -LiteralPath (Join-Path $root 'target\release\gnx.exe') -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $root 'target\release\gnx-service.exe') -Destination $output -Force
 Copy-Item -LiteralPath (Join-Path $root 'config\gnx.example.toml') -Destination $output -Force
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $output -Force
 Copy-Item -LiteralPath (Join-Path $root 'runtime') -Destination $output -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $root 'packaging\linux\install.sh') -Destination (Join-Path $output 'install-linux.sh') -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'runtime.lock.json') -Destination $output -Force
 
 & (Join-Path $output 'gnx.exe') --version | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'FAILED WINDOWS_ARTIFACT' }
+& (Join-Path $output 'gnx-service.exe') --version | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'FAILED SERVICE_ARTIFACT' }
 & wsl.exe -d $BuildDistribution --exec "$outputWsl/gnx" --version | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'FAILED ARTIFACT_EXECUTION' }
+if ($LASTEXITCODE -ne 0) { throw 'FAILED LINUX_ARTIFACT' }
 
-foreach ($name in @('gnx.exe', 'gnx')) {
+foreach ($name in @('gnx.exe', 'gnx-service.exe', 'gnx')) {
     (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $output $name)).Hash.ToLowerInvariant() |
         Set-Content -Encoding ascii -NoNewline -LiteralPath (Join-Path $output "$name.sha256")
+}
+
+$stage = Join-Path $output '.linux-bundle'
+New-Item -ItemType Directory -Force -Path $stage | Out-Null
+try {
+    foreach ($name in @('gnx', 'gnx.sha256', 'gnx.example.toml', 'LICENSE', 'install-linux.sh')) {
+        Copy-Item -LiteralPath (Join-Path $output $name) -Destination $stage -Force
+    }
+    Copy-Item -LiteralPath (Join-Path $output 'runtime') -Destination $stage -Recurse -Force
+    $linuxBundle = Join-Path $output 'gnx-linux-bundle.tar'
+    & tar.exe -cf $linuxBundle -C $stage .
+    if ($LASTEXITCODE -ne 0) { throw 'FAILED LINUX_BUNDLE' }
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $linuxBundle).Hash.ToLowerInvariant() |
+        Set-Content -Encoding ascii -NoNewline -LiteralPath "$linuxBundle.sha256"
+} finally {
+    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 if ($Validate) {

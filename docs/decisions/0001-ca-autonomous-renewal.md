@@ -17,7 +17,8 @@ operación/depuración local.
 cambian los SAN (`cmp -s` sobre `domains`). La **raíz** (`root.key`,
 RSA-3072, `pathlen:0`, `nameConstraints:DNS:.gnx`) se genera una sola vez y no se
 revisa. La confianza de la raíz en Windows (`trust-ca.ps1`) es manual y requiere
-admin — es una decisión de seguridad, no de operación.
+admin. En Windows aislado, el broker exporta únicamente `root.crt` público a
+`C:\ProgramData\GNX\public`; la private key permanece dentro de la distro GNX.
 
 El operador no quiere intervención manual (`apply`) ni que el CA sea source of
 truth, y prefiere **integraciones inteligentes** sobre nuevos paradigmas.
@@ -38,9 +39,9 @@ truth, y prefiere **integraciones inteligentes** sobre nuevos paradigmas.
    `controller.autonomous_ca = true`.
 
 3. **Confianza deliberada, no automática.** `trust-ca.ps1` permanece manual
-   (admin explícito). No se automatiza la confianza de raíz en Windows ni en
-   clientes. Un `controller status` verifica que el server cert esté vigente y
-   que `pki.gnx` resuelva a la IP del controller.
+   (admin explícito). El broker puede exportar el certificado raíz público, pero
+   nunca instala confianza ni exporta `root.key`. Un `controller status` verifica
+   vigencia y ruta antes de declarar el controller listo.
 
 4. **Discovery de la raíz vía `gnx-dns`.** `pki.gnx` → IP del controller
    (registro dnsmasq existente en `records()`). El cliente obtiene la raíz
