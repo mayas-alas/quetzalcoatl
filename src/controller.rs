@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn autonomous_ca_is_explicit_in_the_rendered_route() {
-        let config: Config = toml::from_str(include_str!("../config/gnx.example.toml")).unwrap();
+        let config: Config = toml::from_str(include_str!("../config/gnx.toml")).unwrap();
         let sites = private_sites(&config);
         assert!(sites.contains("https://compute.gnx"));
         assert!(sites.contains("tls /etc/gnx/tls/server.crt"));

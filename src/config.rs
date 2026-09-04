@@ -141,7 +141,7 @@ impl Config {
 mod tests {
     use super::*;
 
-    const CONFIG: &str = include_str!("../config/gnx.example.toml");
+    const CONFIG: &str = include_str!("../config/gnx.toml");
 
     #[test]
     fn accepts_only_the_three_declared_capabilities() {

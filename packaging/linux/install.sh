@@ -20,6 +20,6 @@ chmod 755 /usr/local/share/gnx/runtime/access/enroll.sh \
     /usr/local/share/gnx/runtime/compute/entrypoint.sh \
     /usr/local/share/gnx/runtime/controller/ca.sh
 if test ! -e /etc/gnx/gnx.toml; then
-    install -m 600 "$bundle/gnx.example.toml" /etc/gnx/gnx.toml
+    install -m 600 "$bundle/gnx.toml" /etc/gnx/gnx.toml
 fi
 echo 'READY linux'

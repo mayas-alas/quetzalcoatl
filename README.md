@@ -1,71 +1,151 @@
 # GNX
 
-**Tu infraestructura privada, en una sola caja.**
+**Private infrastructure, one command surface.**
 
-GNX convierte un host Linux (o Windows vía WSL2) en un nodo privado y
-verificable: red, cómputo y superficie HTTPS convergen con tres comandos y
-cero secretos en configuración. Cada operación termina en `READY` o en
-`FAILED <ETIQUETA>` — sin estados intermedios, sin puertas ocultas.
+GNX is a Rust orchestrator that turns a Linux host — or Windows through WSL2 — into a private infrastructure node with reproducible networking, compute, and HTTPS services.
 
-## Qué obtienes
+The product keeps one execution model across both platforms:
 
-- **Acceso privado sin exponer puertos.** Tailscale entrega el transporte y
-  TLS administrado para `*.ts.net`; Pi-hole responde la zona `.gnx` por
-  Split DNS. Nada escucha en la red pública.
-- **Cómputo con salud comprobada.** El ciclo de vida del nodo (Proxmox en
-  contenedor) se aplica y se verifica con gates reales: identidad, API,
-  uptime.
-- **HTTPS propio, opcional y explícito.** Un CA autónomo firma la ruta
-  `.gnx` para operación e investigación local; confiar en él siempre es tu
-  decisión, nunca un efecto colateral.
-- [ADDRESS] **auditable.** Imágenes fijadas por digest, permisos 0600/0700
-  verificados, claves sólo por prompt oculto. Un gate fallido [PERSON_NAME]
-  [PERSON_NAME] nunca se oculta como éxito.
+- **Linux:** `gnx` runs natively.
+- **Windows:** `gnx.exe` acts as a thin bridge and delegates Linux operations to `gnx` inside WSL2.
+- **Runtime:** systemd + Podman Quadlets manage the services installed by GNX.
 
-## Cómo se usa
+## What GNX provides
+
+### Private access
+
+`gnx access` provisions the private access layer using Tailscale and Pi-hole:
+
+- Tailscale runs inside the managed `gnx-access` container.
+- Split DNS for the `.gnx` zone is served by `gnx-dns`.
+- Services can be exposed privately through Tailscale Services.
+- Enrollment secrets are entered interactively and are never stored in `gnx.toml`.
+
+### Compute
+
+`gnx compute` manages the local compute service:
+
+- Proxmox runs as a managed Podman Quadlet.
+- The root password is generated locally from kernel entropy.
+- GNX verifies service health through the Proxmox API before returning success.
+- Credentials remain in root-owned state with restrictive permissions.
+
+### Controller
+
+`gnx controller` provides the HTTP/TLS entry point:
+
+- Caddy proxies requests to the compute service.
+- The primary private TLS path is provided through Tailscale.
+- An autonomous `.gnx` CA is available as an explicit, optional capability.
+- GNX never installs that CA into a client trust store automatically.
+
+## Execution model
 
 ```text
-gnx access      # Tailscale, Services y Pi-hole para Split DNS .gnx
-gnx compute     # ciclo de vida y salud del servicio de cómputo
-gnx controller  # entrada HTTP y CA autónomo opcional para HTTPS .gnx
+Linux host
+└── gnx
+    └── systemd + Podman Quadlets
+        ├── gnx-access
+        ├── gnx-dns
+        ├── gnx-compute
+        └── gnx-controller
+
+Windows host
+└── gnx.exe
+    └── WSL2
+        └── gnx
+            └── same Linux runtime
 ```
 
-Windows es un puente delgado: valida la misma configuración y delega la acción
-en WSL2. Sin servicio, sin bandeja, sin estado que mantener.
+Windows does not maintain a second implementation of the runtime. The Windows binary validates and forwards commands to the Linux binary inside the configured WSL2 distribution.
 
-## [PERSON_NAME]
+## Basic workflow
 
-1. Copiar `config/gnx.example.toml` a `gnx.toml` y sustituir el FQDN de ejemplo.
-2. [ADDRESS] bundle generado por `packaging/windows/build.ps1`.
-3. Ejecutar, en orden: `gnx compute apply`, `gnx controller apply` y
-   `gnx access configure`.
-4. Aprobar `svc:compute` en Tailscale si el reporte lo solicita.
-5. En DNS del tailnet, añadir el nameserver reportado y restringirlo a `gnx`.
+```text
+gnx compute apply
+gnx controller apply
+gnx access configure
+gnx access dns
+```
 
-Reparar es volver a aplicar: todas las operaciones son idempotentes.
-Diagnosticar es preguntar: `compute status`, `controller status` y `access dns`
-son los mismos gates de la instalación.
+Health and verification commands use the same gates as installation:
 
-La arquitectura completa, las decisiones y la operación están en
-[arquitectura](docs/arquitectura.md), [operar](docs/operar.md) y
-[decisiones](docs/decisions/).
+```text
+gnx compute status
+gnx controller status
+gnx access dns
+```
 
-## Licencia
+Each operation finishes with either:
 
-GNX usa `AGPL-3.0-only`; las dependencias conservan sus licencias y
-atribuciones. La rama histórica `legacy` queda archivada y separada, sin
-modificaciones.
+```text
+READY <payload>
+```
 
-## Release gate
+or:
+
+```text
+FAILED <LABEL>
+```
+
+## Configuration
+
+GNX uses a single declarative configuration file:
+
+```text
+config/gnx.toml
+```
+
+Copy it to `gnx.toml` and adjust the deployment values for your environment.
+
+Secrets do not belong in the configuration file. Enrollment keys and generated credentials use dedicated runtime paths and permission checks.
+
+## Build and packaging
+
+Windows release builds are produced with:
 
 ```powershell
-# Construir
 .\packaging\windows\build.ps1
-
-# Validar contrato sobre artefactos release
-.\packaging\validate.ps1 -DistPath dist
 ```
 
-`validate.ps1` ejecuta los 3 contract-smoke (`WINDOWS_CONTRACT`,
-`LINUX_CONTRACT`, `ARGUMENTS_CONTRACT`) contra los binarios de `dist/`.
-Salida: `READY VALIDATION` o `FAILED <ETIQUETA>`.
+The release process builds and validates both artifacts:
+
+```text
+gnx.exe    Windows bridge
+gnx        Linux native binary
+```
+
+Linux installation is provided through:
+
+```bash
+sudo ./install-linux.sh <bundle>
+```
+
+The Linux installer verifies the release checksum and installs `gnx` into `/usr/local/bin`.
+
+## Repository layout
+
+```text
+gnx/
+├── src/                 Rust orchestrator
+├── runtime/             Quadlets and runtime assets
+├── config/              example configuration
+├── packaging/
+│   ├── linux/
+│   └── windows/
+├── tests/               contract tests
+├── docs/
+│   ├── arquitectura.md
+│   └── operar.md
+├── Cargo.toml
+└── AGENTS.md
+```
+
+## Documentation
+
+- [`docs/arquitectura.md`](docs/arquitectura.md) — execution model, trust boundaries and component architecture.
+- [`docs/operar.md`](docs/operar.md) — operational procedures and recovery workflow.
+
+## License
+
+GNX is licensed under `AGPL-3.0-only`. Third-party components retain their respective licenses and attribution requirements.

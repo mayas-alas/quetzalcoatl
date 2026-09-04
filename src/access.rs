@@ -390,7 +390,7 @@ mod tests {
 
     #[test]
     fn private_names_resolve_to_the_controller_not_the_service_vip() {
-        let config: Config = toml::from_str(include_str!("../config/gnx.example.toml")).unwrap();
+        let config: Config = toml::from_str(include_str!("../config/gnx.toml")).unwrap();
         let access_ip = "100.64.0.1".parse().unwrap();
         let rendered = records(&config, access_ip);
         assert!(rendered.contains("address=/compute.gnx/100.64.0.1"));

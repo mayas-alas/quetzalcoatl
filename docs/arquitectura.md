@@ -1,275 +1,379 @@
 # Arquitectura
 
-GNX es un orquestador Rust (AGPL-3.0) *thin binary* que despliega y verifica una
-stack privada en un nodo Linux/WSL. Windows es un puente delgado que delega al
-binario Linux dentro de WSL2. No hay estado de agente fuera del runtime del
-producto; los assets (`runtime/`) se compilan dentro del binario vía
-`include_str!` y usan marcadores visibles (`@MONTE@`) — no hay archivos `.in`
-en disco.
+GNX es un orquestador escrito en Rust que despliega, configura y verifica una infraestructura privada sobre Linux.
 
-## Big picture: trust boundaries y flujos de datos
+Linux es la plataforma de ejecución nativa. En Windows, `gnx.exe` funciona como un puente delgado hacia el mismo binario Linux dentro de WSL2; no existe una segunda implementación del runtime para Windows.
+
+Los servicios administrados por GNX se ejecutan con systemd y Podman Quadlets.
+
+## Alcance
+
+La arquitectura actual se divide en tres capacidades:
+
+- **Access** — conectividad privada con Tailscale y Split DNS con Pi-hole.
+- **Compute** — ciclo de vida y verificación del servicio Proxmox.
+- **Controller** — proxy HTTP/TLS con Caddy y CA `.gnx` opcional.
+
+El binario `gnx` es la superficie de control común para las tres.
+
+## Modelo de ejecución
 
 ```mermaid
 flowchart TB
-    subgraph OPHOST["Operador (host)"]
-        OP["terminal gnx.exe / gnx"]
-        CFG["gnx.toml<br/>(sin secretos)"]
+    subgraph LINUX["Linux host"]
+        GNXL["gnx"]
+        SYSTEMD["systemd"]
+        PODMAN["Podman Quadlets"]
     end
 
-    subgraph WSLROOT["WSL2 / Linux (root)"]
-        BIN["gnx"]
-        PLAT["platform.rs<br/>root() private_dir() install()"]
+    subgraph WINDOWS["Windows host"]
+        GNXW["gnx.exe"]
+        WSL["WSL2"]
     end
 
-    subgraph QUADLETS["Podman Quadlets"]
-        ACC["gnx-access<br/>Tailscale + socket /run/gnx/access.sock"]
-        DNS["gnx-dns<br/>Pi-hole .gnx autoridad"]
-        CMP["gnx-compute<br/>Proxmox 127.0.0.1:8006"]
-        CTRL["gnx-controller<br/>Caddy + CA autónoma"]
-    end
-
-    subgraph EXTERNAL["Externo (tailnet)"]
-        CLI["Tailscale CLI"]
-        TAIL["Tailscale control plane *.ts.net"]
-    end
-
-    OP -->|"delega exec"| BIN
-    BIN -->|"valida + forward"| PLAT
-    PLAT -->|"systemd enable/run"| ACC
-    PLAT -->|"systemd enable/run"| DNS
-    PLAT -->|"systemd enable/run"| CMP
-    PLAT -->|"systemd enable/run"| CTRL
-
-    ACC -->|"Tailscale IPs"| CLI
-    CLI -->|"enroll key (stdin, mktemp, trap rm)"| ACC
-    ACC <-->|"serve svc:compute"| TAIL
-    DNS -->|"Split DNS .gnx"| ACC
-    CMP -->|"upstream-ca.crt"| CTRL
-    CTRL -->|"reverse_proxy https"| CMP
-
-    CFG -.->|"config única"| BIN
-    style OP fill:#1e293b,stroke:#0f172a,color:#f1f5f9
-    style CFG fill:#0f1f2e,stroke:#1e3a5f,color:#cbd5e1
-    style ACC fill:#0f172a,stroke:#0ea5e9,color:#e2e8f0
-    style DNS fill:#0f172a,stroke:#2dd36f,color:#e2e8f0
-    style CMP fill:#0f172a,stroke:#f59e0b,color:#e2e8f0
-    style CTRL fill:#0f172a,stroke:#8b5cf6,color:#e2e8f0
+    GNXW -->|"forward"| WSL
+    WSL --> GNXL
+    GNXL --> SYSTEMD
+    SYSTEMD --> PODMAN
 ```
 
-- **Trust boundary única:** el binario (`BIN`) es la frontera. `platform.rs`
-  corre como `root` y valida permisos (`private_dir` 0700, `write_new` 0600,
-  `read_secret` 0600 + anti-symlink + UID 0) antes de tocar el filesystem.
-- **Secretos:** `cfg` nunca contiene secretos; la enrolamiento key entra sólo
-  por prompt oculto (`rpassword`) → `stdin` → `mktemp` con `trap rm`
-  dentro del contenedor (`enroll.sh`). `platform::linux_command` borra
-  `TS_AUTHKEY`/`NB_SETUP_KEY` del env siempre.
-- **Salida:** `main.rs` imprime `READY <payload>` en *stdout* o
-  `FAILED <ETIQUETA>` en *stderr* con código estructurado (2 args/config,
-  4 host-no-supported, 6 runtime) — contrato estable probado en
-  `tests/contract.rs`.
+En Linux, `gnx` ejecuta las operaciones directamente.
 
-## Uso 1 — `gnx access`: red privada + Split DNS
+En Windows:
+
+1. `gnx.exe` valida la invocación.
+2. Convierte las rutas Windows a rutas WSL cuando es necesario.
+3. Ejecuta `/usr/local/bin/gnx` dentro de la distribución WSL configurada.
+4. El binario Linux realiza la operación real.
+
+Esta separación mantiene un único runtime y evita duplicar lógica de infraestructura entre plataformas.
+
+## Vista general
+
+```mermaid
+flowchart TB
+    subgraph HOST["Operador"]
+        CLI["gnx / gnx.exe"]
+        CFG["gnx.toml<br/>sin secretos"]
+    end
+
+    subgraph CORE["GNX Linux runtime"]
+        BIN["gnx"]
+        PLATFORM["platform.rs<br/>permisos + install + execution"]
+    end
+
+    subgraph SERVICES["Servicios administrados"]
+        ACCESS["gnx-access<br/>Tailscale"]
+        DNS["gnx-dns<br/>Pi-hole"]
+        COMPUTE["gnx-compute<br/>Proxmox"]
+        CONTROLLER["gnx-controller<br/>Caddy"]
+    end
+
+    subgraph TAILNET["Tailnet"]
+        TSCTRL["Tailscale control plane"]
+        TSSVC["Tailscale Services"]
+    end
+
+    CLI --> BIN
+    CFG -.-> BIN
+    BIN --> PLATFORM
+
+    PLATFORM --> ACCESS
+    PLATFORM --> DNS
+    PLATFORM --> COMPUTE
+    PLATFORM --> CONTROLLER
+
+    ACCESS <--> TSCTRL
+    ACCESS <--> TSSVC
+    DNS --> ACCESS
+    CONTROLLER --> COMPUTE
+```
+
+## Frontera de confianza
+
+La frontera principal es el binario `gnx`.
+
+Antes de modificar estado persistente, GNX aplica controles explícitos sobre rutas y permisos:
+
+- directorios privados con modo `0700`;
+- secretos persistentes con modo `0600`;
+- rechazo de symlinks en rutas sensibles;
+- validación de ownership;
+- rechazo de sobrescritura de archivos no administrados por GNX.
+
+Los archivos administrados utilizan el marcador:
+
+```text
+# Managed by GNX
+```
+
+Si un archivo existente no contiene ese marcador, `platform::install()` rechaza reemplazarlo.
+
+## Configuración y secretos
+
+`gnx.toml` contiene configuración declarativa, no secretos.
+
+El flujo de enrolamiento de Tailscale solicita la clave mediante prompt oculto. La clave:
+
+1. entra por `stdin`;
+2. se mantiene en memoria protegida durante la operación;
+3. se escribe temporalmente dentro del contenedor mediante `mktemp`;
+4. se elimina con `trap`;
+5. no se pasa como argumento visible del proceso.
+
+`platform::linux_command()` también elimina `TS_AUTHKEY` del entorno antes de ejecutar procesos hijos.
+
+Las credenciales de compute se generan localmente con entropía del kernel y se almacenan con permisos restrictivos.
+
+## Access
+
+`gnx access` administra dos componentes:
+
+```text
+gnx-access    Tailscale
+gnx-dns       Pi-hole
+```
+
+### Flujo
 
 ```mermaid
 sequenceDiagram
     participant OP as Operador
-    participant CLI as gnx CLI / WSL bridge
-    participant SYS as systemd - Linux
-    participant TS as gnx-access - Tailscale
-    participant PH as gnx-dns - Pi-hole
-    participant TSCTRL as Tailscale control
-    participant DNSCHK as podman dig + curl
+    participant GNX as gnx
+    participant SYS as systemd
+    participant TS as gnx-access
+    participant DNS as gnx-dns
+    participant CTRL as Tailscale control
 
-    OP->>CLI: gnx access configure
-    CLI->>SYS: foundation: private_dir, install quadlets, daemon-reload, enable --now
-    Note right of TS: enroll key via stdin, mktemp and trap rm
-    TS->>TSCTRL: tailscale up --auth-key=file:$key --hostname --advertise-tags
-    TS-->>TSCTRL: Tailscale IP 100.x.x.x
-    OP->>CLI: gnx access dns
-    CLI->>SYS: status() + identity() → 100.x.x.x
-    CLI->>PH: build dns.toml for alias, pki.gnx and local gnx
-    CLI->>SYS: install dns quadlet, enable --now
-    CLI->>DNSCHK: podman run dig @IP alias A + curl --fail https://fqdn
-    DNSCHK-->>CLI: READY access + Split DNS → Pi-hole
+    OP->>GNX: gnx access configure
+    GNX->>SYS: instalar y habilitar Quadlets
+    GNX->>TS: enrolar mediante stdin
+    TS->>CTRL: tailscale up
+    CTRL-->>TS: identidad y Tailscale IP
+    GNX->>DNS: generar configuración Split DNS
+    GNX->>SYS: habilitar gnx-dns
+    GNX-->>OP: READY access
 ```
 
-Flujo de datos del DNS: `fields()` produce `Split DNS: gnx → <IP>` +
-`Tailscale nameserver: <IP>` + alias→IP; `records()` genera las entradas
-dnsmasq que Pi-hole resuelve autoritativamente. `service_addresses()`
-consulta el IP del `svc:compute` aprobado en el tailnet.
+Tailscale se ejecuta dentro del contenedor `gnx-access`, usando:
 
-## Uso 2 — `gnx compute`: ciclo de vida del nodo Proxmox
+```text
+/run/gnx/access.sock
+```
+
+GNX utiliza ese socket para consultar estado, identidad, DNS y Tailscale Services.
+
+Pi-hole responde autoritativamente la zona privada `.gnx` y los aliases configurados por GNX.
+
+## Compute
+
+`gnx compute` administra el servicio Proxmox.
 
 ```mermaid
 flowchart LR
-    OP["Operador"] -->|"gnx compute apply"| BIN["gnx<br/>(root)"]
-    BIN -->|"install entrypoint.sh + quadlet<br/>private_dir(0700)"| CMP["gnx-compute<br/>Proxmox dockurr"]
-    BIN -->|"password() = getrandom(32)<br/>write_new(0600)"| PWD["root.password"]
-    PWD -.->|"injected<br/>read-only mount"| CMP
-    CMP -->|"pve-root-ca.pem → upstream-ca.crt"| BIN
-    BIN -->|"READY compute"| OP
-
-    subgraph HEALTH["healthcheck"]
-        OP -->|"gnx compute status"| BIN
-        BIN -->|"is-active svc"| SYS["systemd"]
-        BIN -->|"POST /access/ticket (username/password)"| CMP
-        BIN -->|"GET /nodes/X/status (cookie)"| CMP
-        CMP -->|"uptime > 0"| BIN
-        BIN -->|"READY compute<br/>Node uptime"| OP
-    end
-
-    style PWD fill:#0f1f2e,stroke:#ef4444,color:#fecaca
+    OP["Operador"] -->|"gnx compute apply"| GNX["gnx"]
+    GNX -->|"install Quadlet"| CMP["gnx-compute"]
+    GNX -->|"generate secret"| PWD["root.password<br/>0600"]
+    PWD -.->|"read-only mount"| CMP
+    CMP -->|"CA upstream"| GNX
+    GNX -->|"READY compute"| OP
 ```
 
-- El password se genera con entropía del kernel (`getrandom`, 32 bytes, base64url)
-  y nunca se loguea. `read_secret` valida modo 0600, no-symlink, UID root.
-- `verify_endpoint` debe ser `http://127.0.0.1:*` (validado en `config.rs`).
-- `gnx compute credentials` abre una consola privada (modo alt-screen) que
-  revela nombre de usuario + password guardado; el password se lee con el
-  mismo contrato de permisos.
+El password root:
 
-## Uso 3 — `gnx controller`: proxy + CA autónomo (opcional)
+- se genera con entropía del kernel;
+- utiliza 32 bytes aleatorios;
+- no se registra en logs;
+- se guarda dentro del state directory privado;
+- se lee sólo después de validar permisos y ownership.
 
-```mermaid
-flowchart TB
-    subgraph LINUXROOT["Linux root"]
-        CTRL["gnx-controller<br/>Caddy"]
-        CA["ca.sh<br/>openssl root.key/root.crt<br/>NameConstraints DNS:.gnx<br/>pathlen:0"]
-        TLS["tls/server.key + server.crt<br/>0600"]
-        PUB["public/root.crt<br/>0644"]
-    end
+La verificación del servicio usa la API de Proxmox y exige una respuesta de salud válida antes de devolver `READY`.
 
-    subgraph CLIENT["Cliente"]
-        WIN["Windows<br/>trust-ca.ps1 opcional<br/>(requiere admin)"]
-    end
+El endpoint de verificación queda restringido a loopback:
 
-    subgraph UPSTREAM["Upstream"]
-        CMP["gnx-compute 127.0.0.1:8006<br/>tls_trust_pool upstream-ca.crt"]
-    end
-
-    CA -->|"firma"| TLS
-    CA -->|"root.crt"| PUB
-    CTRL -->|"reverse_proxy"| CMP
-    CTRL -->|"serve .gnx with server.crt"| PUB
-    PUB -.->|"confianza explícita"| WIN
-    style CA fill:#0f172a,stroke:#8b5cf6,color:#ddd
-    style PUB fill:#0f1f2e,stroke:#f59e0b,color:#ddd
+```text
+http://127.0.0.1:*
 ```
 
-- El CA autónomo (`ca.sh`) genera una raíz con `basicConstraints=critical,CA:TRUE,pathlen:0`
-  y `nameConstraints=critical,permitted;DNS:.gnx`. La raíz **nunca** se instala de
-  forma implícita: `trust-ca.ps1` es la única acción que la confía en Windows
-  (valida `CN=GNX Autonomous Root` + sin private key, requiere admin).
-- `Caddyfile` enruta `http://127.0.0.1:8443 { import compute }` usando
-  `tls_trust_pool` del `upstream-ca.crt` del compute.
-- TLS automático `*.ts.net` (de Tailscale) sigue siendo el camino principal;
-  el CA es una ruta secundaria, marcada **experimental** (falta revocation,
-  ceremonia/backup de raíz, pruebas de restauración).
+## Controller
 
-## Trust map de secretos
-
-```mermaid
-stateDiagram-v2
-    state "Operador terminal" as Operador
-    state "CLI sin secretos por argv" as CLI
-    state "WSL bridge" as WSL
-    state "Gnx Linux /usr/local/bin/gnx" as GnxLinux
-    state "platform.rs" as Platform
-    state "systemd" as Systemd
-    state "Public output" as PublicOut
-
-    [*] --> Operador
-    Operador --> CLI: invoke
-    CLI --> WSL: forward config and action
-    WSL --> GnxLinux: exec
-    GnxLinux --> Platform: clean secret env
-    Platform --> Systemd: install managed units
-    Systemd --> Container: enable and start
-
-    state Container {
-        state "Enroll" as Enroll
-        state "Temporary key file" as KeyFile
-        state "tailscale" as Tailscale
-        state "Compute password" as ComputePW
-        state "Kernel entropy" as GetRandom
-        state "CA key" as CAKey
-        state "openssl" as OpenSSL
-
-        [*] --> Enroll
-        Enroll --> KeyFile: mktemp under /run/gnx
-        KeyFile --> Tailscale: auth key from file
-        [*] --> ComputePW
-        ComputePW --> GetRandom: 32 bytes and zeroizing
-        [*] --> CAKey
-        CAKey --> OpenSSL: umask 077 and root.key 0600
-    }
-
-    Container --> ContainerFS: validate permissions
-
-    state ContainerFS {
-        state "Private dirs 0700 root root" as PrivateDirs
-        [*] --> PrivateDirs
-        PrivateDirs --> [*]
-    }
-
-    ContainerFS --> PublicOut: root.crt and upstream-ca.crt
-    PublicOut --> [*]: controller or trust-ca.ps1
-```
-
-Contrato de secretos (AGENTS.md §3): los tokens, claves privadas y URLs de
-actualización **no** entran en Git, argv, logs, capturas ni evidencia. Los
-ejemplos contienen sólo valores no secretos.
-
-## CI/CD y packaging (build gate)
+`gnx controller` administra Caddy y, opcionalmente, una CA autónoma para `.gnx`.
 
 ```mermaid
 flowchart LR
-    SRC["src/ + runtime/ + Cargo.toml"] -->|"cargo"| LINUX["Linux native<br/>gnx release, LTO thin<br/>panic=abort, strip=symbols"]
-    SRC -->|"cargo"| WIN["gnx.exe (Windows)"]
+    CLIENT["Cliente"] --> CTRL["gnx-controller<br/>Caddy"]
+    CTRL --> CMP["gnx-compute<br/>127.0.0.1:8006"]
 
-    subgraph BUILD["build.ps1 (Windows)"]
-        GATES["cargo test --locked<br/>cargo clippy -- -D warnings<br/>cargo build --release"]
-        WSLBUILD["wsl podman rust@sha256<br/>test + clippy + release (Linux)"]
-        HASH["SHA-256 gnx.exe / gnx"]
-        DIST["dist/: gnx.exe gnx *.sha256 runtime/ install.sh LICENSE"]
-    end
-
-    LINUX --> WSLBUILD
-    WIN --> GATES --> WSLBUILD --> HASH --> DIST
-    DIST --> INST["install-host.ps1<br/>(checksum 0/0, PATH machine)<br/>install-linux.sh<br/>(sha256sum -c)"]
-    style DIST fill:#0f172a,stroke:#2563eb,color:#ddd
+    CA["GNX Autonomous CA<br/>opcional"] -.-> CTRL
 ```
+
+La ruta primaria de acceso privado utiliza TLS gestionado por Tailscale.
+
+La CA autónoma `.gnx` es una capacidad secundaria y explícita. GNX puede generar:
+
+```text
+root.key
+root.crt
+server.key
+server.crt
+```
+
+La clave raíz permanece privada.
+
+El certificado raíz público puede exportarse para confianza manual, pero GNX no instala automáticamente esa CA en Windows ni en otros clientes.
+
+`packaging/windows/trust-ca.ps1` es una acción separada y deliberada.
+
+## Estado persistente
+
+GNX mantiene estado únicamente en las rutas que administra el runtime.
+
+Ejemplos:
+
+```text
+/var/lib/gnx/access/
+/var/lib/gnx/compute/
+/var/lib/gnx/controller/
+```
+
+Los directorios privados se validan como `root:root` y `0700`.
+
+Los secretos persistentes se validan como `0600`.
+
+## Assets de runtime
+
+Los assets versionados bajo `runtime/` incluyen Quadlets, scripts y archivos de configuración utilizados por el binario.
+
+Los módulos Rust los incorporan en tiempo de compilación mediante `include_str!`, por ejemplo:
+
+```rust
+const ACCESS_UNIT: &str =
+    include_str!("../runtime/access/gnx-access.container");
+```
+
+El release bundle también conserva `runtime/` como material de packaging y auditoría.
+
+No se utilizan plantillas `.in`; las sustituciones se realizan con marcadores explícitos como:
+
+```text
+@STATE@
+@IP@
+@UPLINK@
+@MTU@
+```
+
+## Contrato de salida
+
+La CLI mantiene un contrato de salida simple:
+
+```text
+READY <payload>
+```
+
+para éxito, y:
+
+```text
+FAILED <LABEL>
+```
+
+para error.
+
+Los códigos de salida distinguen errores de argumentos/configuración, host no soportado y fallos de runtime.
+
+Este contrato se valida en `tests/contract.rs`.
+
+## Build y packaging
+
+```mermaid
+flowchart LR
+    SRC["src/ + runtime/ + Cargo.toml"] --> WIN["gnx.exe"]
+    SRC --> LINUX["gnx"]
+
+    WIN --> GATES["test + clippy + release"]
+    LINUX --> WSLBUILD["Linux build<br/>WSL2 + Podman"]
+
+    GATES --> DIST["dist/"]
+    WSLBUILD --> DIST
+
+    DIST --> HASH["SHA-256"]
+    HASH --> INSTALL["Windows / Linux install"]
+```
+
+El build de Windows genera:
+
+```text
+gnx.exe
+gnx
+gnx.exe.sha256
+gnx.sha256
+gnx.toml
+runtime/
+LICENSE
+install-linux.sh
+```
+
+El instalador Windows valida hashes antes de copiar los artefactos y después delega la instalación Linux a WSL2.
+
+El instalador Linux:
+
+- exige ejecución como root;
+- verifica prerequisitos;
+- valida `gnx.sha256`;
+- instala `/usr/local/bin/gnx`;
+- instala la configuración inicial si aún no existe.
 
 ## Árbol del repositorio
 
 ```text
 gnx/
-├── src/              # orquestador Rust (shared)
-│   ├── main.rs       # entrypoint: READY / FAILED contract
-│   ├── cli.rs        # clap: access|compute|controller (no secret positions)
-│   ├── config.rs     # gnx.toml declarativo + validación estricta
-│   ├── platform.rs   # Linux root + WSL bridge (env limpio)
-│   ├── access.rs     # Tailscale/Pi-hole Quadlets + Split DNS checks
-│   ├── compute.rs    # Proxmox Quadlet + API2 health + password 0600
-│   ├── controller.rs # Caddy proxy + CA autónomo opcional
-│   ├── error.rs      # etiquetas estables + códigos de salida
-│   └── lib.rs        # feature gates: linux-only modules
-├── runtime/          # assets compilados (include_str!), no .in
-│   ├── access/       # Tailscale + Pi-hole Quadlet + enroll.sh
-│   ├── compute/      # Proxmox Quadlet + entrypoint.sh
-│   ├── controller/   # Caddyfile + ca.sh + Quadlet
-│   └── artifacts/    # .msi/.LICENSE  (gitignored)
-├── config/gnx.example.toml
-├── packaging/{linux,windows}/  # install.sh, build.ps1, install-host.ps1, trust-ca.ps1
-├── tests/contract.rs   # tests de integración (exit code + stderr contract)
-├── docs/{arquitectura,operar}.md
-├── Cargo.toml         # AGPL-3.0, MSRV 1.98, release LTO/abort/strip
-└── AGENTS.md          # contrato de agentes (out-of-runtime, GNX names, secret safety)
+├── src/
+│   ├── main.rs
+│   ├── cli.rs
+│   ├── config.rs
+│   ├── platform.rs
+│   ├── access.rs
+│   ├── compute.rs
+│   ├── controller.rs
+│   ├── error.rs
+│   └── lib.rs
+│
+├── runtime/
+│   ├── access/
+│   ├── compute/
+│   └── controller/
+│
+├── config/
+│   └── gnx.toml
+│
+├── packaging/
+│   ├── linux/
+│   │   └── install.sh
+│   └── windows/
+│       ├── build.ps1
+│       ├── install-host.ps1
+│       └── trust-ca.ps1
+│
+├── tests/
+│   └── contract.rs
+│
+├── docs/
+│   ├── arquitectura.md
+│   └── operar.md
+│
+├── Cargo.toml
+├── Cargo.lock
+├── LICENSE
+├── README.md
+└── AGENTS.md
 ```
 
-Lo que viene (roadmap implícito): el CA autónomo es experimental — pendiente
-revocación (CRL/OCSP), ceremonia y backup de la raíz (`c5ff496` ya documenta
-encrypted USB backup), y pruebas de restauración. El *human console* de
-credenciales (`b44f115`) podría convertirse en una fuente de backup de
-recuperación. Las decisiones de `docs/decisions/` (vacío hoy) quedan por
-llenarse para registrar los trade-offs de confianza `.gnx` vs `*.ts.net`.
+## Principios actuales
+
+La arquitectura mantiene cuatro decisiones simples:
+
+1. **Un solo runtime Linux.** Windows delega; Linux ejecuta nativamente.
+2. **Infraestructura declarativa y verificable.** Cada `apply` termina con comprobaciones reales.
+3. **Secretos fuera de configuración y argumentos.**
+4. **Servicios del producto administrados mediante systemd + Podman Quadlets.**
+
+La documentación de arquitectura describe únicamente capacidades implementadas en el código actual.
