@@ -11,5 +11,4 @@
 *.pfx
 /target/
 /dist/
-/runtime/artifacts/
 target
