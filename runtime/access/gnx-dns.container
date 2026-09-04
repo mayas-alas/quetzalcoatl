@@ -5,14 +5,12 @@ Wants=gnx-access.service
 After=gnx-access.service
 
 [Container]
-Image=docker.io/pihole/pihole@sha256:7c96327ecfb96dbc74b0a47d073dbef7d60526e0aa87519b2a2f7a0007cb5c88
+Image=docker.io/dockurr/dnsmasq@sha256:2067f17b31ace4e3fff2a6e341aef98cbc91be8c7c282e5c1225a160dd3754f5
 ContainerName=gnx-dns
 Network=bridge
 PublishPort=@IP@:53:53/udp
 PublishPort=@IP@:53:53/tcp
-PodmanArgs=--entrypoint=/usr/bin/pihole-FTL
-Exec=no-daemon
-Volume=@STATE@/dns.toml:/etc/pihole/pihole.toml:ro
+Volume=@STATE@/dnsmasq.conf:/etc/dnsmasq.conf:ro
 LogDriver=none
 
 [Service]

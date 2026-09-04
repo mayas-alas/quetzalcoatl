@@ -10,10 +10,10 @@ use crate::{
 
 const ACCESS_UNIT: &str = include_str!("../runtime/access/gnx-access.container");
 const DNS_UNIT: &str = include_str!("../runtime/access/gnx-dns.container");
-const DNS_CONFIG: &str = include_str!("../runtime/access/dns.toml");
+const DNS_CONFIG: &str = include_str!("../runtime/access/dnsmasq.conf");
 const ENROLL: &str = include_str!("../runtime/access/enroll.sh");
 const NETWORK_UNIT: &str = include_str!("../runtime/access/gnx-access-network.service");
-const DNS_IMAGE: &str = "docker.io/pihole/pihole@sha256:7c96327ecfb96dbc74b0a47d073dbef7d60526e0aa87519b2a2f7a0007cb5c88";
+const DNS_IMAGE: &str = "docker.io/dockurr/dnsmasq@sha256:2067f17b31ace4e3fff2a6e341aef98cbc91be8c7c282e5c1225a160dd3754f5";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -169,7 +169,7 @@ fn finish(config: &Config) -> Result<String> {
         .replace("@STATE@", &config.access.state_dir)
         .replace("@IP@", &access_ip.to_string());
     crate::platform::install(
-        &Path::new(&config.access.state_dir).join("dns.toml"),
+        &Path::new(&config.access.state_dir).join("dnsmasq.conf"),
         &dns,
         0o644,
     )?;
@@ -247,13 +247,12 @@ fn records(config: &Config, access_ip: Ipv4Addr) -> String {
         .access
         .services
         .iter()
-        .map(|service| format!("\"address=/{}/{access_ip}\"", service.alias))
+        .map(|service| format!("address=/{}/{access_ip}", service.alias))
         .collect::<Vec<_>>();
     if config.controller.autonomous_ca {
-        records.push(format!("\"address=/pki.gnx/{access_ip}\""));
+        records.push(format!("address=/pki.gnx/{access_ip}"));
     }
-    records.push("\"local=/gnx/\"".into());
-    records.join(", ")
+    records.join("\n")
 }
 
 fn fields(config: &Config, access_ip: Ipv4Addr, services: &[Ipv4Addr]) -> String {
@@ -278,34 +277,9 @@ fn fields(config: &Config, access_ip: Ipv4Addr, services: &[Ipv4Addr]) -> String
 
 fn dns_checks(config: &Config, access_ip: Ipv4Addr) -> Result<()> {
     systemctl(&["is-active", "--quiet", "gnx-dns.service"], "DNS_SERVICE")?;
+    dns_tcp(access_ip)?;
     for service in &config.access.services {
-        for transport in ["+notcp", "+tcp"] {
-            let server = format!("@{access_ip}");
-            let answer = crate::platform::run(
-                &[
-                    "podman",
-                    "run",
-                    "--rm",
-                    "--pull=never",
-                    "--network=host",
-                    "--log-driver=none",
-                    "--entrypoint=dig",
-                    DNS_IMAGE,
-                    &server,
-                    &service.alias,
-                    "A",
-                    "+short",
-                    "+time=2",
-                    "+tries=1",
-                    transport,
-                ],
-                None,
-                "DNS_QUERY",
-            )?;
-            if String::from_utf8_lossy(&answer).trim() != access_ip.to_string() {
-                return Err(Error::Operation("DNS_ANSWER"));
-            }
-        }
+        dns_answer(&service.alias, access_ip)?;
         let url = format!("https://{}/", service.fqdn);
         crate::platform::run(
             &[
@@ -323,32 +297,64 @@ fn dns_checks(config: &Config, access_ip: Ipv4Addr) -> Result<()> {
         )?;
     }
     if config.controller.autonomous_ca {
-        let server = format!("@{access_ip}");
-        let answer = crate::platform::run(
-            &[
-                "podman",
-                "run",
-                "--rm",
-                "--pull=never",
-                "--network=host",
-                "--log-driver=none",
-                "--entrypoint=dig",
-                DNS_IMAGE,
-                &server,
-                "pki.gnx",
-                "A",
-                "+short",
-                "+time=2",
-                "+tries=1",
-            ],
-            None,
-            "DNS_QUERY",
-        )?;
-        if String::from_utf8_lossy(&answer).trim() != access_ip.to_string() {
-            return Err(Error::Operation("DNS_ANSWER"));
-        }
+        dns_answer("pki.gnx", access_ip)?;
     }
     Ok(())
+}
+
+fn dns_answer(name: &str, access_ip: Ipv4Addr) -> Result<()> {
+    let server = access_ip.to_string();
+    let answer = crate::platform::run(
+        &[
+            "podman",
+            "run",
+            "--rm",
+            "--pull=never",
+            "--network=host",
+            "--log-driver=none",
+            "--entrypoint=/bin/busybox",
+            DNS_IMAGE,
+            "nslookup",
+            name,
+            &server,
+        ],
+        None,
+        "DNS_QUERY",
+    )?;
+    let answer = String::from_utf8_lossy(&answer);
+    if answer
+        .split_once("Name:")
+        .is_some_and(|(_, record)| record.contains(&server))
+    {
+        Ok(())
+    } else {
+        Err(Error::Operation("DNS_ANSWER"))
+    }
+}
+
+fn dns_tcp(access_ip: Ipv4Addr) -> Result<()> {
+    let server = access_ip.to_string();
+    crate::platform::run(
+        &[
+            "podman",
+            "run",
+            "--rm",
+            "--pull=never",
+            "--network=host",
+            "--log-driver=none",
+            "--entrypoint=/bin/busybox",
+            DNS_IMAGE,
+            "nc",
+            "-z",
+            "-w",
+            "2",
+            &server,
+            "53",
+        ],
+        None,
+        "DNS_TCP",
+    )
+    .map(|_| ())
 }
 
 fn systemctl(args: &[&str], operation: &'static str) -> Result<()> {
@@ -390,7 +396,7 @@ mod tests {
 
     #[test]
     fn private_names_resolve_to_the_controller_not_the_service_vip() {
-        let config: Config = toml::from_str(include_str!("../config/gnx.toml")).unwrap();
+        let config: Config = toml::from_str(include_str!("../config/gnx.example.toml")).unwrap();
         let access_ip = "100.64.0.1".parse().unwrap();
         let rendered = records(&config, access_ip);
         assert!(rendered.contains("address=/compute.gnx/100.64.0.1"));

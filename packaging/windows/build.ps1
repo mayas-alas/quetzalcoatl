@@ -39,7 +39,7 @@ try {
 }
 
 Copy-Item -LiteralPath (Join-Path $root 'target\release\gnx.exe') -Destination $output -Force
-Copy-Item -LiteralPath (Join-Path $root 'config\gnx.toml') -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $root 'config\gnx.example.toml') -Destination $output -Force
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $output -Force
 Copy-Item -LiteralPath (Join-Path $root 'runtime') -Destination $output -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $root 'packaging\linux\install.sh') -Destination (Join-Path $output 'install-linux.sh') -Force

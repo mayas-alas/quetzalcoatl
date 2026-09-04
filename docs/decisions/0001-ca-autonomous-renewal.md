@@ -9,8 +9,9 @@
 El CA autónomo (`runtime/controller/ca.sh`) firma los certs server de Caddy para
 HTTPS `.gnx`. El nombre canónico con TLS administrado sigue siendo
 `compute.<tailnet>.ts.net` (Tailscale Services): **el CA no es source of truth**.
-Tailscale provee transporte, TLS `*.ts.net` y, mediante Pi-hole, la autoridad DNS
-de la zona `.gnx`. El CA `.gnx` es exclusivamente para operación/depuración local.
+Tailscale provee transporte y TLS `*.ts.net`; `gnx-dns` (dnsmasq) mantiene la
+autoridad DNS mínima de la zona `.gnx`. El CA `.gnx` es exclusivamente para
+operación/depuración local.
 
 `ca.sh` ya es idempotente: regenera el *server cert* cuando expira en <30 días o
 cambian los SAN (`cmp -s` sobre `domains`). La **raíz** (`root.key`,
@@ -25,9 +26,10 @@ truth, y prefiere **integraciones inteligentes** sobre nuevos paradigmas.
 
 1. **Raíz inmutable.** La raíz (`root.key`/`root.crt`) se genera una sola vez
    (si no existe) y **nunca** se revoca ni rota. 10 años de vida, `pathlen:0`.
-   Es una *offline root de facto*. Si se compromete, el recovery es manual
-   (borrar `pki/`, redeployar). Esto **elimina la necesidad de CRL/OCSP** y de
-   ceremonia de rotación — threat model `.gnx`-only no lo exige.
+   La raíz permanece local en el state directory y firma únicamente certificados
+   `.gnx`. Si se compromete, el recovery es manual (borrar `pki/`, regenerar y
+   volver a distribuir confianza). CRL/OCSP y rotación automática de raíz no
+   forman parte del alcance actual.
 
 2. **Renovación automática del server cert (no raíz).** Se añade un *timer*
    systemd `gnx-ca-renew.timer` (diario, `Persistent=true`) que ejecuta
@@ -40,11 +42,11 @@ truth, y prefiere **integraciones inteligentes** sobre nuevos paradigmas.
    clientes. Un `controller status` verifica que el server cert esté vigente y
    que `pki.gnx` resuelva a la IP del controller.
 
-4. **Discovery de la raíz vía Pi-hole.** `pki.gnx` → IP del controller (registro
-   dnsmasq existente en `records()`). El cliente obtiene la raíz pública vía HTTP
-   desde el propio `.gnx`: `curl http://pki.gnx/root.crt --cacert` para tests, o
-   `--resolve pki.gnx:127.0.0.1` para operación local. No se requiere
-   distribución out-of-band de la raíz.
+4. **Discovery de la raíz vía `gnx-dns`.** `pki.gnx` → IP del controller
+   (registro dnsmasq existente en `records()`). El cliente obtiene la raíz
+   pública vía HTTP desde el propio `.gnx`: `curl http://pki.gnx/root.crt`.
+   Para validar HTTPS `.gnx`, el cliente usa después esa raíz explícitamente.
+   No se instala confianza de forma automática.
 
 ## Integración existente aprovechada
 
@@ -55,14 +57,11 @@ truth, y prefiere **integraciones inteligentes** sobre nuevos paradigmas.
 
 ## Consecuencias
 
-- **Ventajas:** menos código (sin CRL, sin rotación de raíz, sin ceremony USB);
-  renovación transparente; raíz offline/protegida contra rotación accidental.
+- **Ventajas:** menos código (sin CRL ni rotación automática de raíz); renovación
+  transparente del certificado de servidor y menor superficie operativa.
 - **Desventajas:** sin revocación granulacional; una raíz comprometida requiere
   redeploy manual. Aceptable porque Tailscale es source of truth y `.gnx` es
   operacional, no productivo.
-- **Siguiente step (no incluido):** wiring del timer en
-  `packaging/linux/install.sh` + `runtime/compute/` assets; ~12 líneas. Opcional
-  según priorizar.
 
 ## References
 

@@ -52,7 +52,7 @@ rust (test/clippy/build Linux) → copia artefactos → SHA-256 →
 
 1. `packaging/windows/install-host.ps1` (Windows) o
    `packaging/linux/install.sh <bundle>` (Linux).
-2. Copiar `gnx.toml` → `gnx.toml` y editar FQDN.
+2. Copiar `gnx.example.toml` → `gnx.toml` y editar FQDN.
 3. En orden: `gnx compute apply`, `gnx controller apply`, `gnx access configure`.
 4. Aprobar `svc:compute` en Tailscale si el reporte lo solicita.
 5. Configurar Split DNS `gnx → IP Pi-hole` en DNS del tailnet.

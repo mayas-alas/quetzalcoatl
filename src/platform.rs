@@ -63,9 +63,7 @@ pub fn linux_command(distribution: Option<&str>, args: &[&str]) -> Command {
         command.args(args.get(1..).unwrap_or_default());
         command
     };
-    for name in ["NB_SETUP_KEY", "NB_SETUP_KEY_FILE", "TS_AUTHKEY"] {
-        command.env_remove(name);
-    }
+    command.env_remove("TS_AUTHKEY");
     command
 }
 

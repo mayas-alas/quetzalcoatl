@@ -11,7 +11,7 @@ La rama `legacy` conserva el producto anterior (Quetzalcoatl Next, corte
 servicio Windows con cuenta aislada y tray, journal JSONL, **Headscale soberano**
 como `login-server`, Docktail, OpenTofu dentro de un LXC runner y Podman
 Machine. La base activa (GNX 0.2) es deliberadamente más pequeña: tres
-capacidades, Tailscale SaaS como source of truth, Pi-hole Split DNS, Caddy con
+capacidades, Tailscale SaaS como source of truth, dnsmasq Split DNS, Caddy con
 CA opcional y un puente Windows delgado.
 
 La pregunta de paridad: qué extraña el legacy a la nueva base y qué se recupera.
@@ -31,7 +31,7 @@ La pregunta de paridad: qué extraña el legacy a la nueva base y qué se recupe
 | OpenTofu + provider bpg/proxmox en LXC runner | ausente | **Diferido:** el MVP gestiona un nodo; los workloads declarativos son un producto distinto. Requiere ADR propia. |
 | Podman Machine (Windows) | Podman nativo en WSL2 | **Mejorado:** una capa menos, mismos gates. |
 | Docktail dentro de Proxmox | Tailscale Services en el host | **Sustituido:** TLS administrado y nombres estables sin self-hosting. |
-| Split DNS `.gnx` (Pi-hole) | presente | **Nuevo** en 0.2. |
+| Split DNS `.gnx` (dnsmasq) | presente | **Nuevo** en 0.2. |
 | CA autónomo `.gnx` explícito | presente | **Nuevo** en 0.2 (ver ADR 0001). |
 | Imágenes fijadas por digest | presente | **Nuevo** en 0.2. |
 | Contrato de salida `READY`/`FAILED` con tests | presente | **Nuevo** en 0.2. |

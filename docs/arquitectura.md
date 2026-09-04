@@ -10,7 +10,7 @@ Los servicios administrados por GNX se ejecutan con systemd y Podman Quadlets.
 
 La arquitectura actual se divide en tres capacidades:
 
-- **Access** — conectividad privada con Tailscale y Split DNS con Pi-hole.
+- **Access** — conectividad privada con Tailscale y Split DNS con dnsmasq mínimo.
 - **Compute** — ciclo de vida y verificación del servicio Proxmox.
 - **Controller** — proxy HTTP/TLS con Caddy y CA `.gnx` opcional.
 
@@ -64,7 +64,7 @@ flowchart TB
 
     subgraph SERVICES["Servicios administrados"]
         ACCESS["gnx-access<br/>Tailscale"]
-        DNS["gnx-dns<br/>Pi-hole"]
+        DNS["gnx-dns<br/>dnsmasq"]
         COMPUTE["gnx-compute<br/>Proxmox"]
         CONTROLLER["gnx-controller<br/>Caddy"]
     end
@@ -131,7 +131,7 @@ Las credenciales de compute se generan localmente con entropía del kernel y se 
 
 ```text
 gnx-access    Tailscale
-gnx-dns       Pi-hole
+gnx-dns       dnsmasq
 ```
 
 ### Flujo
@@ -163,7 +163,9 @@ Tailscale se ejecuta dentro del contenedor `gnx-access`, usando:
 
 GNX utiliza ese socket para consultar estado, identidad, DNS y Tailscale Services.
 
-Pi-hole responde autoritativamente la zona privada `.gnx` y los aliases configurados por GNX.
+`gnx-dns` conserva la misma frontera de servicio y publica TCP/UDP 53 únicamente sobre la IP Tailscale del runtime. Su configuración se genera desde `runtime/access/dnsmasq.conf`; no hay lógica DNS paralela en el host Windows.
+
+dnsmasq responde únicamente la zona privada `.gnx` con los aliases generados por GNX. No actúa como DNS general, DHCP, bloqueador ni resolver recursivo.
 
 ## Compute
 
@@ -187,7 +189,7 @@ El password root:
 - se guarda dentro del state directory privado;
 - se lee sólo después de validar permisos y ownership.
 
-La verificación del servicio usa la API de Proxmox y exige una respuesta de salud válida antes de devolver `READY`.
+`gnx compute status` usa la API de Proxmox para validar identidad y uptime. `gnx compute apply` se limita a instalar el Quadlet, esperar la inicialización necesaria y extraer la CA del upstream.
 
 El endpoint de verificación queda restringido a loopback:
 
@@ -306,7 +308,7 @@ gnx.exe
 gnx
 gnx.exe.sha256
 gnx.sha256
-gnx.toml
+gnx.example.toml
 runtime/
 LICENSE
 install-linux.sh
@@ -343,7 +345,7 @@ gnx/
 │   └── controller/
 │
 ├── config/
-│   └── gnx.toml
+│   └── gnx.example.toml
 │
 ├── packaging/
 │   ├── linux/
@@ -372,7 +374,7 @@ gnx/
 La arquitectura mantiene cuatro decisiones simples:
 
 1. **Un solo runtime Linux.** Windows delega; Linux ejecuta nativamente.
-2. **Infraestructura declarativa y verificable.** Cada `apply` termina con comprobaciones reales.
+2. **Infraestructura declarativa y verificable.** Cada capacidad mantiene gates explícitos sin introducir un subsistema adicional de estado.
 3. **Secretos fuera de configuración y argumentos.**
 4. **Servicios del producto administrados mediante systemd + Podman Quadlets.**
 

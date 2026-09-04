@@ -14,10 +14,10 @@ The product keeps one execution model across both platforms:
 
 ### Private access
 
-`gnx access` provisions the private access layer using Tailscale and Pi-hole:
+`gnx access` provisions the private access layer using Tailscale and a minimal dnsmasq resolver:
 
 - Tailscale runs inside the managed `gnx-access` container.
-- Split DNS for the `.gnx` zone is served by `gnx-dns`.
+- Split DNS for the `.gnx` zone is served by a minimal dnsmasq instance in `gnx-dns`.
 - Services can be exposed privately through Tailscale Services.
 - Enrollment secrets are entered interactively and are never stored in `gnx.toml`.
 
@@ -27,7 +27,7 @@ The product keeps one execution model across both platforms:
 
 - Proxmox runs as a managed Podman Quadlet.
 - The root password is generated locally from kernel entropy.
-- GNX verifies service health through the Proxmox API before returning success.
+- `gnx compute status` verifies service identity and uptime through the Proxmox API.
 - Credentials remain in root-owned state with restrictive permissions.
 
 ### Controller
@@ -68,7 +68,7 @@ gnx access configure
 gnx access dns
 ```
 
-Health and verification commands use the same gates as installation:
+Health and verification are exposed explicitly:
 
 ```text
 gnx compute status
@@ -93,7 +93,7 @@ FAILED <LABEL>
 GNX uses a single declarative configuration file:
 
 ```text
-config/gnx.toml
+config/gnx.example.toml
 ```
 
 Copy it to `gnx.toml` and adjust the deployment values for your environment.

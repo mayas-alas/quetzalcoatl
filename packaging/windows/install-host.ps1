@@ -20,11 +20,11 @@ foreach ($name in @('gnx.exe', 'gnx')) {
 
 $destination = 'C:\Program Files\GNX'
 New-Item -ItemType Directory -Force -Path $destination | Out-Null
-foreach ($name in @('gnx.exe', 'gnx', 'gnx.exe.sha256', 'gnx.sha256', 'gnx.toml', 'LICENSE')) {
+foreach ($name in @('gnx.exe', 'gnx', 'gnx.exe.sha256', 'gnx.sha256', 'gnx.example.toml', 'LICENSE')) {
     Copy-Item -LiteralPath (Join-Path $bundle $name) -Destination $destination -Force
 }
 if (-not (Test-Path -LiteralPath (Join-Path $destination 'gnx.toml'))) {
-    Copy-Item -LiteralPath (Join-Path $bundle 'gnx.toml') -Destination (Join-Path $destination 'gnx.toml')
+    Copy-Item -LiteralPath (Join-Path $bundle 'gnx.example.toml') -Destination (Join-Path $destination 'gnx.toml')
 }
 $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
 if ($destination -notin ($machinePath -split ';')) {
