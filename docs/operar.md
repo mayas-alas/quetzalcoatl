@@ -9,7 +9,7 @@ flowchart TD
     R --> A[access configure]
     A --> V{Servicio aprobado}
     V -->|no| O[Aprobar svc:compute\ny repetir access apply]
-    V -->|sí| D[Configurar Split DNS\ngnx → IP Pi-hole]
+    V -->|sí| D[Delegar zona gnx en DNS\ndel tailnet -> IP de gnx-access]
     O --> D
     D --> G[access dns]
 ```
@@ -23,7 +23,7 @@ flowchart TD
 - `packaging/windows/trust-ca.ps1` es la única acción que confía esa raíz en
   Windows; requiere administrador y debe invocarse de forma deliberada.
 - El nombre canónico con TLS administrado es `compute.<tailnet>.ts.net`.
-  `compute.gnx` depende de Pi-hole y, para HTTPS, del CA autónomo.
+  `compute.gnx` lo resuelve `gnx-dns` (dnsmasq gestionado por `access`) y, para HTTPS, del CA autónomo.
 - El CA es una capacidad experimental: antes de declararlo PKI de producción
   faltan revocación, ceremonia/backup de raíz y pruebas de restauración.
 
@@ -55,7 +55,8 @@ rust (test/clippy/build Linux) → copia artefactos → SHA-256 →
 2. Copiar `gnx.example.toml` → `gnx.toml` y editar FQDN.
 3. En orden: `gnx compute apply`, `gnx controller apply`, `gnx access configure`.
 4. Aprobar `svc:compute` en Tailscale si el reporte lo solicita.
-5. Configurar Split DNS `gnx → IP Pi-hole` en DNS del tailnet.
+5. Delegar la zona `gnx` en el DNS del tailnet hacia la IP de `gnx-access`
+   (esa IP la reporta `gnx access dns`).
 6. `gnx access dns` — último gate de validación end-to-end.
 
 ## Diagnóstico (componer gates existentes)
