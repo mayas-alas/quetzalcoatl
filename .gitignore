@@ -11,4 +11,3 @@
 *.pfx
 /target/
 /dist/
-target

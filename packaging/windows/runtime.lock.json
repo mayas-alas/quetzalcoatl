@@ -1,0 +1,8 @@
+{
+  "wsl": {
+    "distribution": "GNX",
+    "rootfs_file": "ubuntu.rootfs.tar.gz",
+    "rootfs_url": "https://cloud-images.ubuntu.com/wsl/releases/24.04/current/ubuntu-noble-wsl-amd64-24.04lts.rootfs.tar.gz",
+    "rootfs_sha256": "2a790896740b14d637dbdc583cce1ba081ac53b9e9cdb46dc09a2f73abbd9934"
+  }
+}
