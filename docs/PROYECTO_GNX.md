@@ -18,7 +18,7 @@ flowchart TB
     subgraph Windows["🪟 Windows Host"]
         direction TB
         user[Usuario Operador] -->|CLI| cli[gnx CLI]
-        cli --> broker[[\\.\pipe\GNX]]
+        cli --> broker[[Named pipe: GNX]]
         broker --> service[GNXRuntime Service]
         
         subgraph "GNXRuntime (Cuenta Dedicada gnx-runtime)"
@@ -26,7 +26,7 @@ flowchart TB
             wsl[WSL2: Ubuntu 24.04]
             subgraph "En WSL"
                 podman[Podman + systemd]
-                services[Quadlets: access | dns | compute | controller]
+                services["Quadlets: access | dns | compute | controller"]
                 tailscale[Tailscale bridge]
             end
         end
@@ -36,7 +36,7 @@ flowchart TB
     
     subgraph Linux["🐧 Linux Nativo"]
         direction TB
-        user2[Usuario Operador] -->|CLI| cli_linux[gnx CLI (AppImage)]
+        user2[Usuario Operador] -->|CLI| cli_linux["gnx CLI (AppImage)"]
         cli_linux --> service_linux[GNXService]
         
         subgraph "GNXService"
@@ -62,14 +62,10 @@ flowchart TB
     
     %% Conexiones entre host y WSL
     user -.->|no acceso directo| wsl
-    cli -->|protocolo binario allowlist (8 acciones)| broker
+    cli -->|"protocolo binario allowlist (8 acciones)"| broker
     
-    style Windows fill:#e1f5fe
-    style Linux fill:#f3e5f5
-    subgraph Windows fill:#e1f5fe; stroke:#0277bd; stroke-width:2px
-    end
-    subgraph Linux fill:#f3e5f5; stroke:#8e24aa; stroke-width:2px
-    end
+    style Windows fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    style Linux fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px
 ```
 
 ---
@@ -90,10 +86,9 @@ sequenceDiagram
     Inst->>WSL: Crea instancia Ubuntu 24.04 (vhdx pinado)
     Inst->>Svc: Instala quadlets en WSL
     Inst->>Svc: Configura bridge + firewall
-    Inst->|protocolo binario| U: Entrega CLI al host Windows
+    Inst-->>U: Entrega CLI al host Windows por protocolo binario
     
-    note over U,WSL: La distro WSL pertenece a gnx-runtime.
-    El operador normal NO la ve en `wsl --list`
+    Note over U,WSL: La distro WSL pertenece a gnx-runtime.<br/>El operador normal NO la ve en wsl --list.
 ```
 
 ### Flujo Linux Nativo
@@ -105,11 +100,9 @@ sequenceDiagram
     
     U->>App: Ejecuta gnx.appimage (sin root)
     App->>U: Instala binarios en ~/.local/bin
-    App->|socket| U: Exponen CLI + sockets de datos sensibles
+    App-->>U: Expone CLI y sockets de datos sensibles
     
-    note over U,App: No se crea usuario dedicado.
-    No hay WSL ni Podman.
-    Solo el servicio local con socket seguro.
+    Note over U,App: No se crea usuario dedicado.<br/>No hay WSL ni Podman.<br/>Solo el servicio local con socket seguro.
 ```
 
 ---
@@ -125,25 +118,26 @@ flowchart LR
         podman[Podman]
         
         quadlets{Quadlets}
-        q1[gfx-access.service<br/>→ Tailscale + DNS]
-        q2[gfx-dns.service<br/>→ dnsmasq + DoT]
-        q3[gfx-compute.service<br/>→ bridge + firewall]
-        q4[gfx-controller.service<br/>→ Caddy + CA .gnx]
+        q1[gnx-access.service<br/>Tailscale + DNS]
+        q2[gnx-dns.service<br/>dnsmasq + DoT]
+        q3[gnx-compute.service<br/>bridge + firewall]
+        q4[gnx-controller.service<br/>Caddy + CA .gnx]
         
         subnet[(bridge0: 172.25.0.0/16)]
-        tailscale[tailscale0 (br-tlslch-*)]
+        tailscale["tailscale0 (br-tlslch-*)"]
         host[eth0: acceso al host Windows]
     end
     
     subgraph "Aislamiento"
         direction TB
-        no_shell[(No shell genérico<br/>no bash/zsh/sh)])
+        no_shell[(No shell genérico<br/>no bash/zsh/sh)]
         no_exec[(No /bin/sh por defecto)]
         allowlist[Protocolo binario<br/>allowlist de 8 acciones]
+        broker[Broker GNX]
         
-        style no_shell fill:#ffeb3b;stroke:#f57f17
-        style no_exec fill:#ffccbc;stroke:#c62828
-        style allowlist fill:#c8e6c9;stroke:#2e7d32
+        style no_shell fill:#ffeb3b,stroke:#f57f17
+        style no_exec fill:#ffccbc,stroke:#c62828
+        style allowlist fill:#c8e6c9,stroke:#2e7d32
     end
     
     systemd --> podman
@@ -155,9 +149,9 @@ flowchart LR
     %% Límites de seguridad
     GNXRuntime -.-> no_shell
     GNXRuntime -.-> no_exec
-    Svc -.-> allowlist
+    broker -.-> allowlist
     
-    style GNXRuntime fill:#e8f5e9;stroke:#1b5e20;stroke-width:2px
+    style GNXRuntime fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
 ```
 
 ---
@@ -179,7 +173,7 @@ flowchart TB
     
     subgraph GNXRuntimeIsolated["🔒 Aislado: gnx-runtime"]
         runtime_home[/home/gnx-runtime/]
-        secrets{Clave de enrollment<br/>Tailscale (encriptada)}
+        secrets{"Clave de enrollment<br/>Tailscale encriptada"}
         no_cwd[No puede montar /mnt/c]
         no_wsl[No ve wsl --list]
     end
@@ -189,7 +183,8 @@ flowchart TB
     phishing --> GNXRuntimeIsolated
     malware --> GNXRuntimeIsolated
     
-    note right de GNXRuntimeIsolated: El usuario gnx-runtime NO ve:\n- /mnt/c/Windows/\n- Claves de enrollment\n- Estado de WSL en el host\n- Datos sensibles de Proxmox/Tailscale
+    boundary_note[El usuario gnx-runtime NO ve:<br/>/mnt/c/Windows/<br/>Claves de enrollment<br/>Estado de WSL en el host<br/>Datos sensibles de Proxmox/Tailscale]
+    boundary_note -.-> runtime_home
 ```
 
 ---
@@ -211,7 +206,7 @@ flowchart LR
         runtime_lock[(runtime.lock.json<br/>SHA256 del VHD)]
         installer -.->|usa como referencia| runtime_lock
         
-        style installer fill:#e3f2fd;stroke:#1565c0
+        style installer fill:#e3f2fd,stroke:#1565c0
     end
     
     subgraph Linux["🐧 Linux Native"]
@@ -219,10 +214,10 @@ flowchart LR
         appimage[gnx.appimage]
         
         appimage --> install_binaries[Instala binarios en ~/.local/bin]
-        install_binaries --> start_service[Inicia GNXService (socket)]
+        install_binaries --> start_service["Inicia GNXService (socket)"]
         start_service --> cli_ready[CLI lista para uso]
         
-        style appimage fill:#fce4ec;stroke:#c2185b
+        style appimage fill:#fce4ec,stroke:#c2185b
     end
     
     subgraph Common["🌐 Clima Común"]
@@ -230,8 +225,8 @@ flowchart LR
         gnx_toml{gnx.toml}
         runtime_lock_common[(runtime.lock.json)]
         
-        style gnx_toml fill:#fff9c4;stroke:#fbc02d
-        style runtime_lock_common fill:#e8f5e9;stroke:#1b5e20
+        style gnx_toml fill:#fff9c4,stroke:#fbc02d
+        style runtime_lock_common fill:#e8f5e9,stroke:#1b5e20
     end
     
     Windows -.-> common[Comparten: gnx.toml<br/>runtime.lock.json]
@@ -260,28 +255,28 @@ stateDiagram-v2
     RequestReceived --> InvalidCommand: Acción no permitida
     InvalidCommand --> ResponseSent
     
-    state "8 acciones allowlist" as actions{
+    state "8 acciones allowlist" as actions {
         [*] --> tailscale_connect
         tailscale_connect --> tailscale_disconnect
         tailscale_disconnect --> dns_configure
         dns_configure --> dns_reset
         dns_reset --> compute_deploy
         compute_deploy --> compute_undeploy
-        deploy_status --> status_report
-        status_report --> health_check
+        compute_undeploy --> compute_status
+        compute_status --> health_report
+        health_report --> config_get
+        config_get --> health_check
+        health_check --> status_report
     }
     
     ResponseSent --> Connected
     
-    note right de Validated
-      Verifica:
-      1. Firma RSA de la CLI del host
-      2. Acción en allowlist (≤8)
-      3. Parámetros dentro de límites
-    end
-    
-    style Connected fill:#e8f5e9;stroke:#1b5e20
-    state Validated fill:#fff3e0;stroke:#ef6c00
+    note right of Validated: Verifica firma RSA de la CLI, acción en allowlist (≤8) y parámetros dentro de límites.
+
+    classDef connected fill:#e8f5e9,stroke:#1b5e20
+    classDef validated fill:#fff3e0,stroke:#ef6c00
+    class Connected connected
+    class Validated validated
 ```
 
 ---
@@ -294,23 +289,21 @@ stateDiagram-v2
     
     Installing --> Running: Servicio iniciado (GNXRuntime)
     
-    Running --> Stopping: Comando `gnx stop` o reinicio WSL
-    Running --> Updating: Comando `gnx update`
+    Running --> Stopping: Comando gnx stop o reinicio WSL
+    Running --> Updating: Comando gnx update
     Updating --> Running
     
-    Running --> Decommissioning: Comando `gnx reset`
+    Running --> Decommissioning: Comando gnx reset
     Decommissioning --> [*]
     
-    note right de Running
-      El servicio se ejecuta como:
-      C:\Users\gnx-runtime\AppData\Local\Microsoft\WindowsApps\System~3.exe
-  
-      La distro WSL pertenece a gnx-runtime, no al usuario normal.
-    end
-    
-    style Installing fill:#e3f2fd;stroke:#1565c0
-    style Running fill:#e8f5e9;stroke:#1b5e20
-    style Decommissioning fill:#ffebee;stroke:#c62828
+    note right of Running: El servicio corre bajo la cuenta dedicada gnx-runtime.<br/>La distro WSL pertenece a esa cuenta, no al usuario normal.
+
+    classDef installing fill:#e3f2fd,stroke:#1565c0
+    classDef running fill:#e8f5e9,stroke:#1b5e20
+    classDef decommissioning fill:#ffebee,stroke:#c62828
+    class Installing installing
+    class Running running
+    class Decommissioning decommissioning
 ```
 
 ---
@@ -338,7 +331,7 @@ flowchart LR
     
     subgraph "Host Windows"
         direction TB
-        eth0[eth0: 192.168.x.x<br/>(IP del host)]
+        eth0["eth0: 192.168.x.x<br/>(IP del host)"]
     end
     
     bridge0{bridge0} --> gateway
@@ -352,7 +345,7 @@ flowchart LR
     
     eth0 -->|gateway NAT| subnet
     
-    style bridge0 fill:#e8f5e9;stroke:#1b5e20;stroke-width:3px
+    style bridge0 fill:#e8f5e9,stroke:#1b5e20,stroke-width:3px
 ```
 
 ---
