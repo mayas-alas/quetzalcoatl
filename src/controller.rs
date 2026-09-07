@@ -1,6 +1,10 @@
 use std::path::Path;
 
-use crate::{Error, Result, config::Config};
+use crate::{
+    Error, Result,
+    config::Config,
+    platform::systemctl,
+};
 
 const CA: &str = include_str!("../runtime/controller/ca.sh");
 const CADDY: &str = include_str!("../runtime/controller/Caddyfile");
@@ -80,7 +84,10 @@ fn private_sites(config: &Config) -> String {
         .map(|service| format!("{scheme}://{} {{{tls}\n\timport compute\n}}", service.alias,))
         .collect::<Vec<String>>();
     if config.controller.autonomous_ca {
-        sites.push("http://pki.gnx {\n\troot * /srv/gnx\n\tfile_server\n}".into());
+            sites.push(format!(
+            "http://pki.{} {{\n\troot * /srv/gnx\n\tfile_server\n}}",
+            config.access.zone
+        ));
     }
     sites.join("\n\n")
 }
@@ -152,12 +159,6 @@ pub fn status(config: &Config) -> Result<String> {
             "disabled"
         }
     ))
-}
-
-fn systemctl(args: &[&str], operation: &'static str) -> Result<()> {
-    let mut command = vec!["systemctl"];
-    command.extend_from_slice(args);
-    crate::platform::run(&command, None, operation).map(|_| ())
 }
 
 #[cfg(test)]

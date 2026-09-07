@@ -1,11 +1,34 @@
 use std::path::Path;
 
+use zeroize::Zeroizing;
+
 use crate::{Error, Result};
+
+/// Shared console prompts and screens, so the Linux and Windows front ends
+/// render the same contract instead of copying escape sequences.
+pub fn prompt_auth_key() -> Result<Zeroizing<String>> {
+    let key = Zeroizing::new(
+        rpassword::prompt_password("Tailscale auth key (hidden; Enter cancels): ")
+            .map_err(|_| Error::Operation("ACCESS_SECRET_INPUT"))?,
+    );
+    if key.trim().is_empty() {
+        return Err(Error::Operation("ACCESS_SECRET_INPUT"));
+    }
+    Ok(key)
+}
+
+pub fn show_secret(body: &str) -> Result<()> {
+    println!("\x1b[?1049h\x1b[2J\x1b[H{body}\n\nEnter hides this screen.");
+    std::io::stdout().flush().map_err(Error::Io)?;
+    let mut key = [0_u8; 1];
+    let _ = std::io::stdin().read(&mut key);
+    print!("\x1b[2J\x1b[H\x1b[?1049l");
+    std::io::stdout().flush().map_err(Error::Io)
+}
 
 #[cfg(windows)]
 pub fn forward(config: &Path, action: &[&str]) -> Result<String> {
-    use std::io::{Read, Write};
-    use zeroize::Zeroizing;
+    use std::io::Write;
 
     if action.len() != 2 {
         return Err(Error::Arguments);
@@ -17,38 +40,34 @@ pub fn forward(config: &Path, action: &[&str]) -> Result<String> {
     if action == ["access", "configure"]
         && String::from_utf8_lossy(&response.stderr).contains("FAILED ACCESS_SECRET_REQUIRED")
     {
-        let secret = Zeroizing::new(
-            rpassword::prompt_password("Tailscale auth key (hidden; Enter cancels): ")
-                .map_err(|_| Error::Operation("ACCESS_SECRET_INPUT"))?,
-        );
-        if secret.trim().is_empty() {
-            return Err(Error::Operation("ACCESS_SECRET_INPUT"));
-        }
+        let secret = prompt_auth_key()?;
         response = crate::windows::broker::request(action, &config, Some(secret.as_bytes()))?;
     }
 
     if action == ["compute", "credentials"] && response.exit_code == 0 {
         let output = Zeroizing::new(String::from_utf8_lossy(&response.stdout).into_owned());
         if let Some(payload) = output.strip_prefix("READY broker-credentials\n") {
-            print!(
-                "\x1b[?1049h\x1b[2J\x1b[HGNX compute\n{payload}\n\nEnter hides this screen."
-            );
-            std::io::stdout().flush().map_err(Error::Spawn)?;
-            let mut input = [0_u8; 1];
-            let _ = std::io::stdin().read(&mut input);
-            println!("\x1b[2J\x1b[H\x1b[?1049lREADY credentials-hidden");
-            std::io::stdout().flush().map_err(Error::Spawn)?;
+            show_secret(&format!("GNX compute\n{payload}"))?;
+            println!("READY credentials-hidden");
+            std::io::stdout().flush().map_err(Error::Io)?;
             std::process::exit(0);
         }
     }
 
     std::io::stdout()
         .write_all(&response.stdout)
-        .map_err(Error::Spawn)?;
+        .map_err(Error::Io)?;
     std::io::stderr()
         .write_all(&response.stderr)
-        .map_err(Error::Spawn)?;
+        .map_err(Error::Io)?;
     std::process::exit(response.exit_code as i32);
+}
+
+#[cfg(target_os = "linux")]
+pub fn systemctl(args: &[&str], operation: &'static str) -> Result<()> {
+    let mut command = vec!["systemctl"];
+    command.extend_from_slice(args);
+    run(&command, None, operation).map(|_| ())
 }
 
 #[cfg(target_os = "linux")]

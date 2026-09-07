@@ -5,7 +5,11 @@ use reqwest::{blocking::Client, redirect::Policy};
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
-use crate::{Error, Result, config::Config};
+use crate::{
+    Error, Result,
+    config::Config,
+    platform::systemctl,
+};
 
 const ENTRYPOINT: &str = include_str!("../runtime/compute/entrypoint.sh");
 const UNIT: &str = include_str!("../runtime/compute/gnx-compute.container");
@@ -146,16 +150,11 @@ pub fn credentials(config: &Config) -> Result<String> {
             secret.trim()
         ));
     }
-    println!(
-        "\x1b[?1049h\x1b[2J\x1b[HGNX compute\nUser: {}\nPassword: {}\n\nEnter hides this screen.",
+    crate::platform::show_secret(&format!(
+        "GNX compute\nUser: {}\nPassword: {}",
         config.compute.username,
         secret.trim()
-    );
-    let mut input = Zeroizing::new(String::new());
-    std::io::stdin()
-        .read_line(&mut input)
-        .map_err(|_| Error::Operation("CREDENTIAL_INPUT"))?;
-    print!("\x1b[2J\x1b[H\x1b[?1049l");
+    ))?;
     Ok("credentials-hidden".into())
 }
 
@@ -194,12 +193,6 @@ fn read_secret(path: &Path) -> Result<String> {
         return Err(Error::Operation("CREDENTIAL_PERMISSIONS"));
     }
     fs::read_to_string(path).map_err(Error::ConfigRead)
-}
-
-fn systemctl(args: &[&str], operation: &'static str) -> Result<()> {
-    let mut command = vec!["systemctl"];
-    command.extend_from_slice(args);
-    crate::platform::run(&command, None, operation).map(|_| ())
 }
 
 #[cfg(test)]

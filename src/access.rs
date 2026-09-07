@@ -6,6 +6,7 @@ use zeroize::Zeroizing;
 use crate::{
     Error, Result,
     config::{Access, Config},
+    platform::systemctl,
 };
 
 const ACCESS_UNIT: &str = include_str!("../runtime/access/gnx-access.container");
@@ -13,7 +14,6 @@ const DNS_UNIT: &str = include_str!("../runtime/access/gnx-dns.container");
 const DNS_CONFIG: &str = include_str!("../runtime/access/dnsmasq.conf");
 const ENROLL: &str = include_str!("../runtime/access/enroll.sh");
 const NETWORK_UNIT: &str = include_str!("../runtime/access/gnx-access-network.service");
-const DNS_IMAGE: &str = "docker.io/dockurr/dnsmasq@sha256:2067f17b31ace4e3fff2a6e341aef98cbc91be8c7c282e5c1225a160dd3754f5";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -55,10 +55,7 @@ pub fn configure(config: &Config) -> Result<String> {
             }
             secret
         } else {
-            Zeroizing::new(
-                rpassword::prompt_password("Tailscale auth key (hidden; Enter cancels): ")
-                    .map_err(|_| Error::Operation("ACCESS_SECRET_INPUT"))?,
-            )
+            crate::platform::prompt_auth_key()?
         };
         let key = enrollment(&secret)?;
         let hostname = format!("--hostname={}", config.access.hostname);
@@ -263,7 +260,7 @@ fn records(config: &Config, access_ip: Ipv4Addr) -> String {
         .map(|service| format!("address=/{}/{access_ip}", service.alias))
         .collect::<Vec<_>>();
     if config.controller.autonomous_ca {
-        records.push(format!("address=/pki.gnx/{access_ip}"));
+        records.push(format!("address=/pki.{}/{}", config.access.zone, access_ip));
     }
     records.join("\n")
 }
@@ -310,30 +307,37 @@ fn dns_checks(config: &Config, access_ip: Ipv4Addr) -> Result<()> {
         )?;
     }
     if config.controller.autonomous_ca {
-        dns_answer("pki.gnx", access_ip)?;
+        dns_answer(&format!("pki.{}", config.access.zone), access_ip)?;
     }
     Ok(())
 }
 
+fn dns_image() -> Result<&'static str> {
+    DNS_UNIT
+        .lines()
+        .find_map(|line| line.strip_prefix("Image="))
+        .ok_or(Error::Operation("DNS_IMAGE_PIN"))
+}
+
+fn dns_probe(args: &[&str], operation: &'static str) -> Result<Vec<u8>> {
+    const BUSYBOX: [&str; 7] = [
+        "podman",
+        "run",
+        "--rm",
+        "--pull=never",
+        "--network=host",
+        "--log-driver=none",
+        "--entrypoint=/bin/busybox",
+    ];
+    let mut command = BUSYBOX.to_vec();
+    command.push(dns_image()?);
+    command.extend_from_slice(args);
+    crate::platform::run(&command, None, operation)
+}
+
 fn dns_answer(name: &str, access_ip: Ipv4Addr) -> Result<()> {
     let server = access_ip.to_string();
-    let answer = crate::platform::run(
-        &[
-            "podman",
-            "run",
-            "--rm",
-            "--pull=never",
-            "--network=host",
-            "--log-driver=none",
-            "--entrypoint=/bin/busybox",
-            DNS_IMAGE,
-            "nslookup",
-            name,
-            &server,
-        ],
-        None,
-        "DNS_QUERY",
-    )?;
+    let answer = dns_probe(&["nslookup", name, &server], "DNS_QUERY")?;
     let answer = String::from_utf8_lossy(&answer);
     if answer
         .split_once("Name:")
@@ -347,33 +351,7 @@ fn dns_answer(name: &str, access_ip: Ipv4Addr) -> Result<()> {
 
 fn dns_tcp(access_ip: Ipv4Addr) -> Result<()> {
     let server = access_ip.to_string();
-    crate::platform::run(
-        &[
-            "podman",
-            "run",
-            "--rm",
-            "--pull=never",
-            "--network=host",
-            "--log-driver=none",
-            "--entrypoint=/bin/busybox",
-            DNS_IMAGE,
-            "nc",
-            "-z",
-            "-w",
-            "2",
-            &server,
-            "53",
-        ],
-        None,
-        "DNS_TCP",
-    )
-    .map(|_| ())
-}
-
-fn systemctl(args: &[&str], operation: &'static str) -> Result<()> {
-    let mut command = vec!["systemctl"];
-    command.extend_from_slice(args);
-    crate::platform::run(&command, None, operation).map(|_| ())
+    dns_probe(&["nc", "-z", "-w", "2", &server, "53"], "DNS_TCP").map(|_| ())
 }
 
 fn enrollment(value: &str) -> Result<&str> {
