@@ -55,7 +55,6 @@ flowchart TB
 
     Service -->|fixed argv + config/secret on stdin| LinuxGNX
     LinuxGNX -->|sanitized JSON + exit code| Service
-    Secrets -.->|private material never crosses| Service
     LinuxGNX -->|public CA certificate only| Public
 ```
 
@@ -106,7 +105,7 @@ sequenceDiagram
 
     SCM->>S: launch using service credential held by SCM
     S->>W: import fixed GNX distro as gnx-runtime if absent
-    S->>W: configure systemd; disable automount and interop
+    S->>W: configure systemd and disable automount and interop
     S->>W: stream verified bundle to root-only temporary directory
     S->>W: verify and install /usr/local/bin/gnx + runtime assets
     S->>S: remove bootstrap copies after successful install
@@ -136,7 +135,7 @@ sequenceDiagram
     O->>C: gnx apply
     C->>C: parse and validate gnx.toml
     C->>B: APPLY opcode + intent frame
-    B->>L: fixed argv; intent on stdin
+    B->>L: fixed argv with intent on stdin
     L-->>B: ACTION_REQUIRED with secret kind
     B-->>C: sanitized ACTION_REQUIRED
     C->>O: hidden prompt for that secret
@@ -144,7 +143,7 @@ sequenceDiagram
     C->>B: APPLY opcode + bounded secret frame
     B->>L: secret on stdin, never argv/environment
     L->>A: scoped secret on stdin
-    A->>A: consume; persist only derived runtime state if required
+    A->>A: consume and persist only derived runtime state if required
     A-->>L: result without secret
     L-->>B: sanitized JSON + exit code
     B-->>C: bounded response
