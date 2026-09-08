@@ -73,6 +73,45 @@ recovers without recreating identity or persistent storage.
   authorization headers and private keys are runtime state, never node intent,
   command-line values, logs or evidence.
 
+## Windows host requirements
+
+- **BR-W01 — Dedicated identity.** Installation creates or reconciles the local
+  standard account `.\gnx-runtime`. It has service-logon permission and explicit
+  denial of interactive, remote-interactive and network logon. Its random
+  credential is transferred only to SCM and zeroized after registration.
+- **BR-W02 — Managed service.** Installation creates or updates the automatic
+  `GNXRuntime` Windows service under `.\gnx-runtime`, configures bounded restart
+  recovery and verifies service readiness before reporting success.
+- **BR-W03 — Private host state.** `C:\ProgramData\GNX` has protected ACLs limited
+  to SYSTEM, Administrators and `.\gnx-runtime`. The normal operator receives no
+  direct access to the WSL disk, bootstrap material or runtime secrets.
+- **BR-W04 — Closed broker.** `gnx.exe` reaches `GNXRuntime` through a local-only
+  named pipe authorized for SYSTEM, Administrators and the installing operator
+  SID. The protocol has bounded frames and opcodes only for `plan`, `apply`,
+  `status` and `doctor`; it cannot carry an arbitrary command or path.
+- **BR-W05 — Separate secret channel.** A secret is requested only after the Linux
+  runtime returns `ACTION_REQUIRED`. It is read without echo, carried in a
+  dedicated bounded frame and delivered to Linux through stdin. It never appears
+  in `gnx.toml`, argv, environment, Windows files, logs or broker responses.
+- **BR-W06 — Product-owned Linux artifact.** The Windows release contains the GNX
+  Linux binary built by the same release pipeline. An authenticated release
+  manifest pins its digest together with the service, CLI, runtime assets and WSL
+  rootfs. Installation rejects any mismatch before execution.
+- **BR-W07 — Isolated WSL runtime.** `GNXRuntime` imports and owns the fixed `GNX`
+  distribution. Automount and Windows interop are disabled. The verified Linux
+  bundle crosses the boundary through stdin, is installed root-owned, and its
+  bootstrap copy is removed after success.
+- **BR-W08 — Fixed Linux execution.** The service invokes only the product binary
+  at `/usr/local/bin/gnx`, with fixed configuration path and argv derived from an
+  allowlisted opcode. Linux remains the sole owner of use-case orchestration.
+- **BR-W09 — Public export only.** Windows may receive the public GNX CA
+  certificate and sanitized JSON results. Private keys and persistent service
+  secrets never cross back from Linux.
+- **BR-W10 — Explicit trust boundary.** The design protects the operator's normal
+  session from accidental access and limits product surfaces. SYSTEM and local
+  Administrators remain trusted and are not claimed as hostile-administrator
+  boundaries.
+
 ## Release constraints for 0.3.1
 
 - Access, Control and Compute run in one shared Linux runtime.
@@ -92,6 +131,7 @@ recovers without recreating identity or persistent storage.
 | BR-A01, BR-A02, BR-A03 | G2 — Access |
 | BR-C01, BR-C02, BR-C03, BR-C04, BR-C05 | G3 — Control |
 | BR-P01, BR-P02, BR-P04 | G4 — Reconcile |
-| BR-P06 | G5 — Recovery |
-| BR-P03, BR-P05, BR-P07, BR-P08 | G6 — Parity |
-| Host prerequisites for all capabilities | G0 — Preflight |
+| BR-P06, BR-W01, BR-W02, BR-W03, BR-W07 | G5 — Recovery |
+| BR-P03, BR-P05, BR-P07, BR-P08, BR-W04, BR-W08 | G6 — Parity |
+| BR-P09, BR-W05, BR-W09 | G2/G3/G6 security assertions |
+| BR-W06 and host prerequisites for all capabilities | G0 — Preflight |

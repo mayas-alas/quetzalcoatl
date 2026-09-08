@@ -31,6 +31,13 @@ From an authorized remote client:
 G2 must also prove that a name outside `.gnx` is refused rather than recursively
 resolved. G3 must prove hostname verification, not only TCP reachability.
 
+On Windows, G0 also verifies the authenticated manifest and every staged digest.
+G5 verifies the dedicated account, protected state ACL, `GNXRuntime` automatic
+recovery, isolated WSL ownership and removal of bootstrap artifacts. G6 rejects
+unknown broker opcodes, remote pipe clients, oversized frames and arbitrary argv;
+it also proves that a secret is absent from process listings, environment, disk,
+logs, evidence and returned JSON.
+
 ## Command contract
 
 ```text
@@ -52,7 +59,11 @@ For each run record only:
 - immutable release references actually used;
 - private identity/IP and selected backplane;
 - public CA fingerprints;
-- exact commands and results for G0-G6.
+- exact commands and results for G0-G6;
+- service account rights, service identity and protected state ACL, without
+  recording its generated password;
+- hashes and signature identity from the authenticated release manifest;
+- installed `/usr/local/bin/gnx` digest and the digest expected by the release.
 
 Never store passwords, enrollment credentials, cookies, private keys or
 authorization headers in evidence.

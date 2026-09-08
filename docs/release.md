@@ -13,6 +13,9 @@ product implementation.
 - Release-specific immutable references live in one internal release definition.
 - CoreDNS is the fixed private DNS adapter for this PoC and is authoritative only
   for `.gnx`.
+- The Windows bundle contains `gnx.exe`, `gnx-service.exe` and the GNX Linux
+  binary produced by the same pipeline. An authenticated manifest pins them and
+  the WSL rootfs before installation.
 
 ## Deliberate reset
 

@@ -62,6 +62,8 @@ gnx/
 ├── Cargo.lock
 ├── src/
 │   ├── main.rs                     # composition and JSON output
+│   ├── bin/
+│   │   └── gnx-service.rs          # Windows SCM entrypoint; no business logic
 │   ├── config.rs                   # validated node intent
 │   ├── report.rs                   # shared result and exit semantics
 │   ├── domain/
@@ -85,7 +87,12 @@ gnx/
 │   └── adapter/
 │       ├── mod.rs
 │       ├── linux.rs                # native Linux host
-│       ├── windows.rs              # typed stdin bridge to WSL GNX
+│       ├── windows/
+│       │   ├── mod.rs
+│       │   ├── account.rs          # dedicated service identity and rights
+│       │   ├── service.rs          # GNXRuntime lifecycle and recovery
+│       │   ├── broker.rs           # local pipe, framing and opcode allowlist
+│       │   └── runtime.rs          # isolated WSL and Linux bundle injection
 │       ├── systemd.rs              # service lifecycle
 │       ├── podman.rs               # fixed container runtime
 │       ├── coredns.rs              # authoritative .gnx implementation
@@ -104,7 +111,9 @@ gnx/
 │       └── gnx-compute.container
 ├── packaging/
 │   └── windows/
-│       └── build.ps1
+│       ├── build.ps1               # builds Windows and Linux artifacts
+│       ├── install.ps1             # elevated, verified host installation
+│       └── runtime.lock.json        # pinned WSL rootfs and bundle digests
 ├── tests/
 │   ├── contract.rs                 # CLI/JSON/exit contract
 │   ├── architecture.rs             # dependency-boundary checks
@@ -113,7 +122,8 @@ gnx/
     ├── business-requirements.md
     ├── architecture.md
     ├── poc.md
-    └── release.md
+    ├── release.md
+    └── windows-runtime.md
 ```
 
 `app` contains the four public use cases. `port` describes everything those use
@@ -142,3 +152,6 @@ Linux runs the application core directly. Windows `gnx.exe` validates the local
 request and sends one typed message on stdin to `/usr/local/bin/gnx` inside the
 dedicated `GNX` WSL distribution. Fixed argv and the common response schema avoid
 remote-shell behavior and platform-specific orchestration forks.
+
+The Windows installation, service identity, broker, secret channel and Linux
+artifact flow are specified in [windows-runtime.md](windows-runtime.md).
