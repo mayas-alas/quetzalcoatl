@@ -1,2 +1,12 @@
 .AGENTS/
 .AGENTS.md
+
+# Local agent tooling and workflow bundles
+/AGENTS.md
+/scripts/gauntlet.py
+/tests/test_gauntlet.py
+/quetzalcoatl.zip
+
+/target/
+/dist/
+__pycache__/
