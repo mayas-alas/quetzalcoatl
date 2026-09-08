@@ -4,6 +4,28 @@ This document is the product contract for the clean 0.3.1 PoC. Architecture and
 implementation choices must trace back to these requirements. A component name
 is not a business capability.
 
+`Must` requirements are required for PoC acceptance. `May` describes permitted
+behavior, not an acceptance requirement. When an implementation constraint and a
+business requirement conflict, the implementation changes or the requirement is
+explicitly revised; the constraint does not silently redefine the product.
+
+## Product language
+
+| Term | Meaning in 0.3.1 |
+| --- | --- |
+| Authorized client | a remote client admitted by the selected private transport policy; host administration alone does not make it an authorized product client |
+| GNX node | one instance of the three capabilities in a shared Linux runtime |
+| Intent | portable, non-secret operator input describing the desired node |
+| Release | authenticated, immutable implementation choices and artifacts supplied by GNX |
+| Observed state | facts read from the running host and services through ports |
+| Candidate | validated intent plus one release, staged but not yet promoted |
+| Last valid | the most recent candidate whose required live checks passed |
+| Required route | `compute.gnx`, whose failure affects Control acceptance |
+| Optional route | an explicit route to software whose lifecycle GNX does not own |
+
+Access, Control and Compute are always capitalized when they mean GNX business
+capabilities. Concrete component names belong to release or adapter vocabulary.
+
 ## Required outcome
 
 An authorized remote client can resolve and open `https://compute.gnx` over a

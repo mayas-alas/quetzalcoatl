@@ -1,0 +1,7 @@
+# Development asset: pin and authenticate the release before enabling.
+[Unit]
+Description=GNX Access
+[Container]
+# Image intentionally absent: no unverified image may be started.
+[Install]
+WantedBy=multi-user.target
