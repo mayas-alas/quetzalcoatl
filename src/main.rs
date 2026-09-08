@@ -18,12 +18,12 @@ use std::{
 #[derive(Parser)]
 #[command(
     version,
-    about = "GNX: private access, HTTPS control and Proxmox compute"
+    about = "GNX: private access, HTTPS control and persistent compute"
 )]
 struct Cli {
     #[arg(long, global = true, default_value = "gnx.toml")]
     config: PathBuf,
-    #[arg(long, global = true, default_value = "Ubuntu-24.04")]
+    #[arg(long, global = true, default_value = "GNX")]
     distribution: String,
     #[arg(long, global = true, default_value = "/usr/local/bin/gnx")]
     linux_binary: String,
@@ -66,11 +66,13 @@ enum Commands {
         ca: PathBuf,
     },
 }
+
 #[derive(Subcommand)]
 enum Operation {
     Apply,
     Status,
 }
+
 #[derive(Subcommand)]
 enum AccessOperation {
     Apply,
@@ -86,6 +88,7 @@ enum Action {
     Status,
     Enroll,
 }
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Scope {
@@ -94,6 +97,7 @@ enum Scope {
     Access,
     Control,
 }
+
 #[cfg(target_os = "linux")]
 impl Scope {
     fn name(self) -> &'static str {
@@ -105,6 +109,7 @@ impl Scope {
         }
     }
 }
+
 #[cfg(target_os = "linux")]
 impl Action {
     fn name(self) -> &'static str {
@@ -116,6 +121,7 @@ impl Action {
         }
     }
 }
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
@@ -185,8 +191,8 @@ fn bridge(cli: &Cli, request: &Request) -> Result<u8> {
         .spawn()
         .map_err(|_| {
             Failure::action(
-                "WSL_MISSING",
-                "Install WSL2 and the Linux GNX binary in the selected distribution",
+                "RUNTIME_MISSING",
+                "Install the dedicated GNX Linux runtime and GNX binary",
             )
         })?;
     let payload = serde_json::to_vec(request).expect("serializable request");
@@ -241,7 +247,7 @@ fn run(cli: Cli) -> Result<u8> {
         let artifacts = plan::render(&config, "all")?;
         let changes = plan::changes(&config, &artifacts)?;
         let mut details = json!({"revision":config.revision(),"changes":changes,"applied":false,
-            "pending_access_ip":config.network.tailnet_ip.is_none()});
+            "pending_identity_ip":config.network.identity_ip.is_none()});
         if render {
             details["artifacts"] = serde_json::to_value(artifacts).unwrap();
         }
@@ -288,7 +294,7 @@ fn run(cli: Cli) -> Result<u8> {
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     Err(Failure::new(
         "PLATFORM",
-        "Live operations require Linux or Windows with WSL2",
+        "Live operations require Linux or Windows with the GNX runtime",
     ))
 }
 

@@ -1,4 +1,4 @@
-use crate::{Result, config::Config, report::Failure};
+use crate::{Result, config::Config, release, report::Failure};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -20,6 +20,7 @@ pub fn render(config: &Config, scope: &str) -> Result<Vec<Artifact>> {
     let state = &config.state_dir;
     let unit =
         |name: &str| Path::new(&config.units_dir).join(format!("{}.{name}", config.instance));
+    // Keep the major/minor ownership marker stable across 0.3.x patch releases.
     let marker = format!("# Managed by GNX 0.3: {}\n", config.instance);
     let mut add = |path: PathBuf, content: String, capability: &str| {
         result.push(Artifact {
@@ -50,9 +51,9 @@ pub fn render(config: &Config, scope: &str) -> Result<Vec<Artifact>> {
         add(
             Path::new(&config.units_dir).join(format!("{name}.container")),
             format!(
-                "[Unit]\nDescription=GNX Proxmox compute\n{}StartLimitIntervalSec=120\nStartLimitBurst=5\n\n[Container]\nImage={}\nContainerName={name}\nHostName={}\nNetwork={network_ref}\nIP={}\nPodmanArgs=--privileged --systemd=always --stop-timeout=120 --entrypoint=/bin/sh\nExec=/run/gnx/entry.sh /sbin/init --log-target=console --log-level=warning\nVolume={state}/runtime/compute-entry.sh:/run/gnx/entry.sh:ro\nVolume={state}/compute/private/password:/run/gnx/password:ro\nVolume={state}/compute/config:/var/lib/pve-cluster\nVolume={state}/compute/storage:/var/lib/vz\nShmSize=1g\nPidsLimit=2048\n\n{lifecycle}",
+                "[Unit]\nDescription=GNX persistent compute\n{}StartLimitIntervalSec=120\nStartLimitBurst=5\n\n[Container]\nImage={}\nContainerName={name}\nHostName={}\nNetwork={network_ref}\nIP={}\nPodmanArgs=--privileged --systemd=always --stop-timeout=120 --entrypoint=/bin/sh\nExec=/run/gnx/entry.sh /sbin/init --log-target=console --log-level=warning\nVolume={state}/runtime/compute-entry.sh:/run/gnx/entry.sh:ro\nVolume={state}/compute/private/password:/run/gnx/password:ro\nVolume={state}/compute/config:/var/lib/pve-cluster\nVolume={state}/compute/storage:/var/lib/vz\nShmSize=1g\nPidsLimit=2048\n\n{lifecycle}",
                 mount("compute"),
-                config.images.compute,
+                release::COMPUTE_IMAGE,
                 config.node,
                 config.network.compute_ip
             ),
@@ -66,18 +67,18 @@ pub fn render(config: &Config, scope: &str) -> Result<Vec<Artifact>> {
             format!(
                 "[Unit]\nDescription=GNX private access\n{}StartLimitIntervalSec=120\nStartLimitBurst=5\n\n[Container]\nImage={}\nContainerName={name}\nNetwork={network_ref}\nIP={}\nAddDevice=/dev/net/tun\nAddCapability=NET_ADMIN NET_RAW\nPodmanArgs=--entrypoint=/usr/local/bin/tailscaled\nExec=--state=/var/lib/tailscale/node.state --socket=/run/tailscale/tailscaled.sock --tun=tailscale0\nVolume={state}/access/state:/var/lib/tailscale\n\n{lifecycle}",
                 mount("access"),
-                config.images.access,
+                release::ACCESS_IMAGE,
                 config.network.access_ip
             ),
             "access",
         );
     }
-    if let Some(ip) = config.network.tailnet_ip {
+    if let Some(ip) = config.network.identity_ip {
         if scope == "all" || scope == "access" {
             // Content-derived serial: reuse the current serial on an identical plan;
             // otherwise strictly increment, including when reverting to older records.
             let records = format!(
-                "@ IN NS ns.gnx.\nns IN A {ip}\nproxmox IN A {ip}\n{}",
+                "@ IN NS ns.gnx.\nns IN A {ip}\ncompute IN A {ip}\n{}",
                 config
                     .routes
                     .iter()
@@ -119,14 +120,14 @@ pub fn render(config: &Config, scope: &str) -> Result<Vec<Artifact>> {
                 Path::new(&config.units_dir).join(format!("{name}.container")),
                 format!(
                     "[Unit]\nDescription=GNX authoritative DNS\nAfter={access}.service\nBindsTo={access}.service\nPartOf={access}.service\n\n[Container]\nImage={}\nContainerName={name}\nNetwork={access}.container\nVolume={state}/access/dns:/etc/coredns:ro\nExec=-conf /etc/coredns/Corefile\n\n{lifecycle}",
-                    config.images.dns
+                    release::DNS_IMAGE
                 ),
                 "dns",
             );
         }
         if scope == "all" || scope == "control" {
             let mut caddy = format!(
-                "{{\n admin 127.0.0.1:2019\n skip_install_trust\n auto_https disable_redirects\n servers {{\n  protocols h1 h2\n }}\n}}\nhttps://proxmox.gnx {{\n bind {ip}\n tls internal\n reverse_proxy https://{}:8006 {{\n  transport http {{\n   tls_server_name {}\n   tls_trust_pool file /etc/gnx/upstream-ca.crt\n  }}\n }}\n}}\n",
+                "{{\n admin 127.0.0.1:2019\n skip_install_trust\n auto_https disable_redirects\n servers {{\n  protocols h1 h2\n }}\n}}\nhttps://compute.gnx {{\n bind {ip}\n tls internal\n reverse_proxy https://{}:8006 {{\n  transport http {{\n   tls_server_name {}\n   tls_trust_pool file /etc/gnx/upstream-ca.crt\n  }}\n }}\n}}\n",
                 config.network.compute_ip, config.node
             );
             for route in &config.routes {
@@ -144,7 +145,7 @@ pub fn render(config: &Config, scope: &str) -> Result<Vec<Artifact>> {
                 Path::new(&config.units_dir).join(format!("{name}.container")),
                 format!(
                     "[Unit]\nDescription=GNX HTTPS control\nAfter={access}.service\nBindsTo={access}.service\nPartOf={access}.service\n\n[Container]\nImage={}\nContainerName={name}\nNetwork={access}.container\nVolume={state}/control/Caddyfile:/etc/caddy/Caddyfile:ro\nVolume={state}/compute/public/upstream-ca.crt:/etc/gnx/upstream-ca.crt:ro\nVolume={state}/control/data:/data\nVolume={state}/control/config:/config\n\n{lifecycle}",
-                    config.images.control
+                    release::CONTROL_IMAGE
                 ),
                 "control",
             );
@@ -152,7 +153,7 @@ pub fn render(config: &Config, scope: &str) -> Result<Vec<Artifact>> {
     } else if scope == "control" {
         return Err(Failure::action(
             "ACCESS_IP_REQUIRED",
-            "Enroll Access and provide network.tailnet_ip before publishing Control",
+            "Enroll Access and provide network.identity_ip before publishing Control",
         ));
     }
     Ok(result)

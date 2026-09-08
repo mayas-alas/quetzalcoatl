@@ -1,4 +1,4 @@
-use crate::{Result, config::Config, plan, report::Failure};
+use crate::{Result, config::Config, plan, release, report::Failure};
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -269,25 +269,25 @@ pub fn access_ip(config: &Config) -> Result<Ipv4Addr> {
         15,
     )?;
     let status: Value = serde_json::from_slice(&output)
-        .map_err(|_| Failure::new("ACCESS_STATUS", "Invalid Tailscale response"))?;
+        .map_err(|_| Failure::new("ACCESS_STATUS", "Invalid Access status response"))?;
     if status["BackendState"] != "Running" {
         return Err(Failure::action(
             "ACCESS_ENROLLMENT",
-            "Run gnx access enroll with a protected auth key on stdin, then configure tailnet split DNS",
+            "Run gnx access enroll with a protected credential on stdin, then configure restricted DNS",
         ));
     }
     let ip = status["TailscaleIPs"]
         .as_array()
         .and_then(|a| a.iter().find_map(|v| v.as_str()?.parse::<Ipv4Addr>().ok()))
-        .ok_or_else(|| Failure::action("ACCESS_IP", "Tailscale has no IPv4 address"))?;
+        .ok_or_else(|| Failure::action("ACCESS_IP", "Access has no private IPv4 address"))?;
     if config
         .network
-        .tailnet_ip
+        .identity_ip
         .is_some_and(|expected| expected != ip)
     {
         return Err(Failure::action(
             "ACCESS_IP_CHANGED",
-            "Observed Access IP differs from configuration; reconcile split DNS and intent",
+            "Observed Access identity differs from configuration; reconcile DNS and intent",
         ));
     }
     Ok(ip)
@@ -298,7 +298,7 @@ pub fn enroll(config: &Config, key: &[u8]) -> Result<Value> {
     if key.len() > 4096 || key.is_empty() {
         return Err(Failure::new(
             "ENROLL_INPUT",
-            "Provide a single auth key on stdin",
+            "Provide a single Access enrollment credential on stdin",
         ));
     }
     const ENROLL: &str = "set -eu; umask 077; key=$(mktemp /run/tailscale/enroll.XXXXXX); trap 'rm -f \"$key\"' EXIT; cat > \"$key\"; tailscale up --auth-key=file:$key --accept-dns=false --accept-routes=false --hostname=\"$1\" > /dev/null";
@@ -335,7 +335,7 @@ fn export_ca(config: &Config) -> Result<()> {
         15,
     )?;
     reqwest::Certificate::from_pem(&ca)
-        .map_err(|_| Failure::new("COMPUTE_CA", "Proxmox did not provide a valid CA"))?;
+        .map_err(|_| Failure::new("COMPUTE_CA", "Compute did not provide a valid CA"))?;
     let path = Path::new(&config.state_dir).join("compute/public/upstream-ca.crt");
     if fs::read(&path).ok().as_deref() != Some(&ca) {
         atomic(&path, &ca, 0o644)?;
@@ -347,7 +347,7 @@ pub fn compute_status(config: &Config) -> Result<Value> {
     systemctl("is-active", config, "compute")?;
     let ca = fs::read(Path::new(&config.state_dir).join("compute/public/upstream-ca.crt"))?;
     let ca = reqwest::Certificate::from_pem(&ca)
-        .map_err(|_| Failure::new("COMPUTE_CA", "Invalid stored Proxmox CA"))?;
+        .map_err(|_| Failure::new("COMPUTE_CA", "Invalid stored Compute CA"))?;
     let client = reqwest::blocking::Client::builder()
         .no_proxy()
         .tls_built_in_root_certs(false)
@@ -371,13 +371,13 @@ pub fn compute_status(config: &Config) -> Result<Value> {
         .map_err(|_| {
             Failure::new(
                 "COMPUTE_AUTH_TLS",
-                "Authenticated Proxmox HTTPS failed; check CA, SNI, credentials and reachability",
+                "Authenticated Compute HTTPS failed; check trust, name, credentials and reachability",
             )
         })?;
     if login["data"]["username"] != "root@pam" {
         return Err(Failure::new(
             "COMPUTE_IDENTITY",
-            "Unexpected Proxmox identity",
+            "Unexpected Compute identity",
         ));
     }
     let ticket = login["data"]["ticket"]
@@ -397,7 +397,7 @@ pub fn compute_status(config: &Config) -> Result<Value> {
             .map_err(|_| {
                 Failure::new(
                     "COMPUTE_HEALTH",
-                    "Proxmox authenticated node/storage query failed",
+                    "Authenticated Compute node/storage query failed",
                 )
             })?;
         responses.push(value);
@@ -409,7 +409,7 @@ pub fn compute_status(config: &Config) -> Result<Value> {
     {
         return Err(Failure::new(
             "COMPUTE_STORAGE",
-            "Proxmox node or storage is not ready",
+            "Compute node or storage is not ready",
         ));
     }
     Ok(json!({"node":config.node,"api_authenticated":true,"storage_active":true}))
@@ -422,7 +422,7 @@ pub fn apply(config: &Config, scope: &str) -> Result<Value> {
     // Refuse collisions with unmanaged files before creating a credential or starting services.
     let mut effective = config.clone();
     if scope == "control" {
-        effective.network.tailnet_ip = Some(access_ip(config)?);
+        effective.network.identity_ip = Some(access_ip(config)?);
     }
     let initial = plan::render(&effective, scope)?;
     plan::changes(config, &initial)?;
@@ -501,7 +501,7 @@ pub fn apply(config: &Config, scope: &str) -> Result<Value> {
                 if Instant::now() >= deadline {
                     return Err(Failure::new(
                         "COMPUTE_STARTING",
-                        "Proxmox is not ready after 180s; its state was preserved",
+                        "Compute is not ready after 180s; its state was preserved",
                     ));
                 }
                 thread::sleep(Duration::from_secs(3));
@@ -509,7 +509,7 @@ pub fn apply(config: &Config, scope: &str) -> Result<Value> {
         }
     }
     if scope != "compute" {
-        effective.network.tailnet_ip = Some(access_ip(config)?);
+        effective.network.identity_ip = Some(access_ip(config)?);
         // Restore both namespace consumers after Access replacement when Control exists.
         let reconcile_scope = if scope == "access"
             && Path::new(&config.units_dir)
@@ -522,7 +522,7 @@ pub fn apply(config: &Config, scope: &str) -> Result<Value> {
         };
         let full = plan::render(&effective, reconcile_scope)?;
         plan::changes(&effective, &full)?;
-        // Validate Caddy before replacing its effective configuration.
+        // Validate proxy configuration before replacing its effective configuration.
         if let Some(caddy) = full.iter().find(|a| a.path.ends_with("Caddyfile")) {
             let candidate = Path::new(&config.state_dir).join("control/Caddyfile.candidate");
             atomic(&candidate, caddy.content.as_bytes(), 0o600)?;
@@ -539,7 +539,7 @@ pub fn apply(config: &Config, scope: &str) -> Result<Value> {
                         "{}/compute/public/upstream-ca.crt:/etc/gnx/upstream-ca.crt:ro",
                         config.state_dir
                     ),
-                    &config.images.control,
+                    release::CONTROL_IMAGE,
                     "caddy",
                     "validate",
                     "--config",
@@ -627,14 +627,14 @@ pub fn status(config: &Config, scope: &str) -> Result<Value> {
             30,
         )?;
         result["control"] =
-            json!({"url":"https://proxmox.gnx","tls_verified":true,"dns_verified":true});
+            json!({"url":"https://compute.gnx","tls_verified":true,"dns_verified":true});
     }
     Ok(result)
 }
 
 pub fn probe(ip: Ipv4Addr, ca_path: &Path) -> Result<Value> {
     let mut query = vec![0x47, 0x4e, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0];
-    for label in ["proxmox", "gnx"] {
+    for label in ["compute", "gnx"] {
         query.push(label.len() as u8);
         query.extend_from_slice(label.as_bytes());
     }
@@ -671,25 +671,25 @@ pub fn probe(ip: Ipv4Addr, ca_path: &Path) -> Result<Value> {
         {
             return Err(Failure::new(
                 "DNS_RESPONSE",
-                "Expected authoritative proxmox.gnx IPv4 answer",
+                "Expected authoritative compute.gnx IPv4 answer",
             ));
         }
     }
     let ca = reqwest::Certificate::from_pem(&fs::read(ca_path)?)
-        .map_err(|_| Failure::new("CONTROL_CA", "Invalid Caddy CA"))?;
+        .map_err(|_| Failure::new("CONTROL_CA", "Invalid Control CA"))?;
     let client = reqwest::blocking::Client::builder()
         .no_proxy()
         .tls_built_in_root_certs(false)
         .add_root_certificate(ca)
-        .resolve("proxmox.gnx", SocketAddr::from((ip, 443)))
+        .resolve("compute.gnx", SocketAddr::from((ip, 443)))
         .timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| Failure::new("CONTROL_TLS", "Cannot initialize Control TLS probe"))?;
     client
-        .get("https://proxmox.gnx/")
+        .get("https://compute.gnx/")
         .send()
         .and_then(|r| r.error_for_status())
-        .map_err(|_| Failure::new("CONTROL_TLS", "Proxmox HTTPS through Control failed"))?;
+        .map_err(|_| Failure::new("CONTROL_TLS", "Compute HTTPS through Control failed"))?;
     Ok(json!({"dns_udp":true,"dns_tcp":true,"https":true}))
 }

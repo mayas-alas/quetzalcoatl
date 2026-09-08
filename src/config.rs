@@ -8,34 +8,48 @@ pub struct Config {
     pub schema: u32,
     pub instance: String,
     pub node: String,
+    #[serde(default = "default_state_dir")]
     pub state_dir: String,
+    #[serde(default = "default_units_dir")]
     pub units_dir: String,
     pub network: Network,
-    pub images: Images,
     #[serde(default)]
     pub routes: Vec<Route>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Network {
     pub subnet: String,
+    #[serde(default = "default_access_ip")]
     pub access_ip: Ipv4Addr,
+    #[serde(default = "default_compute_ip")]
     pub compute_ip: Ipv4Addr,
-    pub tailnet_ip: Option<Ipv4Addr>,
+    #[serde(default)]
+    pub identity_ip: Option<Ipv4Addr>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Images {
-    pub access: String,
-    pub dns: String,
-    pub control: String,
-    pub compute: String,
-}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Route {
     pub hostname: String,
     pub upstream: String,
+}
+
+fn default_state_dir() -> String {
+    "/var/lib/gnx".into()
+}
+
+fn default_units_dir() -> String {
+    "/etc/containers/systemd".into()
+}
+
+fn default_access_ip() -> Ipv4Addr {
+    Ipv4Addr::new(10, 90, 0, 2)
+}
+
+fn default_compute_ip() -> Ipv4Addr {
+    Ipv4Addr::new(10, 90, 0, 3)
 }
 
 pub fn identifier(value: &str) -> bool {
@@ -65,8 +79,9 @@ impl Config {
     pub fn read(path: &Path) -> Result<Self> {
         Self::parse(&std::fs::read_to_string(path)?)
     }
+
     pub fn parse(text: &str) -> Result<Self> {
-        // TOML errors can quote the user's input, which may contain a misplaced secret.
+        // Parser diagnostics may quote input, so public errors never echo TOML content.
         let config: Self = toml::from_str(text).map_err(|_| {
             Failure::new(
                 "CONFIG_PARSE",
@@ -76,6 +91,7 @@ impl Config {
         config.validate()?;
         Ok(config)
     }
+
     pub fn validate(&self) -> Result<()> {
         let invalid = |why| Failure::new("CONFIG_INVALID", why);
         if self.schema != 1 || !identifier(&self.instance) || !identifier(&self.node) {
@@ -122,31 +138,12 @@ impl Config {
         }
         if self
             .network
-            .tailnet_ip
+            .identity_ip
             .is_some_and(|ip| u32::from(ip) >> 22 != u32::from(Ipv4Addr::new(100, 64, 0, 0)) >> 22)
         {
-            return Err(invalid("tailnet_ip must belong to 100.64.0.0/10"));
+            return Err(invalid("identity_ip must belong to the Access address space"));
         }
-        for (image, repository) in [
-            (&self.images.access, "docker.io/tailscale/tailscale"),
-            (&self.images.dns, "docker.io/coredns/coredns"),
-            (&self.images.control, "docker.io/library/caddy"),
-            (&self.images.compute, "docker.io/dockurr/proxmox"),
-        ] {
-            let Some(digest) = image.strip_prefix(&format!("{repository}@sha256:")) else {
-                return Err(invalid(
-                    "Images must use the selected repositories and immutable sha256 digests",
-                ));
-            };
-            if digest.len() != 64
-                || !digest
-                    .bytes()
-                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-            {
-                return Err(invalid("Invalid image digest"));
-            }
-        }
-        let mut names: HashSet<String> = ["proxmox.gnx".into(), "ns.gnx".into()].into();
+        let mut names: HashSet<String> = ["compute.gnx".into(), "ns.gnx".into()].into();
         for route in &self.routes {
             let label = route
                 .hostname
@@ -187,7 +184,7 @@ impl Config {
                 || host.parse::<Ipv4Addr>().is_ok_and(|ip| {
                     ip.is_loopback()
                         || ip.is_unspecified()
-                        || Some(ip) == self.network.tailnet_ip
+                        || Some(ip) == self.network.identity_ip
                         || subnet.contains(&ip)
                 })
             {
@@ -198,13 +195,15 @@ impl Config {
         }
         Ok(())
     }
+
     pub fn revision(&self) -> String {
         use sha2::{Digest, Sha256};
-        format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_vec(self).expect("serializable config"))
-        )
+        let mut digest = Sha256::new();
+        digest.update(env!("CARGO_PKG_VERSION").as_bytes());
+        digest.update(serde_json::to_vec(self).expect("serializable config"));
+        format!("{:x}", digest.finalize())
     }
+
     pub fn unit(&self, name: &str) -> String {
         format!("{}-{name}", self.instance)
     }
