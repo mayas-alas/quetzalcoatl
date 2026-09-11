@@ -1,4 +1,4 @@
-# GNX 0.3.1
+# GNX 0.3.2-rc.1
 
 **Private infrastructure behind one small, verifiable command contract.**
 
@@ -27,9 +27,24 @@ flowchart LR
 
 ## Current status
 
-This branch is the clean architectural baseline for the 0.3.1 PoC. It contains
-the product contract and implementation plan, but no product implementation.
-Consequently, no acceptance gate is currently claimed as passed.
+This candidate includes the Rust runtime, Proxmox, Tailscale, CoreDNS, Caddy,
+Quadlet, Windows broker/service, and an installer executable. See
+[`docs/release-validation.md`](docs/release-validation.md) for current evidence
+and acceptance gaps. This is a release candidate, not a claim that G0-G6 passed.
+
+Windows artifacts: `gnx-install.exe`, `gnx.exe`, `gnx-service.exe`, the matching
+Linux bundle, and a clean WSL rootfs pinned by `manifest.json`.
+Run the installer elevated, using the manifest digest published with the release:
+
+```powershell
+./gnx-install.exe --manifest-sha256 <published-hash> --rootfs ./gnx-wsl-rootfs.tar.gz
+```
+
+The installer creates the dedicated account and rights, verifies artifacts before
+execution, and checks the broker after bootstrap. Existing services/accounts are
+refused to preserve them; automatic in-place migration is not yet accepted.
+Linux installation uses `sudo sh gnx-linux.run`, followed by `gnx doctor` and
+`gnx apply`. Proxmox is exposed as both `compute.gnx` and `proxmox.gnx`.
 
 The first useful milestone is not “the project compiles.” It is an executable
 vertical slice in which `doctor`, `plan`, `apply` and `status` share one JSON

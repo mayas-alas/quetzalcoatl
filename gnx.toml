@@ -1,0 +1,10 @@
+schema = 1
+instance = "gnx"
+node = "compute"
+
+[network]
+subnet = "10.90.0.0/24"
+
+[[routes]]
+hostname = "app.gnx"
+upstream = "http://192.168.1.50:8080"

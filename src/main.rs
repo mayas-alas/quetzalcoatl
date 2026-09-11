@@ -123,6 +123,10 @@ fn run() -> Report {
     result
 }
 fn main() {
+    if std::env::args().skip(1).collect::<Vec<_>>() == ["--version"] {
+        println!("gnx {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     let r = run();
     println!("{}", serde_json::to_string(&r).unwrap());
     std::process::exit(r.exit())

@@ -23,7 +23,7 @@ echo '$hash  '"\$stage/bundle.tar" | sha256sum -c - >&2
 tar -xf "\$stage/bundle.tar" -C /
 [ -e /etc/gnx/gnx.toml ] || cp /etc/gnx/gnx.example.toml /etc/gnx/gnx.toml
 chmod 600 /etc/gnx/gnx.toml
-printf '%s\n' 'Development core installed; run gnx doctor. Runtime capabilities are pending.' >&2
+printf '%s\n' 'GNX installed. Run gnx doctor, then gnx apply to configure this node.' >&2
 exit 0
 # payload
 EOF

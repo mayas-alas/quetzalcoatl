@@ -90,7 +90,16 @@ fn sync_dir(p: &Path) -> Result<(), String> {
 }
 impl StateStore for Filesystem {
     fn current(&self) -> Result<Option<String>, String> {
-        Ok(self.previous()?.map(|c| c.revision()))
+        match fs::read_to_string(self.root.join("last-valid.revision")) {
+            Ok(revision)
+                if revision.len() == 64 && revision.bytes().all(|b| b.is_ascii_hexdigit()) =>
+            {
+                Ok(Some(revision))
+            }
+            Ok(_) => Err("STATE_REVISION_INVALID".into()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(_) => Err("STATE_READ_FAILED".into()),
+        }
     }
     fn previous(&self) -> Result<Option<Config>, String> {
         match fs::read_to_string(self.root.join("last-valid.toml")) {
@@ -137,11 +146,19 @@ impl StateStore for Filesystem {
         )
     }
     fn promote(&self) -> Result<(), String> {
+        let candidate = fs::read_to_string(self.root.join("candidate.toml"))
+            .map_err(|_| "STATE_READ_FAILED")?;
+        let revision = Config::parse(&candidate)?.revision();
         replace(
             &self.root.join("candidate.toml"),
             &self.root.join("last-valid.toml"),
         )?;
         sync_dir(&self.root)?;
+        atomic_write(
+            &self.root.join("last-valid.revision"),
+            revision.as_bytes(),
+            0o600,
+        )?;
         self.abort()
     }
     fn abort(&self) -> Result<(), String> {

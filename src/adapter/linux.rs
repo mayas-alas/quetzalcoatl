@@ -15,6 +15,22 @@ pub struct Linux {
     pub config: Config,
     pub root: PathBuf,
 }
+fn quadlet(
+    name: &str,
+    cap: &str,
+    instance: &str,
+    args: &str,
+    requires: &str,
+) -> Result<String, String> {
+    let words: Vec<_> = args.split_whitespace().collect();
+    let image = words
+        .iter()
+        .position(|v| v.contains("@sha256:"))
+        .ok_or("RELEASE_UNPINNED")?;
+    let options = words[..image].join(" ");
+    let command = words[image + 1..].join(" ");
+    Ok(format!("[Unit]\nDescription=GNX {cap} ({instance})\nAfter=network-online.target {requires}\nWants=network-online.target\nRequires={requires}\nBindsTo={requires}\nPartOf={requires}\nStartLimitIntervalSec=300\nStartLimitBurst=5\n[Container]\nImage={}\nContainerName={name}\nPodmanArgs=--pull=never --log-driver=none {options}\nExec={command}\n[Service]\nRestart=on-failure\nRestartSec=5\nTimeoutStartSec=300\nTimeoutStopSec=120\nStandardOutput=null\nStandardError=null\n[Install]\nWantedBy=multi-user.target\n", words[image]))
+}
 impl Linux {
     pub fn new(config: Config) -> Self {
         let root = PathBuf::from(format!("/var/lib/gnx/{}", config.instance));
@@ -122,19 +138,26 @@ impl Linux {
     }
     fn unit(&self, cap: &str, args: &str, requires: &str) -> Result<(), String> {
         let name = self.name(cap);
-        let path = PathBuf::from(format!("/etc/systemd/system/{name}.service"));
-        let content=format!("[Unit]\nDescription=GNX {cap} ({})\nAfter=network-online.target {requires}\nWants=network-online.target\nRequires={requires}\nStartLimitIntervalSec=0\n[Service]\nType=simple\nRestart=always\nRestartSec=5\nTimeoutStartSec=300\nTimeoutStopSec=120\nKillMode=control-group\nDelegate=yes\nStandardOutput=null\nStandardError=null\nExecStart=/usr/bin/podman run --rm --replace --pull=never --log-driver=none --name {name} {args}\nExecStop=/usr/bin/podman stop --ignore --time 90 {name}\nExecStopPost=/usr/bin/podman rm --ignore --force {name}\n[Install]\nWantedBy=multi-user.target\n",self.config.instance);
+        let path = PathBuf::from(format!("/etc/containers/systemd/{name}.container"));
+        std::fs::create_dir_all("/etc/containers/systemd")
+            .map_err(|_| "QUADLET_DIRECTORY_FAILED")?;
+        let content = quadlet(&name, cap, &self.config.instance, args, requires)?;
+        // Migrate only this instance's generated development unit; retain its original file.
+        let legacy = PathBuf::from(format!("/etc/systemd/system/{name}.service"));
+        if legacy.exists() {
+            let old = std::fs::read_to_string(&legacy).map_err(|_| "UNIT_READ_FAILED")?;
+            if !old.contains(&format!("Description=GNX {cap} ({})", self.config.instance)) {
+                return Err("UNIT_OWNERSHIP_CONFLICT".into());
+            }
+            std::fs::rename(&legacy, legacy.with_extension("service.pre-quadlet"))
+                .map_err(|_| "UNIT_MIGRATION_FAILED")?;
+        }
         let changed = std::fs::read(&path).ok().as_deref() != Some(content.as_bytes());
         if changed {
             atomic_write(&path, content.as_bytes(), 0o644)?;
             process::checked("systemctl", &["daemon-reload"], None, 30)?;
         }
-        process::checked(
-            "systemctl",
-            &["enable", &format!("{name}.service")],
-            None,
-            30,
-        )?;
+        // Quadlet's generator implements [Install]; generated units cannot be enabled directly.
         if changed {
             process::checked(
                 "systemctl",
@@ -240,7 +263,7 @@ impl Linux {
             Zeroizing::new(url::form_urlencoded::byte_serialize(&password).collect::<String>());
         let config = Zeroizing::new(format!(
             "data = \"username=root%40pam&password={}\"\n",
-            &*encoded
+            *encoded
         ));
         let resolve = format!("{}:8006:{}", self.name("compute"), self.compute_ip());
         let ca = self.path("compute/root-ca.pem");
@@ -273,7 +296,7 @@ impl Linux {
         if ticket.contains(['"', '\r', '\n', '\\']) {
             return Err("COMPUTE_AUTH_FAILED".into());
         }
-        let cookie = Zeroizing::new(format!("header = \"Cookie: PVEAuthCookie={}\"\n", &*ticket));
+        let cookie = Zeroizing::new(format!("header = \"Cookie: PVEAuthCookie={}\"\n", *ticket));
         let reply = self
             .curl(
                 &format!("{origin}/api2/json/nodes"),
@@ -514,11 +537,9 @@ impl Linux {
         let ca = self.path("control/data/caddy/pki/authorities/local/root.crt");
         let resolve = format!("compute.gnx:443:{ip}");
         let b = self
-            .curl_private("https://compute.gnx/api2/json/version", b"", &resolve, &ca)
+            .curl_private("https://compute.gnx/", b"", &resolve, &ca)
             .map_err(|_| "CONTROL_TLS_OR_UPSTREAM_FAILED")?;
-        let v: serde_json::Value =
-            serde_json::from_slice(&b).map_err(|_| "CONTROL_UPSTREAM_IDENTITY_FAILED")?;
-        if v["data"]["version"].as_str().is_none() {
+        if !String::from_utf8_lossy(&b).contains("Proxmox") {
             return Err("CONTROL_UPSTREAM_IDENTITY_FAILED".into());
         }
         Ok(())
@@ -534,6 +555,10 @@ impl Host for Linux {
             return Err("ROOT_REQUIRED".into());
         }
         for (path, code) in [
+            (
+                "/usr/lib/systemd/system-generators/podman-system-generator",
+                "QUADLET_REQUIRED",
+            ),
             ("/run/systemd/system", "SYSTEMD_REQUIRED"),
             ("/sys/fs/cgroup/cgroup.controllers", "CGROUP_V2_REQUIRED"),
             ("/dev/kvm", "KVM_REQUIRED"),
@@ -548,7 +573,7 @@ impl Host for Linux {
         if !super::podman::available() {
             return Err("PODMAN_REQUIRED".into());
         }
-        for p in ["curl", "openssl"] {
+        for p in ["curl", "openssl", "nsenter", "dig"] {
             process::checked(p, &["--version"], None, 10)
                 .or_else(|_| process::checked(p, &["version"], None, 10))
                 .map_err(|_| "TOOLS_REQUIRED")?;

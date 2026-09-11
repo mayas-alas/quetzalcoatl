@@ -1,6 +1,6 @@
 [package]
 name = "gnx"
-version = "0.3.1"
+version = "0.3.2-rc.1"
 edition = "2021"
 default-run = "gnx"
 [dependencies]
