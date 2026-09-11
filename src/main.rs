@@ -145,7 +145,19 @@ fn run() -> Report {
         };
         let secret = match Secret::new(kind, value) {
             Ok(s) => s,
-            Err(e) => return failure(op, &e),
+            Err(e) => {
+                let label = match kind {
+                    gnx::domain::secret::SecretKind::ComputePassword =>
+                        "Use a new Compute password with 16-4096 printable ASCII characters.",
+                    gnx::domain::secret::SecretKind::AccessEnrollment =>
+                        "Use the Tailscale enrollment key exactly as provided, without quotes or line breaks.",
+                };
+                let mut out = failure(op, &e);
+                out.state = State::ActionRequired;
+                out.secret_kind = Some(kind);
+                out.next_action = Some(label.into());
+                return out;
+            }
         };
         result = execute(op, &input, Some(&secret));
     }
