@@ -5,8 +5,8 @@ functional private-network release candidate; the boundaries below are material.
 
 ## Current deployment
 
-- Existing instance `poc031` runs in the operator-owned Ubuntu 24.04 WSL distro
-  on the Windows host. It retains Tailscale identity `100.124.251.14`.
+- The former operator-owned Ubuntu 24.04 WSL instance used Tailscale identity
+  `100.124.251.14`; it is legacy evidence and is no longer the active runtime.
 - Windows `GNXRuntime` runs separately as `.\gnx-runtime`, with its own `GNX`
   distribution. Its broker reports `HOST_READY`, but that distribution is not
   enrolled and is not the owner of the working `poc031` deployment.
@@ -21,8 +21,9 @@ functional private-network release candidate; the boundaries below are material.
   remains ignored; it must not replace the active node's private entry address.
 - Windows formatting and clippy pass. Both release binaries and the Linux bundle
   are built from this source with locked dependencies and pinned runtime images.
-- Normal Windows split DNS resolves `app.gnx` and `compute.gnx`
-  to `100.124.251.14`. Direct UDP and TCP queries pass for all three.
+- The former split-DNS check resolved `app.gnx` and `compute.gnx` to
+  `100.124.251.14`; that result is historical and must not be used as current
+  acceptance evidence.
 - All three HTTPS endpoints return 200 through the Windows Tailscale client.
   `tests/verify_client.ps1` reproduces these checks. Windows curl uses
   `--ssl-revoke-best-effort` because the private CA has no revocation endpoint;
