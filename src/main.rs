@@ -54,6 +54,26 @@ fn execute(op: &str, input: &str, secret: Option<&Secret>) -> Report {
         }
     }
 }
+fn environment_secret(kind: gnx::domain::secret::SecretKind) -> Option<Secret> {
+    let names: &[&str] = match kind {
+        gnx::domain::secret::SecretKind::AccessEnrollment => &[
+            "GNX_TAILSCALE_AUTHKEY",
+            "GNX_ACCESS_ENROLLMENT_KEY",
+            "TAILSCALE_AUTHKEY",
+            "TS_AUTHKEY",
+        ],
+        gnx::domain::secret::SecretKind::ComputePassword => {
+            &["GNX_COMPUTE_PASSWORD", "GNX_SECRET_COMPUTE"]
+        }
+    };
+    names.iter().find_map(|name| {
+        let value = std::env::var(name).ok()?;
+        if value.is_empty() {
+            return None;
+        }
+        Secret::new(kind, value.into_bytes()).ok()
+    })
+}
 fn run() -> Report {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let op = a.first().map(String::as_str).unwrap_or("");
@@ -111,6 +131,10 @@ fn run() -> Report {
         let Some(kind) = result.secret_kind else {
             break;
         };
+        if let Some(secret) = environment_secret(kind) {
+            result = execute(op, &input, Some(&secret));
+            continue;
+        }
         let prompt = match kind {
             gnx::domain::secret::SecretKind::ComputePassword => "Compute password (hidden): ",
             gnx::domain::secret::SecretKind::AccessEnrollment => "Access enrollment key (hidden): ",
