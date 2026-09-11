@@ -11,10 +11,9 @@ fn release_and_public_names_are_consistent() {
     assert_eq!(release.version, env!("CARGO_PKG_VERSION"));
     let c = Config::parse(include_str!("../gnx.toml")).unwrap();
     let zone = gnx::adapter::coredns::zone(&c, "100.64.0.1");
-    assert!(zone.contains("proxmox IN A 100.64.0.1"));
+    assert!(zone.contains("compute IN A 100.64.0.1"));
     assert!(zone.contains("app IN A 100.64.0.1"));
     let tls = gnx::adapter::caddy::render(&c, "100.64.0.1", "compute", "10.90.0.2");
-    assert!(tls.contains("https://proxmox.gnx"));
     assert!(tls.contains("https://app.gnx"));
     assert!(tls.contains("root * /gnx-app"));
     assert!(tls.contains("intermediate_cn \"GNX Local Auth\""));

@@ -46,7 +46,10 @@ fn framing_rejects_all_truncations_and_trailing_bytes() {
 }
 #[test]
 fn dangerous_origins_are_refused() {
-    let template = include_str!("../gnx.toml");
+    let template = format!(
+        "{}\n[[routes]]\nhostname = 'service.gnx'\nupstream = 'http://192.168.1.50:8080'\n",
+        include_str!("../gnx.toml")
+    );
     for upstream in [
         "http://host/a",
         "http://host/?token=secret",

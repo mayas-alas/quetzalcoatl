@@ -21,7 +21,7 @@ functional private-network release candidate; the boundaries below are material.
   remains ignored; it must not replace the active node's private entry address.
 - Windows formatting and clippy pass. Both release binaries and the Linux bundle
   are built from this source with locked dependencies and pinned runtime images.
-- Normal Windows split DNS resolves `app.gnx`, `proxmox.gnx`, and `compute.gnx`
+- Normal Windows split DNS resolves `app.gnx` and `compute.gnx`
   to `100.124.251.14`. Direct UDP and TCP queries pass for all three.
 - All three HTTPS endpoints return 200 through the Windows Tailscale client.
   `tests/verify_client.ps1` reproduces these checks. Windows curl uses

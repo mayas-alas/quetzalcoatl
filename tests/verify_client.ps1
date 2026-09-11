@@ -2,7 +2,7 @@
 param([Parameter(Mandatory)][string]$Nameserver)
 $ErrorActionPreference='Stop'
 $results=@()
-foreach($name in @('app.gnx','proxmox.gnx','compute.gnx')) {
+foreach($name in @('app.gnx','compute.gnx')) {
  $normal=@(Resolve-DnsName $name -Type A -DnsOnly | Where-Object Type -eq 'A' | Select-Object -ExpandProperty IPAddress)
  if ($normal -notcontains $Nameserver) {throw "SPLIT_DNS_FAILED: $name"}
  foreach($tcp in @($false,$true)) {

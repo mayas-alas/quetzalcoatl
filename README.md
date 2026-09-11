@@ -44,7 +44,7 @@ The installer creates the dedicated account and rights, verifies artifacts befor
 execution, and checks the broker after bootstrap. Existing services/accounts are
 refused to preserve them; automatic in-place migration is not yet accepted.
 Linux installation uses `sudo sh gnx-linux.run`, followed by `gnx doctor` and
-`gnx apply`. Proxmox is exposed as both `compute.gnx` and `proxmox.gnx`.
+`gnx apply`. Compute is exposed only as `compute.gnx`.
 
 `https://app.gnx` serves the bundled HTML/CSS/JavaScript welcome page, with a
 real HTTPS reachability check and links to Proxmox. It does not expose an

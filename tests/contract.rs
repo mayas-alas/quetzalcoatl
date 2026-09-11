@@ -15,8 +15,11 @@ fn exit_contract() {
 }
 #[test]
 fn strict_intent() {
-    let s = include_str!("../gnx.toml");
-    assert!(Config::parse(s).is_ok());
+    let s = format!(
+        "{}\n[[routes]]\nhostname = 'service.gnx'\nupstream = 'http://192.168.1.50:8080'\n",
+        include_str!("../gnx.toml")
+    );
+    assert!(Config::parse(&s).is_ok());
     assert!(Config::parse(&s.replace("schema = 1", "schema = 99")).is_err());
     assert!(Config::parse(&s.replace("schema = 1", "secret = 'canary'\nschema = 1")).is_err());
     assert!(

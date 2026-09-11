@@ -4,7 +4,3 @@ node = "compute"
 
 [network]
 subnet = "10.90.0.0/24"
-
-[[routes]]
-hostname = "example.gnx"
-upstream = "http://192.168.1.50:8080"

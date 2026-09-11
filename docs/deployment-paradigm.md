@@ -18,8 +18,8 @@ extraer evidencia o migrar estado, pero no es una segunda implementación ni la
 autoridad del producto.
 
 LXC está fuera del roadmap actual. No se agrega una capa de provisión LXC.
-Proxmox solo permanece como implementación de Compute si el release definido lo
-requiere; GNX debe conservar un único dueño de su lifecycle y de sus probes.
+El backend de Compute puede seguir usando la implementación fijada por el
+release, pero su único nombre público es `compute.gnx`.
 
 ## Limpieza controlada del host
 
