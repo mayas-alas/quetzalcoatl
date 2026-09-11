@@ -7,6 +7,6 @@ subnet = "10.90.0.0/24"
 # Optional assertion after Access enrollment; normally discovered automatically.
 # identity_ip = "100.64.0.10"
 # Existing application managed outside GNX. GNX only publishes its name and HTTPS route.
-[[routes]]
-hostname = "app.gnx"
-upstream = "http://192.168.1.50:8080"
+# [[routes]]
+# hostname = "example.gnx"
+# upstream = "http://192.168.1.50:8080"

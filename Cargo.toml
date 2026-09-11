@@ -1,6 +1,6 @@
 [package]
 name = "gnx"
-version = "0.3.2-rc.1"
+version = "0.3.2-rc.2"
 edition = "2021"
 default-run = "gnx"
 [dependencies]
@@ -20,4 +20,3 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Securit
 
 [target."cfg(unix)".dependencies]
 libc = "0.2.189"
-

@@ -3,7 +3,7 @@ pub fn validate(routes: &[crate::config::Route]) -> Result<(), String> {
     if routes.len() > 64 {
         return Err("TOO_MANY_ROUTES".into());
     }
-    let mut names = HashSet::from(["compute.gnx", "proxmox.gnx", "ns.gnx"]);
+    let mut names = HashSet::from(["compute.gnx", "proxmox.gnx", "app.gnx", "ns.gnx"]);
     for r in routes {
         let name = r.hostname.strip_suffix(".gnx").ok_or("INVALID_HOSTNAME")?;
         if !super::node::valid_name(name) || !names.insert(&r.hostname) {

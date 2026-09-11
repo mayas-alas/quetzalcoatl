@@ -197,7 +197,7 @@ gnx/
 │   └── windows/
 │       ├── build.ps1               # builds Windows and Linux artifacts
 │       ├── install.ps1             # elevated, verified host installation
-│       └── runtime.lock.json        # pinned WSL rootfs and bundle digests
+│       └── build.ps1                # produces dist/manifest.json and pinned digests
 ├── tests/
 │   ├── contract.rs                 # CLI/JSON/exit contract
 │   ├── architecture.rs             # dependency-boundary checks

@@ -1,5 +1,23 @@
 use crate::report::{Report, State};
 use std::process::{Command, Stdio};
+pub fn keep_alive() -> std::io::Result<std::process::Child> {
+    // WSL stops idle distributions even when their systemd units are active.
+    // Keep a service-owned session open; SCM supervises the Windows parent.
+    Command::new("C:\\Windows\\System32\\wsl.exe")
+        .args([
+            "-d",
+            "GNX",
+            "-u",
+            "root",
+            "--exec",
+            "/bin/sleep",
+            "infinity",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+}
 pub fn invoke(op: &str, intent: &str) -> Report {
     invoke_secret(op, intent, None)
 }
@@ -19,6 +37,11 @@ pub fn invoke_secret(
     let Ok(frame) = crate::wire::encode(op, intent, secret) else {
         return fail();
     };
+    let (linux_timeout, host_timeout) = if op == "apply" {
+        ("600", 620)
+    } else {
+        ("30", 40)
+    };
     let result = super::super::process::run(
         "C:\\Windows\\System32\\wsl.exe",
         &[
@@ -28,13 +51,13 @@ pub fn invoke_secret(
             "root",
             "--exec",
             "/usr/bin/timeout",
-            "600",
+            linux_timeout,
             "/usr/local/bin/gnx",
             op,
             "--broker",
         ],
         Some(&frame),
-        std::time::Duration::from_secs(620),
+        std::time::Duration::from_secs(host_timeout),
         1024 * 1024,
     );
     match result {
@@ -46,7 +69,7 @@ pub fn invoke_secret(
     }
 }
 pub fn bootstrap() -> Result<(), String> {
-    let root = std::path::Path::new("C:\\ProgramData\\GNX");
+    let root = std::path::Path::new(super::account::PRIVATE_ROOT);
     if !root.join("bundle.tar").exists() {
         return Ok(());
     }
@@ -56,8 +79,8 @@ pub fn bootstrap() -> Result<(), String> {
             .args([
                 "--import",
                 "GNX",
-                "C:\\ProgramData\\GNX\\wsl",
-                "C:\\ProgramData\\GNX\\rootfs.tar",
+                "C:\\ProgramData\\GNX\\runtime\\wsl",
+                "C:\\ProgramData\\GNX\\runtime\\rootfs.tar",
                 "--version",
                 "2",
             ])

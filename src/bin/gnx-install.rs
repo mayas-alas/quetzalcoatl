@@ -27,7 +27,9 @@ fn main() {
         .expect("start installer");
     // Only public paths and digests cross through the environment. Credentials stay in SCM.
     let mut input = child.stdin.take().unwrap();
-    input.write_all(include_bytes!("../../packaging/windows/setup.ps1")).expect("installer input");
+    input
+        .write_all(include_bytes!("../../packaging/windows/setup.ps1"))
+        .expect("installer input");
     input.write_all(b"\n").expect("installer terminator");
     drop(input);
     std::process::exit(child.wait().expect("installer result").code().unwrap_or(1));

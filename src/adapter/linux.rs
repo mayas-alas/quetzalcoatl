@@ -45,7 +45,7 @@ impl Linux {
     fn network(&self) -> String {
         format!("gnx-{}", self.config.instance)
     }
-    fn compute_ip(&self) -> String {
+    fn network_ip(&self, offset: u32) -> String {
         let ip = self
             .config
             .network
@@ -55,7 +55,13 @@ impl Linux {
             .unwrap()
             .parse::<std::net::Ipv4Addr>()
             .unwrap();
-        std::net::Ipv4Addr::from(u32::from(ip) + 2).to_string()
+        std::net::Ipv4Addr::from(u32::from(ip) + offset).to_string()
+    }
+    fn compute_ip(&self) -> String {
+        self.network_ip(2)
+    }
+    fn access_ip(&self) -> String {
+        self.network_ip(3)
     }
     fn exec(
         &self,
@@ -142,6 +148,19 @@ impl Linux {
         std::fs::create_dir_all("/etc/containers/systemd")
             .map_err(|_| "QUADLET_DIRECTORY_FAILED")?;
         let content = quadlet(&name, cap, &self.config.instance, args, requires)?;
+        let content = if cap == "access" {
+            content.replacen(
+                "[Unit]\n",
+                &format!(
+                    "[Unit]\nWants={}.service {}.service\n",
+                    self.name("dns"),
+                    self.name("control")
+                ),
+                1,
+            )
+        } else {
+            content
+        };
         // Migrate only this instance's generated development unit; retain its original file.
         let legacy = PathBuf::from(format!("/etc/systemd/system/{name}.service"));
         if legacy.exists() {
@@ -213,7 +232,10 @@ impl Linux {
                 .is_ok()
             {
                 let ca = self.exec("compute", &["cat", "/etc/pve/pve-root-ca.pem"], None)?;
-                atomic_write(&self.root.join("compute/root-ca.pem"), &ca, 0o644)?;
+                let path = self.root.join("compute/root-ca.pem");
+                if std::fs::read(&path).ok().as_deref() != Some(ca.as_slice()) {
+                    atomic_write(&path, &ca, 0o644)?;
+                }
                 if self.compute_health().is_ok() {
                     return Ok(());
                 }
@@ -370,7 +392,9 @@ impl Linux {
     }
     fn access_start(&self, r: &PinnedRelease, secret: Option<&Secret>) -> Result<String, String> {
         private_dir(&self.root.join("access"))?;
-        let args=format!("--network {} --cap-add NET_ADMIN --cap-add NET_RAW --device /dev/net/tun --volume {}:/var/lib/tailscale --entrypoint tailscaled {} --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock --tun=tailscale0",self.network(),self.path("access"),r.access);
+        // Reserve a stable address for Access so Podman's allocator cannot take
+        // Compute's fixed .2 address when Access starts first after a reboot.
+        let args=format!("--network {} --ip {} --cap-add NET_ADMIN --cap-add NET_RAW --device /dev/net/tun --volume {}:/var/lib/tailscale --entrypoint tailscaled {} --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock --tun=tailscale0",self.network(),self.access_ip(),self.path("access"),r.access);
         self.unit("access", &args, "")?;
         for _ in 0..15 {
             if self
@@ -415,16 +439,46 @@ impl Linux {
         self.identity()
     }
     fn control_start(&self, r: &PinnedRelease, ip: &str) -> Result<(), String> {
-        for dir in ["control", "control/data", "control/config", "dns"] {
+        for dir in [
+            "control",
+            "control/data",
+            "control/config",
+            "control/app",
+            "dns",
+        ] {
             private_dir(&self.root.join(dir))?;
+        }
+        for (name, bytes) in [
+            (
+                "index.html",
+                include_bytes!("../../runtime/control/app/index.html").as_slice(),
+            ),
+            (
+                "style.css",
+                include_bytes!("../../runtime/control/app/style.css").as_slice(),
+            ),
+            (
+                "app.js",
+                include_bytes!("../../runtime/control/app/app.js").as_slice(),
+            ),
+        ] {
+            let path = self.root.join("control/app").join(name);
+            if std::fs::read(&path).ok().as_deref() != Some(bytes) {
+                atomic_write(&path, bytes, 0o644)?;
+            }
         }
         let core = super::coredns::render_at(&self.config, ip)?;
         let caddy =
             super::caddy::render(&self.config, ip, &self.name("compute"), &self.compute_ip());
-        let dns_changed = std::fs::read(self.root.join("dns/Corefile"))
+        let zone = super::coredns::zone(&self.config, ip);
+        let dns_changed = std::fs::read(self.root.join("dns/gnx.zone"))
             .ok()
             .as_deref()
-            != Some(core.as_bytes());
+            != Some(zone.as_bytes())
+            || std::fs::read(self.root.join("dns/Corefile"))
+                .ok()
+                .as_deref()
+                != Some(core.as_bytes());
         let control_changed = std::fs::read(self.root.join("control/Caddyfile"))
             .ok()
             .as_deref()
@@ -440,13 +494,11 @@ impl Linux {
             )?;
         }
         let requires = format!("{}.service", self.name("access"));
-        atomic_write(
-            &self.root.join("dns/gnx.zone"),
-            super::coredns::zone(&self.config, ip).as_bytes(),
-            0o644,
-        )?;
+        if dns_changed {
+            atomic_write(&self.root.join("dns/gnx.zone"), zone.as_bytes(), 0o644)?;
+        }
         self.unit("dns",&format!("--network container:{} --volume {}:/Corefile:ro --volume {}:/gnx.zone:ro {} -conf /Corefile",self.name("access"),self.path("dns/Corefile"),self.path("dns/gnx.zone"),r.dns),&requires)?;
-        self.unit("control",&format!("--network container:{} --volume {}:/etc/caddy/Caddyfile:ro --volume {}:/data --volume {}:/config --volume {}:/gnx-compute-ca.pem:ro {} caddy run --config /etc/caddy/Caddyfile --adapter caddyfile",self.name("access"),self.path("control/Caddyfile"),self.path("control/data"),self.path("control/config"),self.path("compute/root-ca.pem"),r.control),&requires)?;
+        self.unit("control",&format!("--network container:{} --volume {}:/etc/caddy/Caddyfile:ro --volume {}:/data --volume {}:/config --volume {}:/gnx-compute-ca.pem:ro --volume {}:/gnx-app:ro {} caddy run --config /etc/caddy/Caddyfile --adapter caddyfile",self.name("access"),self.path("control/Caddyfile"),self.path("control/data"),self.path("control/config"),self.path("compute/root-ca.pem"),self.path("control/app"),r.control),&requires)?;
         if dns_changed {
             process::checked(
                 "systemctl",
@@ -668,6 +720,18 @@ impl Runtime for Linux {
 #[cfg(test)]
 mod local_integration {
     use super::*;
+
+    #[test]
+    fn reserves_distinct_access_and_compute_addresses() {
+        let config = Config::parse(
+            "schema=1\ninstance='poc031'\nnode='compute'\n[network]\nsubnet='10.93.0.0/24'\n",
+        )
+        .unwrap();
+        let linux = Linux::new(config);
+        assert_eq!(linux.compute_ip(), "10.93.0.2");
+        assert_eq!(linux.access_ip(), "10.93.0.3");
+    }
+
     #[test]
     #[ignore = "Creates local DNS/TLS units in the explicitly named poc031 lab namespace; run as Linux root only"]
     fn dns_tls_loopback() {

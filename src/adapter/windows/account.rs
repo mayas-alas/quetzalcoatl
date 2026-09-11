@@ -12,7 +12,7 @@ use windows_sys::Win32::{
 };
 use zeroize::Zeroizing;
 pub const SERVICE_ACCOUNT: &str = ".\\gnx-runtime";
-pub const PRIVATE_ROOT: &str = "C:\\ProgramData\\GNX";
+pub const PRIVATE_ROOT: &str = "C:\\ProgramData\\GNX\\runtime";
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }
@@ -89,7 +89,7 @@ pub fn install() -> Result<String, String> {
         let mut kind = 0;
         LookupAccountNameW(
             ptr::null(),
-            account.as_ptr(),
+            name.as_ptr(),
             ptr::null_mut(),
             &mut sid_len,
             ptr::null_mut(),
@@ -100,7 +100,7 @@ pub fn install() -> Result<String, String> {
         let mut domain = vec![0u16; domain_len as usize];
         if LookupAccountNameW(
             ptr::null(),
-            account.as_ptr(),
+            name.as_ptr(),
             sid.as_mut_ptr() as *mut _,
             &mut sid_len,
             domain.as_mut_ptr(),
@@ -181,18 +181,18 @@ pub fn install() -> Result<String, String> {
         }
         let manager = Sc(manager);
         let service_name = wide("GNXRuntime");
-        let binary = wide("\"C:\\Program Files\\GNX\\gnx-service.exe\"");
+        let binary = wide("\"C:\\Program Files\\GNX\\runtime\\gnx-service.exe\"");
         let existing = OpenServiceW(
             manager.0,
             service_name.as_ptr(),
-            SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG,
+            SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG | SERVICE_START,
         );
         let service = if existing.is_null() {
             let raw = CreateServiceW(
                 manager.0,
                 service_name.as_ptr(),
                 service_name.as_ptr(),
-                SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG,
+                SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG | SERVICE_START,
                 SERVICE_WIN32_OWN_PROCESS,
                 SERVICE_AUTO_START,
                 SERVICE_ERROR_NORMAL,

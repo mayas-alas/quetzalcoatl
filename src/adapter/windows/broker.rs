@@ -92,20 +92,30 @@ pub fn request(op: &str, intent: &str) -> io::Result<Report> {
 }
 pub fn request_secret(op: &str, intent: &str, secret: Option<&Secret>) -> io::Result<Report> {
     let name = wide(PIPE);
-    let raw = unsafe {
-        CreateFileW(
-            name.as_ptr(),
-            GENERIC_READ | GENERIC_WRITE,
-            0,
-            ptr::null(),
-            OPEN_EXISTING,
-            FILE_FLAG_OVERLAPPED,
-            ptr::null_mut(),
-        )
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let raw = loop {
+        let handle = unsafe {
+            CreateFileW(
+                name.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE,
+                0,
+                ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_OVERLAPPED,
+                ptr::null_mut(),
+            )
+        };
+        if handle != INVALID_HANDLE_VALUE {
+            break handle;
+        }
+        let error = unsafe { GetLastError() };
+        if !matches!(error, ERROR_FILE_NOT_FOUND | ERROR_PIPE_BUSY)
+            || std::time::Instant::now() >= deadline
+        {
+            return Err(io::Error::from_raw_os_error(error as i32));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
     };
-    if raw == INVALID_HANDLE_VALUE {
-        return Err(io::Error::last_os_error());
-    }
     let h = Handle(raw);
     let mut pid = 0;
     if unsafe { GetNamedPipeServerProcessId(h.0, &mut pid) } == 0 {
@@ -129,7 +139,8 @@ pub fn request_secret(op: &str, intent: &str, secret: Option<&Secret>) -> io::Re
     }
     let b = crate::wire::encode(op, intent, secret).map_err(|_| invalid())?;
     write_message(h.0, &b, 5000)?;
-    let bytes = read_message(h.0, RESPONSE_LIMIT, 650_000)?;
+    let response_timeout = if op == "apply" { 650_000 } else { 45_000 };
+    let bytes = read_message(h.0, RESPONSE_LIMIT, response_timeout)?;
     let r: Report = serde_json::from_slice(&bytes)?;
     if r.schema != 1 || r.operation != op || (r.secret_kind.is_some() && op != "apply") {
         return Err(invalid());
@@ -138,7 +149,9 @@ pub fn request_secret(op: &str, intent: &str, secret: Option<&Secret>) -> io::Re
     Ok(r)
 }
 pub fn serve_one() -> io::Result<()> {
-    let sid = std::fs::read_to_string("C:\\ProgramData\\GNX\\operator.sid")?;
+    let sid = std::fs::read_to_string(
+        std::path::Path::new(super::account::PRIVATE_ROOT).join("operator.sid"),
+    )?;
     let sid = sid.trim();
     if !sid.starts_with("S-1-")
         || !sid

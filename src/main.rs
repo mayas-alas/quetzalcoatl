@@ -20,12 +20,17 @@ fn execute(op: &str, input: &str, secret: Option<&Secret>) -> Report {
     #[cfg(windows)]
     {
         let _ = c;
-        gnx::adapter::windows::broker::request_secret(op, input, secret).unwrap_or_else(|_| {
+        gnx::adapter::windows::broker::request_secret(op, input, secret).unwrap_or_else(|error| {
+            let code = match error.kind() {
+                std::io::ErrorKind::PermissionDenied => "BROKER_ACCESS_DENIED",
+                std::io::ErrorKind::TimedOut => "BROKER_TIMEOUT",
+                _ => "BROKER_UNAVAILABLE",
+            };
             Report::new(
                 op,
                 State::ActionRequired,
-                "BROKER_UNAVAILABLE",
-                Some("Install and start GNXRuntime."),
+                code,
+                Some(&format!("GNXRuntime broker error: {error}")),
             )
         })
     }

@@ -1,4 +1,4 @@
-# GNX 0.3.2-rc.1
+# GNX 0.3.2-rc.2
 
 **Private infrastructure behind one small, verifiable command contract.**
 
@@ -45,6 +45,11 @@ execution, and checks the broker after bootstrap. Existing services/accounts are
 refused to preserve them; automatic in-place migration is not yet accepted.
 Linux installation uses `sudo sh gnx-linux.run`, followed by `gnx doctor` and
 `gnx apply`. Proxmox is exposed as both `compute.gnx` and `proxmox.gnx`.
+
+`https://app.gnx` serves the bundled HTML/CSS/JavaScript welcome page, with a
+real HTTPS reachability check and links to Proxmox. It does not expose an
+unauthenticated service-control API. Reserve `app.gnx` for this built-in page;
+use a different hostname for optional application routes.
 
 The first useful milestone is not “the project compiles.” It is an executable
 vertical slice in which `doctor`, `plan`, `apply` and `status` share one JSON

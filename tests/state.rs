@@ -23,12 +23,15 @@ fn transaction_lock_and_atomic_promotion() {
     assert_eq!(store.current().unwrap(), None);
     store.promote().unwrap();
     assert_eq!(store.current().unwrap(), Some(c.revision()));
+    assert_eq!(store.previous().unwrap(), Some(c.clone()));
+    // A staged next candidate cannot change either part of the committed record.
     assert!(!store.interrupted().unwrap());
     let mut next = c.clone();
     next.node = "next".into();
     store.stage(&next).unwrap();
     store.abort().unwrap();
     assert_eq!(store.current().unwrap(), Some(c.revision()));
+    assert_eq!(store.previous().unwrap(), Some(c));
     drop(guard);
     assert!(store.acquire().is_ok());
     std::fs::remove_dir_all(root).unwrap();

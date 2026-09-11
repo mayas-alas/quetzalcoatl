@@ -16,17 +16,26 @@ try {
  & wsl.exe --status | Out-Null
  if ($LASTEXITCODE){throw 'WSL_REQUIRED: Install WSL 2 machine-wide and reboot before retrying.'}
  # Refuse updates until an authenticated rollback of account, service and WSL is available.
- if (Get-Service GNXRuntime -ErrorAction SilentlyContinue){throw 'EXISTING_SERVICE: preserve this installation; in-place upgrade is not accepted yet.'}
- if (Get-LocalUser gnx-runtime -ErrorAction SilentlyContinue){throw 'EXISTING_ACCOUNT: refusing to rotate an unowned account credential.'}
- $data='C:\ProgramData\GNX'
- $bin='C:\Program Files\GNX'
- if (Test-Path -LiteralPath $data){throw 'EXISTING_STATE: preserve and inspect the previous installation.'}
+ $data='C:\ProgramData\GNX\runtime'
+ $installRoot='C:\Program Files\GNX'
+ $bin=Join-Path $installRoot 'runtime'
+ $cli=Join-Path $installRoot 'gnx.exe'
+ $pending=Join-Path $data 'install.pending'
+ $resume=(Test-Path -LiteralPath $pending) -and ((Get-Content -LiteralPath $pending -Raw).Trim() -eq 'GNX-INSTALL-1')
+ $service=Get-CimInstance Win32_Service -Filter "Name='GNXRuntime'"
+ if ($service -and !($resume -and $service.State -eq 'Stopped' -and $service.StartName -eq '.\gnx-runtime' -and $service.PathName -eq ('"'+$bin+'\gnx-service.exe"'))){throw 'EXISTING_SERVICE: preserve this installation; in-place upgrade is not accepted yet.'}
+ if ((Get-LocalUser gnx-runtime -ErrorAction SilentlyContinue) -and !$resume){throw 'EXISTING_ACCOUNT: refusing to rotate an unowned account credential.'}
+ if ((Test-Path -LiteralPath $data) -and !$resume){throw 'EXISTING_STATE: preserve and inspect the previous installation.'}
  New-Item -ItemType Directory -Path $data -Force | Out-Null
  & icacls.exe $data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
  if ($LASTEXITCODE){throw 'PRIVATE_ACL_FAILED'}
- New-Item -ItemType Directory -Path $bin -Force | Out-Null
+ 'GNX-INSTALL-1' | Set-Content -LiteralPath $pending -Encoding ascii
+ New-Item -ItemType Directory -Path $installRoot,$bin -Force | Out-Null
+ & icacls.exe $installRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+ if ($LASTEXITCODE){throw 'INSTALL_ROOT_ACL_FAILED'}
  & icacls.exe $bin /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
  if ($LASTEXITCODE){throw 'BINARY_ACL_FAILED'}
+ Copy-Item "$bundle/gnx.exe" $cli -Force
  Copy-Item "$bundle/gnx.exe","$bundle/gnx-service.exe" $bin -Force
  $result=& "$bin/gnx-service.exe" --install
  if ($LASTEXITCODE){throw "ACCOUNT_INSTALL_FAILED: $result"}
@@ -46,6 +55,7 @@ try {
   if ($report.code -notin @('BROKER_UNAVAILABLE','WSL_RUNTIME_UNAVAILABLE')){break}
  } while ([DateTime]::UtcNow -lt $deadline)
  if ($report.code -in @('BROKER_UNAVAILABLE','WSL_RUNTIME_UNAVAILABLE')){throw 'BOOTSTRAP_NOT_READY: preserve ProgramData/GNX and inspect the service.'}
+ Remove-Item -LiteralPath $pending
  $report | ConvertTo-Json -Depth 8
  exit $(if($report.state -eq 'READY'){0}else{2})
 } catch {

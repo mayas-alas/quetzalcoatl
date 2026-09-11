@@ -10,6 +10,32 @@ use std::{
 pub struct Filesystem {
     pub root: PathBuf,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LastValid {
+    schema: u32,
+    intent: Config,
+    revision: String,
+}
+impl Filesystem {
+    fn last_valid(&self) -> Result<Option<LastValid>, String> {
+        let bytes = match fs::read(self.root.join("last-valid.json")) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err("STATE_READ_FAILED".into()),
+        };
+        let value: LastValid =
+            serde_json::from_slice(&bytes).map_err(|_| "STATE_RECORD_INVALID")?;
+        if value.schema != 1
+            || value.revision.len() != 64
+            || !value.revision.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err("STATE_RECORD_INVALID".into());
+        }
+        Config::parse(&toml::to_string(&value.intent).map_err(|_| "STATE_RECORD_INVALID")?)?;
+        Ok(Some(value))
+    }
+}
 pub fn private_dir(p: &Path) -> Result<(), String> {
     if p.symlink_metadata()
         .is_ok_and(|m| m.file_type().is_symlink())
@@ -90,6 +116,9 @@ fn sync_dir(p: &Path) -> Result<(), String> {
 }
 impl StateStore for Filesystem {
     fn current(&self) -> Result<Option<String>, String> {
+        if let Some(value) = self.last_valid()? {
+            return Ok(Some(value.revision));
+        }
         match fs::read_to_string(self.root.join("last-valid.revision")) {
             Ok(revision)
                 if revision.len() == 64 && revision.bytes().all(|b| b.is_ascii_hexdigit()) =>
@@ -102,6 +131,9 @@ impl StateStore for Filesystem {
         }
     }
     fn previous(&self) -> Result<Option<Config>, String> {
+        if let Some(value) = self.last_valid()? {
+            return Ok(Some(value.intent));
+        }
         match fs::read_to_string(self.root.join("last-valid.toml")) {
             Ok(s) => Ok(Some(Config::parse(&s)?)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -148,15 +180,17 @@ impl StateStore for Filesystem {
     fn promote(&self) -> Result<(), String> {
         let candidate = fs::read_to_string(self.root.join("candidate.toml"))
             .map_err(|_| "STATE_READ_FAILED")?;
-        let revision = Config::parse(&candidate)?.revision();
-        replace(
-            &self.root.join("candidate.toml"),
-            &self.root.join("last-valid.toml"),
-        )?;
-        sync_dir(&self.root)?;
+        let intent = Config::parse(&candidate)?;
+        let value = LastValid {
+            schema: 1,
+            revision: intent.revision(),
+            intent,
+        };
+        // Intent and release revision have one durable commit point. Never publish
+        // a new intent paired with an old revision after an interrupted rename.
         atomic_write(
-            &self.root.join("last-valid.revision"),
-            revision.as_bytes(),
+            &self.root.join("last-valid.json"),
+            &serde_json::to_vec(&value).map_err(|_| "STATE_RECORD_INVALID")?,
             0o600,
         )?;
         self.abort()

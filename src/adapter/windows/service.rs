@@ -36,11 +36,55 @@ fn serve() -> windows_service::Result<()> {
     };
     h.set_service_status(status(ServiceState::Running))?;
     std::thread::spawn(|| loop {
-        if super::runtime::bootstrap().is_err() || super::broker::serve_one().is_err() {
+        let bootstrap = super::runtime::bootstrap();
+        let broker = if bootstrap.is_ok() {
+            super::broker::serve_one()
+        } else {
+            Err(std::io::Error::other("bootstrap failed"))
+        };
+        let broker_ready = match broker.as_ref() {
+            Ok(()) => true,
+            Err(error) => error.kind() == std::io::ErrorKind::TimedOut,
+        };
+        let phase = serde_json::json!({
+            "schema": 1,
+            "bootstrap_code": bootstrap.as_ref().err(),
+            "broker_code": broker.as_ref().err().filter(|error| error.kind() != std::io::ErrorKind::TimedOut).map(|error| error.to_string()),
+            "ready": bootstrap.is_ok() && broker_ready
+        });
+        let path = std::path::Path::new(super::account::PRIVATE_ROOT).join("bootstrap-status.json");
+        let bytes = phase.to_string();
+        if std::fs::read(&path).ok().as_deref() != Some(bytes.as_bytes()) {
+            let _ = crate::adapter::filesystem::atomic_write(&path, bytes.as_bytes(), 0o600);
+        }
+        if bootstrap.is_err() || !broker_ready {
             std::thread::sleep(Duration::from_secs(1))
         }
     });
-    let _ = rx.recv();
+    let mut session: Option<std::process::Child> = None;
+    loop {
+        match rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        let root = std::path::Path::new(super::account::PRIVATE_ROOT);
+        if root.join("bundle.tar").exists() || !root.join("wsl/ext4.vhdx").exists() {
+            continue;
+        }
+        if session
+            .as_mut()
+            .is_some_and(|child| matches!(child.try_wait(), Ok(Some(_))))
+        {
+            session = None;
+        }
+        if session.is_none() {
+            session = super::runtime::keep_alive().ok();
+        }
+    }
+    if let Some(mut child) = session {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
     h.set_service_status(status(ServiceState::Stopped))?;
     Ok(())
 }
