@@ -28,6 +28,7 @@ pub fn execute(op: &str, c: &Config, h: &dyn Host, r: &dyn Runtime, s: &dyn Stat
     out.capabilities = r.observe();
     out.routes = r.optional_routes();
     out.public_root = r.public_root();
+    out.access_ip = r.access_ip();
     if op == "doctor" {
         return doctor::run(out, h);
     }

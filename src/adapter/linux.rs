@@ -679,6 +679,9 @@ impl Runtime for Linux {
         .ok()
         .filter(|s| s.starts_with("-----BEGIN CERTIFICATE-----") && s.len() < 16384)
     }
+    fn access_ip(&self) -> Option<String> {
+        self.identity().ok()
+    }
     fn optional_routes(&self) -> Vec<Capability> {
         self.config
             .routes

@@ -28,6 +28,8 @@ pub struct Report {
     pub secret_kind: Option<crate::domain::secret::SecretKind>,
     #[serde(default)]
     pub public_root: Option<String>,
+    #[serde(default)]
+    pub access_ip: Option<String>,
 }
 impl Report {
     pub fn new(op: &str, state: State, code: &str, action: Option<&str>) -> Self {
@@ -43,6 +45,7 @@ impl Report {
             routes: vec![],
             secret_kind: None,
             public_root: None,
+            access_ip: None,
         }
     }
     pub fn exit(&self) -> i32 {

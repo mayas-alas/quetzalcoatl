@@ -57,6 +57,7 @@ pub fn run_secret(
     out.capabilities = r.observe();
     out.routes = r.optional_routes();
     out.public_root = r.public_root();
+    out.access_ip = r.access_ip();
     match result {
         Ok(()) => {
             out.revision = Some(c.revision());

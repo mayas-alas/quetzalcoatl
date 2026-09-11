@@ -14,4 +14,7 @@ pub trait Runtime {
     fn public_root(&self) -> Option<String> {
         None
     }
+    fn access_ip(&self) -> Option<String> {
+        None
+    }
 }
