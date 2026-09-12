@@ -55,14 +55,19 @@ fn main() {
         let public = include_str!("../../packaging/release/trusted-release.pub").trim();
         let key_id = gnx::release_auth::verify(&manifest, &signature, public)
             .unwrap_or_else(|code| installer_failure(operation, &code));
-        let document: serde_json::Value = serde_json::from_slice(&manifest)
-            .unwrap_or_else(|_| installer_failure(operation, "MANIFEST_SCHEMA_INVALID"));
+        let document = validate_manifest_schema(&manifest)
+            .unwrap_or_else(|code| installer_failure(operation, code));
         if document
             .get("signing_key_id")
             .and_then(|value| value.as_str())
             != Some(&key_id)
         {
             installer_failure(operation, "RELEASE_SIGNER_UNTRUSTED");
+        }
+        if install || update || rollback {
+            let rootfs = install.then(|| std::path::Path::new(&args[3]));
+            validate_release_artifacts(&path, &document, rootfs)
+                .unwrap_or_else(|code| installer_failure(operation, code));
         }
         Some((path, key_id, digest))
     } else {
@@ -72,7 +77,7 @@ fn main() {
         let (_, key_id, manifest_sha256) = authenticated.unwrap();
         println!(
             "{}",
-            serde_json::json!({"schema":1,"operation":"verify-release","state":"READY","code":"RELEASE_AUTHENTIC","key_id":key_id,"manifest_sha256":manifest_sha256})
+            serde_json::json!({"schema":1,"operation":"verify-release","state":"READY","code":"RELEASE_AUTHENTIC","key_id":key_id,"manifest_sha256":manifest_sha256,"next_action":null})
         );
         return;
     }
@@ -122,10 +127,89 @@ fn main() {
 }
 
 #[cfg(windows)]
+fn validate_manifest_schema(bytes: &[u8]) -> Result<serde_json::Value, &'static str> {
+    let document: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|_| "MANIFEST_SCHEMA_INVALID")?;
+    let valid = document.get("schema").and_then(|v| v.as_u64()) == Some(1)
+        && document
+            .get("version")
+            .and_then(|v| v.as_str())
+            .is_some_and(|v| !v.is_empty())
+        && document
+            .get("release_serial")
+            .and_then(|v| v.as_u64())
+            .is_some_and(|v| v > 0)
+        && document
+            .get("signing_key_id")
+            .and_then(|v| v.as_str())
+            .is_some_and(valid_digest)
+        && document.get("artifacts").is_some_and(|v| v.is_object())
+        && document.get("rootfs").is_some_and(|v| v.is_object());
+    valid.then_some(document).ok_or("MANIFEST_SCHEMA_INVALID")
+}
+
+#[cfg(windows)]
+fn validate_release_artifacts(
+    bundle: &std::path::Path,
+    document: &serde_json::Value,
+    rootfs: Option<&std::path::Path>,
+) -> Result<(), &'static str> {
+    use sha2::{Digest, Sha256};
+    for name in [
+        "gnx.exe",
+        "gnx-service.exe",
+        "gnx-install.exe",
+        "gnx-linux-bundle.tar",
+    ] {
+        let expected = document
+            .get("artifacts")
+            .and_then(|v| v.get(name))
+            .and_then(|v| v.as_str())
+            .filter(|v| valid_digest(v))
+            .ok_or("MANIFEST_SCHEMA_INVALID")?;
+        let bytes = std::fs::read(bundle.join(name)).map_err(|_| "ARTIFACT_MISMATCH")?;
+        if !expected.eq_ignore_ascii_case(&hex::encode(Sha256::digest(bytes))) {
+            return Err("ARTIFACT_MISMATCH");
+        }
+    }
+    if let Some(rootfs) = rootfs {
+        let expected = document
+            .get("rootfs")
+            .and_then(|v| v.get("sha256"))
+            .and_then(|v| v.as_str())
+            .filter(|v| valid_digest(v))
+            .ok_or("MANIFEST_SCHEMA_INVALID")?;
+        let bytes = std::fs::read(rootfs).map_err(|_| "ROOTFS_MISMATCH")?;
+        if !expected.eq_ignore_ascii_case(&hex::encode(Sha256::digest(bytes))) {
+            return Err("ROOTFS_MISMATCH");
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+#[cfg(windows)]
 fn installer_failure(operation: &str, code: &str) -> ! {
+    let next_action = match code {
+        "MANIFEST_AUTHENTICATION_FAILED"
+        | "RELEASE_SIGNATURE_INVALID"
+        | "RELEASE_SIGNATURE_MISSING"
+        | "RELEASE_SIGNER_UNTRUSTED" => {
+            "Obtain the manifest and digest from the authenticated GNX release."
+        }
+        "MANIFEST_SCHEMA_INVALID" => "Use a supported GNX release manifest.",
+        "ARTIFACT_MISMATCH" | "ROOTFS_MISMATCH" => {
+            "Replace the release bundle with an exact authenticated copy."
+        }
+        _ => "Inspect the GNX release bundle and retry.",
+    };
     println!(
         "{}",
-        serde_json::json!({"schema":1,"operation":operation,"state":"FAILED","code":code})
+        serde_json::json!({"schema":1,"operation":operation,"state":"FAILED","code":code,"next_action":next_action})
     );
     std::process::exit(1)
 }

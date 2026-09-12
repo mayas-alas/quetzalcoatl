@@ -1,6 +1,6 @@
 # GNX release contract
 
-The current candidate is **0.3.2-rc.2**. See [release-validation.md](release-validation.md)
+The current candidate is **0.3.2-rc.3**. See [release-validation.md](release-validation.md)
 for executed checks and the explicit acceptance decision. The earlier
 documentation-only baseline has been superseded by the Rust implementation.
 

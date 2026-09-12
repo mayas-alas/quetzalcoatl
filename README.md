@@ -1,4 +1,4 @@
-# GNX 0.3.2-rc.2
+# GNX 0.3.2-rc.3
 
 **Private infrastructure behind one small, verifiable command contract.**
 

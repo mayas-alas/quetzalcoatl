@@ -1,10 +1,10 @@
 [package]
 name = "gnx"
-version = "0.3.2-rc.2"
+version = "0.3.2-rc.3"
 edition = "2021"
 default-run = "gnx"
 [package.metadata.gnx]
-release_serial = 30202
+release_serial = 30203
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

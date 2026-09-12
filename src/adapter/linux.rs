@@ -244,6 +244,24 @@ impl Linux {
         }
         Err("COMPUTE_START_TIMEOUT".into())
     }
+
+    fn prepare_secrets(&self, secret: Option<&Secret>) -> Result<(), String> {
+        let password = self.root.join("compute/password");
+        if !password.exists() {
+            let supplied = secret
+                .filter(|value| value.kind == SecretKind::ComputePassword)
+                .ok_or("COMPUTE_PASSWORD_REQUIRED")?;
+            private_dir(&self.root)?;
+            private_dir(&self.root.join("compute"))?;
+            atomic_write(&password, &supplied.value, 0o600)?;
+        }
+        if !self.root.join("access/tailscaled.state").exists()
+            && !secret.is_some_and(|value| value.kind == SecretKind::AccessEnrollment)
+        {
+            return Err("ACCESS_ENROLLMENT_REQUIRED".into());
+        }
+        Ok(())
+    }
     fn curl(
         &self,
         url: &str,
@@ -666,6 +684,9 @@ impl Runtime for Linux {
     }
     fn reconcile_secret(&self, _: &Config, secret: Option<&Secret>) -> Result<(), String> {
         let release = PinnedRelease::embedded()?;
+        // Complete the typed secret handshake before downloading images or
+        // creating networks, units and persistent service storage.
+        self.prepare_secrets(secret)?;
         self.ensure_images(&release)?;
         self.ensure_network()?;
         self.compute_start(&release, secret)?;

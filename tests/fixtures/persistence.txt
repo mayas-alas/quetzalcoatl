@@ -1,1 +1,1 @@
-GNX 0.3.2-rc.2 storage persistence witness. This file contains no secrets.
+GNX 0.3.2-rc.3 storage persistence witness. This file contains no secrets.

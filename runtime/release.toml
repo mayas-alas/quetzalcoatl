@@ -1,6 +1,6 @@
 schema = 1
 # rc.2 adds app.gnx, GNX Local Auth, and dependency recovery after Access failure.
-version = "0.3.2-rc.2"
+version = "0.3.2-rc.3"
 platform = "linux-amd64"
 access = "docker.io/tailscale/tailscale@sha256:51fec4863144d6ba0a22504cfb455d020ee0307d0c04eb48f5afee63390bdba0"
 dns = "docker.io/coredns/coredns@sha256:986f04c2e15e147d00bdd51e8c51bcef3644b13ff806be7d2ff1b261d6dfbae1"

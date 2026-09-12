@@ -46,3 +46,11 @@ fn unknown_arguments_refused() {
     assert_eq!(r.code, "INVALID_ARGUMENT");
     assert!(!String::from_utf8(o.stdout).unwrap().contains("canary"));
 }
+
+#[test]
+fn normal_cli_never_reads_secrets_from_environment() {
+    let main = include_str!("../src/main.rs");
+    assert!(!main.contains("std::env::var"));
+    assert!(!main.contains("TAILSCALE_AUTHKEY"));
+    assert!(!main.contains("GNX_COMPUTE_PASSWORD"));
+}

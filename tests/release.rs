@@ -44,9 +44,23 @@ fn windows_release_build_requires_a_pinned_signing_authority() {
     assert!(installer.contains("release_auth::verify"));
     assert!(installer.contains("trusted-release.pub"));
     assert!(installer.contains("RELEASE_AUTHENTIC"));
+    assert!(installer.contains("validate_release_artifacts"));
+    assert!(installer.contains("ARTIFACT_MISMATCH"));
+    assert!(installer.contains("MANIFEST_SCHEMA_INVALID"));
+    assert!(installer.contains("next_action"));
     assert!(build.contains("Pinned installer rejected the signed release"));
     assert!(build.contains("$rootfsTarget"));
     assert!(build.contains("LastWriteTimeUtc=$epoch"));
+}
+
+#[test]
+fn release_negative_matrix_is_executable_and_sanitized() {
+    let verifier = include_str!("verify_release.ps1");
+    assert!(verifier.contains("G0_RELEASE_MATRIX_PASSED"));
+    assert!(verifier.contains("corrupt_artifact"));
+    assert!(verifier.contains("unsupported_schema"));
+    assert!(verifier.contains("MISSING_NEXT_ACTION"));
+    assert!(!verifier.contains("Get-Content Env:"));
 }
 
 #[test]
@@ -137,4 +151,12 @@ fn linux_runtime_revision_binds_intent_to_the_embedded_release() {
     let revision = linux.revision(&config);
     assert_eq!(revision.len(), 64);
     assert_ne!(revision, config.revision());
+}
+
+#[test]
+fn linux_negotiates_secrets_before_runtime_mutation() {
+    let linux = include_str!("../src/adapter/linux.rs");
+    let prepare = linux.find("self.prepare_secrets(secret)?").unwrap();
+    assert!(prepare < linux.find("self.ensure_images(&release)?").unwrap());
+    assert!(prepare < linux.find("self.ensure_network()?").unwrap());
 }

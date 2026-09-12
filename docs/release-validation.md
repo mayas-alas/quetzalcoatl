@@ -1,4 +1,4 @@
-# 0.3.2-rc.2 verification — 2026-09-11
+# 0.3.2-rc.3 verification — 2026-09-11
 
 Decision: **not accepted as a complete G0-G6 Windows installation**. This is a
 functional private-network release candidate; the boundaries below are material.
@@ -102,23 +102,23 @@ outside the repository; only its public key and key identity are versioned.
 
 The signed Windows pipeline completed after the lifecycle changes. The current
 manifest SHA-256 is
-`81e7be7e6ca78f80ef1ca5a379b850eb1c0f3d59e5cd3be1102279bbee8c4864`,
+`117ffb844df76818778ec13e5d0f4dfd3ca65c7f83fdd981ea1ca682ff993f46`,
 the signing key identity is
 `7720127012478b755554071a15ba57b4874cb99152be37c1fa11620a5f649a63`,
 and the complete ZIP SHA-256 is
-`b12bdb57c41ff32bc34242fe9d9f9139ce38cbb4422a5fd3873f3add1605423d`.
+`6a0455661839100ed88cb301d74e2f9061590b4b3e855413b719229c9f5b4c29`.
 The ZIP includes the pinned rootfs. `gnx-install.exe verify`
 returned `READY/RELEASE_AUTHENTIC`, while an incorrect manifest digest returned
 `FAILED/MANIFEST_AUTHENTICATION_FAILED`. These are build and G0-negative-path
 artifacts, not live clean-host installation or Linux execution evidence.
 
-The signed manifest now carries monotonic `release_serial=30202`. The durable
+The signed manifest now carries monotonic `release_serial=30203`. The durable
 last-valid revision binds both strict operator intent and the embedded immutable
 release definition. An executable acceptance test proves that changing the
 authenticated release forces reconciliation even when GNX intent is unchanged;
 the state store promotes the combined revision atomically with the intent.
 
-The worktree now contains the corresponding two-phase Windows update and
+The source now contains the corresponding two-phase Windows update and
 explicit rollback implementation. It validates signed serial direction, backs
 up Windows binaries, stages the Linux bundle through the service-owned WSL
 identity, runs Linux `apply` plus `status`, verifies the Windows broker, and
@@ -129,3 +129,32 @@ evidence only; it has not yet been executed against an isolated installed node.
 Public artifacts have SHA-256 identities in `manifest.json`. Obtain its digest
 through the authenticated GitHub release channel before installation. The
 executables do not claim Authenticode signing.
+
+## Isolated rc.3 preflight and G0 release negatives
+
+The current candidate is **not accepted**. The rc.3 ZIP and signed manifest
+above were built locally from the current source; they have not been published
+as a GitHub release. The reproducible `tests/verify_release.ps1` invocation
+against that ZIP, with the external signing key only for a disposable invalid
+schema case, returned `G0_RELEASE_MATRIX_PASSED`: authentic manifest exit 0,
+incorrect digest, altered signature, corrupted executable and authenticated
+unsupported schema each exit 1 with distinct JSON codes and corrective
+`next_action`. Corrupted executable rejection occurs before elevation. This is
+only the release-integrity subset of G0; host-prerequisite failures, clean-host
+installation and partial-install assertions are still outstanding.
+
+An explicitly isolated WSL2 distribution `GNXAcceptance-rc3` was imported from
+the pinned Ubuntu 24.04.5 rootfs into the ignored `.acceptance` directory. It
+booted systemd and Podman with automount disabled. The installed GNX Linux ELF
+had SHA-256
+`d941c33da2ca77b981d366ece62a5feb7485525a527e32463fdfab27ae3451d8`.
+After resetting only this lab's uninitialized GNX state, two `plan` calls
+returned identical `READY/PLAN_OBSERVED`, exit 0, and created no node-state
+directory. An `apply` with a canary `GNX_COMPUTE_PASSWORD` environment variable
+returned `ACTION_REQUIRED/COMPUTE_PASSWORD_REQUIRED`, exit 2, and created only
+`/var/lib/gnx/gnx/apply.lock`; no candidate, volume directories or last-valid
+revision appeared. The lab had images cached from an earlier local attempt, so
+these observations do not establish image immutability. The CLI no longer reads
+environment secrets and negotiates a typed secret before image/network/volume
+mutation. No enrollment key or password was supplied; Compute/Access/Control,
+remote clients, Windows clean install/update/rollback and G0-G6 remain unproved.
