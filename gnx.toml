@@ -1,6 +1,0 @@
-schema = 1
-instance = "gnx"
-node = "compute"
-
-[network]
-subnet = "10.90.0.0/24"
