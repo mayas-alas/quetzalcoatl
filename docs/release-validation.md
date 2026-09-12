@@ -79,6 +79,53 @@ No password-export or password-rotation command is claimed in this candidate.
 - Complete failure matrix, broker DACL/parity tests and G0-G6 evidence required
   by `poc.md`. A successful build or a running Windows service is insufficient.
 
+## Local lifecycle implementation evidence
+
+The current worktree adds a receipt-gated destructive uninstall path for future
+clean instances. It requires the literal `REMOVE-GNX-AND-DATA` confirmation,
+verifies the fixed service/account/install roots, and asks `GNXRuntime` to
+unregister only its own WSL `GNX` distribution before removing Windows state.
+The ownership receipt and request live in the administrator-owned install root,
+where the service account has read-only access.
+
+`cargo test --locked --all-targets`, strict Clippy, release binary compilation,
+PowerShell parser validation, and invalid-token exit checks pass locally. The
+uninstall was deliberately not run against the existing deployment. Clean-host
+install/uninstall/reinstall evidence remains outstanding and this section does
+not change the acceptance decision above.
+
+The worktree also replaces unsigned-manifest acceptance with a detached Ed25519
+signature verified inside `gnx-install.exe` against its pinned release public
+key. Unit and CLI tests reject modified manifests, malformed signatures and a
+signature from a different key. The private PoC authority seed is protected
+outside the repository; only its public key and key identity are versioned.
+
+The signed Windows pipeline completed after the lifecycle changes. The current
+manifest SHA-256 is
+`81e7be7e6ca78f80ef1ca5a379b850eb1c0f3d59e5cd3be1102279bbee8c4864`,
+the signing key identity is
+`7720127012478b755554071a15ba57b4874cb99152be37c1fa11620a5f649a63`,
+and the complete ZIP SHA-256 is
+`b12bdb57c41ff32bc34242fe9d9f9139ce38cbb4422a5fd3873f3add1605423d`.
+The ZIP includes the pinned rootfs. `gnx-install.exe verify`
+returned `READY/RELEASE_AUTHENTIC`, while an incorrect manifest digest returned
+`FAILED/MANIFEST_AUTHENTICATION_FAILED`. These are build and G0-negative-path
+artifacts, not live clean-host installation or Linux execution evidence.
+
+The signed manifest now carries monotonic `release_serial=30202`. The durable
+last-valid revision binds both strict operator intent and the embedded immutable
+release definition. An executable acceptance test proves that changing the
+authenticated release forces reconciliation even when GNX intent is unchanged;
+the state store promotes the combined revision atomically with the intent.
+
+The worktree now contains the corresponding two-phase Windows update and
+explicit rollback implementation. It validates signed serial direction, backs
+up Windows binaries, stages the Linux bundle through the service-owned WSL
+identity, runs Linux `apply` plus `status`, verifies the Windows broker, and
+commits the receipt only after both boundaries pass. Pre-commit failures invoke
+Linux and Windows rollback. This path has compile, parser and contract-test
+evidence only; it has not yet been executed against an isolated installed node.
+
 Public artifacts have SHA-256 identities in `manifest.json`. Obtain its digest
 through the authenticated GitHub release channel before installation. The
 executables do not claim Authenticode signing.

@@ -12,7 +12,7 @@ pub trait StateStore {
     fn interrupted(&self) -> Result<bool, String> {
         Ok(false)
     }
-    fn stage(&self, config: &Config) -> Result<(), String>;
+    fn stage(&self, config: &Config, revision: &str) -> Result<(), String>;
     fn phase(&self, _phase: &str) -> Result<(), String> {
         Ok(())
     }

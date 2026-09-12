@@ -1,8 +1,9 @@
 use gnx::{
     adapter::{filesystem::Filesystem, release::PinnedRelease},
     config::Config,
-    port::state::StateStore,
+    port::{runtime::Runtime, state::StateStore},
 };
+use std::process::Command;
 
 #[test]
 fn release_and_public_names_are_consistent() {
@@ -31,6 +32,93 @@ fn windows_installer_publishes_the_cli_outside_the_service_runtime() {
 }
 
 #[test]
+fn windows_release_build_requires_a_pinned_signing_authority() {
+    let build = include_str!("../packaging/windows/build.ps1");
+    let setup = include_str!("../packaging/windows/setup.ps1");
+    let installer = include_str!("../src/bin/gnx-install.rs");
+    assert!(build.contains("[Parameter(Mandatory)][string]$SigningKey"));
+    assert!(build.contains("manifest.json.sig"));
+    assert!(build.contains("release_serial=$releaseSerial"));
+    assert!(build.contains("keyInfo.public_key -cne $trusted"));
+    assert!(setup.contains("$manifest.signing_key_id"));
+    assert!(installer.contains("release_auth::verify"));
+    assert!(installer.contains("trusted-release.pub"));
+    assert!(installer.contains("RELEASE_AUTHENTIC"));
+    assert!(build.contains("Pinned installer rejected the signed release"));
+    assert!(build.contains("$rootfsTarget"));
+    assert!(build.contains("LastWriteTimeUtc=$epoch"));
+}
+
+#[test]
+fn release_signer_cli_produces_a_strictly_verifiable_detached_signature() {
+    const TEST_SECRET: &str = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
+    const TEST_PUBLIC: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+    let root = std::env::temp_dir().join(format!("gnx-sign-test-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let key = root.join("test.seed");
+    let manifest = root.join("manifest.json");
+    let signature = root.join("manifest.json.sig");
+    std::fs::write(&key, TEST_SECRET).unwrap();
+    std::fs::write(&manifest, br#"{"schema":1,"version":"test"}"#).unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_gnx-sign"))
+        .args([
+            "sign",
+            "--private-key",
+            key.to_str().unwrap(),
+            "--manifest",
+            manifest.to_str().unwrap(),
+            "--output",
+            signature.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let signed = std::fs::read(&signature).unwrap();
+    assert!(
+        gnx::release_auth::verify(&std::fs::read(&manifest).unwrap(), &signed, TEST_PUBLIC).is_ok()
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn windows_uninstall_requires_receipt_confirmation_and_owned_targets() {
+    let uninstall = include_str!("../packaging/windows/uninstall.ps1");
+    assert!(uninstall.contains("REMOVE-GNX-AND-DATA"));
+    assert!(uninstall.contains("install-receipt.json"));
+    assert!(uninstall.contains("$installRoot/uninstall.request"));
+    assert!(uninstall.contains("SERVICE_OWNERSHIP_MISMATCH"));
+    assert!(uninstall.contains("WSL_UNREGISTERED"));
+    assert!(uninstall.contains("Remove-LocalUser gnx-runtime"));
+    assert!(!uninstall.contains("Ubuntu-24.04"));
+}
+
+#[test]
+fn windows_release_update_is_two_phase_and_rolls_both_boundaries_back() {
+    let update = include_str!("../packaging/windows/update.ps1");
+    let runtime = include_str!("../src/adapter/windows/runtime.rs");
+    assert!(update.contains("RELEASE_NOT_NEWER"));
+    assert!(update.contains("RELEASE_NOT_OLDER"));
+    assert!(update.contains("release-previous"));
+    assert!(update.contains("GNX-RELEASE-COMMIT-1"));
+    assert!(update.contains("GNX-RELEASE-ROLLBACK-1"));
+    assert!(update.contains("RELEASE_ROLLBACK_FAILED"));
+    assert!(runtime.contains("AWAITING_COMMIT"));
+    assert!(runtime.contains("RELEASE_CANDIDATE_READY"));
+    assert!(runtime.contains("/usr/local/bin/gnx apply --config"));
+    assert!(runtime.contains("/usr/local/bin/gnx status --config"));
+    assert!(!update.contains("Ubuntu-24.04"));
+}
+
+#[test]
+fn windows_service_unregisters_only_the_fixed_product_distro() {
+    let service = include_str!("../src/adapter/windows/service.rs");
+    let runtime = include_str!("../src/adapter/windows/runtime.rs");
+    assert!(service.contains("GNX-UNINSTALL-1"));
+    assert!(runtime.contains("[\"--unregister\", \"GNX\"]"));
+    assert!(!runtime.contains("--unregister\", \"Ubuntu-24.04"));
+}
+
+#[test]
 fn persisted_revision_does_not_change_with_the_running_release() {
     let root = std::env::temp_dir().join(format!("gnx-release-test-{}", std::process::id()));
     let store = Filesystem { root: root.clone() };
@@ -40,4 +128,13 @@ fn persisted_revision_does_not_change_with_the_running_release() {
     assert_eq!(store.current().unwrap(), Some(old_release_revision));
     drop(guard);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn linux_runtime_revision_binds_intent_to_the_embedded_release() {
+    let config = Config::parse(include_str!("../gnx.toml")).unwrap();
+    let linux = gnx::adapter::linux::Linux::new(config.clone());
+    let revision = linux.revision(&config);
+    assert_eq!(revision.len(), 64);
+    assert_ne!(revision, config.revision());
 }

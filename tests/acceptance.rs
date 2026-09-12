@@ -34,7 +34,7 @@ impl StateStore for Fake {
     fn current(&self) -> Result<Option<String>, String> {
         Ok(Some("previous".into()))
     }
-    fn stage(&self, _: &Config) -> Result<(), String> {
+    fn stage(&self, _: &Config, _: &str) -> Result<(), String> {
         self.events.borrow_mut().push("stage");
         Ok(())
     }
@@ -53,6 +53,74 @@ fn plan_does_not_mutate() {
     app::execute("plan", &c, &f, &f, &f);
     app::execute("plan", &c, &f, &f, &f);
     assert!(f.events.borrow().is_empty());
+}
+
+struct ReleaseChange {
+    desired: String,
+    reconciled: RefCell<bool>,
+}
+impl Host for ReleaseChange {
+    fn prerequisites(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+impl Runtime for ReleaseChange {
+    fn revision(&self, _: &Config) -> String {
+        self.desired.clone()
+    }
+    fn observe(&self) -> Vec<Capability> {
+        ["access", "control", "compute"]
+            .iter()
+            .map(|name| Capability {
+                name: (*name).into(),
+                healthy: true,
+                code: "OK".into(),
+            })
+            .collect()
+    }
+    fn reconcile(&self, _: &Config) -> Result<(), String> {
+        self.reconciled.replace(true);
+        Ok(())
+    }
+}
+struct ReleaseState {
+    current: String,
+    staged: RefCell<Option<String>>,
+}
+impl StateStore for ReleaseState {
+    fn current(&self) -> Result<Option<String>, String> {
+        Ok(Some(self.current.clone()))
+    }
+    fn stage(&self, _: &Config, revision: &str) -> Result<(), String> {
+        self.staged.replace(Some(revision.into()));
+        Ok(())
+    }
+    fn promote(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+#[test]
+fn authenticated_release_change_forces_reconciliation_with_unchanged_intent() {
+    let config = Config::parse(include_str!("../gnx.toml")).unwrap();
+    let desired = "a".repeat(64);
+    let runtime = ReleaseChange {
+        desired: desired.clone(),
+        reconciled: RefCell::new(false),
+    };
+    let state = ReleaseState {
+        current: config.revision(),
+        staged: RefCell::new(None),
+    };
+    let report = app::apply::run(
+        gnx::report::Report::new("apply", gnx::report::State::ActionRequired, "TEST", None),
+        &config,
+        &runtime,
+        &runtime,
+        &state,
+    );
+    assert_eq!(report.revision, Some(desired.clone()));
+    assert_eq!(*state.staged.borrow(), Some(desired));
+    assert!(*runtime.reconciled.borrow());
 }
 #[test]
 fn unhealthy_candidate_preserves_last_valid() {

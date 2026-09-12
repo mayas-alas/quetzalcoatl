@@ -85,6 +85,27 @@ fn serve() -> windows_service::Result<()> {
         let _ = child.kill();
         let _ = child.wait();
     }
+    let root = std::path::Path::new(super::account::PRIVATE_ROOT);
+    // The service account can read but cannot write the administrator-owned
+    // install root. A compromised runtime therefore cannot arm its own removal.
+    let request = std::path::Path::new("C:\\Program Files\\GNX\\uninstall.request");
+    let uninstall_requested = std::fs::read_to_string(request)
+        .ok()
+        .is_some_and(|value| value.trim_end_matches(&['\r', '\n'][..]) == "GNX-UNINSTALL-1");
+    if uninstall_requested {
+        let (state, code): (&str, String) = match super::runtime::unregister_for_uninstall() {
+            Ok(()) => ("READY", "WSL_UNREGISTERED".into()),
+            Err(code) => ("FAILED", code),
+        };
+        let result =
+            serde_json::json!({"schema":1,"operation":"uninstall","state":state,"code":code});
+        let _ = crate::adapter::filesystem::atomic_write(
+            &root.join("uninstall-result.json"),
+            result.to_string().as_bytes(),
+            0o600,
+        );
+        let _ = std::fs::remove_file(request);
+    }
     h.set_service_status(status(ServiceState::Stopped))?;
     Ok(())
 }

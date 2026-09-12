@@ -18,19 +18,20 @@ fn transaction_lock_and_atomic_promotion() {
     let c = Config::parse(include_str!("../gnx.toml")).unwrap();
     let guard = store.acquire().unwrap();
     assert!(store.acquire().is_err());
-    store.stage(&c).unwrap();
+    let revision = "1".repeat(64);
+    store.stage(&c, &revision).unwrap();
     assert!(store.interrupted().unwrap());
     assert_eq!(store.current().unwrap(), None);
     store.promote().unwrap();
-    assert_eq!(store.current().unwrap(), Some(c.revision()));
+    assert_eq!(store.current().unwrap(), Some(revision.clone()));
     assert_eq!(store.previous().unwrap(), Some(c.clone()));
     // A staged next candidate cannot change either part of the committed record.
     assert!(!store.interrupted().unwrap());
     let mut next = c.clone();
     next.node = "next".into();
-    store.stage(&next).unwrap();
+    store.stage(&next, &"2".repeat(64)).unwrap();
     store.abort().unwrap();
-    assert_eq!(store.current().unwrap(), Some(c.revision()));
+    assert_eq!(store.current().unwrap(), Some(revision));
     assert_eq!(store.previous().unwrap(), Some(c));
     drop(guard);
     assert!(store.acquire().is_ok());
@@ -44,14 +45,17 @@ fn state_directory_and_files_are_private() {
     let store = Filesystem { root: root.clone() };
     let guard = store.acquire().unwrap();
     store
-        .stage(&Config::parse(include_str!("../gnx.toml")).unwrap())
+        .stage(
+            &Config::parse(include_str!("../gnx.toml")).unwrap(),
+            &"1".repeat(64),
+        )
         .unwrap();
     assert_eq!(
         std::fs::metadata(&root).unwrap().permissions().mode() & 0o777,
         0o700
     );
     assert_eq!(
-        std::fs::metadata(root.join("candidate.toml"))
+        std::fs::metadata(root.join("candidate.json"))
             .unwrap()
             .permissions()
             .mode()

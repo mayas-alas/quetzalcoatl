@@ -29,11 +29,12 @@ pub fn execute(op: &str, c: &Config, h: &dyn Host, r: &dyn Runtime, s: &dyn Stat
     out.routes = r.optional_routes();
     out.public_root = r.public_root();
     out.access_ip = r.access_ip();
+    let desired_revision = r.revision(c);
     if op == "doctor" {
         return doctor::run(out, h);
     }
     if op == "plan" {
-        return plan::run(out, c);
+        return plan::run(out, &desired_revision);
     }
     if op == "apply" {
         return apply::run(out, c, h, r, s);

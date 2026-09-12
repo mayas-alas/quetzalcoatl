@@ -33,7 +33,7 @@ Quadlet, Windows broker/service, and an installer executable. See
 and acceptance gaps. This is a release candidate, not a claim that G0-G6 passed.
 
 Windows artifacts: `gnx-install.exe`, `gnx.exe`, `gnx-service.exe`, the matching
-Linux bundle, and a clean WSL rootfs pinned by `manifest.json`.
+Linux bundle, and a clean WSL rootfs pinned by a signed `manifest.json`.
 Run the installer elevated, using the manifest digest published with the release:
 
 ```powershell
@@ -43,6 +43,28 @@ Run the installer elevated, using the manifest digest published with the release
 The installer creates the dedicated account and rights, verifies artifacts before
 execution, and checks the broker after bootstrap. Existing services/accounts are
 refused to preserve them; automatic in-place migration is not yet accepted.
+New installations also write a non-secret ownership receipt. A destructive clean
+uninstall refuses installations without that receipt and requires an exact token:
+
+```powershell
+./gnx-install.exe uninstall --confirm REMOVE-GNX-AND-DATA
+```
+
+This removes only the receipt-matched `GNXRuntime`, `.\gnx-runtime`, WSL `GNX`
+and GNX-owned roots. It permanently deletes Compute data and private identity;
+export sanitized evidence first. It never targets an Ubuntu build or legacy distro.
+
+Signed releases with a greater monotonic serial use the two-phase update path;
+an explicit rollback accepts only an older signed serial:
+
+```powershell
+./gnx-install.exe update --manifest-sha256 <published-hash>
+./gnx-install.exe rollback --manifest-sha256 <published-hash> --confirm ROLLBACK-GNX
+```
+
+Both paths preserve the installed receipt until Linux apply/status and the
+Windows broker pass. A rejected candidate restores the previous Linux runtime
+and Windows binaries.
 Linux installation uses `sudo sh gnx-linux.run`, followed by `gnx doctor` and
 `gnx apply`. Compute is exposed only as `compute.gnx`.
 

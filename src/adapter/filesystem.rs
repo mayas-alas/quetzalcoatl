@@ -17,6 +17,13 @@ struct LastValid {
     intent: Config,
     revision: String,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Candidate {
+    schema: u32,
+    intent: Config,
+    revision: String,
+}
 impl Filesystem {
     fn last_valid(&self) -> Result<Option<LastValid>, String> {
         let bytes = match fs::read(self.root.join("last-valid.json")) {
@@ -158,12 +165,18 @@ impl StateStore for Filesystem {
     fn interrupted(&self) -> Result<bool, String> {
         Ok(self.root.join("transaction.json").exists())
     }
-    fn stage(&self, c: &Config) -> Result<(), String> {
+    fn stage(&self, c: &Config, revision: &str) -> Result<(), String> {
+        if revision.len() != 64 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err("STATE_REVISION_INVALID".into());
+        }
         atomic_write(
-            &self.root.join("candidate.toml"),
-            toml::to_string(c)
-                .map_err(|_| "CONFIG_ENCODE_FAILED")?
-                .as_bytes(),
+            &self.root.join("candidate.json"),
+            &serde_json::to_vec(&Candidate {
+                schema: 1,
+                intent: c.clone(),
+                revision: revision.into(),
+            })
+            .map_err(|_| "CONFIG_ENCODE_FAILED")?,
             0o600,
         )?;
         self.phase("staged")
@@ -178,13 +191,24 @@ impl StateStore for Filesystem {
         )
     }
     fn promote(&self) -> Result<(), String> {
-        let candidate = fs::read_to_string(self.root.join("candidate.toml"))
-            .map_err(|_| "STATE_READ_FAILED")?;
-        let intent = Config::parse(&candidate)?;
+        let candidate =
+            fs::read(self.root.join("candidate.json")).map_err(|_| "STATE_READ_FAILED")?;
+        let candidate: Candidate =
+            serde_json::from_slice(&candidate).map_err(|_| "STATE_RECORD_INVALID")?;
+        if candidate.schema != 1
+            || candidate.revision.len() != 64
+            || !candidate
+                .revision
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err("STATE_RECORD_INVALID".into());
+        }
+        Config::parse(&toml::to_string(&candidate.intent).map_err(|_| "STATE_RECORD_INVALID")?)?;
         let value = LastValid {
             schema: 1,
-            revision: intent.revision(),
-            intent,
+            revision: candidate.revision,
+            intent: candidate.intent,
         };
         // Intent and release revision have one durable commit point. Never publish
         // a new intent paired with an old revision after an interrupted rename.
@@ -196,7 +220,7 @@ impl StateStore for Filesystem {
         self.abort()
     }
     fn abort(&self) -> Result<(), String> {
-        for name in ["candidate.toml", "transaction.json"] {
+        for name in ["candidate.json", "candidate.toml", "transaction.json"] {
             match fs::remove_file(self.root.join(name)) {
                 Ok(()) => (),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),

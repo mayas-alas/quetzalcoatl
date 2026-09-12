@@ -6,7 +6,7 @@ try {
  $manifestHash=$env:GNX_INSTALL_MANIFEST
  if ($manifestHash -notmatch '^[a-fA-F0-9]{64}$' -or (Get-FileHash "$bundle/manifest.json").Hash -ne $manifestHash){throw 'MANIFEST_AUTHENTICATION_FAILED'}
  $manifest=Get-Content "$bundle/manifest.json" -Raw | ConvertFrom-Json
- if ($manifest.schema -ne 1){throw 'MANIFEST_SCHEMA_INVALID'}
+ if ($manifest.schema -ne 1 -or $manifest.release_serial -lt 1 -or $manifest.signing_key_id -notmatch '^[a-f0-9]{64}$'){throw 'MANIFEST_SCHEMA_INVALID'}
  foreach($name in @('gnx.exe','gnx-service.exe','gnx-install.exe','gnx-linux-bundle.tar')) {
   $hash=$manifest.artifacts.$name
   if ($hash -notmatch '^[a-fA-F0-9]{64}$' -or (Get-FileHash "$bundle/$name").Hash -ne $hash){throw "ARTIFACT_MISMATCH: $name"}
@@ -55,6 +55,7 @@ try {
   if ($report.code -notin @('BROKER_UNAVAILABLE','WSL_RUNTIME_UNAVAILABLE')){break}
  } while ([DateTime]::UtcNow -lt $deadline)
  if ($report.code -in @('BROKER_UNAVAILABLE','WSL_RUNTIME_UNAVAILABLE')){throw 'BOOTSTRAP_NOT_READY: preserve ProgramData/GNX and inspect the service.'}
+ @{schema=1;version=$manifest.version;release_serial=$manifest.release_serial;manifest_sha256=$manifestHash.ToLowerInvariant();service='GNXRuntime';account='.\gnx-runtime';distro='GNX';install_root=$installRoot;data_root=$data} | ConvertTo-Json -Compress | Set-Content -LiteralPath "$installRoot/install-receipt.json" -Encoding ascii
  Remove-Item -LiteralPath $pending
  $report | ConvertTo-Json -Depth 8
  exit $(if($report.state -eq 'READY'){0}else{2})

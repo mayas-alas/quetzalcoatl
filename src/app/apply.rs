@@ -27,13 +27,14 @@ pub fn run_secret(
         // Observe again under the lock to prevent a stale decision across concurrent apply.
         let current = s.current()?;
         let caps = r.observe();
-        if current.as_deref() == Some(&c.revision())
+        let desired_revision = r.revision(c);
+        if current.as_deref() == Some(&desired_revision)
             && caps.len() == 3
             && caps.iter().all(|x| x.healthy)
         {
             return Ok(());
         }
-        s.stage(c)?;
+        s.stage(c, &desired_revision)?;
         s.phase("reconciling")?;
         mutated = true;
         let candidate = (|| {
@@ -60,7 +61,7 @@ pub fn run_secret(
     out.access_ip = r.access_ip();
     match result {
         Ok(()) => {
-            out.revision = Some(c.revision());
+            out.revision = Some(r.revision(c));
             super::status::run(out)
         }
         Err(e) => {
