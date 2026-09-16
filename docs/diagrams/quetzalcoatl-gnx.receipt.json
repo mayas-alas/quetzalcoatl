@@ -1,0 +1,15 @@
+{
+  "diagram_type": "architecture",
+  "output": "C:/Users/mayas/Quetzalcoat/dist/diagrams/quetzalcoatl-gnx.html",
+  "source_revision": "75d866d1069d90d37e5a57e26cf5089a85de3749",
+  "specification_sha256": "67b0c764a62a4f91c016703dcc856caf68742f975b88393c8f3cb2108febb6e7",
+  "specification_bytes": 3453,
+  "artifact_sha256": "efa41403dd56ac6181bb390ba530cd9c65b6dc7faf2b11db0c608c009bb6026c",
+  "artifact_bytes": 809327,
+  "validation": "9/9 showcase, 0 errors, 0 warnings",
+  "browser_evidence": "passed",
+  "browser_receipt": "../../dist/diagrams/quetzalcoatl-gnx.visual-check.json",
+  "visual_review": "passed",
+  "visual_review_scope": "Four screenshots: light/dark at 1440x900 and 2048x1320; composition, text fit, labels and boundaries. Search, focus and export interactions not manually exercised.",
+  "correction_rounds": 1
+}

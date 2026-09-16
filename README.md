@@ -6,6 +6,8 @@ Estado actual: implementación experimental en Rust del instalador, servicio y C
 
 Consulta la [arquitectura con diagramas Mermaid](docs/arquitectura-wsl.md): identidades, canal de consulta, instalación y pruebas de aceptación.
 
+También está disponible el [diagrama Archify con vista previa y fuente editable](docs/diagrams/README.md).
+
 Consulta también la [entrega experimental](docs/entrega-experimental.md), sus comandos y limitaciones. Compilación: `cargo build --release --locked`. Pruebas: `cargo test --locked`.
 
 El [naming fijo y la auditoría de doble revisión](docs/naming-auditoria.md) describen los identificadores de instalación, las correcciones comprobadas y los bloqueos pendientes antes de instalar.

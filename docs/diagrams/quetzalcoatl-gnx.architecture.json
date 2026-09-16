@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Quetzalcoatl GNX",
+    "quality_profile": "showcase",
+    "viewBox": [1120, 700],
+    "legend": { "entries": { "frontend": { "label": "Interfaz" }, "backend": { "label": "Proceso" }, "database": { "label": "Estado" }, "security": { "label": "Administración" } } }
+  },
+  "components": [
+    { "id": "gnx-setup", "type": "security", "label": "Setup Rust", "sublabel": "quetzalcoatl-gnx-setup.exe", "tag": "Instalación elevada", "pos": [40, 80], "size": [250, 76] },
+    { "id": "gnx-cli", "type": "frontend", "label": "CLI del usuario", "sublabel": "quetzalcoatl-gnx.exe", "tag": "check · status", "pos": [40, 310], "size": [250, 76] },
+    { "id": "gnx-state", "type": "database", "label": "Última observación", "sublabel": "Memoria del servicio", "tag": "Caduca a los 45 s", "pos": [420, 80], "size": [250, 76] },
+    { "id": "gnx-service", "type": "backend", "label": "Servicio QuetzalcoatlGNX", "sublabel": "Mismo EXE · --service", "tag": "Consulta + supervisión", "pos": [420, 310], "size": [250, 76] },
+    { "id": "gnx-wsl", "type": "backend", "label": "Distribución WSL2", "sublabel": "quetzalcoatl-gnx", "tag": "Rootfs verificado por SHA256", "pos": [420, 540], "size": [250, 76] },
+    { "id": "gnx-init", "type": "backend", "label": "systemd", "sublabel": "Arranque de Linux · cgroups v2", "pos": [800, 540], "size": [250, 76] },
+    { "id": "gnx-podman", "type": "backend", "label": "Podman sin root", "sublabel": "Usuario: quetzalcoatl-gnx", "tag": "Sesión persistente del usuario", "pos": [800, 310], "size": [250, 76] },
+    { "id": "gnx-quadlets", "type": "backend", "label": "Quadlets de aplicación", "sublabel": "Directorio preparado", "tag": "PENDIENTE · Sin contenedor", "pos": [800, 80], "size": [250, 76] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "Cuenta Windows dedicada: svc_quetzalcoatl_gnx", "wraps": ["gnx-state", "gnx-service", "gnx-wsl", "gnx-init", "gnx-podman", "gnx-quadlets"], "pad": 30 }
+  ],
+  "connections": [
+    { "id": "setup-installs", "from": "gnx-setup", "to": "gnx-service", "label": "Cuenta + servicio + ACL", "variant": "security" },
+    { "id": "cli-query", "from": "gnx-cli", "to": "gnx-service", "label": "Pipe local · SID", "variant": "emphasis", "labelDy": 36 },
+    { "id": "service-observes", "from": "gnx-service", "to": "gnx-state", "label": "Lee / actualiza" },
+    { "id": "service-wsl", "from": "gnx-service", "to": "gnx-wsl", "label": "Importa y supervisa", "labelDy": 60 },
+    { "id": "wsl-init", "from": "gnx-wsl", "to": "gnx-init", "label": "Activa al arrancar" },
+    { "id": "init-user", "from": "gnx-init", "to": "gnx-podman", "label": "Sesión con linger" },
+    { "id": "podman-quadlets", "from": "gnx-podman", "to": "gnx-quadlets", "label": "Capacidad preparada", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Consulta sin acceso directo", "items": ["La CLI pide check/status; el servicio devuelve JSON.", "La consulta lee memoria; el supervisor gestiona WSL."] },
+    { "dot": "emerald", "title": "Implementado en código", "items": ["Dos EXE Rust; cuenta dedicada y permisos explícitos.", "Pipe con SID y PID del servicio; comandos limitados."] },
+    { "dot": "amber", "title": "Aún experimental", "items": ["Instalación, reinicio y aislamiento sin prueba integral.", "Sin Quadlet desplegado; recuperación aún pendiente."] }
+  ]
+}
