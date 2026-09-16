@@ -12,6 +12,8 @@ El [naming fijo y la auditoría de doble revisión](docs/naming-auditoria.md) de
 
 ## Criterios de trabajo
 
-- Usar la identidad aprobada **Quetzalcoatl GNX** y los nombres fijos centralizados en `src/naming.rs`; cualquier cambio posterior requiere considerar migraciones.
+- Conservar la identidad **Quetzalcoatl GNX**: nombres compartidos en `src/lib.rs` e identificadores privados de instalación en `src/windows.rs`. Cambiarlos requiere considerar migraciones.
 - Mantener cada commit enfocado en un cambio relevante, de tamaño pequeño o mediano y fácil de revisar.
 - Publicar la documentación compartida en `docs/`; mantener herramientas y notas locales en `.codex/` y `.agents/`, excluidos de Git.
+
+La base mantiene tres responsabilidades: entradas CLI/setup, contrato de consultas (`protocol.rs`) e integración Windows (`windows.rs`). Los helpers se extraen solo cuando eliminan duplicación o aseguran la liberación de recursos; no se añaden módulos para agrupar constantes.

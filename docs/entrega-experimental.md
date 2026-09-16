@@ -34,13 +34,7 @@ El SID actual aparece en `preflight`. No introducir una contraseña en la línea
 
 ## Límites pendientes de resolver
 
-- Se requiere Windows x64 instalado en `C:\Windows`; las rutas de esta primera implementación son fijas.
-- Falta comprobar el perfil de la cuenta de servicio y el registro de WSL después de reiniciar sin iniciar sesión.
-- No hay actualización, desinstalación ni recuperación automática de una instalación parcial. Ante colisiones el instalador se detiene y conserva datos para inspección.
-- No se instala un Quadlet de aplicación: todavía no se definieron imagen, puertos ni volúmenes. Se prepara la capacidad de ejecutar Quadlets.
-- El supervisor mantiene el entorno activo; `check` y `status` consultan la misma observación en esta versión.
-- El paquete requiere dos EXE; aún no es un único instalador autocontenido ni está firmado.
-- Una cuenta administradora elevada puede modificar la instalación. No se bloquea el uso de otras distribuciones por política global.
+La lista de bloqueos se mantiene en la [auditoría](naming-auditoria.md#bloqueos-encontrados-que-siguen-abiertos): instalación y aislamiento sin validar, recuperación incompleta y paquete aún experimental. Las rutas presuponen Windows en `C:`. `check` y `status` consultan la misma observación del supervisor en esta versión; el supervisor administra el ciclo de vida del entorno.
 
 ## Ciclo de verificación
 

@@ -6,7 +6,7 @@ Estado: diseño con implementación experimental; instalación completa y aislam
 
 Una cuenta Windows dedicada es propietaria de la distribución WSL del producto. La cuenta cotidiana solo consulta mediante los comandos `check` y `status` de la CLI. No recibe credenciales de la cuenta dedicada, shell Linux, acceso al disco de la distribución ni acceso al socket de Podman.
 
-La identidad aprobada es **Quetzalcoatl GNX**. Los nombres fijos de cuentas, ejecutables, servicios y canales están centralizados en `src/naming.rs` y documentados en la [matriz de naming y auditoría](naming-auditoria.md). Los nombres de tecnologías externas identifican dependencias reales.
+La identidad aprobada es **Quetzalcoatl GNX**. Los nombres compartidos viven en `src/lib.rs`; los identificadores privados de instalación, en `src/windows.rs`. Sus valores están documentados en la [matriz de naming y auditoría](naming-auditoria.md). Los nombres de tecnologías externas identifican dependencias reales.
 
 El instalador y los componentes propios se escriben en Rust. WSL, systemd y Podman son dependencias del sistema; el usuario final no necesita Rust ni compiladores.
 
@@ -43,7 +43,7 @@ Microsoft documenta que las distribuciones WSL se registran por usuario Windows.
 | Servicio Rust de consultas | Cuenta Windows dedicada, sin pertenecer a Administradores | Autorizar consultas, supervisar el entorno y devolver resultados limitados |
 | Distribución del producto | Registro y almacenamiento privados de la cuenta dedicada | Ejecutar systemd, Podman y Quadlets |
 
-Tres binarios de un mismo workspace Rust permiten que la CLI no solicite elevación y que el instalador tenga permisos administrativos. Un solo archivo de instalación puede incluir los otros dos.
+La implementación tiene dos binarios del mismo paquete Rust: el setup y la CLI, que también proporciona la entrada interna del servicio (`--service`). Esa entrada solo funciona cuando la inicia el administrador de servicios de Windows. La CLI de consulta no requiere elevación; el setup sí. El empaquetado autocontenido queda pendiente.
 
 El arranque de WSL desde un servicio Windows bajo esta cuenta es una hipótesis que debemos probar: perfil cargado, registro por usuario, ejecución sin sesión interactiva, reinicio y recuperación. No se da por resuelto al crear la cuenta.
 

@@ -19,7 +19,7 @@ Fecha: 2026-09-15, hora local de México. Alcance: nombres, revisión de código
 | Datos privados | `C:\ProgramData\QuetzalcoatlGNX\private` |
 | Quadlets del usuario | `/home/quetzalcoatl-gnx/.config/containers/systemd` |
 
-Fuente única de identificadores: `src/naming.rs`. El script Linux se genera desde esa identidad y se normaliza a LF. Los nombres no dependen del nombre del equipo, usuario cotidiano o versión; las actualizaciones futuras deberán respetarlos o implementar una migración. No existe migración automática desde el prototipo anterior.
+Cada identificador tiene una sola definición: los tres nombres compartidos por los binarios están en `src/lib.rs`; los de instalación son privados de `src/windows.rs`. El bootstrap Linux vive junto a la integración Windows y se normaliza a LF. Los valores no dependen del equipo, usuario cotidiano o versión. No existe migración automática desde el prototipo anterior.
 
 ```mermaid
 flowchart LR
@@ -70,6 +70,16 @@ Resultado: naming listo y correcciones comprobables aplicadas; **instalación ex
 - Búsqueda de identificadores genéricos anteriores en código, manifiesto, lockfile y documentación: sin coincidencias.
 - `git diff --check`: sin errores de espacios.
 - Artefactos actuales: `dist/quetzalcoatl-gnx/`. Son compilaciones experimentales locales; no se ha creado un release de binarios en GitHub.
+
+## Simplificación posterior de la base
+
+Se revisaron todos los archivos fuente, dependencias y documentos. Se eliminó `naming.rs` y se mantuvo el protocolo como frontera útil entre CLI y servicio. La configuración de instalación, validación de SID, límites del pipe y bootstrap quedaron privados de Windows. La dependencia SHA256 también es exclusiva de Windows; se retiró una feature Win32 no utilizada.
+
+CLI y servidor comparten ahora el mismo reconocimiento de operaciones, y las dos conversiones de SID usan un solo helper. Los handles del administrador de servicios se liberan automáticamente incluso al devolver errores; esto evita repetir cierres que podían alterar el último error de Windows antes de reportarlo. Nombres instalados, configuración JSON, protocolo y códigos de salida se conservan. Las pruebas de seguridad anteriores se mantienen o se agrupan; se añade rechazo de operaciones con bytes o sufijos inesperados.
+
+Esta simplificación no resuelve ni oculta los bloqueos de instalación enumerados arriba. Las referencias de uso se contrastan con dos binarios reales, corrigiendo la propuesta anterior de tres.
+
+Verificación de esta pasada: 10 pruebas aprobadas; compilación release Windows; `cargo check --target x86_64-unknown-linux-gnu --all-targets` aprobado (comprobación de compilación, no ejecución Linux). Ocho comparaciones entre los EXE anteriores y los nuevos conservaron exactamente stdout, stderr y código de salida: ayuda implícita y explícita de la CLI, `check`, `status`, argumentos adicionales, comando no admitido, ayuda del setup y comando de setup no admitido. No se ejecutó instalación.
 
 ## Referencias de contraste
 
