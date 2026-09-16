@@ -1,12 +1,12 @@
-# Propuesta: WSL privado y CLI de consulta
+# Quetzalcoatl GNX: WSL privado y CLI de consulta
 
-Estado: diseño para revisar; todavía no implementado ni verificado en el host.
+Estado: diseño con implementación experimental; instalación completa y aislamiento todavía no verificados en el host.
 
 ## Acuerdo de partida
 
 Una cuenta Windows dedicada es propietaria de la distribución WSL del producto. La cuenta cotidiana solo consulta mediante los comandos `check` y `status` de la CLI. No recibe credenciales de la cuenta dedicada, shell Linux, acceso al disco de la distribución ni acceso al socket de Podman.
 
-Los nombres de cuentas, ejecutables, servicios y canales quedan por definir. Este diseño usa roles funcionales, sin heredar nombres de proyectos anteriores ni introducir marcas de proveedores en identificadores propios. Los nombres de tecnologías externas identifican dependencias reales.
+La identidad aprobada es **Quetzalcoatl GNX**. Los nombres fijos de cuentas, ejecutables, servicios y canales están centralizados en `src/naming.rs` y documentados en la [matriz de naming y auditoría](naming-auditoria.md). Los nombres de tecnologías externas identifican dependencias reales.
 
 El instalador y los componentes propios se escriben en Rust. WSL, systemd y Podman son dependencias del sistema; el usuario final no necesita Rust ni compiladores.
 
@@ -17,9 +17,9 @@ flowchart LR
     subgraph usuario[Cuenta Windows cotidiana]
         CLI[CLI Rust sin elevación]
     end
-    subgraph dedicada[Cuenta Windows dedicada]
+    subgraph dedicada[Cuenta Windows: svc_quetzalcoatl_gnx]
         B[Servicio Rust de consultas]
-        W[Distribución WSL privada]
+        W[Distribución WSL: quetzalcoatl-gnx]
         S[systemd]
         P[Usuario Linux de aplicación / Podman rootless]
         Q[Quadlets]
@@ -49,7 +49,7 @@ El arranque de WSL desde un servicio Windows bajo esta cuenta es una hipótesis 
 
 ## Canal seguro de consulta
 
-Propuesta: named pipe local con protocolo versionado y nombre por definir, protegido mediante una DACL explícita. El instalador autoriza el SID del usuario cotidiano; el servicio verifica la identidad real del cliente, nunca un nombre enviado en JSON. Se rechazan clientes remotos.
+Canal: named pipe local `\\.\pipe\quetzalcoatl-gnx-control-v1`, protegido mediante una DACL explícita. El instalador autoriza el SID del usuario cotidiano; el servicio verifica la identidad real del cliente, nunca un nombre enviado en JSON. Se rechazan clientes remotos.
 
 El protocolo solo admite dos operaciones enumeradas. No recibe comandos, rutas, nombres de distribución, nombres de unidades ni argumentos de shell. Las sondas internas usan ejecutables y argumentos fijos. Los datos recibidos de Linux también se tratan como entrada no confiable.
 

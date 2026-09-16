@@ -1,4 +1,4 @@
-# Diseño del entorno aislado
+# Quetzalcoatl GNX
 
 Instalador y componentes propios en Rust. Una cuenta Windows dedicada posee la distribución WSL; el usuario cotidiano accede únicamente a consultas autorizadas mediante una CLI.
 
@@ -8,8 +8,10 @@ Consulta la [arquitectura con diagramas Mermaid](docs/arquitectura-wsl.md): iden
 
 Consulta también la [entrega experimental](docs/entrega-experimental.md), sus comandos y limitaciones. Compilación: `cargo build --release --locked`. Pruebas: `cargo test --locked`.
 
+El [naming fijo y la auditoría de doble revisión](docs/naming-auditoria.md) describen los identificadores de instalación, las correcciones comprobadas y los bloqueos pendientes antes de instalar.
+
 ## Criterios de trabajo
 
-- Usar nombres funcionales neutrales; no heredar identificadores anteriores ni introducir marcas de proveedores en nombres propios.
+- Usar la identidad aprobada **Quetzalcoatl GNX** y los nombres fijos centralizados en `src/naming.rs`; cualquier cambio posterior requiere considerar migraciones.
 - Mantener cada commit enfocado en un cambio relevante, de tamaño pequeño o mediano y fácil de revisar.
 - Publicar la documentación compartida en `docs/`; mantener herramientas y notas locales en `.codex/` y `.agents/`, excluidos de Git.
