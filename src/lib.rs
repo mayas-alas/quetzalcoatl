@@ -4,6 +4,7 @@ pub const CLI_EXE: &str = "quetzalcoatl-gnx.exe";
 pub const SETUP_EXE: &str = "quetzalcoatl-gnx-setup.exe";
 
 pub mod protocol;
+pub mod installer;
 #[cfg(windows)]
 pub mod windows;
 

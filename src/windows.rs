@@ -1,4 +1,6 @@
 use crate::protocol::*;
+pub mod installer;
+use std::os::windows::process::CommandExt;
 use crate::{CLI_EXE, PRODUCT, SETUP_EXE};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -17,10 +19,10 @@ const MAX_MESSAGE: usize = 8192;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Config { client_sid: String, account_sid: String, rootfs_sha256: String }
+struct Config { client_sid: String, account_sid: String, #[serde(default)] rootfs_sha256: String }
 
 fn valid_sid(s: &str) -> bool {
-    s.starts_with("S-1-5-21-") && s.len() < 190 && s.split('-').skip(1).all(|v| !v.is_empty() && v.bytes().all(|c| c.is_ascii_digit()) && v.parse::<u32>().is_ok()) && s.split('-').count() == 8
+    crate::installer::valid_client_sid(s)
 }
 
 fn bootstrap() -> String {
@@ -155,7 +157,8 @@ fn serve(cfg: &Config) -> Result<(), String> { unsafe {
             if RevertToSelf() == 0 { std::process::abort(); }
             if identity? != cfg.client_sid { return Err("access_denied".into()); }
             if Operation::from_bytes(&request).is_none() { return Err("unsupported operation".into()); }
-            let report = REPORT.lock().map_err(|_| "state lock".to_string())?.clone().unwrap_or_else(|| Report::new("unknown", "supervisor initializing", false));
+            let mut report = REPORT.lock().map_err(|_| "state lock".to_string())?.clone().unwrap_or_else(|| Report::new("unknown", "supervisor initializing", false));
+            if matches!(report.state.as_str(), "downloading" | "configuring" | "verifying") { report.observed_unix = unix_now(); }
             serde_json::to_vec(&report).map_err(|e| e.to_string())
         })();
         if let Ok(data) = response { let mut n = 0; WriteFile(pipe.0, data.as_ptr(), data.len() as u32, &mut n, null_mut()); thread::sleep(Duration::from_millis(50)); }
@@ -165,7 +168,9 @@ fn serve(cfg: &Config) -> Result<(), String> { unsafe {
 } }
 
 fn run(exe: &Path, args: &[&str], seconds: u64) -> Result<(), String> {
-    let mut child = Command::new(exe).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e| e.to_string())?;
+    let log_path = base().join("private").join("runtime.log");
+    let output = || -> Stdio { fs::OpenOptions::new().create(true).append(true).open(&log_path).map(Stdio::from).unwrap_or_else(|_| Stdio::null()) };
+    let mut child = Command::new(exe).creation_flags(CREATE_NO_WINDOW).args(args).stdin(Stdio::null()).stdout(output()).stderr(output()).spawn().map_err(|e| e.to_string())?;
     let started = Instant::now();
     loop {
         match child.try_wait().map_err(|e| e.to_string())? { Some(s) if s.success() => return Ok(()), Some(s) => return Err(format!("{} exited with {s}", exe.display())), None => {} }
@@ -174,28 +179,50 @@ fn run(exe: &Path, args: &[&str], seconds: u64) -> Result<(), String> {
     }
 }
 fn wsl() -> PathBuf { PathBuf::from(r"C:\Windows\System32\wsl.exe") }
+fn publish_report(report: Report) {
+    if let Ok(bytes) = serde_json::to_vec(&report) {
+        let _ = installer::atomic_write(&base().join("private/runtime-status.json"), &bytes);
+    }
+    *REPORT.lock().unwrap() = Some(report);
+}
+
 fn supervise() {
     let result = initialize_runtime();
-    if let Err(e) = result { *REPORT.lock().unwrap() = Some(Report::new("degraded", &e, false)); return; }
+    if let Err(e) = result { publish_report(Report::new("degraded", &e, false)); return; }
     while !STOP.load(Ordering::Relaxed) {
         // Supervisor, not a user query, is responsible for keeping the runtime active.
         let probe = format!("set -o pipefail; test \"$(cat /proc/1/comm)\" = systemd && test -f /sys/fs/cgroup/cgroup.controllers && test -x /usr/lib/systemd/system-generators/podman-system-generator && runuser -u {LINUX_USER} -- env XDG_RUNTIME_DIR=/run/user/$(id -u {LINUX_USER}) podman info --format '{{{{.Host.CgroupsVersion}}}}' | grep -qx v2");
         let result = run(&wsl(), &["-d", DISTRO, "-u", "root", "--", "bash", "-lc", &probe], 20);
-        *REPORT.lock().unwrap() = Some(match result { Ok(()) => Report::new("ready", "systemd, cgroups v2 and rootless Podman verified; no application Quadlet deployed", true), Err(e) => Report::new("degraded", &e, false) });
+        publish_report(match result { Ok(()) => Report::new("ready", "systemd, cgroups v2 and rootless Podman verified; no application Quadlet deployed", true), Err(e) => Report::new("degraded", &e, false) });
         for _ in 0..100 { if STOP.load(Ordering::Relaxed) { break; } thread::sleep(Duration::from_millis(100)); }
     }
 }
 fn initialize_runtime() -> Result<(), String> {
     let data = base().join("private");
     if !data.join("initialized").exists() {
-        if data.join("distro").exists() { return Err("partial initialization detected; administrator recovery required (existing distro preserved)".into()); }
         let cfg = config()?;
-        verify_sha256(&mut fs::File::open(data.join("rootfs.tar")).map_err(|e| e.to_string())?, &cfg.rootfs_sha256)?;
-        run(&wsl(), &["--import", DISTRO, data.join("distro").to_str().unwrap(), data.join("rootfs.tar").to_str().unwrap(), "--version", "2"], 300)?;
-        run(&wsl(), &["-d", DISTRO, "-u", "root", "--", "bash", "-lc", &bootstrap()], 600)?;
+        let recovering = data.join("download-started").exists();
+        if data.join("distro").exists() && !recovering { return Err("Unowned partial distro directory; administrator inspection required.".into()); }
+        if recovering {
+            // Never delete/reimport a distro on retry. Only continue a usable owned Ubuntu.
+            run(&wsl(), &["-d", DISTRO, "-u", "root", "--", "bash", "-lc", ". /etc/os-release; test \"$ID\" = ubuntu && test \"$VERSION_ID\" = 24.04"], 60)
+                .map_err(|e| format!("Partial download cannot be resumed safely; inspect runtime.log: {e}"))?;
+        } else if cfg.rootfs_sha256.is_empty() {
+            publish_report(Report::new("downloading", "WSL is downloading Ubuntu 24.04 under the dedicated account.", false));
+            // A durable marker prevents retrying a possibly partial registration blindly.
+            let marker = data.join("download-started");
+            fs::write(&marker, b"1").map_err(|e| e.to_string())?;
+            run(&wsl(), &["--install", "Ubuntu-24.04", "--web-download", "--no-launch", "--name", DISTRO, "--location", data.join("distro").to_str().unwrap()], 1800)?;
+        } else {
+            verify_sha256(&mut fs::File::open(data.join("rootfs.tar")).map_err(|e| e.to_string())?, &cfg.rootfs_sha256)?;
+            run(&wsl(), &["--import", DISTRO, data.join("distro").to_str().unwrap(), data.join("rootfs.tar").to_str().unwrap(), "--version", "2"], 300)?;
+        }
+        publish_report(Report::new("configuring", "Configuring Ubuntu, systemd and rootless Podman.", false));
+        run(&wsl(), &["-d", DISTRO, "-u", "root", "--", "bash", "-lc", &bootstrap()], 1200)?;
         run(&wsl(), &["--terminate", DISTRO], 30)?;
         fs::write(data.join("initialized"), b"1").map_err(|e| e.to_string())?;
     }
+    publish_report(Report::new("verifying", "Verifying the dedicated runtime.", false));
     Ok(())
 }
 
@@ -231,20 +258,46 @@ pub fn setup(args: &[String]) -> Result<(), String> {
     if args == ["preflight"] {
         println!("{}", serde_json::json!({"product":PRODUCT, "service":SERVICE, "account":ACCOUNT, "distribution":DISTRO, "install_path":BASE, "platform":"windows", "architecture":std::env::consts::ARCH, "elevated":elevated(), "current_sid":current_sid()?, "wsl_launcher_present":wsl().exists(), "installation_present":base().exists(), "dedicated_runtime_verified":false, "changes_made":false})); return Ok(());
     }
-    if args.len() != 4 || args[0] != "install" { return Err(format!("Usage: {SETUP_EXE} install <rootfs.tar> <sha256> <client-SID>")); }
+    // Keep the verified offline path available, but default to WSL-managed download.
+    let normalized;
+    let args = if args.len() == 2 && args[0] == "install" {
+        normalized = vec![args[0].clone(), String::new(), String::new(), args[1].clone()];
+        &normalized[..]
+    } else { args };
+    if args.len() != 4 || args[0] != "install" { return Err(format!("Usage: {SETUP_EXE} install <client-SID> OR install <rootfs.tar> <sha256> <client-SID>")); }
+    let online = args[1].is_empty() && args[2].is_empty();
     if !elevated() { return Err("Open an elevated console to install; check/status never require elevation.".into()); }
     if !valid_sid(&args[3]) { return Err("Expected a local/domain user SID, not a group or system identity.".into()); }
-    if args[2].len() != 64 || !args[2].bytes().all(|b| b.is_ascii_hexdigit()) { return Err("SHA256 must contain exactly 64 hexadecimal characters.".into()); }
+    let _engine_lock = installer::lock_engine(&args[3])?;
+    if !online && (args[2].len() != 64 || !args[2].bytes().all(|b| b.is_ascii_hexdigit())) { return Err("SHA256 must contain exactly 64 hexadecimal characters.".into()); }
     if base().exists() || account_sid(ACCOUNT).is_ok() { return Err("Existing installation or account detected; refusing to overwrite. Administrator inspection required.".into()); }
-    let source = fs::canonicalize(&args[1]).map_err(|e| e.to_string())?;
-    let mut input = fs::File::open(&source).map_err(|e| e.to_string())?;
-    verify_sha256(&mut input, &args[2])?;
+    let mut input = if online { None } else {
+        let mut file = fs::File::open(fs::canonicalize(&args[1]).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        verify_sha256(&mut file, &args[2])?;
+        Some(file)
+    };
     let companion = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name(CLI_EXE);
     if !companion.is_file() { return Err(format!("Place {CLI_EXE} next to {SETUP_EXE}.")); }
+    // Enable host features without rebooting the user's machine automatically.
+    let features = Command::new(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+        .creation_flags(CREATE_NO_WINDOW).env("PSModulePath", r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules").args(["-NoProfile", "-NonInteractive", "-Command", r"$ErrorActionPreference='Stop'; $restart=(Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'); foreach($name in @('Microsoft-Windows-Subsystem-Linux','VirtualMachinePlatform')) { $f=Get-WindowsOptionalFeature -Online -FeatureName $name; if($f.State -eq 'EnablePending') { $restart=$true } elseif($f.State -ne 'Enabled') { $r=Enable-WindowsOptionalFeature -Online -FeatureName $name -All -NoRestart; if($r.RestartNeeded) { $restart=$true } } }; if($restart) { exit 3010 }"])
+        .status().map_err(|e| e.to_string())?;
+    if features.code() == Some(3010) { println!("Restart Windows and run the same install command again. No dedicated account created yet."); std::process::exit(3010); }
+    if !features.success() { return Err(format!("Windows feature preparation failed: {features}")); }
     // Host prerequisites happen before creating a dedicated identity.
-    let status = Command::new(&wsl()).args(["--install", "--no-distribution", "--web-download", "--no-launch"]).status().map_err(|e| e.to_string())?;
+    let mut child = Command::new(&wsl()).creation_flags(CREATE_NO_WINDOW).args(["--install", "--no-distribution", "--web-download", "--no-launch"]).spawn().map_err(|e| e.to_string())?;
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? { break status; }
+        if start.elapsed() > Duration::from_secs(600) {
+            let _ = child.kill(); let _ = child.wait();
+            return Err("WSL host preparation timed out. Inspect Windows prerequisites before retrying.".into());
+        }
+        thread::sleep(Duration::from_millis(200));
+    };
     if status.code() == Some(3010) { println!("Restart Windows and run the same install command again."); std::process::exit(3010); }
     if !status.success() { return Err(format!("WSL preparation failed ({status}); restart if requested and retry.")); }
+    if online { installer::provisioning_progress(&args[3])?; }
     fs::create_dir(base()).map_err(|e| e.to_string())?;
     // Protect the newly created directory before putting executable content in it.
     run(Path::new(r"C:\Windows\System32\icacls.exe"), &[BASE, "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", &format!("*{}:(OI)(CI)RX", args[3])], 15)?;
@@ -263,12 +316,14 @@ pub fn setup(args: &[String]) -> Result<(), String> {
         run(Path::new(r"C:\Windows\System32\icacls.exe"), &[BASE, "/grant", &format!("*{sid}:(OI)(CI)RX")], 15)?;
         let private = base().join("private"); fs::create_dir(&private).map_err(|e| e.to_string())?;
         run(Path::new(r"C:\Windows\System32\icacls.exe"), &[private.to_str().unwrap(), "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", &format!("*{sid}:(OI)(CI)F")], 15)?;
+        if let Some(input) = input.as_mut() {
         input.rewind().map_err(|e| e.to_string())?;
         let mut staged = fs::OpenOptions::new().read(true).write(true).create_new(true).open(private.join("rootfs.tar")).map_err(|e| e.to_string())?;
-        std::io::copy(&mut input, &mut staged).map_err(|e| e.to_string())?;
+        std::io::copy(input, &mut staged).map_err(|e| e.to_string())?;
         staged.sync_all().map_err(|e| e.to_string())?;
         staged.rewind().map_err(|e| e.to_string())?;
         verify_sha256(&mut staged, &args[2])?;
+        }
         fs::copy(companion, base().join(CLI_EXE)).map_err(|e| e.to_string())?;
         let cfg = Config { client_sid: args[3].clone(), account_sid: sid, rootfs_sha256: args[2].to_ascii_lowercase() };
         fs::write(base().join("config.json"), serde_json::to_vec_pretty(&cfg).unwrap()).map_err(|e| e.to_string())?;

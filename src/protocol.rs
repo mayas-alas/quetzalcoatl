@@ -35,7 +35,7 @@ impl Report {
         Self { protocol: 1, state: state.into(), observed_unix: unix_now(), detail: detail.into(), verified }
     }
     pub fn validate_at(&mut self, now: u64) -> Result<(), String> {
-        if self.protocol != 1 || !matches!(self.state.as_str(), "ready" | "degraded" | "stopped" | "unknown") || self.verified != (self.state == "ready") {
+        if self.protocol != 1 || !matches!(self.state.as_str(), "ready" | "degraded" | "stopped" | "unknown" | "downloading" | "configuring" | "verifying") || self.verified != (self.state == "ready") {
             return Err("protocol_mismatch: unsupported or inconsistent health state".into());
         }
         if self.observed_unix > now.saturating_add(5) { return Err("protocol_mismatch: observation is in the future".into()); }
@@ -66,6 +66,14 @@ mod tests {
     #[test] fn rejects_extra_response_fields() {
         let text = r#"{"protocol":1,"state":"ready","observed_unix":0,"detail":"x","verified":true,"exec":"cmd"}"#;
         assert!(serde_json::from_str::<Report>(text).is_err());
+    }
+    #[test] fn progress_is_valid_but_not_ready() {
+        for state in ["downloading", "configuring", "verifying"] {
+            let mut report = Report::new(state, "initializing", false);
+            assert!(report.validate_at(report.observed_unix).is_ok());
+            report.verified = true;
+            assert!(report.validate_at(report.observed_unix).is_err());
+        }
     }
     #[test] fn stale_health_is_never_ready() {
         let mut report = Report::new("ready", "healthy", true);
