@@ -1,15 +1,24 @@
 use serde::{Deserialize, Serialize};
 
-pub const MAX_MESSAGE: usize = 8192;
-
 #[derive(Debug, PartialEq)]
 pub enum Operation { Check, Status }
-pub fn parse_operation(args: &[String]) -> Result<Operation, String> {
-    match args {
-        [one] if one == "check" => Ok(Operation::Check),
-        [one] if one == "status" => Ok(Operation::Status),
-        _ => Err("Only check and status are supported; no additional arguments are accepted.".into()),
+impl Operation {
+    pub fn as_bytes(&self) -> &'static [u8] {
+        match self { Self::Check => b"check", Self::Status => b"status" }
     }
+
+    pub fn from_bytes(value: &[u8]) -> Option<Self> {
+        match value { b"check" => Some(Self::Check), b"status" => Some(Self::Status), _ => None }
+    }
+}
+
+pub fn parse_operation(args: &[String]) -> Result<Operation, String> {
+    let operation = match args { [one] => Operation::from_bytes(one.as_bytes()), _ => None };
+    operation.ok_or_else(|| "Only check and status are supported; no additional arguments are accepted.".into())
+}
+
+pub fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -23,7 +32,7 @@ pub struct Report {
 }
 impl Report {
     pub fn new(state: &str, detail: &str, verified: bool) -> Self {
-        Self { protocol: 1, state: state.into(), observed_unix: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(), detail: detail.into(), verified }
+        Self { protocol: 1, state: state.into(), observed_unix: unix_now(), detail: detail.into(), verified }
     }
     pub fn validate_at(&mut self, now: u64) -> Result<(), String> {
         if self.protocol != 1 || !matches!(self.state.as_str(), "ready" | "degraded" | "stopped" | "unknown") || self.verified != (self.state == "ready") {
@@ -38,14 +47,6 @@ impl Report {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Config { pub client_sid: String, pub account_sid: String, pub rootfs_sha256: String }
-
-pub fn valid_sid(s: &str) -> bool {
-    s.starts_with("S-1-5-21-") && s.len() < 190 && s.split('-').skip(1).all(|v| !v.is_empty() && v.bytes().all(|c| c.is_ascii_digit()) && v.parse::<u32>().is_ok()) && s.split('-').count() == 8
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,9 +55,13 @@ mod tests {
         assert_eq!(parse_operation(&["status".into()]).unwrap(), Operation::Status);
         for args in [vec![], vec!["install".into()], vec!["status".into(), "--exec".into()], vec!["status;cmd".into()]] { assert!(parse_operation(&args).is_err()); }
     }
-    #[test] fn sid_cannot_inject_acl() {
-        assert!(valid_sid("S-1-5-21-1-2-3-1001"));
-        for sid in ["S-1-5-18", "S-1-5-21-1-2-3-1001)(A;;GA;;;WD)", "S-1-5-21-1-2-3-", "S-1-5-21-1-2-3-1001-extra"] { assert!(!valid_sid(sid)); }
+    #[test] fn wire_operations_roundtrip_and_reject_trailing_data() {
+        for op in [Operation::Check, Operation::Status] {
+            assert_eq!(Operation::from_bytes(op.as_bytes()), Some(op));
+        }
+        for data in [b"check\0".as_slice(), b"status\n", b"STATUS", b"install", &[255]] {
+            assert!(Operation::from_bytes(data).is_none());
+        }
     }
     #[test] fn rejects_extra_response_fields() {
         let text = r#"{"protocol":1,"state":"ready","observed_unix":0,"detail":"x","verified":true,"exec":"cmd"}"#;
@@ -73,8 +78,5 @@ mod tests {
         report = Report::new("ready", "healthy", true);
         assert!(report.validate_at(report.observed_unix - 6).is_err());
         report.protocol = 2; assert!(report.validate_at(report.observed_unix).is_err());
-    }
-    #[test] fn reject_sid_numeric_overflow() {
-        assert!(!valid_sid("S-1-5-21-4294967296-2-3-1001"));
     }
 }

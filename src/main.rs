@@ -1,10 +1,10 @@
-use quetzalcoatl_gnx::{naming::*, protocol::parse_operation};
+use quetzalcoatl_gnx::{protocol::{parse_operation, Report}, CLI_EXE, PRODUCT};
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args == ["--help"] || args.is_empty() { println!("{PRODUCT}\n{CLI_EXE} <check|status>\nRead-only authenticated local queries. No elevation required."); return; }
     #[cfg(windows)]
     if args == ["--service"] { if let Err(e) = quetzalcoatl_gnx::windows::service_dispatch() { eprintln!("{e}"); std::process::exit(1); } return; }
-    let result = parse_operation(&args).and_then(|op| {
+    let result: Result<Report, String> = parse_operation(&args).and_then(|op| {
         #[cfg(windows)] { quetzalcoatl_gnx::windows::query(op) }
         #[cfg(not(windows))] { let _ = op; Err("Windows host required.".into()) }
     });

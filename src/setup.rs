@@ -1,4 +1,4 @@
-use quetzalcoatl_gnx::naming::*;
+use quetzalcoatl_gnx::{CLI_EXE, PRODUCT, SETUP_EXE};
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() || args == ["--help"] {

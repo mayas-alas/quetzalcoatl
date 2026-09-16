@@ -1,8 +1,31 @@
 use crate::protocol::*;
-use crate::naming::*;
+use crate::{CLI_EXE, PRODUCT, SETUP_EXE};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{ffi::c_void, fs, io::{Read, Seek}, mem::{size_of, zeroed}, path::{Path, PathBuf}, process::{Command, Stdio}, ptr::{null, null_mut}, sync::{atomic::{AtomicBool, Ordering}, Mutex}, thread, time::{Duration, Instant}};
 use windows_sys::Win32::{Foundation::*, Security::{*, Authorization::*, Authentication::Identity::*, Cryptography::*}, NetworkManagement::NetManagement::*, Storage::FileSystem::*, System::{Pipes::*, Services::*, Threading::*}};
+
+// Private installation identifiers; changing them requires a migration.
+const SERVICE: &str = "QuetzalcoatlGNX";
+const SERVICE_DISPLAY: &str = "Quetzalcoatl GNX - Consultas WSL";
+const ACCOUNT: &str = "svc_quetzalcoatl_gnx";
+const DISTRO: &str = "quetzalcoatl-gnx";
+const LINUX_USER: &str = "quetzalcoatl-gnx";
+const PIPE: &str = r"\\.\pipe\quetzalcoatl-gnx-control-v1";
+const BASE: &str = r"C:\ProgramData\QuetzalcoatlGNX";
+const MAX_MESSAGE: usize = 8192;
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Config { client_sid: String, account_sid: String, rootfs_sha256: String }
+
+fn valid_sid(s: &str) -> bool {
+    s.starts_with("S-1-5-21-") && s.len() < 190 && s.split('-').skip(1).all(|v| !v.is_empty() && v.bytes().all(|c| c.is_ascii_digit()) && v.parse::<u32>().is_ok()) && s.split('-').count() == 8
+}
+
+fn bootstrap() -> String {
+    include_str!("bootstrap.sh").replace("@LINUX_USER@", LINUX_USER).replace('\r', "")
+}
 
 static STOP: AtomicBool = AtomicBool::new(false);
 static REPORT: Mutex<Option<Report>> = Mutex::new(None);
@@ -18,6 +41,17 @@ fn config() -> Result<Config, String> { serde_json::from_slice(&fs::read(base().
 struct Handle(HANDLE);
 impl Drop for Handle { fn drop(&mut self) { unsafe { if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE { CloseHandle(self.0); } } } }
 
+struct ServiceHandle(SC_HANDLE);
+impl Drop for ServiceHandle { fn drop(&mut self) { unsafe { if !self.0.is_null() { CloseServiceHandle(self.0); } } } }
+
+unsafe fn sid_string(sid: PSID) -> Result<String, String> {
+    let mut text = null_mut();
+    if ConvertSidToStringSidW(sid, &mut text) == 0 { return Err(err("SID")); }
+    let mut len = 0; while *text.add(len) != 0 { len += 1; }
+    let result = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
+    LocalFree(text.cast()); Ok(result)
+}
+
 fn token_sid(token: HANDLE) -> Result<String, String> { unsafe {
     let mut n = 0;
     GetTokenInformation(token, TokenUser, null_mut(), 0, &mut n);
@@ -25,11 +59,7 @@ fn token_sid(token: HANDLE) -> Result<String, String> { unsafe {
     let mut buf = vec![0usize; (n as usize).div_ceil(size_of::<usize>())];
     if GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), n, &mut n) == 0 { return Err(err("token identity")); }
     let user = &*(buf.as_ptr() as *const TOKEN_USER);
-    let mut text = null_mut();
-    if ConvertSidToStringSidW(user.User.Sid, &mut text) == 0 { return Err(err("SID")); }
-    let mut len = 0; while *text.add(len) != 0 { len += 1; }
-    let sid = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
-    LocalFree(text.cast()); Ok(sid)
+    sid_string(user.User.Sid)
 } }
 fn current_sid() -> Result<String, String> { unsafe {
     let mut token = null_mut();
@@ -52,22 +82,21 @@ pub fn query(op: Operation) -> Result<Report, String> { unsafe {
     let mut pid = 0;
     if GetNamedPipeServerProcessId(handle.0, &mut pid) == 0 { return Err(err("server identity")); }
     // Compare the pipe endpoint with the process registered by the service manager.
-    let manager = OpenSCManagerW(null(), null(), SC_MANAGER_CONNECT);
-    if manager.is_null() { return Err(err("service manager")); }
-    let service = OpenServiceW(manager, wide(SERVICE).as_ptr(), SERVICE_QUERY_STATUS);
-    if service.is_null() { CloseServiceHandle(manager); return Err(err("service identity")); }
+    let manager = ServiceHandle(OpenSCManagerW(null(), null(), SC_MANAGER_CONNECT));
+    if manager.0.is_null() { return Err(err("service manager")); }
+    let service = ServiceHandle(OpenServiceW(manager.0, wide(SERVICE).as_ptr(), SERVICE_QUERY_STATUS));
+    if service.0.is_null() { return Err(err("service identity")); }
     let mut status: SERVICE_STATUS_PROCESS = zeroed(); let mut needed = 0;
-    let ok = QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO, (&mut status as *mut SERVICE_STATUS_PROCESS).cast(), size_of::<SERVICE_STATUS_PROCESS>() as u32, &mut needed);
-    CloseServiceHandle(service); CloseServiceHandle(manager);
+    let ok = QueryServiceStatusEx(service.0, SC_STATUS_PROCESS_INFO, (&mut status as *mut SERVICE_STATUS_PROCESS).cast(), size_of::<SERVICE_STATUS_PROCESS>() as u32, &mut needed);
     if ok == 0 || status.dwProcessId != pid || status.dwCurrentState != SERVICE_RUNNING { return Err("untrusted_server: endpoint does not match running service".into()); }
     let mode = PIPE_READMODE_MESSAGE | PIPE_NOWAIT;
     if SetNamedPipeHandleState(handle.0, &mode, null(), null()) == 0 { return Err(err("pipe mode")); }
-    let request = match op { Operation::Check => b"check".as_slice(), Operation::Status => b"status".as_slice() };
+    let request = op.as_bytes();
     let mut written = 0;
     if WriteFile(handle.0, request.as_ptr(), request.len() as u32, &mut written, null_mut()) == 0 { return Err(err("request")); }
     let data = read_message(handle.0, Duration::from_secs(2))?;
     let mut report: Report = serde_json::from_slice(&data).map_err(|_| "protocol_mismatch: invalid response".to_string())?;
-    report.validate_at(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())?;
+    report.validate_at(unix_now())?;
     Ok(report)
 } }
 
@@ -125,7 +154,7 @@ fn serve(cfg: &Config) -> Result<(), String> { unsafe {
             let identity = if OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut token) != 0 { let t = Handle(token); token_sid(t.0) } else { Err(err("client token")) };
             if RevertToSelf() == 0 { std::process::abort(); }
             if identity? != cfg.client_sid { return Err("access_denied".into()); }
-            if request != b"check" && request != b"status" { return Err("unsupported operation".into()); }
+            if Operation::from_bytes(&request).is_none() { return Err("unsupported operation".into()); }
             let report = REPORT.lock().map_err(|_| "state lock".to_string())?.clone().unwrap_or_else(|| Report::new("unknown", "supervisor initializing", false));
             serde_json::to_vec(&report).map_err(|e| e.to_string())
         })();
@@ -176,9 +205,7 @@ fn account_sid(name: &str) -> Result<String, String> { unsafe {
     if n == 0 { return Err(err("lookup account")); }
     let mut sid = vec![0u8; n as usize]; let mut domain = vec![0u16; dn as usize];
     if LookupAccountNameW(null(), wide(name).as_ptr(), sid.as_mut_ptr().cast(), &mut n, domain.as_mut_ptr(), &mut dn, &mut kind) == 0 { return Err(err("lookup SID")); }
-    let mut text = null_mut(); if ConvertSidToStringSidW(sid.as_mut_ptr().cast(), &mut text) == 0 { return Err(err("account SID")); }
-    let mut len = 0; while *text.add(len) != 0 { len += 1; }
-    let result = String::from_utf16_lossy(std::slice::from_raw_parts(text, len)); LocalFree(text.cast()); Ok(result)
+    sid_string(sid.as_mut_ptr().cast())
 } }
 unsafe fn account_rights(sid: &str) -> Result<(), String> {
     let mut raw = null_mut(); if ConvertStringSidToSidW(wide(sid).as_ptr(), &mut raw) == 0 { return Err(err("account rights SID")); }
@@ -245,13 +272,13 @@ pub fn setup(args: &[String]) -> Result<(), String> {
         fs::copy(companion, base().join(CLI_EXE)).map_err(|e| e.to_string())?;
         let cfg = Config { client_sid: args[3].clone(), account_sid: sid, rootfs_sha256: args[2].to_ascii_lowercase() };
         fs::write(base().join("config.json"), serde_json::to_vec_pretty(&cfg).unwrap()).map_err(|e| e.to_string())?;
-        let scm = OpenSCManagerW(null(), null(), SC_MANAGER_CREATE_SERVICE);
-        if scm.is_null() { return Err(err("service manager")); }
+        let scm = ServiceHandle(OpenSCManagerW(null(), null(), SC_MANAGER_CREATE_SERVICE));
+        if scm.0.is_null() { return Err(err("service manager")); }
         let binary = wide(&format!("\"{}\" --service", base().join(CLI_EXE).display()));
-        let service = CreateServiceW(scm, wide(SERVICE).as_ptr(), wide(SERVICE_DISPLAY).as_ptr(), SERVICE_START | SERVICE_QUERY_STATUS, SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, binary.as_ptr(), null(), null_mut(), null(), wide(&format!(".\\{ACCOUNT}")).as_ptr(), password_w.0.as_ptr());
+        let service = ServiceHandle(CreateServiceW(scm.0, wide(SERVICE).as_ptr(), wide(SERVICE_DISPLAY).as_ptr(), SERVICE_START | SERVICE_QUERY_STATUS, SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, binary.as_ptr(), null(), null_mut(), null(), wide(&format!(".\\{ACCOUNT}")).as_ptr(), password_w.0.as_ptr()));
         drop(password_w);
-        if service.is_null() { CloseServiceHandle(scm); return Err(err("service creation (account retained for recovery)")); }
-        let started = StartServiceW(service, 0, null()); CloseServiceHandle(service); CloseServiceHandle(scm);
+        if service.0.is_null() { return Err(err("service creation (account retained for recovery)")); }
+        let started = StartServiceW(service.0, 0, null());
         if started == 0 { return Err(err("service start (installation retained for recovery)")); }
     }
     println!("{PRODUCT} service installed. Initialization is asynchronous; use {CLI_EXE} check. Installation does not yet mean runtime readiness."); Ok(())
@@ -260,6 +287,21 @@ pub fn setup(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn installation_identity_matches_bootstrap() {
+        assert!(ACCOUNT.len() <= 20);
+        assert!(ACCOUNT.bytes().all(|c| c.is_ascii_lowercase() || c == b'_'));
+        let script = bootstrap();
+        assert!(!script.contains("@LINUX_USER@") && !script.contains('\r'));
+        for required in [format!("default={LINUX_USER}"), format!("/home/{LINUX_USER}/.config/containers/systemd"), format!("/var/lib/systemd/linger/{LINUX_USER}")] {
+            assert!(script.contains(&required));
+        }
+    }
+    #[test] fn sid_cannot_inject_acl() {
+        assert!(valid_sid("S-1-5-21-1-2-3-1001"));
+        for sid in ["S-1-5-18", "S-1-5-21-1-2-3-1001)(A;;GA;;;WD)", "S-1-5-21-1-2-3-", "S-1-5-21-1-2-3-1001-extra", "S-1-5-21-4294967296-2-3-1001"] {
+            assert!(!valid_sid(sid));
+        }
+    }
     #[test] fn pipe_rights_allow_mode_changes_without_server_creation() {
         assert_eq!(CLIENT_PIPE_ACCESS & FILE_WRITE_ATTRIBUTES, FILE_WRITE_ATTRIBUTES);
         assert_eq!(CLIENT_PIPE_ACCESS & FILE_CREATE_PIPE_INSTANCE, 0);
