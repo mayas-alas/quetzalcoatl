@@ -1,12 +1,15 @@
 use crate::protocol::*;
+use crate::naming::*;
 use sha2::{Digest, Sha256};
-use std::{ffi::c_void, fs, io::Read, mem::{size_of, zeroed}, path::{Path, PathBuf}, process::{Command, Stdio}, ptr::{null, null_mut}, sync::{atomic::{AtomicBool, Ordering}, Mutex}, thread, time::{Duration, Instant}};
+use std::{ffi::c_void, fs, io::{Read, Seek}, mem::{size_of, zeroed}, path::{Path, PathBuf}, process::{Command, Stdio}, ptr::{null, null_mut}, sync::{atomic::{AtomicBool, Ordering}, Mutex}, thread, time::{Duration, Instant}};
 use windows_sys::Win32::{Foundation::*, Security::{*, Authorization::*, Authentication::Identity::*, Cryptography::*}, NetworkManagement::NetManagement::*, Storage::FileSystem::*, System::{Pipes::*, Services::*, Threading::*}};
 
-const BASE: &str = r"C:\ProgramData\IsolatedRuntime";
 static STOP: AtomicBool = AtomicBool::new(false);
 static REPORT: Mutex<Option<Report>> = Mutex::new(None);
 static mut STATUS_HANDLE: SERVICE_STATUS_HANDLE = null_mut();
+const CLIENT_PIPE_ACCESS: u32 = FILE_READ_DATA | FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE;
+struct Secret(Vec<u16>);
+impl Drop for Secret { fn drop(&mut self) { for ch in &mut self.0 { unsafe { std::ptr::write_volatile(ch, 0); } } std::sync::atomic::compiler_fence(Ordering::SeqCst); } }
 fn wide(s: &str) -> Vec<u16> { s.encode_utf16().chain(Some(0)).collect() }
 fn err(context: &str) -> String { format!("{context}: {}", std::io::Error::last_os_error()) }
 fn base() -> PathBuf { PathBuf::from(BASE) }
@@ -44,7 +47,7 @@ pub fn query(op: Operation) -> Result<Report, String> { unsafe {
     if current_sid()? != cfg.client_sid { return Err("access_denied: caller is not authorized".into()); }
     let path = wide(PIPE);
     if WaitNamedPipeW(path.as_ptr(), 1500) == 0 { return Err("broker_unavailable: pipe not available within 1500ms".into()); }
-    let handle = Handle(CreateFileW(path.as_ptr(), FILE_READ_DATA | FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE, 0, null(), OPEN_EXISTING, SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, null_mut()));
+    let handle = Handle(CreateFileW(path.as_ptr(), CLIENT_PIPE_ACCESS, 0, null(), OPEN_EXISTING, SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, null_mut()));
     if handle.0 == INVALID_HANDLE_VALUE { return Err(err("access_denied")); }
     let mut pid = 0;
     if GetNamedPipeServerProcessId(handle.0, &mut pid) == 0 { return Err(err("server identity")); }
@@ -63,8 +66,8 @@ pub fn query(op: Operation) -> Result<Report, String> { unsafe {
     let mut written = 0;
     if WriteFile(handle.0, request.as_ptr(), request.len() as u32, &mut written, null_mut()) == 0 { return Err(err("request")); }
     let data = read_message(handle.0, Duration::from_secs(2))?;
-    let report: Report = serde_json::from_slice(&data).map_err(|_| "protocol_mismatch: invalid response".to_string())?;
-    if report.protocol != 1 { return Err("protocol_mismatch".into()); }
+    let mut report: Report = serde_json::from_slice(&data).map_err(|_| "protocol_mismatch: invalid response".to_string())?;
+    report.validate_at(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())?;
     Ok(report)
 } }
 
@@ -105,8 +108,8 @@ unsafe extern "system" fn service_main(_: u32, _: *mut *mut u16) {
 }
 
 fn serve(cfg: &Config) -> Result<(), String> { unsafe {
-    if !valid_sid(&cfg.client_sid) { return Err("invalid client SID".into()); }
-    let acl = wide(&format!("D:P(A;;GA;;;SY)(A;;GA;;;{})(A;;0x00100083;;;{})", cfg.account_sid, cfg.client_sid));
+    if !valid_sid(&cfg.client_sid) || !valid_sid(&cfg.account_sid) || cfg.client_sid == cfg.account_sid { return Err("invalid or overlapping identities".into()); }
+    let acl = wide(&format!("D:P(A;;GA;;;SY)(A;;GA;;;{})(A;;0x{CLIENT_PIPE_ACCESS:08x};;;{})", cfg.account_sid, cfg.client_sid));
     let mut sd = null_mut();
     if ConvertStringSecurityDescriptorToSecurityDescriptorW(acl.as_ptr(), 1, &mut sd, null_mut()) == 0 { return Err(err("pipe ACL")); }
     let sa = SECURITY_ATTRIBUTES { nLength: size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd, bInheritHandle: 0 };
@@ -147,7 +150,8 @@ fn supervise() {
     if let Err(e) = result { *REPORT.lock().unwrap() = Some(Report::new("degraded", &e, false)); return; }
     while !STOP.load(Ordering::Relaxed) {
         // Supervisor, not a user query, is responsible for keeping the runtime active.
-        let result = run(&wsl(), &["-d", DISTRO, "-u", "root", "--", "bash", "-lc", "test \"$(cat /proc/1/comm)\" = systemd && test -f /sys/fs/cgroup/cgroup.controllers && test -x /usr/lib/systemd/system-generators/podman-system-generator && runuser -u runtime -- env XDG_RUNTIME_DIR=/run/user/$(id -u runtime) podman info --format '{{.Host.CgroupsVersion}}' | grep -qx v2"], 20);
+        let probe = format!("set -o pipefail; test \"$(cat /proc/1/comm)\" = systemd && test -f /sys/fs/cgroup/cgroup.controllers && test -x /usr/lib/systemd/system-generators/podman-system-generator && runuser -u {LINUX_USER} -- env XDG_RUNTIME_DIR=/run/user/$(id -u {LINUX_USER}) podman info --format '{{{{.Host.CgroupsVersion}}}}' | grep -qx v2");
+        let result = run(&wsl(), &["-d", DISTRO, "-u", "root", "--", "bash", "-lc", &probe], 20);
         *REPORT.lock().unwrap() = Some(match result { Ok(()) => Report::new("ready", "systemd, cgroups v2 and rootless Podman verified; no application Quadlet deployed", true), Err(e) => Report::new("degraded", &e, false) });
         for _ in 0..100 { if STOP.load(Ordering::Relaxed) { break; } thread::sleep(Duration::from_millis(100)); }
     }
@@ -156,8 +160,10 @@ fn initialize_runtime() -> Result<(), String> {
     let data = base().join("private");
     if !data.join("initialized").exists() {
         if data.join("distro").exists() { return Err("partial initialization detected; administrator recovery required (existing distro preserved)".into()); }
+        let cfg = config()?;
+        verify_sha256(&mut fs::File::open(data.join("rootfs.tar")).map_err(|e| e.to_string())?, &cfg.rootfs_sha256)?;
         run(&wsl(), &["--import", DISTRO, data.join("distro").to_str().unwrap(), data.join("rootfs.tar").to_str().unwrap(), "--version", "2"], 300)?;
-        run(&wsl(), &["-d", DISTRO, "-u", "root", "--", "bash", "-lc", include_str!("bootstrap.sh")], 600)?;
+        run(&wsl(), &["-d", DISTRO, "-u", "root", "--", "bash", "-lc", &bootstrap()], 600)?;
         run(&wsl(), &["--terminate", DISTRO], 30)?;
         fs::write(data.join("initialized"), b"1").map_err(|e| e.to_string())?;
     }
@@ -187,21 +193,27 @@ unsafe fn account_rights(sid: &str) -> Result<(), String> {
     LsaClose(policy); LocalFree(raw); Ok(())
 }
 
+fn verify_sha256(input: &mut impl Read, expected: &str) -> Result<(), String> {
+    let mut hash = Sha256::new(); let mut buffer = [0u8; 65536];
+    loop { let n = input.read(&mut buffer).map_err(|e| e.to_string())?; if n == 0 { break; } hash.update(&buffer[..n]); }
+    if format!("{:x}", hash.finalize()) != expected.to_ascii_lowercase() { return Err("Rootfs SHA256 mismatch; refusing to import.".into()); }
+    Ok(())
+}
+
 pub fn setup(args: &[String]) -> Result<(), String> {
     if args == ["preflight"] {
-        println!("{}", serde_json::json!({"platform":"windows", "architecture":std::env::consts::ARCH, "elevated":elevated(), "current_sid":current_sid()?, "wsl_launcher_present":wsl().exists(), "installation_present":base().exists(), "dedicated_runtime_verified":false, "changes_made":false})); return Ok(());
+        println!("{}", serde_json::json!({"product":PRODUCT, "service":SERVICE, "account":ACCOUNT, "distribution":DISTRO, "install_path":BASE, "platform":"windows", "architecture":std::env::consts::ARCH, "elevated":elevated(), "current_sid":current_sid()?, "wsl_launcher_present":wsl().exists(), "installation_present":base().exists(), "dedicated_runtime_verified":false, "changes_made":false})); return Ok(());
     }
-    if args.len() != 4 || args[0] != "install" { return Err("Usage: runtime-setup install <rootfs.tar> <sha256> <client-SID>".into()); }
+    if args.len() != 4 || args[0] != "install" { return Err(format!("Usage: {SETUP_EXE} install <rootfs.tar> <sha256> <client-SID>")); }
     if !elevated() { return Err("Open an elevated console to install; check/status never require elevation.".into()); }
     if !valid_sid(&args[3]) { return Err("Expected a local/domain user SID, not a group or system identity.".into()); }
     if args[2].len() != 64 || !args[2].bytes().all(|b| b.is_ascii_hexdigit()) { return Err("SHA256 must contain exactly 64 hexadecimal characters.".into()); }
     if base().exists() || account_sid(ACCOUNT).is_ok() { return Err("Existing installation or account detected; refusing to overwrite. Administrator inspection required.".into()); }
     let source = fs::canonicalize(&args[1]).map_err(|e| e.to_string())?;
-    let mut input = fs::File::open(&source).map_err(|e| e.to_string())?; let mut hash = Sha256::new(); let mut buffer = [0u8; 65536];
-    loop { let n = input.read(&mut buffer).map_err(|e| e.to_string())?; if n == 0 { break; } hash.update(&buffer[..n]); }
-    if format!("{:x}", hash.finalize()) != args[2].to_ascii_lowercase() { return Err("Rootfs SHA256 mismatch; no installation changes made.".into()); }
-    let companion = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name("runtime.exe");
-    if !companion.is_file() { return Err("Place runtime.exe next to runtime-setup.exe.".into()); }
+    let mut input = fs::File::open(&source).map_err(|e| e.to_string())?;
+    verify_sha256(&mut input, &args[2])?;
+    let companion = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name(CLI_EXE);
+    if !companion.is_file() { return Err(format!("Place {CLI_EXE} next to {SETUP_EXE}.")); }
     // Host prerequisites happen before creating a dedicated identity.
     let status = Command::new(&wsl()).args(["--install", "--no-distribution", "--web-download", "--no-launch"]).status().map_err(|e| e.to_string())?;
     if status.code() == Some(3010) { println!("Restart Windows and run the same install command again."); std::process::exit(3010); }
@@ -211,27 +223,52 @@ pub fn setup(args: &[String]) -> Result<(), String> {
     run(Path::new(r"C:\Windows\System32\icacls.exe"), &[BASE, "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", &format!("*{}:(OI)(CI)RX", args[3])], 15)?;
     unsafe {
         let mut random = [0u8; 32]; if BCryptGenRandom(null_mut(), random.as_mut_ptr(), 32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0 { return Err("secure random generation failed".into()); }
-        let password = format!("Aa1!{}", random.iter().map(|b| format!("{b:02x}")).collect::<String>());
-        let mut password_w = wide(&password); let mut user = wide(ACCOUNT);
-        let info = USER_INFO_1 { usri1_name: user.as_mut_ptr(), usri1_password: password_w.as_mut_ptr(), usri1_password_age: 0, usri1_priv: USER_PRIV_USER, usri1_home_dir: null_mut(), usri1_comment: null_mut(), usri1_flags: UF_SCRIPT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE, usri1_script_path: null_mut() };
+        let mut password_w = Secret(Vec::with_capacity(69)); password_w.0.extend("Aa1!".encode_utf16());
+        const HEX: &[u8] = b"0123456789abcdef";
+        for byte in &random { password_w.0.push(HEX[(byte >> 4) as usize] as u16); password_w.0.push(HEX[(byte & 15) as usize] as u16); }
+        password_w.0.push(0);
+        for byte in &mut random { std::ptr::write_volatile(byte, 0); }
+        let mut user = wide(ACCOUNT);
+        let info = USER_INFO_1 { usri1_name: user.as_mut_ptr(), usri1_password: password_w.0.as_mut_ptr(), usri1_password_age: 0, usri1_priv: USER_PRIV_USER, usri1_home_dir: null_mut(), usri1_comment: null_mut(), usri1_flags: UF_SCRIPT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE, usri1_script_path: null_mut() };
         let mut parm = 0; let code = NetUserAdd(null(), 1, (&info as *const USER_INFO_1).cast(), &mut parm);
         if code != 0 { return Err(format!("Dedicated account creation failed: {code}, parameter {parm}")); }
         let sid = account_sid(ACCOUNT)?; account_rights(&sid)?;
         run(Path::new(r"C:\Windows\System32\icacls.exe"), &[BASE, "/grant", &format!("*{sid}:(OI)(CI)RX")], 15)?;
         let private = base().join("private"); fs::create_dir(&private).map_err(|e| e.to_string())?;
         run(Path::new(r"C:\Windows\System32\icacls.exe"), &[private.to_str().unwrap(), "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", &format!("*{sid}:(OI)(CI)F")], 15)?;
-        fs::copy(&source, private.join("rootfs.tar")).map_err(|e| e.to_string())?;
-        fs::copy(companion, base().join("runtime.exe")).map_err(|e| e.to_string())?;
+        input.rewind().map_err(|e| e.to_string())?;
+        let mut staged = fs::OpenOptions::new().read(true).write(true).create_new(true).open(private.join("rootfs.tar")).map_err(|e| e.to_string())?;
+        std::io::copy(&mut input, &mut staged).map_err(|e| e.to_string())?;
+        staged.sync_all().map_err(|e| e.to_string())?;
+        staged.rewind().map_err(|e| e.to_string())?;
+        verify_sha256(&mut staged, &args[2])?;
+        fs::copy(companion, base().join(CLI_EXE)).map_err(|e| e.to_string())?;
         let cfg = Config { client_sid: args[3].clone(), account_sid: sid, rootfs_sha256: args[2].to_ascii_lowercase() };
         fs::write(base().join("config.json"), serde_json::to_vec_pretty(&cfg).unwrap()).map_err(|e| e.to_string())?;
         let scm = OpenSCManagerW(null(), null(), SC_MANAGER_CREATE_SERVICE);
         if scm.is_null() { return Err(err("service manager")); }
-        let binary = wide(&format!("\"{}\" --service", base().join("runtime.exe").display()));
-        let service = CreateServiceW(scm, wide(SERVICE).as_ptr(), wide("Isolated runtime query service").as_ptr(), SERVICE_START | SERVICE_QUERY_STATUS, SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, binary.as_ptr(), null(), null_mut(), null(), wide(&format!(".\\{ACCOUNT}")).as_ptr(), password_w.as_ptr());
-        for ch in &mut password_w { std::ptr::write_volatile(ch, 0); }
+        let binary = wide(&format!("\"{}\" --service", base().join(CLI_EXE).display()));
+        let service = CreateServiceW(scm, wide(SERVICE).as_ptr(), wide(SERVICE_DISPLAY).as_ptr(), SERVICE_START | SERVICE_QUERY_STATUS, SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, binary.as_ptr(), null(), null_mut(), null(), wide(&format!(".\\{ACCOUNT}")).as_ptr(), password_w.0.as_ptr());
+        drop(password_w);
         if service.is_null() { CloseServiceHandle(scm); return Err(err("service creation (account retained for recovery)")); }
         let started = StartServiceW(service, 0, null()); CloseServiceHandle(service); CloseServiceHandle(scm);
         if started == 0 { return Err(err("service start (installation retained for recovery)")); }
     }
-    println!("Service installed. Runtime initialization is asynchronous; use runtime check. Installation does not yet mean runtime readiness."); Ok(())
+    println!("{PRODUCT} service installed. Initialization is asynchronous; use {CLI_EXE} check. Installation does not yet mean runtime readiness."); Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test] fn pipe_rights_allow_mode_changes_without_server_creation() {
+        assert_eq!(CLIENT_PIPE_ACCESS & FILE_WRITE_ATTRIBUTES, FILE_WRITE_ATTRIBUTES);
+        assert_eq!(CLIENT_PIPE_ACCESS & FILE_CREATE_PIPE_INSTANCE, 0);
+        assert_eq!(CLIENT_PIPE_ACCESS, 0x00100183);
+    }
+    #[test] fn rootfs_hash_detects_changes() {
+        let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert!(verify_sha256(&mut &b"abc"[..], expected).is_ok());
+        assert!(verify_sha256(&mut &b"abd"[..], expected).is_err());
+        assert!(verify_sha256(&mut &b""[..], expected).is_err());
+    }
 }
