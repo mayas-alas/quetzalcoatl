@@ -1,7 +1,7 @@
 use crate::protocol::*;
 pub mod installer;
 use std::os::windows::process::CommandExt;
-use crate::{CLI_EXE, PRODUCT, SETUP_EXE};
+use crate::{CLI_EXE, GNX_EXE, PRODUCT, SETUP_EXE, TRAY_EXE};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{ffi::c_void, fs, io::{Read, Seek}, mem::{size_of, zeroed}, path::{Path, PathBuf}, process::{Command, Stdio}, ptr::{null, null_mut}, sync::{atomic::{AtomicBool, Ordering}, Mutex}, thread, time::{Duration, Instant}};
@@ -9,6 +9,7 @@ use windows_sys::Win32::{Foundation::*, Security::{*, Authorization::*, Authenti
 
 // Private installation identifiers; changing them requires a migration.
 const SERVICE: &str = "QuetzalcoatlGNX";
+const UNINSTALL_KEY: &str = r"HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\QuetzalcoatlGNX";
 const SERVICE_DISPLAY: &str = "Quetzalcoatl GNX - Consultas WSL";
 const ACCOUNT: &str = "svc_quetzalcoatl_gnx";
 const DISTRO: &str = "quetzalcoatl-gnx";
@@ -30,6 +31,7 @@ fn bootstrap() -> String {
 }
 
 static STOP: AtomicBool = AtomicBool::new(false);
+static UNINSTALL: AtomicBool = AtomicBool::new(false);
 static REPORT: Mutex<Option<Report>> = Mutex::new(None);
 static mut STATUS_HANDLE: SERVICE_STATUS_HANDLE = null_mut();
 const CLIENT_PIPE_ACCESS: u32 = FILE_READ_DATA | FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE;
@@ -74,9 +76,24 @@ fn elevated() -> bool { unsafe {
     GetTokenInformation(token.0, TokenElevation, (&mut elevation as *mut TOKEN_ELEVATION).cast(), size_of::<TOKEN_ELEVATION>() as u32, &mut size) != 0 && elevation.TokenIsElevated != 0
 } }
 
-pub fn query(op: Operation) -> Result<Report, String> { unsafe {
+fn administrator_member() -> Result<bool, String> { unsafe {
+    let mut sid = null_mut();
+    if ConvertStringSidToSidW(wide("S-1-5-32-544").as_ptr(), &mut sid) == 0 { return Err(err("administrator SID")); }
+    let mut member = 0;
+    let ok = CheckTokenMembership(null_mut(), sid, &mut member);
+    LocalFree(sid);
+    if ok == 0 { return Err(err("administrator membership")); }
+    Ok(member != 0)
+} }
+
+pub fn query(op: Operation) -> Result<Report, String> { request(op, false) }
+pub fn request_uninstall() -> Result<Report, String> {
+    if !elevated() || !administrator_member()? { return Err("Uninstall requires an elevated administrator.".into()); }
+    request(Operation::Uninstall, true)
+}
+fn request(op: Operation, allow_admin: bool) -> Result<Report, String> { unsafe {
     let cfg = config()?;
-    if current_sid()? != cfg.client_sid { return Err("access_denied: caller is not authorized".into()); }
+    if current_sid()? != cfg.client_sid && (!allow_admin || !administrator_member()?) { return Err("access_denied: caller is not authorized".into()); }
     let path = wide(PIPE);
     if WaitNamedPipeW(path.as_ptr(), 1500) == 0 { return Err("broker_unavailable: pipe not available within 1500ms".into()); }
     let handle = Handle(CreateFileW(path.as_ptr(), CLIENT_PIPE_ACCESS, 0, null(), OPEN_EXISTING, SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, null_mut()));
@@ -129,34 +146,48 @@ unsafe extern "system" fn service_main(_: u32, _: *mut *mut u16) {
     if STATUS_HANDLE.is_null() { return; }
     set_status(SERVICE_START_PENDING, 0);
     let result = config().and_then(|cfg| {
-        if current_sid()? != cfg.account_sid || elevated() { return Err("service identity must be dedicated and non-admin".into()); }
+        let sid = current_sid()?;
+        let admin = administrator_member()?;
+        runtime_log(&format!("Service identity: {sid}; TokenIsElevated={}; administrator_member={admin}", elevated()));
+        // A service logon has a full token even for a standard account. UAC
+        // TokenIsElevated is not an administrator-membership test.
+        if sid != cfg.account_sid || admin { return Err("service identity must be dedicated and non-admin".into()); }
         set_status(SERVICE_RUNNING, 0);
         thread::spawn(supervise);
         serve(&cfg)
-    });
+    }).and_then(|_| if UNINSTALL.load(Ordering::Relaxed) { cleanup_runtime() } else { Ok(()) });
+    if let Err(e) = &result {
+        runtime_log(&format!("Service startup/pipe failure: {e}"));
+        publish_report(Report::new("degraded", e, false));
+    }
     STOP.store(true, Ordering::Relaxed);
     set_status(SERVICE_STOPPED, if result.is_ok() { 0 } else { 1 });
 }
 
 fn serve(cfg: &Config) -> Result<(), String> { unsafe {
     if !valid_sid(&cfg.client_sid) || !valid_sid(&cfg.account_sid) || cfg.client_sid == cfg.account_sid { return Err("invalid or overlapping identities".into()); }
-    let acl = wide(&format!("D:P(A;;GA;;;SY)(A;;GA;;;{})(A;;0x{CLIENT_PIPE_ACCESS:08x};;;{})", cfg.account_sid, cfg.client_sid));
+    let acl = wide(&format!("D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;{})(A;;0x{CLIENT_PIPE_ACCESS:08x};;;{})", cfg.account_sid, cfg.client_sid));
     let mut sd = null_mut();
     if ConvertStringSecurityDescriptorToSecurityDescriptorW(acl.as_ptr(), 1, &mut sd, null_mut()) == 0 { return Err(err("pipe ACL")); }
     let sa = SECURITY_ATTRIBUTES { nLength: size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd, bInheritHandle: 0 };
     let pipe = Handle(CreateNamedPipeW(wide(PIPE).as_ptr(), PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, MAX_MESSAGE as u32, MAX_MESSAGE as u32, 1000, &sa));
     LocalFree(sd);
     if pipe.0 == INVALID_HANDLE_VALUE { return Err(err("pipe creation")); }
-    while !STOP.load(Ordering::Relaxed) {
+    while !STOP.load(Ordering::Relaxed) && !UNINSTALL.load(Ordering::Relaxed) {
         if ConnectNamedPipe(pipe.0, null_mut()) == 0 && GetLastError() != ERROR_PIPE_CONNECTED { thread::sleep(Duration::from_millis(30)); continue; }
         let response = (|| -> Result<Vec<u8>, String> {
             let request = read_message(pipe.0, Duration::from_secs(1))?;
             if ImpersonateNamedPipeClient(pipe.0) == 0 { return Err(err("client authentication")); }
             let mut token = null_mut();
             let identity = if OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut token) != 0 { let t = Handle(token); token_sid(t.0) } else { Err(err("client token")) };
+            let is_admin = administrator_member();
             if RevertToSelf() == 0 { std::process::abort(); }
-            if identity? != cfg.client_sid { return Err("access_denied".into()); }
-            if Operation::from_bytes(&request).is_none() { return Err("unsupported operation".into()); }
+            let operation = Operation::from_bytes(&request).ok_or("unsupported operation")?;
+            if identity? != cfg.client_sid && !(operation == Operation::Uninstall && is_admin?) { return Err("access_denied".into()); }
+            if operation == Operation::Uninstall {
+                UNINSTALL.store(true, Ordering::Relaxed);
+                return serde_json::to_vec(&Report::new("stopped", "Uninstall accepted; stopping dedicated runtime.", false)).map_err(|e| e.to_string());
+            }
             let mut report = REPORT.lock().map_err(|_| "state lock".to_string())?.clone().unwrap_or_else(|| Report::new("unknown", "supervisor initializing", false));
             if matches!(report.state.as_str(), "downloading" | "configuring" | "verifying") { report.observed_unix = unix_now(); }
             serde_json::to_vec(&report).map_err(|e| e.to_string())
@@ -170,7 +201,7 @@ fn serve(cfg: &Config) -> Result<(), String> { unsafe {
 fn run(exe: &Path, args: &[&str], seconds: u64) -> Result<(), String> {
     let log_path = base().join("private").join("runtime.log");
     let output = || -> Stdio { fs::OpenOptions::new().create(true).append(true).open(&log_path).map(Stdio::from).unwrap_or_else(|_| Stdio::null()) };
-    let mut child = Command::new(exe).creation_flags(CREATE_NO_WINDOW).args(args).stdin(Stdio::null()).stdout(output()).stderr(output()).spawn().map_err(|e| e.to_string())?;
+    let mut child = Command::new(exe).creation_flags(CREATE_NO_WINDOW).env("WSL_UTF8", "1").args(args).stdin(Stdio::null()).stdout(output()).stderr(output()).spawn().map_err(|e| e.to_string())?;
     let started = Instant::now();
     loop {
         match child.try_wait().map_err(|e| e.to_string())? { Some(s) if s.success() => return Ok(()), Some(s) => return Err(format!("{} exited with {s}", exe.display())), None => {} }
@@ -179,6 +210,13 @@ fn run(exe: &Path, args: &[&str], seconds: u64) -> Result<(), String> {
     }
 }
 fn wsl() -> PathBuf { PathBuf::from(r"C:\Windows\System32\wsl.exe") }
+fn runtime_log(message: &str) {
+    use std::io::Write;
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(base().join("private/runtime.log")) {
+        let _ = writeln!(file, "[{}] {message}", unix_now());
+    }
+}
+
 fn publish_report(report: Report) {
     if let Ok(bytes) = serde_json::to_vec(&report) {
         let _ = installer::atomic_write(&base().join("private/runtime-status.json"), &bytes);
@@ -186,17 +224,28 @@ fn publish_report(report: Report) {
     *REPORT.lock().unwrap() = Some(report);
 }
 
+fn health_probe() -> String {
+    // runuser changes identity, not cwd: WSL's root shell starts in /root,
+    // which is inaccessible to the rootless Podman child.
+    format!("set -o pipefail; test \"$(cat /proc/1/comm)\" = systemd && test -f /sys/fs/cgroup/cgroup.controllers && test -x /usr/lib/systemd/system-generators/podman-system-generator && cd /home/{LINUX_USER} && runuser -u {LINUX_USER} -- env HOME=/home/{LINUX_USER} XDG_RUNTIME_DIR=/run/user/$(id -u {LINUX_USER}) podman info --format '{{{{.Host.CgroupsVersion}}}}' | grep -qx v2")
+}
+
 fn supervise() {
     let result = initialize_runtime();
     if let Err(e) = result { publish_report(Report::new("degraded", &e, false)); return; }
     while !STOP.load(Ordering::Relaxed) {
         // Supervisor, not a user query, is responsible for keeping the runtime active.
-        let probe = format!("set -o pipefail; test \"$(cat /proc/1/comm)\" = systemd && test -f /sys/fs/cgroup/cgroup.controllers && test -x /usr/lib/systemd/system-generators/podman-system-generator && runuser -u {LINUX_USER} -- env XDG_RUNTIME_DIR=/run/user/$(id -u {LINUX_USER}) podman info --format '{{{{.Host.CgroupsVersion}}}}' | grep -qx v2");
+        let probe = health_probe();
         let result = run(&wsl(), &["-d", DISTRO, "-u", "root", "--", "bash", "-lc", &probe], 20);
         publish_report(match result { Ok(()) => Report::new("ready", "systemd, cgroups v2 and rootless Podman verified; no application Quadlet deployed", true), Err(e) => Report::new("degraded", &e, false) });
         for _ in 0..100 { if STOP.load(Ordering::Relaxed) { break; } thread::sleep(Duration::from_millis(100)); }
     }
 }
+fn cleanup_runtime() -> Result<(), String> {
+    publish_report(Report::new("stopped", "Unregistering the dedicated WSL distribution.", false));
+    run(&wsl(), &["--unregister", DISTRO], 300)
+}
+
 fn initialize_runtime() -> Result<(), String> {
     let data = base().join("private");
     if !data.join("initialized").exists() {
@@ -247,6 +296,26 @@ unsafe fn account_rights(sid: &str) -> Result<(), String> {
     LsaClose(policy); LocalFree(raw); Ok(())
 }
 
+fn register_windows_app() -> Result<(), String> {
+    let script = format!(r#"$ErrorActionPreference='Stop'; New-Item -Path '{UNINSTALL_KEY}' -Force | Out-Null; Set-ItemProperty -Path '{UNINSTALL_KEY}' -Name DisplayName -Value '{PRODUCT}'; Set-ItemProperty -Path '{UNINSTALL_KEY}' -Name DisplayVersion -Value '0.1.0'; Set-ItemProperty -Path '{UNINSTALL_KEY}' -Name Publisher -Value 'Quetzalcoatl'; Set-ItemProperty -Path '{UNINSTALL_KEY}' -Name InstallLocation -Value '{BASE}'; Set-ItemProperty -Path '{UNINSTALL_KEY}' -Name UninstallString -Value '"{BASE}\{SETUP_EXE}" --uninstall --confirm'; Set-ItemProperty -Path '{UNINSTALL_KEY}' -Name NoModify -Value 1 -Type DWord; Set-ItemProperty -Path '{UNINSTALL_KEY}' -Name NoRepair -Value 1 -Type DWord"#);
+    let status = Command::new(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe").creation_flags(CREATE_NO_WINDOW).args(["-NoProfile", "-NonInteractive", "-Command", &script]).status().map_err(|e| e.to_string())?;
+    if !status.success() { return Err("Could not register GNX in Windows installed apps.".into()); }
+    Ok(())
+}
+
+fn install_cli_command() -> Result<(), String> {
+    let source = base().join(CLI_EXE);
+    let short = base().join(GNX_EXE);
+    fs::copy(&source, &short).map_err(|e| format!("install {GNX_EXE}: {e}"))?;
+    // A machine PATH entry is safe here: the directory ACL grants execution
+    // only to the authorized client (plus SYSTEM/Administrators).
+    let script = format!(r#"$ErrorActionPreference='Stop'; $dir='{BASE}'; $key='HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment'; $current=[Environment]::GetEnvironmentVariable('Path','Machine'); $parts=@($current -split ';' | Where-Object {{ $_ }}); if($parts -notcontains $dir) {{ [Environment]::SetEnvironmentVariable('Path', (($parts + $dir) -join ';'), 'Machine') }}; Add-Type -Namespace GNX -Name Env -MemberDefinition '[DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Auto)] public static extern IntPtr SendMessageTimeout(IntPtr hWnd,uint Msg,UIntPtr wParam,string lParam,uint flags,uint timeout,out UIntPtr result);'; $r=[UIntPtr]::Zero; [GNX.Env]::SendMessageTimeout([IntPtr]0xffff,0x1A,[UIntPtr]::Zero,'Environment',2,5000,[ref]$r) | Out-Null"#);
+    let status = Command::new(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+        .creation_flags(CREATE_NO_WINDOW).args(["-NoProfile", "-NonInteractive", "-Command", &script]).status().map_err(|e| e.to_string())?;
+    if !status.success() { return Err("Could not register the gnx command in the machine PATH.".into()); }
+    Ok(())
+}
+
 fn verify_sha256(input: &mut impl Read, expected: &str) -> Result<(), String> {
     let mut hash = Sha256::new(); let mut buffer = [0u8; 65536];
     loop { let n = input.read(&mut buffer).map_err(|e| e.to_string())?; if n == 0 { break; } hash.update(&buffer[..n]); }
@@ -285,18 +354,10 @@ pub fn setup(args: &[String]) -> Result<(), String> {
     if features.code() == Some(3010) { println!("Restart Windows and run the same install command again. No dedicated account created yet."); std::process::exit(3010); }
     if !features.success() { return Err(format!("Windows feature preparation failed: {features}")); }
     // Host prerequisites happen before creating a dedicated identity.
-    let mut child = Command::new(&wsl()).creation_flags(CREATE_NO_WINDOW).args(["--install", "--no-distribution", "--web-download", "--no-launch"]).spawn().map_err(|e| e.to_string())?;
-    let start = Instant::now();
-    let status = loop {
-        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? { break status; }
-        if start.elapsed() > Duration::from_secs(600) {
-            let _ = child.kill(); let _ = child.wait();
-            return Err("WSL host preparation timed out. Inspect Windows prerequisites before retrying.".into());
-        }
-        thread::sleep(Duration::from_millis(200));
-    };
-    if status.code() == Some(3010) { println!("Restart Windows and run the same install command again."); std::process::exit(3010); }
-    if !status.success() { return Err(format!("WSL preparation failed ({status}); restart if requested and retry.")); }
+    if installer::prepare_machine_wsl(&args[3])? {
+        println!("WSL MSI requires a restart; installation will resume after reboot.");
+        std::process::exit(3010);
+    }
     if online { installer::provisioning_progress(&args[3])?; }
     fs::create_dir(base()).map_err(|e| e.to_string())?;
     // Protect the newly created directory before putting executable content in it.
@@ -325,6 +386,11 @@ pub fn setup(args: &[String]) -> Result<(), String> {
         verify_sha256(&mut staged, &args[2])?;
         }
         fs::copy(companion, base().join(CLI_EXE)).map_err(|e| e.to_string())?;
+        let tray = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name(TRAY_EXE);
+        if !tray.is_file() { return Err(format!("Place {TRAY_EXE} next to {SETUP_EXE}.")); }
+        fs::copy(tray, base().join(TRAY_EXE)).map_err(|e| e.to_string())?;
+        install_cli_command()?;
+        register_windows_app()?;
         let cfg = Config { client_sid: args[3].clone(), account_sid: sid, rootfs_sha256: args[2].to_ascii_lowercase() };
         fs::write(base().join("config.json"), serde_json::to_vec_pretty(&cfg).unwrap()).map_err(|e| e.to_string())?;
         let scm = ServiceHandle(OpenSCManagerW(null(), null(), SC_MANAGER_CREATE_SERVICE));
@@ -342,6 +408,15 @@ pub fn setup(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn short_cli_name_is_stable() {
+        assert_eq!(GNX_EXE, "gnx.exe");
+    }
+    #[test] fn rootless_probe_does_not_inherit_roots_directory() {
+        let probe = health_probe();
+        assert!(probe.contains(&format!("cd /home/{LINUX_USER} && runuser -u {LINUX_USER}")));
+        assert!(probe.contains(&format!("HOME=/home/{LINUX_USER}")));
+        assert!(probe.contains("set -o pipefail"));
+    }
     #[test] fn installation_identity_matches_bootstrap() {
         assert!(ACCOUNT.len() <= 20);
         assert!(ACCOUNT.bytes().all(|c| c.is_ascii_lowercase() || c == b'_'));

@@ -7,10 +7,26 @@ use windows_sys::Win32::UI::{Shell::{ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MAS
 const ROOT: &str = r"C:\ProgramData\QuetzalcoatlGNX-Setup";
 const TASK: &str = "QuetzalcoatlGNX-Resume";
 const UI_TASK: &str = "QuetzalcoatlGNX-SetupUI";
+const TRAY_TASK: &str = "QuetzalcoatlGNX-Tray";
+const CLEANUP_TASK: &str = "QuetzalcoatlGNX-Cleanup";
 const POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
 fn root() -> PathBuf { PathBuf::from(ROOT) }
 pub fn diagnostic_path() -> PathBuf { root().join("setup.log") }
 pub fn caller_sid() -> Result<String, String> { current_sid() }
+pub fn cleanup_pending() -> bool { root().exists() && !base().exists() && account_sid(ACCOUNT).is_err() }
+
+fn host_install_result(code: i32) -> Result<bool, String> {
+    match code {
+        0 => Ok(false),
+        3010 => Ok(true),
+        _ => Err(format!("No se pudo preparar WSL para todo el equipo (código {code}). Consulta setup.log y wsl-msi.log; no se creó la cuenta dedicada.")),
+    }
+}
+pub(super) fn prepare_machine_wsl(client_sid: &str) -> Result<bool, String> {
+    secure_root(Some(client_sid))?;
+    let script = include_str!("prepare-wsl.ps1").replace("@ROOT@", ROOT);
+    host_install_result(execute(Path::new(POWERSHELL), &["-NoProfile", "-NonInteractive", "-Command", &script], 1500)?)
+}
 
 pub(super) fn lock_engine(client_sid: &str) -> Result<Option<Handle>, String> {
     if !root().exists() { return Ok(None); }
@@ -57,7 +73,7 @@ fn transition(state: &mut State, stage: Stage, detail: impl Into<String>) -> Res
 fn execute(exe: &Path, args: &[&str], timeout: u64) -> Result<i32, String> {
     let out = fs::OpenOptions::new().create(true).append(true).open(diagnostic_path()).map_err(|e| e.to_string())?;
     let err_out = out.try_clone().map_err(|e| e.to_string())?;
-    let mut child = Command::new(exe).creation_flags(CREATE_NO_WINDOW).current_dir(root()).env("PSModulePath", r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules").args(args).stdin(Stdio::null()).stdout(out).stderr(err_out).spawn().map_err(|e| e.to_string())?;
+    let mut child = Command::new(exe).creation_flags(CREATE_NO_WINDOW).current_dir(root()).env("WSL_UTF8", "1").env("PSModulePath", r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules").args(args).stdin(Stdio::null()).stdout(out).stderr(err_out).spawn().map_err(|e| e.to_string())?;
     let begin = Instant::now();
     loop {
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? { return status.code().ok_or("Process exited without a code".into()); }
@@ -121,6 +137,7 @@ fn lock_at(path: &Path) -> Result<Handle, String> {
 fn register_tasks(sid: &str) -> Result<(), String> {
     if !valid_sid(sid) { return Err("Invalid SID".into()); }
     let exe = root().join(SETUP_EXE);
+    let tray = root().join(TRAY_EXE);
     ps(&format!(r#"
 $a=New-ScheduledTaskAction -Execute '{exe}' -Argument '--resume';
 $t=New-ScheduledTaskTrigger -AtStartup;
@@ -131,10 +148,15 @@ $a=New-ScheduledTaskAction -Execute '{exe}' -Argument '--gui';
 $t=New-ScheduledTaskTrigger -AtLogOn -User '{sid}';
 $p=New-ScheduledTaskPrincipal -UserId '{sid}' -LogonType Interactive -RunLevel Limited;
 Register-ScheduledTask -TaskName '{UI_TASK}' -Action $a -Trigger $t -Principal $p -Settings $s -Force | Out-Null;
-"#, exe=exe.display()))
+$a=New-ScheduledTaskAction -Execute '{tray}' -WorkingDirectory '{root}';
+Register-ScheduledTask -TaskName '{TRAY_TASK}' -Action $a -Trigger $t -Principal $p -Settings $s -Force | Out-Null;
+"#, exe=exe.display(), tray=tray.display(), root=root().display()))
 }
 fn remove_tasks() -> Result<(), String> {
     ps(&format!("foreach($n in @('{TASK}','{UI_TASK}')) {{ if(Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue) {{ Unregister-ScheduledTask -TaskName $n -Confirm:$false }} }}"))
+}
+fn start_tray() -> Result<(), String> {
+    ps(&format!("if(Get-ScheduledTask -TaskName '{TRAY_TASK}' -ErrorAction SilentlyContinue) {{ Start-ScheduledTask -TaskName '{TRAY_TASK}' }}"))
 }
 
 /// Launch a separate elevated worker. UAC cancellation is returned to the UI.
@@ -150,9 +172,9 @@ impl Worker {
     }
 }
 pub fn request_action(action: &str, sid: &str) -> Result<Worker, String> {
-    if !valid_sid(sid) || !matches!(action, "--start" | "--restart") { return Err("Invalid installer action".into()); }
+    if !valid_sid(sid) || !matches!(action, "--start" | "--restart" | "--uninstall" | "--cleanup-reboot") { return Err("Invalid installer action".into()); }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let args = format!("{action} {sid}");
+    let args = if action == "--uninstall" { "--uninstall --confirm".into() } else { format!("{action} {sid}") };
     let verb = wide("runas");
     let executable = wide(exe.to_str().ok_or("Invalid executable path")?);
     let parameters = wide(&args);
@@ -182,8 +204,11 @@ pub fn start(client_sid: Option<&str>) -> Result<i32, String> {
             let source = std::env::current_exe().map_err(|e| e.to_string())?;
             let companion = source.with_file_name(CLI_EXE);
             if !companion.is_file() { return Err(format!("Falta {CLI_EXE} junto al instalador.")); }
+            let tray = source.with_file_name(TRAY_EXE);
+            if !tray.is_file() { return Err(format!("Falta {TRAY_EXE} junto al instalador.")); }
             fs::copy(&source, root().join(SETUP_EXE)).map_err(|e| e.to_string())?;
             fs::copy(companion, root().join(CLI_EXE)).map_err(|e| e.to_string())?;
+            fs::copy(tray, root().join(TRAY_EXE)).map_err(|e| e.to_string())?;
             let state = State::new(sid.to_owned()); save(&state)?; state
         }
     };
@@ -194,7 +219,7 @@ pub fn start(client_sid: Option<&str>) -> Result<i32, String> {
     }
 }
 fn resume(state: &mut State) -> Result<i32, String> {
-    if state.stage == Stage::Complete { remove_tasks()?; return Ok(0); }
+    if state.stage == Stage::Complete { remove_tasks()?; start_tray()?; return Ok(0); }
     register_tasks(&state.client_sid)?;
     let boot = boot_id()?;
     if state.reboot_still_pending(&boot) {
@@ -235,6 +260,7 @@ fn resume(state: &mut State) -> Result<i32, String> {
             if report.verified {
                 transition(state, Stage::Complete, "WSL, systemd, cgroups v2 y Podman verificados. No se ha desplegado todavía una aplicación.")?;
                 remove_tasks()?;
+                start_tray()?;
                 return Ok(0);
             }
             if phase == "degraded" { return Err(detail); }
@@ -260,6 +286,25 @@ mod tests {
         let path = std::env::temp_dir().join(format!("gnx-state-test-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         fs::create_dir(&path).unwrap(); path
     }
+    #[test] fn msi_exit_codes_do_not_claim_false_success() {
+        assert_eq!(host_install_result(0).unwrap(), false);
+        assert_eq!(host_install_result(3010).unwrap(), true);
+        for code in [1, -1, 1603, 1618, 1641] { assert!(host_install_result(code).is_err()); }
+    }
+    #[test] fn host_package_requires_hash_signature_and_no_restart() {
+        let script = include_str!("prepare-wsl.ps1");
+        assert!(script.contains("https://github.com/microsoft/WSL/releases/download/"));
+        assert!(script.contains("Get-FileHash") && script.contains("Get-AuthenticodeSignature"));
+        assert!(script.contains("/qn /norestart"));
+        assert!(!script.contains("--install"));
+    }
+    #[test] fn cleanup_helper_waits_and_removes_only_fixed_resources() {
+        let script = include_str!("cleanup.ps1");
+        assert!(script.contains("quetzalcoatl-gnx-setup.exe"));
+        assert!(script.contains("Win32_UserProfile") && script.contains("Remove-CimInstance") && script.contains("svc_quetzalcoatl_gnx"));
+        assert!(script.contains("Remove-Item -LiteralPath $root -Recurse -Force"));
+        assert!(!script.contains("wsl --shutdown"));
+    }
     #[test] fn atomic_state_replaces_existing_file() {
         let dir = temp(); let path = dir.join("state.json");
         atomic_write(&path, b"first").unwrap(); atomic_write(&path, b"second").unwrap();
@@ -271,6 +316,56 @@ mod tests {
         let first = lock_at(&path).unwrap(); assert!(lock_at(&path).is_err());
         drop(first); drop(lock_at(&path).unwrap()); fs::remove_dir_all(dir).unwrap();
     }
+}
+
+fn schedule_cleanup(account_sid: Option<&str>) -> Result<(), String> {
+    if account_sid.is_some_and(|sid| !valid_sid(sid)) { return Err("Invalid dedicated account SID for cleanup.".into()); }
+    let script = include_str!("cleanup.ps1").replace("@ROOT@", ROOT).replace("@SID@", account_sid.unwrap_or("")).replace("@TASK@", CLEANUP_TASK);
+    fs::write(root().join("cleanup.ps1"), script).map_err(|e| e.to_string())?;
+    let script_path = root().join("cleanup.ps1");
+    ps(&format!(r#"$ErrorActionPreference='Stop'; $a=New-ScheduledTaskAction -Execute '{POWERSHELL}' -Argument '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{script}"'; $t=New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1); $p=New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest; $s=New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances IgnoreNew; Register-ScheduledTask -TaskName '{CLEANUP_TASK}' -Action $a -Trigger $t -Principal $p -Settings $s -Force | Out-Null; Start-ScheduledTask -TaskName '{CLEANUP_TASK}'"#, script=script_path.display()))
+}
+
+pub fn uninstall(confirm: bool) -> Result<i32, String> {
+    if !confirm { return Err("Uninstall requires --confirm; it removes the dedicated WSL distribution and all GNX data.".into()); }
+    if !elevated() || !administrator_member()? { return Err("Uninstall requires an elevated administrator.".into()); }
+    let _lock = lock_worker()?;
+    if config().is_err() {
+        // An interrupted/uninstalled runtime may leave only protected staging.
+        // Refuse this recovery if any live GNX service/account still exists.
+        ps(&format!("if((Get-Service '{SERVICE}' -ErrorAction SilentlyContinue) -or (Get-LocalUser '{ACCOUNT}' -ErrorAction SilentlyContinue) -or (Test-Path '{BASE}')) {{ exit 1 }}"))
+            .map_err(|_| "GNX resources remain but configuration is missing; refusing destructive recovery.".to_string())?;
+        ps(&format!("if(Get-ScheduledTask -TaskName '{TRAY_TASK}' -ErrorAction SilentlyContinue) {{ Unregister-ScheduledTask -TaskName '{TRAY_TASK}' -Confirm:$false }}; Remove-Item -Path '{UNINSTALL_KEY}' -Force -ErrorAction SilentlyContinue"))?;
+        schedule_cleanup(None)?;
+        return Ok(0);
+    }
+    let _ = request_uninstall()?;
+    let deadline = Instant::now() + Duration::from_secs(330);
+    loop {
+        let stopped = ps(&format!("$s=Get-Service '{SERVICE}' -ErrorAction SilentlyContinue; if(!$s -or $s.Status -eq 'Stopped') {{ exit 0 }}; exit 1")).is_ok();
+        if stopped { break; }
+        if Instant::now() >= deadline { return Err("The dedicated service did not stop after unregistering WSL; no files or account were removed.".into()); }
+        thread::sleep(Duration::from_secs(2));
+    }
+    let cfg = config()?;
+    // Exact fixed names only; do not discover or remove other WSL distributions.
+    ps(&format!(r#"$ErrorActionPreference='Stop'; sc.exe delete '{SERVICE}' | Out-Null; if(Get-ScheduledTask -TaskName '{TRAY_TASK}' -ErrorAction SilentlyContinue) {{ Unregister-ScheduledTask -TaskName '{TRAY_TASK}' -Confirm:$false }}; Remove-Item -Path '{UNINSTALL_KEY}' -Force -ErrorAction SilentlyContinue; $path=[Environment]::GetEnvironmentVariable('Path','Machine'); [Environment]::SetEnvironmentVariable('Path', (($path -split ';' | Where-Object {{ $_ -and $_ -ne '{BASE}' }}) -join ';'), 'Machine'); net.exe user '{ACCOUNT}' /delete | Out-Null; Remove-Item -LiteralPath '{BASE}' -Recurse -Force"#))?;
+    // SYSTEM deletes staging and the deleted account's Windows profile after this EXE exits.
+    schedule_cleanup(Some(&cfg.account_sid))?;
+    Ok(0)
+}
+
+pub fn restart_cleanup(client_sid: &str) -> Result<i32, String> {
+    if !elevated() || !administrator_member()? { return Err("Restart requires an elevated administrator.".into()); }
+    if !valid_sid(client_sid) { return Err("Invalid client SID.".into()); }
+    // This path is only for a completed uninstall: do not restart while any
+    // live GNX resource remains.
+    ps(&format!("if((Get-Service '{SERVICE}' -ErrorAction SilentlyContinue) -or (Get-LocalUser '{ACCOUNT}' -ErrorAction SilentlyContinue) -or (Test-Path '{BASE}')) {{ exit 1 }}"))
+        .map_err(|_| "GNX runtime still exists; refusing cleanup restart.".to_string())?;
+    schedule_cleanup(None)?;
+    let code = execute(Path::new(r"C:\Windows\System32\shutdown.exe"), &["/r", "/t", "0"], 15)?;
+    if code != 0 { return Err(format!("Windows rejected the cleanup restart ({code}).")); }
+    Ok(0)
 }
 
 pub fn restart(client_sid: &str) -> Result<i32, String> {

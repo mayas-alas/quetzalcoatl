@@ -1,10 +1,12 @@
 # Asistente gráfico y reanudación de instalación
 
+**Actualización:** la [reparación posterior al reinicio](reparacion-post-reinicio.md) alcanzó `ready` en este host. La evidencia al final de este documento corresponde a la primera versión; consulta la reparación para los resultados actuales y los límites pendientes.
+
 ## Uso
 
 Abre `dist/quetzalcoatl-gnx/quetzalcoatl-gnx-setup.exe` con doble clic, desde el usuario que consultará el entorno. Mantén `quetzalcoatl-gnx.exe` junto al instalador. La ventana no necesita elevación; **Instalar** solicita UAC para un motor separado. Si UAC usa otra cuenta administradora, se conserva el SID del usuario original.
 
-La interfaz muestra fases reales, actividad indeterminada, errores, reintento y un visor de las últimas 64 KiB de `setup.log`. No muestra porcentajes inventados. Cerrar la ventana no cancela al motor.
+La interfaz muestra fases reales, barra de etapa (no de porcentaje de descarga), actividad indeterminada, errores, reintento, acceso visible a `gnx` y un visor de las últimas 64 KiB de `setup.log`. No muestra porcentajes inventados. Cerrar la ventana no cancela al motor.
 
 Cuando Windows requiere reinicio:
 
@@ -14,6 +16,10 @@ Cuando Windows requiere reinicio:
 4. Se solicita `shutdown /r /t 0`, **sin `/f`**. Las aplicaciones pueden impedir el reinicio para proteger documentos. No usamos un timeout positivo de `shutdown`, que implica cierre forzado en Windows.
 5. Puedes posponerlo indefinidamente y reiniciar manualmente.
 6. Al arrancar continúa el motor; al iniciar sesión vuelve la interfaz.
+
+Si una desinstalación terminó pero Windows mantiene cargado el perfil técnico, el setup muestra **Reiniciar para finalizar limpieza**. Usa la misma cuenta atrás cancelable; tras arrancar, la tarea SYSTEM limpia los residuos y el setup vuelve a ofrecer **Instalar**.
+
+Al llegar a `complete`, la interfaz ofrece **Desinstalar…** con una segunda confirmación. Solicita UAC y ejecuta únicamente el flujo `--uninstall --confirm`; no elimina WSL global ni otras distribuciones.
 
 La CLI online también utiliza el motor persistente:
 
@@ -71,7 +77,7 @@ El directorio se crea con DACL protegida desde el primer momento: SYSTEM y admin
 
 Se registran antes de preparar Windows y se eliminan al completar. Ante un fallo permanecen para diagnóstico/reanudación. No almacenan contraseña del usuario ni de la cuenta dedicada. Una colisión inicial con nombres de tareas existentes se rechaza.
 
-SYSTEM prepara Windows y crea el servicio. **Ubuntu no se registra bajo SYSTEM:** su descarga, registro y configuración se ejecutan bajo `svc_quetzalcoatl_gnx`, como antes. El motor comprueba SID, ruta del servicio y cuenta de inicio antes de reutilizarlo.
+SYSTEM prepara Windows y crea el servicio. La preparación del motor WSL ahora utiliza el MSI oficial Microsoft 2.7.14.0 x64, con SHA256 fijado y verificación Authenticode; un WSL ya instalado se comprueba sin reinstalarlo. **Ubuntu no se registra bajo SYSTEM:** su descarga, registro y configuración se ejecutan bajo `svc_quetzalcoatl_gnx`, como antes. El motor comprueba SID, ruta del servicio y cuenta de inicio antes de reutilizarlo.
 
 ## Recuperación: alcance real
 

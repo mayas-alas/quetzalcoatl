@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq)]
-pub enum Operation { Check, Status }
+pub enum Operation { Check, Status, Uninstall }
 impl Operation {
     pub fn as_bytes(&self) -> &'static [u8] {
-        match self { Self::Check => b"check", Self::Status => b"status" }
+        match self { Self::Check => b"check", Self::Status => b"status", Self::Uninstall => b"uninstall" }
     }
 
     pub fn from_bytes(value: &[u8]) -> Option<Self> {
-        match value { b"check" => Some(Self::Check), b"status" => Some(Self::Status), _ => None }
+        match value { b"check" => Some(Self::Check), b"status" => Some(Self::Status), b"uninstall" => Some(Self::Uninstall), _ => None }
     }
 }
 
@@ -56,7 +56,7 @@ mod tests {
         for args in [vec![], vec!["install".into()], vec!["status".into(), "--exec".into()], vec!["status;cmd".into()]] { assert!(parse_operation(&args).is_err()); }
     }
     #[test] fn wire_operations_roundtrip_and_reject_trailing_data() {
-        for op in [Operation::Check, Operation::Status] {
+        for op in [Operation::Check, Operation::Status, Operation::Uninstall] {
             assert_eq!(Operation::from_bytes(op.as_bytes()), Some(op));
         }
         for data in [b"check\0".as_slice(), b"status\n", b"STATUS", b"install", &[255]] {

@@ -43,7 +43,7 @@ try {
     $probe = Start-Process (Resolve-Path 'target\release\quetzalcoatl-gnx-setup.exe') -ArgumentList '--help' -Wait -PassThru
     if ($probe.ExitCode -ne 0) { throw "Setup executable smoke test failed: $($probe.ExitCode)" }
     New-Item -ItemType Directory -Force 'dist\quetzalcoatl-gnx' | Out-Null
-    Copy-Item 'target\release\quetzalcoatl-gnx.exe', 'target\release\quetzalcoatl-gnx-setup.exe' 'dist\quetzalcoatl-gnx\' -Force
+    Copy-Item 'target\release\quetzalcoatl-gnx.exe', 'target\release\quetzalcoatl-gnx-setup.exe', 'target\release\quetzalcoatl-gnx-tray.exe' 'dist\quetzalcoatl-gnx\' -Force
     Write-Host 'Built, tested and packaged in dist\quetzalcoatl-gnx. No installation was started.'
 } finally {
     $env:CARGO_ENCODED_RUSTFLAGS = $oldFlags
