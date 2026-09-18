@@ -1,0 +1,14 @@
+C:\Users\mayas\orca\workspaces\Quetzalcoat\rama-mvp\target\release\deps\thiserror-4d70d75d4f87ccdd.d: C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\lib.rs C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\aserror.rs C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\display.rs C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\var.rs C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\private.rs C:\Users\mayas\orca\workspaces\Quetzalcoat\rama-mvp\target\release\build\thiserror-a3680ddb54abb250\out/private.rs
+
+C:\Users\mayas\orca\workspaces\Quetzalcoat\rama-mvp\target\release\deps\libthiserror-4d70d75d4f87ccdd.rlib: C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\lib.rs C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\aserror.rs C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\display.rs C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\var.rs C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\private.rs C:\Users\mayas\orca\workspaces\Quetzalcoat\rama-mvp\target\release\build\thiserror-a3680ddb54abb250\out/private.rs
+
+C:\Users\mayas\orca\workspaces\Quetzalcoat\rama-mvp\target\release\deps\libthiserror-4d70d75d4f87ccdd.rmeta: C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\lib.rs C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\aserror.rs C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\display.rs C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\var.rs C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\private.rs C:\Users\mayas\orca\workspaces\Quetzalcoat\rama-mvp\target\release\build\thiserror-a3680ddb54abb250\out/private.rs
+
+C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\lib.rs:
+C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\aserror.rs:
+C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\display.rs:
+C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\var.rs:
+C:\Users\mayas\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\private.rs:
+C:\Users\mayas\orca\workspaces\Quetzalcoat\rama-mvp\target\release\build\thiserror-a3680ddb54abb250\out/private.rs:
+
+# env-dep:OUT_DIR=C:\\Users\\mayas\\orca\\workspaces\\Quetzalcoat\\rama-mvp\\target\\release\\build\\thiserror-a3680ddb54abb250\\out
