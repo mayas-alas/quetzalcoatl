@@ -1,31 +1,26 @@
 #requires -Version 5.1
 <##
 .SYNOPSIS
-  Provisions the GNX-owned WSL runtime under a dedicated local identity.
+  Provisions the GNX-owned WSL runtime without operator-supplied rootfs input.
 
 .DESCRIPTION
-  This script is intentionally explicit: it never downloads a distribution,
-  accepts arbitrary resource names, or writes credentials to disk, argv, or logs.
-  The caller supplies a trusted rootfs tarball and the script imports it as the
-  GNX runtime identity.
+  WSL obtains the pinned Ubuntu distribution through its own official install
+  path. The temporary base distribution is exported, verified locally, removed,
+  and imported under the GNX runtime identity with the GNX-owned name.
+  No download URL, credential, rootfs path, or secret is accepted from argv.
 #>
 [CmdletBinding()]
-param(
-    [Parameter(Mandatory = $true)]
-    [ValidateScript({ Test-Path -LiteralPath $_ -PathType Leaf })]
-    [string]$RootfsTar,
-    [string]$DistributionName = 'gnx-pihole',
-    [string]$RuntimeUser = 'gnx-runtime',
-    [string]$RuntimeRoot = 'C:\ProgramData\GNX\runtime'
-)
+param()
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$fixedDistribution = 'gnx-pihole'
-$fixedRuntimeUser = 'gnx-runtime'
-$fixedRuntimeRoot = 'C:\ProgramData\GNX\runtime'
+$distribution = 'gnx-pihole'
+$baseDistribution = 'Ubuntu-24.04'
+$runtimeUser = 'gnx-runtime'
+$runtimeRoot = 'C:\ProgramData\GNX\runtime'
 $reportRoot = 'C:\ProgramData\GNX'
+$stageTar = Join-Path $reportRoot 'ubuntu-base.tar'
 
 function Assert-Admin {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -33,12 +28,6 @@ function Assert-Admin {
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         throw 'GNX runtime provisioning requires an elevated administrator.'
     }
-}
-
-function Assert-FixedIdentity {
-    if ($DistributionName -cne $fixedDistribution) { throw "DistributionName must be '$fixedDistribution'." }
-    if ($RuntimeUser -cne $fixedRuntimeUser) { throw "RuntimeUser must be '$fixedRuntimeUser'." }
-    if ($RuntimeRoot -cne $fixedRuntimeRoot) { throw "RuntimeRoot must be '$fixedRuntimeRoot'." }
 }
 
 function Assert-PlainDirectory([string]$Path) {
@@ -50,63 +39,86 @@ function Assert-PlainDirectory([string]$Path) {
     }
 }
 
+function Get-Distros {
+    @(wsl.exe --list --quiet 2>$null | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+
+function Invoke-Wsl([string[]]$Arguments) {
+    & "$env:SystemRoot\System32\wsl.exe" @Arguments
+    if ($LASTEXITCODE -eq 3010) { throw 'WSL requires a restart before GNX provisioning can continue.' }
+    if ($LASTEXITCODE -ne 0) { throw "WSL operation failed with code $LASTEXITCODE." }
+}
+
 function New-RuntimePassword {
     $bytes = New-Object byte[] 32
     [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-    $chars = [Convert]::ToBase64String($bytes).ToCharArray()
+    $text = [Convert]::ToBase64String($bytes)
     $bytes = $null
-    # SecureString never leaves this process and is not persisted.
-    ConvertTo-SecureString (-join $chars) -AsPlainText -Force
+    ConvertTo-SecureString $text -AsPlainText -Force
 }
 
 Assert-Admin
-Assert-FixedIdentity
-$rootfs = (Resolve-Path -LiteralPath $RootfsTar).Path
 Assert-PlainDirectory $reportRoot
-Assert-PlainDirectory $RuntimeRoot
+Assert-PlainDirectory $runtimeRoot
 New-Item -ItemType Directory -Force -Path $reportRoot | Out-Null
-New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
 
-$existingUser = Get-LocalUser -Name $RuntimeUser -ErrorAction SilentlyContinue
+$existingUser = Get-LocalUser -Name $runtimeUser -ErrorAction SilentlyContinue
 if ($existingUser) {
     if ($existingUser.Description -ne 'GNX runtime identity') {
-        throw "Existing local user '$RuntimeUser' is not owned by GNX."
+        throw "Existing local user '$runtimeUser' is not owned by GNX."
     }
-} else {
-    $password = New-RuntimePassword
-    New-LocalUser -Name $RuntimeUser -Password $password -Description 'GNX runtime identity' -AccountNeverExpires -PasswordNeverExpires -UserMayNotChangePassword | Out-Null
+    throw "GNX runtime identity already exists; refusing an unattended credential reset."
 }
 
-$acl = Get-Acl -LiteralPath $RuntimeRoot
-$acl.SetAccessRuleProtection($true, $false)
-$runtimeSid = (Get-LocalUser -Name $RuntimeUser).SID
-$rule = [Security.AccessControl.FileSystemAccessRule]::new($runtimeSid, 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
-$acl.SetAccessRule($rule)
-Set-Acl -LiteralPath $RuntimeRoot -AclObject $acl
-
-$existing = @(wsl.exe --list --quiet 2>$null | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-if ($existing -contains $DistributionName) {
-    throw "WSL distribution '$DistributionName' already exists; refusing adoption."
+$existingDistros = Get-Distros
+if ($existingDistros -contains $distribution) {
+    throw "WSL distribution '$distribution' already exists; refusing adoption."
+}
+if ($existingDistros -contains $baseDistribution) {
+    throw "Base distribution '$baseDistribution' already exists; refusing to reuse an unrelated distribution."
 }
 
-# Import is executed as the dedicated identity so WSL ownership is not tied to
-# the administrator who provisions the host.
-if ($existingUser) {
-    $password = Read-Host -Prompt "Password for existing GNX runtime identity" -AsSecureString
-}
+$password = New-RuntimePassword
 try {
-    $credential = [PSCredential]::new("$env:COMPUTERNAME\$RuntimeUser", $password)
-    $import = Start-Process -FilePath "$env:SystemRoot\System32\wsl.exe" -Credential $credential -Wait -PassThru -WindowStyle Hidden -ArgumentList @('--import', $DistributionName, $RuntimeRoot, $rootfs, '--version', '2')
+    New-LocalUser -Name $runtimeUser -Password $password -Description 'GNX runtime identity' -AccountNeverExpires -PasswordNeverExpires -UserMayNotChangePassword | Out-Null
+
+    $acl = Get-Acl -LiteralPath $runtimeRoot
+    $acl.SetAccessRuleProtection($true, $false)
+    $runtimeSid = (Get-LocalUser -Name $runtimeUser).SID
+    $rule = [Security.AccessControl.FileSystemAccessRule]::new($runtimeSid, 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+    $acl.SetAccessRule($rule)
+    Set-Acl -LiteralPath $runtimeRoot -AclObject $acl
+
+    # WSL performs the official distribution download. No URL or rootfs is
+    # accepted from the operator, and --no-launch prevents an interactive shell.
+    & "$env:SystemRoot\System32\wsl.exe" --install $baseDistribution --no-launch --web-download
+    if ($LASTEXITCODE -eq 3010) { throw 'WSL requires a restart before GNX provisioning can continue.' }
+    if ($LASTEXITCODE -ne 0) { throw "WSL distribution installation failed with code $LASTEXITCODE." }
+
+    Invoke-Wsl @('--export', $baseDistribution, $stageTar)
+    if (-not (Test-Path -LiteralPath $stageTar -PathType Leaf)) { throw 'WSL export did not produce the expected staging archive.' }
+    $hash = (Get-FileHash -LiteralPath $stageTar -Algorithm SHA256).Hash.ToLowerInvariant()
+
+    # The temporary base name is fixed and was created by this run; only that
+    # exact distribution is removed before the GNX-owned import.
+    Invoke-Wsl @('--unregister', $baseDistribution)
+
+    $credential = [PSCredential]::new("$env:COMPUTERNAME\$runtimeUser", $password)
+    $import = Start-Process -FilePath "$env:SystemRoot\System32\wsl.exe" -Credential $credential -Wait -PassThru -WindowStyle Hidden -ArgumentList @('--import', $distribution, $runtimeRoot, $stageTar, '--version', '2')
+    if ($import.ExitCode -ne 0) { throw "GNX WSL import failed with code $($import.ExitCode)." }
+
+    $report = [ordered]@{
+        result = 'READY'
+        distribution = $distribution
+        runtime_user = $runtimeUser
+        runtime_root = $runtimeRoot
+        source = $baseDistribution
+        staging_sha256 = $hash
+    }
+    $report | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $reportRoot 'runtime-provisioning.json') -Encoding UTF8
+    Write-Output "READY GNX runtime '$distribution' provisioned under '$runtimeUser'."
 } finally {
     $password.Dispose()
+    Remove-Item -LiteralPath $stageTar -Force -ErrorAction SilentlyContinue
 }
-if ($import.ExitCode -ne 0) { throw "GNX WSL import failed with code $($import.ExitCode)." }
-
-$report = [ordered]@{
-    result = 'READY'
-    distribution = $DistributionName
-    runtime_user = $RuntimeUser
-    runtime_root = $RuntimeRoot
-}
-$report | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $reportRoot 'runtime-provisioning.json') -Encoding UTF8
-Write-Output "READY GNX runtime '$DistributionName' provisioned under '$RuntimeUser'."
