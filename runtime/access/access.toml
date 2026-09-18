@@ -1,4 +1,5 @@
-distribution = "Ubuntu-24.04"
+# Dedicated WSL distribution name; this must already exist on the host.
+distribution = "gnx-pihole"
 zone = "mesh.gnx"
 wildcard = true
 state_dir = "/var/lib/gnx/access"
