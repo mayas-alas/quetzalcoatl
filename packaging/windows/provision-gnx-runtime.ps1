@@ -6,7 +6,7 @@
 .DESCRIPTION
   WSL obtains the pinned Ubuntu distribution through its own official install
   path. The temporary base distribution is exported, verified locally, removed,
-  and imported under the GNX runtime identity with the GNX-owned name.
+  and imported under the GNX runtime identity with the GNX-owned node name.
   No download URL, credential, rootfs path, or secret is accepted from argv.
 #>
 [CmdletBinding()]
@@ -15,7 +15,7 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$distribution = 'gnx-pihole'
+$distribution = 'gnx-node'
 $baseDistribution = 'Ubuntu-24.04'
 $runtimeUser = 'gnx-runtime'
 $runtimeRoot = 'C:\ProgramData\GNX\runtime'

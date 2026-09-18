@@ -1,5 +1,5 @@
 # Dedicated WSL distribution name; this must already exist on the host.
-distribution = "gnx-pihole"
+distribution = "gnx-node"
 zone = "mesh.gnx"
 wildcard = true
 state_dir = "/var/lib/gnx/access"

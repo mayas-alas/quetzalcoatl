@@ -3,7 +3,7 @@
 **Corte:** un nodo de acceso en WSL; DNS privado y los dos HTTPS existentes.
 No sustituye el cliente Windows ni el control plane local.
 
-Android usa Tailscale SaaS para alcanzar `gnx-access`; Pi-hole responde
+Android usa Tailscale SaaS para alcanzar `gnx-access`; GNX DNS responde
 `mesh.gnx` y `*.mesh.gnx` con la IP de ese nodo. Caddy sigue terminando TLS y
 enviando cómputo a `8006` interno. DNS no crea servicios ni certificados wildcard.
 La VPN, la resolución y la confianza TLS son tres requisitos distintos.
@@ -97,4 +97,4 @@ Windows, el arranque conserva la limitación de la tarea actual del host.
 
 - Tailscale 1.102.3: [código y licencia BSD-3-Clause](https://github.com/tailscale/tailscale/tree/v1.102.3), [clave por archivo](https://tailscale.com/docs/reference/tailscale-cli/up), [split DNS](https://tailscale.com/docs/reference/dns-in-tailscale).
 - [MTU de WSL y encapsulado VPN](https://tailscale.com/docs/install/windows/wsl2).
-- Pi-hole FTL 6.7: [código y licencia EUPL-1.2](https://github.com/pi-hole/FTL/tree/v6.7), [configuración DNS](https://docs.pi-hole.net/ftldns/configfile/). Se usa el motor sin UI, DHCP, NTP ni registro de consultas; se conservan atribuciones de las imágenes.
+- GNX DNS usa Pi-hole FTL 6.7 como motor de resolución: [código y licencia EUPL-1.2](https://github.com/pi-hole/FTL/tree/v6.7), [configuración DNS](https://docs.pi-hole.net/ftldns/configfile/). Se usa el motor sin UI, DHCP, NTP ni registro de consultas; se conservan atribuciones de las imágenes.

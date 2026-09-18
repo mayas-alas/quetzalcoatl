@@ -3,7 +3,7 @@
 **Estado:** aceptado; Android confirmado por el operador, datos móviles/reboot pendientes.
 **Fecha:** 2026-09-02
 
-Se añade un nodo Tailscale SaaS en WSL y un resolver Pi-hole privado. Android
+Se añade un nodo Tailscale SaaS en WSL y el resolver privado GNX DNS. Android
 alcanza así la entrada HTTPS existente sin necesitar resolver primero el
 control plane privado. NetBird conserva su función actual; no se reemplazan
 `gnx.exe`, el cliente Windows, el control plane ni las identidades existentes.
