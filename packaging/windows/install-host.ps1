@@ -112,7 +112,8 @@ try {
     Protect-Backup $backupRoot
     Protect-Backup $backup
     $machinePath = [Environment]::GetEnvironmentVariable('Path','Machine')
-    @{ machine_path_before=$machinePath; retired_service=$oldServiceName; retired_autorun=$oldAutorun } | ConvertTo-Json |
+    $userPath = [Environment]::GetEnvironmentVariable('Path','User')
+    @{ machine_path_before=$machinePath; user_path_before=$userPath; retired_service=$oldServiceName; retired_autorun=$oldAutorun } | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $backup 'restore.json') -Encoding UTF8
     Protect-Backup (Join-Path $backup 'restore.json')
 
@@ -178,10 +179,11 @@ try {
     }
 
     $gate = 'PATH'
-    $pathParts = @($machinePath -split ';' | Where-Object { $_.Trim().TrimEnd('\') -notin @($oldProgram,$destination) })
-    [Environment]::SetEnvironmentVariable('Path', (($pathParts + $destination) -join ';'), 'Machine')
+    $pathParts = @($userPath -split ';' | Where-Object { $_.Trim().TrimEnd('\') -notin @($oldProgram,$destination) })
+    [Environment]::SetEnvironmentVariable('Path', (($pathParts + $destination) -join ';'), 'User')
     $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
-    if ((Get-Command gnx.exe).Source -ne $installedExe) { throw 'A different CLI still shadows the installation.' }
+    $resolvedCommand = (Get-Command gnx.exe -ErrorAction Stop).Source
+    if ($resolvedCommand -ne $installedExe) { throw 'A different CLI still shadows the installation.' }
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -197,7 +199,7 @@ public static class GnxEnvironmentNotice {
     # READY here would create a false positive in release evidence.
     @{ result='ACTION_REQUIRED'; code='HOST_CLI_INSTALLED'; executable=$installedExe; sha256=$digest; retired=$retired; backup=$backup;
        old_account_disabled=$accountDisabled; preserved_profile=$profile.LocalPath; profile_loaded=$profile.Loaded;
-       restart_terminal=$true; next_action='Run the authenticated GNX setup/provision and post-reboot doctor/health gates.' } |
+       path_scope='User'; restart_terminal=$true; next_action='Open a new terminal, then run the authenticated GNX setup/provision and post-reboot doctor/health gates.' } |
         ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $report -Encoding UTF8
     Write-Output 'ACTION_REQUIRED host-cli installed; run runtime provisioning and reopen your terminal'
 } catch {

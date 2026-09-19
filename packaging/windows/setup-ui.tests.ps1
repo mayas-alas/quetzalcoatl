@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$files = @('build.ps1', 'install.ps1', 'setup-ui.ps1', 'uninstall.ps1') | ForEach-Object { Join-Path $PSScriptRoot $_ }
+$files = @('build.ps1', 'install.ps1', 'setup-ui.ps1', 'gnx-progress-ui.ps1', 'uninstall.ps1') | ForEach-Object { Join-Path $PSScriptRoot $_ }
 $assetHashes = @{
     'branding-install-logo.ico' = '1f1e54880c65036a057169a32af3b114d9a7cfe2ab28840f8a389606556ab3a5'
     'branding-install-logo.png' = 'ac4b4ea86c58d1a2e61521ff1f31c50a2faec306c2990c6e148ac5a7ff408bad'
@@ -25,10 +25,22 @@ foreach ($state in @('RUNNING', 'READY', 'ACTION_REQUIRED', 'FAILED')) {
 foreach ($forbidden in @('PSCredential', 'Start-Service', 'New-Service', 'icacls')) {
     if ($ui -match [regex]::Escape($forbidden)) { throw "UI duplicates privileged setup policy: $forbidden" }
 }
+$progressUi = Get-Content (Join-Path $PSScriptRoot 'gnx-progress-ui.ps1') -Raw
+foreach ($required in @('System.Windows.Forms', 'ProgressBar', 'BeginOutputReadLine', 'ACTION_REQUIRED', 'Reiniciar ahora', 'install.ps1')) {
+    if ($progressUi -notmatch [regex]::Escape($required)) { throw "Progress UI missing minimal feedback behavior: $required" }
+}
+foreach ($forbidden in @('New-Service', 'Start-Service', 'icacls', 'PSCredential')) {
+    if ($progressUi -match [regex]::Escape($forbidden)) { throw "Progress UI duplicates privileged setup policy: $forbidden" }
+}
+$build = Get-Content (Join-Path $PSScriptRoot 'build.ps1') -Raw
+if ($build -notmatch 'gnx-progress-ui\.ps1') { throw 'Build does not package the progress UI.' }
 $installer = Get-Content (Join-Path $PSScriptRoot 'install.ps1') -Raw
 foreach ($name in @('gnx.exe', 'gnx-service.exe', 'gnx-setup.exe', 'gnx-linux', 'gnx-linux-bundle.tar', 'gnx-linux.run')) {
     if ($installer -notmatch [regex]::Escape($name)) { throw "Installer omits release artifact: $name" }
 }
+$hostInstaller = Get-Content (Join-Path $PSScriptRoot 'install-host.ps1') -Raw
+if ($hostInstaller -notmatch "SetEnvironmentVariable\('Path'.*'User'\)") { throw 'Host CLI must be added to the current user PATH.' }
+if ($hostInstaller -match "SetEnvironmentVariable\('Path'.*'Machine'\)") { throw 'Host CLI must not mutate machine PATH.' }
 $uninstaller = Get-Content (Join-Path $PSScriptRoot 'uninstall.ps1') -Raw
 foreach ($owned in @('C:\Program Files\GNX-0.3.1', 'C:\ProgramData\GNX-0.3.1', 'C:\ProgramData\GNX-Setup-0.3.1', 'GNXRuntime', 'gnx-runtime')) {
     if ($uninstaller -notmatch [regex]::Escape($owned)) { throw "Uninstaller omits owned object: $owned" }

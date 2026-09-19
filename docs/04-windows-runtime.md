@@ -70,6 +70,8 @@ Successful provisioning returns `ACTION_REQUIRED`/`SETUP_PROVISIONED` and exit 2
 
 A separate stage must import/configure the Wide Linux layer, install the verified Linux bundle, start or enable `GNXRuntime` only when approved, and run `doctor`/health checks before any `READY` claim.
 
+The optional `packaging/windows/gnx-progress-ui.ps1` is only a thin WinForms presentation layer. It shows validation/install progress, the reboot-required boundary and the final `READY`/`ACTION_REQUIRED`/`FAILED` result; it does not implement provisioning or duplicate trust policy.
+
 ## Provisioned objects
 
 | Object | Rule |

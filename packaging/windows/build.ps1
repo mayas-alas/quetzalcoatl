@@ -16,7 +16,7 @@ try {
  New-Item -ItemType Directory -Force dist | Out-Null
  New-Item -ItemType Directory -Force dist/assets | Out-Null
  Copy-Item target/release/gnx.exe,target/release/gnx-service.exe,target/release/gnx-setup.exe dist -Force
- Copy-Item packaging/windows/uninstall.ps1,packaging/windows/uninstall-checklist.md dist -Force
+ Copy-Item packaging/windows/install.ps1,packaging/windows/uninstall.ps1,packaging/windows/uninstall-checklist.md,packaging/windows/gnx-progress-ui.ps1 dist -Force
  Copy-Item packaging/windows/assets/branding-install-logo.ico,packaging/windows/assets/branding-install-logo.png,packaging/windows/assets/banner-install-side.png,packaging/windows/assets/bg-installer-banner.png,packaging/windows/assets/tray-icon.ico,packaging/windows/assets/tray-icon.png dist/assets -Force
  $linuxPath=(& wsl -d $BuildDistro --exec wslpath -a (Get-Location).Path).Trim()
  & wsl -d $BuildDistro --cd $linuxPath --exec bash -lc 'set -eu; cargo_bin=$(command -v cargo); "$cargo_bin" test --locked --all-targets --target-dir /tmp/gnx-build && "$cargo_bin" build --release --locked --bin gnx --target-dir /tmp/gnx-build && cp /tmp/gnx-build/release/gnx dist/gnx-linux && sh packaging/linux/build.sh'
