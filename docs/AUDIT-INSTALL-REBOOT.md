@@ -82,7 +82,7 @@ líneas de comando con secretos.
 ## Hallazgos y riesgos
 
 - La provisión Rust conserva journal y artefactos ante error; no afirma `READY` antes del reinicio.
-- La ruta alternativa `provision-gnx-runtime.ps1` puede dejar cuenta/directorio temporal si WSL solicita reinicio después de crear el usuario; debe probarse separadamente o retirarse del flujo oficial.
+- La antigua ruta alternativa `provision-gnx-runtime.ps1` fue retirada porque podía crear estado antes de consumir el rootfs autenticado; el flujo oficial usa exclusivamente `install.ps1` y `gnx-setup.exe`.
 - La aceptación real aún requiere host Windows desechable, interrupción durante cada fase, reinicio, ejecución de `doctor`, reinstalación y desinstalación.
 - No se debe borrar manualmente una instalación parcial: usar `gnx-setup --recover` o `--rollback` y registrar el código resultante.
 

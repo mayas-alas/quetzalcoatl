@@ -13,7 +13,7 @@ Esta propuesta no cambia el contrato público GNX ni declara READY. Resume incon
 3. Windows tiene dos rutas de instalación con propósitos distintos: `packaging/windows/install.ps1` delega en `gnx-setup.exe` y exige manifest sellado/rootfs verificado; `packaging/windows/install-host.ps1` instala CLI/retira Quetzalcoatl histórico y devuelve `ACTION_REQUIRED HOST_CLI_INSTALLED`. La taxonomía debe evitar llamar a ambas “installer” sin subtipo.
 4. El setup Rust protege bien los límites de confianza: manifiesto Ed25519, hash exacto de artefactos/rootfs, staging privado, cuenta `gnx-runtime`, servicio `GNXRuntime`, journal y rechazo de legacy. Quedan gates de host que no se pueden convertir en PASS sin Windows elevado, rootfs verificado, firma real y aceptación de reboot.
 5. Hay una tensión de release: `packaging/windows/build.ps1` genera `manifest.json` `unsealed`; `seal-manifest.ps1` muta a `sealed` y firma. Esto es correcto, pero la evidencia debe nombrar el estado como **build candidate unsealed** vs **release candidate sealed**, no “manifest listo”.
-6. Wide Linux está bien usado como vocabulario de producto interno, con WSL2 como adaptador. Aun así, `provision-gnx-runtime.ps1` instala/exporta Ubuntu vía WSL oficial y no consume el rootfs autenticado que sí exige el setup actual; debe quedar clasificado como helper/lab o reconciliarse con la ruta sellada antes de aceptación.
+6. Wide Linux está bien usado como vocabulario de producto interno, con WSL2 como adaptador. La antigua ruta `provision-gnx-runtime.ps1` que instalaba/exportaba Ubuntu fue retirada: el runtime sólo consume el rootfs autenticado exigido por el setup actual.
 7. Residuo/remoción tiene una taxonomía más rica que setup: el checklist distingue `BLOCKED` de `RECOVERY_REQUIRED`, pero `uninstall.ps1` todavía agrupa fallos capturados como `BLOCKED`; la aceptación ya exige reclasificar como `RECOVERY_REQUIRED` cuando hubo mutación.
 8. `compute.gnx` sigue siendo la ruta operativa requerida. `app.gnx` se conserva como superficie propia de presentación GNX (HTML/CSS/JS, servida bajo Control y sin convertirse en una cuarta capacidad); sus assets aún no están presentes en este checkout y requieren implementación explícita.
 
@@ -74,7 +74,7 @@ Esta propuesta no cambia el contrato público GNX ni declara READY. Resume incon
 ### P0 — antes de llamar instalable completo
 
 - Resolver o documentar formalmente la superficie `src/cli.rs`: eliminarla si está muerta, moverla a herramienta histórica/lab, o conectarla sin romper el contrato `doctor|plan|apply|status`.
-- Reconciliar la ruta Wide Linux/rootfs: la aceptación debe usar rootfs cubierto por manifest sellado o marcar `provision-gnx-runtime.ps1` como helper no promocionable.
+- Mantener una única ruta Wide Linux/rootfs: la aceptación debe usar el rootfs cubierto por manifest sellado; no se permiten provisiones dinámicas por nombre de distro.
 - Ejecutar en Windows elevado desechable: `--check`, `--provision`, reboot, bootstrap, `doctor`, `status`, residuos y uninstall con observaciones independientes.
 - Producir manifest `sealed` + `manifest.sig` con raíz pública compilada y rootfs verificado; `runtime.lock.json` `unsealed` sigue bloqueando release.
 - Mantener `PROVISIONED` y `SETUP_REBOOT_REQUIRED` como `ACTION_REQUIRED`, nunca READY.
@@ -137,7 +137,7 @@ Esta propuesta no cambia el contrato público GNX ni declara READY. Resume incon
 ## Hallazgos que requieren decisión humana
 
 1. ¿`src/cli.rs` debe eliminarse, convertirse en bin separado/lab o mantenerse como deuda fuera del contrato público?
-2. ¿`provision-gnx-runtime.ps1` sigue siendo helper de laboratorio o debe integrarse a la ruta manifest/rootfs firmada?
+2. Verificar que ningún helper o instalador reintroduzca provisión dinámica por nombre de distro.
 3. ¿Se acepta migrar `PRECHECK` a `PREFLIGHT` en estado persistido, o se conserva por compatibilidad?
 4. ¿El uninstaller debe emitir `RECOVERY_REQUIRED` nativo después de mutación, o basta con reclasificación en evidencia para 0.3.1?
 5. ¿Qué matriz Windows real reemplaza Dockur para G0-G6 final?

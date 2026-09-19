@@ -107,15 +107,15 @@ has_any usr/bin/openssl bin/openssl || fail 'ROOTFS_COMMAND_MISSING_OPENSSL'
 has_any usr/bin/podman bin/podman || fail 'ROOTFS_COMMAND_MISSING_PODMAN'
 has_any usr/lib/systemd/systemd lib/systemd/systemd || fail 'ROOTFS_SYSTEMD_MISSING'
 has_any etc/passwd || fail 'ROOTFS_PASSWD_MISSING'
-has_any var/lib/dpkg/arch etc/apk/arch usr/lib/rpm/platform || fail 'ROOTFS_ARCH_WITNESS_MISSING'
+has_any var/lib/dpkg/arch etc/apk/arch usr/lib/rpm/platform var/lib/dpkg/status || fail 'ROOTFS_ARCH_WITNESS_MISSING'
 
-arch_text=$( (tar -xOf "$rootfs" ./var/lib/dpkg/arch 2>/dev/null || tar -xOf "$rootfs" var/lib/dpkg/arch 2>/dev/null || tar -xOf "$rootfs" ./etc/apk/arch 2>/dev/null || tar -xOf "$rootfs" etc/apk/arch 2>/dev/null || tar -xOf "$rootfs" ./usr/lib/rpm/platform 2>/dev/null || tar -xOf "$rootfs" usr/lib/rpm/platform 2>/dev/null || true) | head -n 1 )
+arch_text=$( (tar -xOf "$rootfs" ./var/lib/dpkg/arch 2>/dev/null || tar -xOf "$rootfs" var/lib/dpkg/arch 2>/dev/null || tar -xOf "$rootfs" ./etc/apk/arch 2>/dev/null || tar -xOf "$rootfs" etc/apk/arch 2>/dev/null || tar -xOf "$rootfs" ./usr/lib/rpm/platform 2>/dev/null || tar -xOf "$rootfs" usr/lib/rpm/platform 2>/dev/null || tar -xOf "$rootfs" ./var/lib/dpkg/status 2>/dev/null | sed -n 's/^Architecture: //p' || tar -xOf "$rootfs" var/lib/dpkg/status 2>/dev/null | sed -n 's/^Architecture: //p' || true) | head -n 1 )
 case "$arch_text" in
     amd64|x86_64|x86_64-*) ;;
     *) fail 'ROOTFS_ARCH_WITNESS_MISMATCH' ;;
 esac
 
-metadata_json='{"schema":1,"kind":"gnx-rootfs","source":"'"$source_id"'","version":"'"$version_id"'","architecture":"amd64","sha256":"'"$actual_sha"'","size_bytes":'"$size"',"format":"posix-tar","requirements":["etc/os-release","/bin/sh or /usr/bin/sh","env","tar","id","mkdir","chmod","cp","rm","timeout","curl","openssl","podman","systemd","etc/passwd","amd64 architecture witness"],"reproducibility":"not_claimed"}'
+metadata_json='{"schema":1,"kind":"gnx-rootfs","source":"'"$source_id"'","version":"'"$version_id"'","architecture":"amd64","sha256":"'"$actual_sha"'","size_bytes":'"$size"',"format":"posix-tar","requirements":["etc/os-release","/bin/sh or /usr/bin/sh","env","tar","id","mkdir","chmod","cp","rm","timeout","curl","openssl","podman","systemd","etc/passwd","amd64 architecture witness (dpkg/apk/rpm)"],"reproducibility":"not_claimed"}'
 if [ -n "$metadata" ]; then
     umask 077
     tmp=${metadata}.$$.tmp

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Manifest = (Join-Path $PSScriptRoot '../../dist/manifest.json'),
+    [string]$ManifestPath = (Join-Path $PSScriptRoot '../../dist/manifest.json'),
     [string]$Signature = (Join-Path $PSScriptRoot '../../dist/manifest.sig')
 )
 
@@ -11,7 +11,7 @@ if ([string]::IsNullOrWhiteSpace($keyPath)) {
     throw 'GNX_RELEASE_PRIVATE_KEY_FILE is required; the private key must not be passed in argv or committed.'
 }
 $key = (Resolve-Path -LiteralPath $keyPath -ErrorAction Stop).Path
-$manifestPath = (Resolve-Path -LiteralPath $Manifest -ErrorAction Stop).Path
+$manifestPath = (Resolve-Path -LiteralPath $ManifestPath -ErrorAction Stop).Path
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.schema -ne 1 -or $manifest.version -ne '0.3.1' -or $manifest.platform -ne 'windows+linux-amd64') {
     throw 'Manifest schema, version or platform is unsupported.'

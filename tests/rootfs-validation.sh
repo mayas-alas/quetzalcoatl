@@ -24,7 +24,7 @@ make_rootfs() {
     : > "$root/usr/lib/systemd/systemd"
     printf 'ID=gnx-test\nVERSION_ID=0\n' > "$root/etc/os-release"
     printf 'root:x:0:0:root:/root:/bin/sh\n' > "$root/etc/passwd"
-    printf 'amd64\n' > "$root/var/lib/dpkg/arch"
+    printf 'Package: gnx-test\nArchitecture: amd64\n' > "$root/var/lib/dpkg/status"
     tar -C "$root" -cf "$tarball" .
 }
 

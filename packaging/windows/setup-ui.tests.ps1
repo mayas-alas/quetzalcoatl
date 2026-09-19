@@ -58,7 +58,7 @@ $audit = Get-Content (Join-Path $PSScriptRoot '../../docs/AUDIT-INSTALL-REBOOT.m
 foreach ($gate in @('service', 'account-sid', 'wsl-distro', 'journal-lock', 'acl', 'path-autorun', 'residue', 'runtime-ready')) {
     if ($audit -notmatch [regex]::Escape("Gate '$gate'")) { throw "Post-reboot audit gate missing: $gate" }
 }
-foreach ($contract in @('POST_REBOOT_READY', 'doctor_failed', 'health_failed', 'setup_lock_held', 'unexpected_setup_residue', 'BLOCKED', 'SETUP_PROVISIONED')) {
+foreach ($contract in @('POST_REBOOT_READY', 'doctor_failed', 'status_failed', 'setup_lock_held', 'unexpected_setup_residue', 'BLOCKED', 'SETUP_PROVISIONED')) {
     if ($audit -notmatch [regex]::Escape($contract)) { throw "Post-reboot audit contract missing: $contract" }
 }
 $setupSource = Get-Content (Join-Path $PSScriptRoot '../../src/adapter/windows/setup.rs') -Raw

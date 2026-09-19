@@ -228,7 +228,9 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     }
     let mut file = open_source(path)?;
     let mut digest = Sha256::new();
-    let mut buffer = [0u8; 1024 * 1024];
+    // Keep the large streaming buffer on the heap; Windows setup has a small
+    // default thread stack and a stack allocation here overflows on rootfs validation.
+    let mut buffer = vec![0u8; 1024 * 1024];
     loop {
         let n = file.read(&mut buffer).map_err(|_| "ARTIFACT_READ_FAILED")?;
         if n == 0 {

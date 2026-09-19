@@ -54,9 +54,9 @@ El archivo no ejecutable `docs/rootfs-comparison.requirements.json` fija los che
 
 **Hechos del repo**
 
-- Es el único nombre de base ya referenciado por scripts: `Ubuntu-24.04` en `packaging/windows/build.ps1` y `packaging/windows/provision-gnx-runtime.ps1`.
+- `Ubuntu-24.04` sólo se referencia como distro de build en `packaging/windows/build.ps1`; la provisión de runtime no descarga ni exporta una distro por nombre.
 - La documentación actual exige distro GNX propia, no que el usuario opere directamente la distro base.
-- El provisionador alternativo existente usa `wsl.exe --install Ubuntu-24.04 --no-launch --web-download`, exporta, calcula hash local, elimina la base e importa bajo `GNX-0.3.1`; ese flujo aún no equivale al manifest firmado exigido por `install.ps1`.
+- La antigua ruta que usaba `wsl.exe --install` fue retirada. El runtime debe importar únicamente el `rootfs.tar` cubierto por el manifest firmado exigido por `install.ps1`.
 
 **Supuestos a validar**
 
@@ -167,5 +167,5 @@ Rechazar cualquier propuesta que:
 
 - Cualquier afirmación de que Ubuntu Base o Debian slim son compatibles sin importar y ejecutar los checks anteriores.
 - Cualquier URL/digest de rootfs no presente en manifest sellado o evidencia externa revisada.
-- Promover `packaging/windows/provision-gnx-runtime.ps1` tal cual como release path: hoy usa instalación WSL por nombre y hash local, pero no sustituye el rootfs autenticado requerido por `install.ps1`.
+- Reintroducir una provisión dinámica por nombre de distro o descargar un rootfs durante la instalación: queda explícitamente prohibido; no sustituye el rootfs autenticado requerido por `install.ps1`.
 - Declarar que una imagen menor es más segura sin registrar paquetes, servicios activos, actualizaciones y gates de funcionalidad.

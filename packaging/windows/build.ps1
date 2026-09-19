@@ -19,7 +19,7 @@ try {
  Copy-Item packaging/windows/uninstall.ps1,packaging/windows/uninstall-checklist.md dist -Force
  Copy-Item packaging/windows/assets/branding-install-logo.ico,packaging/windows/assets/branding-install-logo.png,packaging/windows/assets/banner-install-side.png,packaging/windows/assets/bg-installer-banner.png,packaging/windows/assets/tray-icon.ico,packaging/windows/assets/tray-icon.png dist/assets -Force
  $linuxPath=(& wsl -d $BuildDistro --exec wslpath -a (Get-Location).Path).Trim()
- & wsl -d $BuildDistro --cd $linuxPath --exec sh -c 'set -eu; cargo_bin=$(command -v cargo); "$cargo_bin" test --locked --all-targets --target-dir /tmp/gnx-build && "$cargo_bin" build --release --locked --bin gnx --target-dir /tmp/gnx-build && cp /tmp/gnx-build/release/gnx dist/gnx-linux && sh packaging/linux/build.sh'
+ & wsl -d $BuildDistro --cd $linuxPath --exec bash -lc 'set -eu; cargo_bin=$(command -v cargo); "$cargo_bin" test --locked --all-targets --target-dir /tmp/gnx-build && "$cargo_bin" build --release --locked --bin gnx --target-dir /tmp/gnx-build && cp /tmp/gnx-build/release/gnx dist/gnx-linux && sh packaging/linux/build.sh'
  if ($LASTEXITCODE) { throw 'Linux build failed' }
  if ([string]::IsNullOrWhiteSpace($Rootfs) -or -not (Test-Path -LiteralPath $Rootfs -PathType Leaf)) { throw 'A verified rootfs is required to build a complete candidate.' }
  if ([string]::IsNullOrWhiteSpace($RootfsSource) -or [string]::IsNullOrWhiteSpace($RootfsVersion) -or [string]::IsNullOrWhiteSpace($RootfsArch)) { throw 'Rootfs source, version and architecture metadata are required.' }
