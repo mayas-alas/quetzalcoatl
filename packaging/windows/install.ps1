@@ -18,7 +18,12 @@ $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash
 if ($manifestHash -ne $ManifestSha256.ToLowerInvariant()) { throw 'Manifest authentication failed' }
 $manifest = ([Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($manifestPath)) | ConvertFrom-Json)
 if ($manifest.schema -ne 1 -or $manifest.version -ne '0.3.1') { throw 'Manifest schema or release version is unsupported' }
+if ($manifest.status -ne 'sealed') { throw 'RELEASE_UNAUTHENTICATED: manifest is not sealed by the release promotion step' }
+if ($manifest.platform -ne 'windows+linux-amd64') { throw 'Manifest platform is unsupported' }
 $artifacts = @('gnx.exe', 'gnx-service.exe', 'gnx-setup.exe', 'gnx-linux', 'gnx-linux-bundle.tar', 'gnx-linux.run')
+$signaturePath = Join-Path $bundlePath 'manifest.sig'
+$signatureItem = Get-Item -LiteralPath $signaturePath -ErrorAction Stop
+if ($signatureItem.PSIsContainer -or ($signatureItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $signatureItem.Length -ne 64) { throw 'Release signature is invalid.' }
 foreach ($name in $artifacts) {
     $expected = [string]$manifest.artifacts.$name
     if ($expected -notmatch '^[a-fA-F0-9]{64}$') { throw "Artifact hash is invalid: $name" }

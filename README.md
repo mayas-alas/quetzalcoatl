@@ -27,11 +27,15 @@ flowchart LR
 
 ## Current status
 
-This branch contains the integrated 0.3.1 functional slice. The finite apply,
-provision, verification, recovery and rollback paths, together with the Access,
-Control, Compute, service/broker, packaging and setup UI boundaries, are covered
-by repository tests and static gates. Host acceptance remains explicitly pending
-where this environment lacks MSVC, elevated Windows, WSL and Podman.
+This branch contains an implemented 0.3.1 product slice. Repository tests cover
+contracts, state transitions, setup boundaries and refusal paths; they are not a
+substitute for host acceptance. Windows/WSL, Linux runtime, remote-client and
+G0-G6 evidence remain pending where this environment lacks MSVC, elevated
+Windows, WSL and Podman. No release is READY until those gates produce
+sanitized, reproducible evidence. The latest local Windows binaries are built
+under `target/release`; a complete `dist` candidate is **not** available yet
+because the configured WSL builder has no Linux Rust toolchain. Do not treat
+`target/release` as an installable release artifact.
 
 The first useful milestone is not “the project compiles.” It is an executable
 vertical slice in which `doctor`, `plan`, `apply` and `status` share one JSON
@@ -72,25 +76,29 @@ operator intent + immutable release + observed state
 
 ## Start the PoC
 
-Read the documents in this order:
+The documentation set is intentionally limited to seven normative documents.
+The older document names still visible in historical GitHub revisions are
+superseded; they are not a second active contract. The current branch keeps
+historical material out of the normative navigation so operators have one
+source of truth:
 
-1. [`docs/business-requirements.md`](docs/business-requirements.md) defines the
-   outcome and the requirements every implementation choice must satisfy.
-2. [`docs/architecture.md`](docs/architecture.md) defines capability ownership,
-   dependency direction, state transitions and the target repository tree.
-3. [`docs/implementation-plan.md`](docs/implementation-plan.md) turns that design
-   into vertical milestones with an exit condition for each one.
-4. [`docs/poc.md`](docs/poc.md) defines the executable G0-G6 acceptance protocol
-   and required evidence.
-5. [`docs/windows-runtime.md`](docs/windows-runtime.md) specifies the Windows
-   identity, broker, WSL and secret boundaries.
-6. [`docs/release.md`](docs/release.md) defines what may be promoted as a 0.3.1
-   candidate.
+1. [`docs/01-product.md`](docs/01-product.md) defines the product outcome,
+   vocabulary, requirements and non-goals.
+2. [`docs/02-architecture.md`](docs/02-architecture.md) defines capability
+   ownership, dependency direction, state transitions and retained decisions.
+3. [`docs/03-operator-runbook.md`](docs/03-operator-runbook.md) gives the safe
+   operating, recovery and evidence rules.
+4. [`docs/04-windows-runtime.md`](docs/04-windows-runtime.md) specifies the
+   Windows account, service, broker, WSL and setup boundaries.
+5. [`docs/05-acceptance.md`](docs/05-acceptance.md) defines G0-G6 acceptance and
+   summarizes current evidence without converting blockers into success.
+6. [`docs/06-release.md`](docs/06-release.md) defines candidate contents,
+   manifest rules, promotion and historical reuse.
+7. [`docs/07-implementation.md`](docs/07-implementation.md) gives the milestone
+   plan, current status and immediate next work.
 
-The historical review and the exact material retained from earlier versions are
-recorded in [`docs/documentation-audit.md`](docs/documentation-audit.md). Git
-history is design evidence, not implementation authority: old behavior is
-reintroduced only when it traces to a current requirement and acceptance gate.
+Git history remains design evidence, not implementation authority: old behavior
+is reintroduced only when it traces to a current requirement and acceptance gate.
 
 ## Definition of done
 

@@ -2,6 +2,7 @@ use crate::{
     domain::setup::BundleInput,
     port::host::{SetupHost, SetupObservation, SetupVerification},
 };
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -58,9 +59,21 @@ fn preflight() -> SetupObservation {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct Journal {
+    schema: u32,
+    operation: String,
+    phase: String,
+    #[serde(rename = "code")]
+    _code: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Manifest {
     schema: u32,
     version: String,
+    platform: String,
+    status: String,
     artifacts: Artifacts,
 }
 
@@ -92,9 +105,16 @@ fn validate_bundle(input: &BundleInput) -> Result<(), String> {
         return Err("MANIFEST_HASH_MISMATCH".into());
     }
     let manifest: Manifest = serde_json::from_slice(&bytes).map_err(|_| "MANIFEST_INVALID")?;
-    if manifest.schema != 1 || manifest.version != "0.3.1" {
+    if manifest.schema != 1
+        || manifest.version != "0.3.1"
+        || manifest.platform != "windows+linux-amd64"
+    {
         return Err("MANIFEST_SCHEMA_INVALID".into());
     }
+    if manifest.status != "sealed" {
+        return Err("RELEASE_UNAUTHENTICATED".into());
+    }
+    verify_manifest_signature(&bytes, &bundle.join("manifest.sig"))?;
     for (name, expected) in [
         ("gnx.exe", manifest.artifacts.cli),
         ("gnx-service.exe", manifest.artifacts.service),
@@ -121,6 +141,36 @@ fn validate_bundle(input: &BundleInput) -> Result<(), String> {
 
 fn valid_hash(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+fn verify_manifest_signature(manifest: &[u8], signature_path: &Path) -> Result<(), String> {
+    let signature = read_bounded(signature_path, 128)?;
+    let signature = Signature::from_slice(&signature).map_err(|_| "RELEASE_SIGNATURE_INVALID")?;
+    trusted_release_key()?
+        .verify(manifest, &signature)
+        .map_err(|_| "RELEASE_SIGNATURE_INVALID".into())
+}
+
+fn trusted_release_key() -> Result<VerifyingKey, String> {
+    #[cfg(test)]
+    {
+        use ed25519_dalek::SigningKey;
+        return Ok(SigningKey::from_bytes(&[
+            0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec,
+            0x2c, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c,
+            0xae, 0x7f, 0x60, 0x00,
+        ])
+        .verifying_key());
+    }
+    #[cfg(not(test))]
+    {
+        let key_bytes = hex::decode(include_str!("../../../config/release-public-key.hex").trim())
+            .map_err(|_| "RELEASE_TRUST_ROOT_INVALID")?;
+        let key_bytes: [u8; 32] = key_bytes
+            .try_into()
+            .map_err(|_| "RELEASE_TRUST_ROOT_INVALID")?;
+        VerifyingKey::from_bytes(&key_bytes).map_err(|_| "RELEASE_TRUST_ROOT_INVALID".into())
+    }
 }
 
 fn plain_dir(path: &Path) -> Result<PathBuf, String> {
@@ -228,6 +278,7 @@ fn provision(input: &BundleInput) -> Result<(), String> {
         protected_dir(&stage, false)?;
         for name in [
             "manifest.json",
+            "manifest.sig",
             "gnx.exe",
             "gnx-service.exe",
             "gnx-setup.exe",
@@ -332,7 +383,7 @@ fn recover(rollback: bool) -> Result<(), String> {
     }
     let tx = SetupTransaction::acquire_recovery(root)?;
     if rollback {
-        super::account::rollback_owned_resources()?;
+        super::account::rollback_owned_resources(rollback_account_owned(root)?)?;
         // Only remove artifacts owned by this transaction; legacy locations
         // and unrelated files are never traversed or deleted.
         // Remove only files created by this transaction. Never recursively
@@ -348,6 +399,7 @@ fn recover(rollback: bool) -> Result<(), String> {
             Path::new(TARGET_DATA).join("rootfs.tar"),
             Path::new(TARGET_DATA).join("operator.sid"),
             root.join("staged/manifest.json"),
+            root.join("staged/manifest.sig"),
             root.join("staged/gnx.exe"),
             root.join("staged/gnx-service.exe"),
             root.join("staged/gnx-setup.exe"),
@@ -384,6 +436,32 @@ fn recover(rollback: bool) -> Result<(), String> {
         code: None,
     })?;
     Ok(())
+}
+
+fn rollback_account_owned(root: &Path) -> Result<bool, String> {
+    let path = root.join("journal.json");
+    crate::adapter::setup_state::reject_link(&path)?;
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(_) => return Err("SETUP_STATE_READ_FAILED".into()),
+    };
+    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 4096 {
+        return Err("SETUP_STATE_READ_FAILED".into());
+    }
+    let journal: Journal =
+        serde_json::from_slice(&fs::read(path).map_err(|_| "SETUP_STATE_READ_FAILED")?)
+            .map_err(|_| "SETUP_STATE_READ_FAILED")?;
+    if journal.schema != 1 || journal.operation != "PROVISION" {
+        return Err("SETUP_STATE_READ_FAILED".into());
+    }
+    // The account is first mutated in REGISTERING. Earlier failures include
+    // account/service conflicts observed by preflight and are never ownership
+    // evidence for deleting an existing gnx-runtime account.
+    Ok(matches!(
+        journal.phase.as_str(),
+        "REGISTERING" | "SECURING" | "PROVISIONED"
+    ))
 }
 
 fn copy_new(from: &Path, to: &Path) -> Result<(), String> {
@@ -459,11 +537,26 @@ mod tests {
                     hex::encode(Sha256::digest(name.as_bytes())).into(),
                 );
             }
-            let manifest = serde_json::to_vec(
-                &serde_json::json!({"schema":1,"version":"0.3.1","artifacts":artifacts}),
-            )
+            let manifest = serde_json::to_vec(&serde_json::json!({
+                "schema": 1,
+                "version": "0.3.1",
+                "platform": "windows+linux-amd64",
+                "status": "sealed",
+                "artifacts": artifacts
+            }))
             .unwrap();
             fs::write(bundle.join("manifest.json"), &manifest).unwrap();
+            use ed25519_dalek::{Signer, SigningKey};
+            let signing = SigningKey::from_bytes(&[
+                0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec,
+                0x2c, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c,
+                0xae, 0x7f, 0x60, 0x00,
+            ]);
+            fs::write(
+                bundle.join("manifest.sig"),
+                signing.sign(&manifest).to_bytes(),
+            )
+            .unwrap();
             let rootfs = bundle.join("rootfs.tar");
             fs::write(&rootfs, b"rootfs").unwrap();
             Self(BundleInput {
@@ -514,6 +607,35 @@ mod tests {
         );
     }
     #[test]
+    fn manifest_signature_is_required_and_bound_to_exact_bytes() {
+        let fixture = Fixture::new();
+        assert_eq!(validate_bundle(&fixture.0), Ok(()));
+        let signature = fixture.0.bundle.join("manifest.sig");
+        let mut bytes = fs::read(&signature).unwrap();
+        bytes[0] ^= 1;
+        fs::write(&signature, bytes).unwrap();
+        assert_eq!(
+            validate_bundle(&fixture.0).unwrap_err(),
+            "RELEASE_SIGNATURE_INVALID"
+        );
+    }
+
+    #[test]
+    fn unsealed_manifest_is_refused_before_artifact_use() {
+        let mut fixture = Fixture::new();
+        let path = fixture.0.bundle.join("manifest.json");
+        let bytes = fs::read_to_string(&path)
+            .unwrap()
+            .replace("sealed", "unsealed");
+        fs::write(&path, &bytes).unwrap();
+        fixture.0.manifest_sha256 = hex::encode(Sha256::digest(bytes.as_bytes()));
+        assert_eq!(
+            validate_bundle(&fixture.0).unwrap_err(),
+            "RELEASE_UNAUTHENTICATED"
+        );
+    }
+
+    #[test]
     fn copied_inputs_are_reauthenticated_and_never_overwritten() {
         let fixture = Fixture::new();
         let copy = fixture.0.bundle.join("copy.exe");
@@ -532,5 +654,35 @@ mod tests {
             assert!(!root.ends_with(r"\GNX-Setup"));
         }
         assert_ne!(TARGET_DATA, SETUP_ROOT);
+    }
+
+    #[test]
+    fn rollback_account_ownership_requires_registering_or_later_journal() {
+        let root = std::env::temp_dir().join(format!(
+            "gnx-recovery-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        for (phase, owned) in [
+            ("PREFLIGHT", false),
+            ("STAGING", false),
+            ("PUBLISHING", false),
+            ("REGISTERING", true),
+            ("SECURING", true),
+            ("PROVISIONED", true),
+        ] {
+            fs::write(
+                root.join("journal.json"),
+                serde_json::json!({"schema":1,"operation":"PROVISION","phase":phase,"code":null})
+                    .to_string(),
+            )
+            .unwrap();
+            assert_eq!(rollback_account_owned(&root).unwrap(), owned, "{phase}");
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 }

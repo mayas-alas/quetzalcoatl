@@ -123,17 +123,29 @@ pub fn reject_link(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
+
     fn root() -> PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "gnx-setup-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir(&p).unwrap();
-        p
+        for _ in 0..32 {
+            let serial = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
+            let p = std::env::temp_dir().join(format!(
+                "gnx-setup-{}-{}-{}",
+                std::process::id(),
+                serial,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            match std::fs::create_dir(&p) {
+                Ok(()) => return p,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("failed to create test root: {error}"),
+            }
+        }
+        panic!("could not allocate a unique test root")
     }
     #[test]
     fn lock_excludes_concurrency_and_releases_on_drop() {
@@ -165,6 +177,30 @@ mod tests {
             serde_json::from_slice(&std::fs::read(p.join("journal.json")).unwrap()).unwrap();
         assert_eq!(value["phase"], "FAILED");
         assert_eq!(value["code"], "ARTIFACT_HASH_MISMATCH");
+        drop(tx);
+        std::fs::remove_dir_all(p).unwrap();
+    }
+
+    #[test]
+    fn explicit_recovery_can_open_interrupted_state_and_record_outcome() {
+        let p = root();
+        std::fs::write(
+            p.join("journal.json"),
+            r#"{"schema":1,"operation":"PROVISION","phase":"REGISTERING","code":null}"#,
+        )
+        .unwrap();
+        assert!(matches!(SetupTransaction::acquire(&p), Err(e) if e == "SETUP_RECOVERY_REQUIRED"));
+        let tx = SetupTransaction::acquire_recovery(&p).unwrap();
+        tx.state(&SetupState {
+            schema: 1,
+            phase: "RECOVERY".into(),
+            outcome: "ROLLED_BACK".into(),
+            code: None,
+        })
+        .unwrap();
+        let value: SetupState =
+            serde_json::from_slice(&std::fs::read(p.join("setup-state.json")).unwrap()).unwrap();
+        assert_eq!(value.outcome, "ROLLED_BACK");
         drop(tx);
         std::fs::remove_dir_all(p).unwrap();
     }

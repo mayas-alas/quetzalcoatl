@@ -368,9 +368,10 @@ unsafe fn service_matches_target(
 }
 
 /// Roll back only a service whose SCM configuration proves it is this
-/// versioned GNX target. An account-only partial install is retained because
-/// there is no durable ownership witness safe enough to delete it blindly.
-pub fn rollback_owned_resources() -> Result<(), String> {
+/// versioned GNX target. An account-only partial install is removed only when
+/// setup recovery supplies a durable transaction witness that account creation
+/// was reached after preflight proved the account was absent.
+pub fn rollback_owned_resources(account_owned: bool) -> Result<(), String> {
     unsafe {
         let manager = OpenSCManagerW(ptr::null(), ptr::null(), SC_MANAGER_CONNECT);
         if manager.is_null() {
@@ -384,6 +385,12 @@ pub fn rollback_owned_resources() -> Result<(), String> {
         );
         if raw.is_null() {
             if GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST {
+                if account_owned {
+                    let status = NetUserDel(ptr::null(), wide(ACCOUNT_NAME).as_ptr());
+                    if status != 0 && status != 2221 {
+                        return Err("SETUP_ROLLBACK_FAILED".into());
+                    }
+                }
                 return Ok(());
             }
             return Err("SCM_QUERY_FAILED".into());

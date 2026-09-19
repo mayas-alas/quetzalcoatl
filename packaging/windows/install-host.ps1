@@ -192,11 +192,14 @@ public static class GnxEnvironmentNotice {
 '@
     $broadcastResult = [UIntPtr]::Zero
     $null = [GnxEnvironmentNotice]::SendMessageTimeout([IntPtr]0xffff, 0x1a, [UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$broadcastResult)
-    @{ result='READY'; executable=$installedExe; sha256=$digest; retired=$retired; backup=$backup;
+    # This script installs only the host CLI and retires the historical host
+    # surface. Runtime/WSL bootstrap and health are separate gates; claiming
+    # READY here would create a false positive in release evidence.
+    @{ result='ACTION_REQUIRED'; code='HOST_CLI_INSTALLED'; executable=$installedExe; sha256=$digest; retired=$retired; backup=$backup;
        old_account_disabled=$accountDisabled; preserved_profile=$profile.LocalPath; profile_loaded=$profile.Loaded;
-       retired_machines=$retiredMachines; restart_terminal=$true } |
+       restart_terminal=$true; next_action='Run the authenticated GNX setup/provision and post-reboot doctor/health gates.' } |
         ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $report -Encoding UTF8
-    Write-Output 'READY host-cli; reopen your terminal'
+    Write-Output 'ACTION_REQUIRED host-cli installed; run runtime provisioning and reopen your terminal'
 } catch {
     @{ result='FAILED'; gate=$gate; backup=$backup; reason=$_.Exception.Message } | ConvertTo-Json | Set-Content -LiteralPath $report -Encoding UTF8
     throw "FAILED HOST_INSTALL_$gate"
