@@ -52,6 +52,13 @@ fn execute(op: &str, input: &str, secret: Option<&Secret>) -> Report {
 fn run() -> Report {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let op = a.first().map(String::as_str).unwrap_or("");
+    if op == "upgrade" {
+        return if a.as_slice() == ["upgrade", "--check"] {
+            gnx::upgrade::check()
+        } else {
+            failure("upgrade", "INVALID_ARGUMENT")
+        };
+    }
     if gnx::wire::opcode(op).is_none() {
         return failure(op, "INVALID_OPERATION");
     }

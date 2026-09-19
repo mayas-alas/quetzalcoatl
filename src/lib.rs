@@ -4,4 +4,5 @@ pub mod config;
 pub mod domain;
 pub mod port;
 pub mod report;
+pub mod upgrade;
 pub mod wire;
