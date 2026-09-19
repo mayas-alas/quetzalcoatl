@@ -1,0 +1,14 @@
+# Managed by GNX access
+[Unit]
+Description=GNX access uplink
+Wants=network-online.target
+After=network-online.target
+Before=gnx-access.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ip link set dev @UPLINK@ mtu @MTU@
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

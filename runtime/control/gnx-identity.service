@@ -1,0 +1,7 @@
+[Unit]
+Description=GNX local certificate and revocation refresh
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/local/lib/gnx/control/refresh-identity.sh

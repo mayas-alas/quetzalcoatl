@@ -1,0 +1,10 @@
+[Unit]
+Description=GNX daily identity maintenance
+
+[Timer]
+OnBootSec=5min
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
