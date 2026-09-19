@@ -215,25 +215,6 @@ pub fn grant_runtime(path: &Path, sid: &str, writable: bool) -> Result<(), Strin
     verify_dacl(path, sd.0)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn runtime_acl_has_only_system_admin_and_runtime_identity() {
-        for rights in ["FA", "FRFX"] {
-            let sd = descriptor(&format!(
-                "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;{rights};;;S-1-5-21-1-2-3-1001)"
-            ))
-            .unwrap();
-            let text = dacl_string(sd.0).unwrap();
-            assert!(text.starts_with("D:P"));
-            assert_eq!(text.matches("(A;").count(), 3);
-            assert!(!text.contains(";;;BU)"));
-            assert!(!text.contains(";;;WD)"));
-        }
-    }
-}
-
 pub fn operator_sid() -> Result<String, String> {
     unsafe {
         let mut token = ptr::null_mut();
@@ -242,11 +223,7 @@ pub fn operator_sid() -> Result<String, String> {
         }
         let mut size = 0;
         GetTokenInformation(token, TokenUser, ptr::null_mut(), 0, &mut size);
-        let mut buffer = vec![
-            0usize;
-            (size as usize + std::mem::size_of::<usize>() - 1)
-                / std::mem::size_of::<usize>()
-        ];
+        let mut buffer = vec![0usize; (size as usize).div_ceil(std::mem::size_of::<usize>())];
         let ok = GetTokenInformation(
             token,
             TokenUser,
@@ -270,5 +247,24 @@ pub fn operator_sid() -> Result<String, String> {
         let result = String::from_utf16_lossy(std::slice::from_raw_parts(sid, len));
         LocalFree(sid as *mut _);
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn runtime_acl_has_only_system_admin_and_runtime_identity() {
+        for rights in ["FA", "FRFX"] {
+            let sd = descriptor(&format!(
+                "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;{rights};;;S-1-5-21-1-2-3-1001)"
+            ))
+            .unwrap();
+            let text = dacl_string(sd.0).unwrap();
+            assert!(text.starts_with("D:P"));
+            assert_eq!(text.matches("(A;").count(), 3);
+            assert!(!text.contains(";;;BU)"));
+            assert!(!text.contains(";;;WD)"));
+        }
     }
 }

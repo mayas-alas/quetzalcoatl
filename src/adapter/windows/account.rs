@@ -74,10 +74,9 @@ impl Drop for ServiceGuard {
         unsafe {
             if self.active
                 && service_matches_target(self.handle, &self.binary, &self.account).unwrap_or(false)
+                && DeleteService(self.handle) != 0
             {
-                if DeleteService(self.handle) != 0 {
-                    let _ = NetUserDel(ptr::null(), wide(ACCOUNT_NAME).as_ptr());
-                }
+                let _ = NetUserDel(ptr::null(), wide(ACCOUNT_NAME).as_ptr());
             }
             CloseServiceHandle(self.handle);
         }
@@ -352,11 +351,7 @@ unsafe fn service_matches_target(
     if required == 0 || required > 65536 {
         return Err("SCM_VERIFY_FAILED".into());
     }
-    let mut buffer = vec![
-        0usize;
-        (required as usize + std::mem::size_of::<usize>() - 1)
-            / std::mem::size_of::<usize>()
-    ];
+    let mut buffer = vec![0usize; (required as usize).div_ceil(std::mem::size_of::<usize>())];
     let config = buffer.as_mut_ptr() as *mut QUERY_SERVICE_CONFIGW;
     if QueryServiceConfigW(service, config, required, &mut required) == 0 {
         return Err("SCM_VERIFY_FAILED".into());
@@ -422,11 +417,7 @@ unsafe fn verify_registration(
     if required == 0 || required > 65536 {
         return Err("SCM_VERIFY_FAILED".into());
     }
-    let mut buffer = vec![
-        0usize;
-        (required as usize + std::mem::size_of::<usize>() - 1)
-            / std::mem::size_of::<usize>()
-    ];
+    let mut buffer = vec![0usize; (required as usize).div_ceil(std::mem::size_of::<usize>())];
     let config = buffer.as_mut_ptr() as *mut QUERY_SERVICE_CONFIGW;
     if QueryServiceConfigW(service, config, required, &mut required) == 0 {
         return Err("SCM_VERIFY_FAILED".into());
@@ -453,11 +444,7 @@ unsafe fn verify_registration(
     if required == 0 || required > 65536 {
         return Err("SCM_RECOVERY_VERIFY_FAILED".into());
     }
-    let mut buffer = vec![
-        0usize;
-        (required as usize + std::mem::size_of::<usize>() - 1)
-            / std::mem::size_of::<usize>()
-    ];
+    let mut buffer = vec![0usize; (required as usize).div_ceil(std::mem::size_of::<usize>())];
     if QueryServiceConfig2W(
         service,
         SERVICE_CONFIG_FAILURE_ACTIONS,

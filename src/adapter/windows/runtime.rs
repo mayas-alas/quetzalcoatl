@@ -74,8 +74,10 @@ fn command(
 fn has_distro(bytes: &[u8], wanted: &str) -> bool {
     let text = if bytes.len() >= 2 && bytes.iter().step_by(2).any(|b| *b == 0) {
         let units = bytes
-            .chunks_exact(2)
-            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| u16::from_le_bytes(*b))
             .collect::<Vec<_>>();
         String::from_utf16_lossy(&units)
     } else {

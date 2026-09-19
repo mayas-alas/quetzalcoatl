@@ -240,7 +240,7 @@ impl Linux {
             Zeroizing::new(url::form_urlencoded::byte_serialize(&password).collect::<String>());
         let config = Zeroizing::new(format!(
             "data = \"username=root%40pam&password={}\"\n",
-            &*encoded
+            *encoded
         ));
         let resolve = format!("{}:8006:{}", self.name("compute"), self.compute_ip());
         let ca = self.path("compute/root-ca.pem");
@@ -273,7 +273,7 @@ impl Linux {
         if ticket.contains(['"', '\r', '\n', '\\']) {
             return Err("COMPUTE_AUTH_FAILED".into());
         }
-        let cookie = Zeroizing::new(format!("header = \"Cookie: PVEAuthCookie={}\"\n", &*ticket));
+        let cookie = Zeroizing::new(format!("header = \"Cookie: PVEAuthCookie={}\"\n", *ticket));
         let reply = self
             .curl(
                 &format!("{origin}/api2/json/nodes"),
