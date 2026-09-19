@@ -70,8 +70,9 @@ Control publishes explicit HTTPS names and routes each one to a declared upstrea
 
 Required operational facts:
 
-- public GNX root certificate may be exported; private CA key stays protected;
+- the GNX public root certificate is exported by the broker and automatically installed in the interactive operator's Windows user trust store; the private CA key stays protected;
 - TLS validates chain, hostname and validity period without insecure overrides;
+- browser restart is only a cache refresh after trust installation, not a substitute for certificate validation;
 - each route is explicit; no wildcard fallback;
 - direct Compute ports and local Control interfaces are not remotely reachable;
 - optional routes may fail without degrading required capabilities.

@@ -9,7 +9,8 @@
 | Candidate autenticado | BLOCKED | falta rootfs verificado y firma de producción; `runtime.lock.json` sigue `unsealed` |
 | Host Windows / reboot | BLOCKED | no hay PowerShell elevado disponible; no se declara instalación ni resiliencia |
 | Residuos del host | PASS preflight observado | ausentes las raíces GNX/Quetzalcoatl versionadas inspeccionadas; no se borró nada |
-| Terminología | IN PROGRESS | docs activos usan **Wide Linux**; la tecnología host queda sólo como detalle de implementación |
+| Terminología | PASS local | docs activos usan **Wide Linux**; la tecnología host queda sólo como detalle de implementación |
+| Confianza TLS Windows | IMPLEMENTED | el broker persiste la CA pública y la importa automáticamente en el almacén de usuario; host real aún bloqueado |
 
 No se modifica `legacy`; el análisis delegado quedó documentado y un gate bloqueado permanece bloqueado.
 

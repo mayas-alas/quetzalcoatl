@@ -1,5 +1,10 @@
 use crate::{domain::secret::Secret, report::Report};
-use std::{io, ptr};
+use std::{
+    io,
+    path::Path,
+    process::{Command, Stdio},
+    ptr,
+};
 use windows_sys::Win32::{
     Foundation::*,
     Security::{
@@ -154,12 +159,45 @@ pub fn request_secret(op: &str, intent: &str, secret: Option<&Secret>) -> io::Re
     write_message(h.0, &b, 5000)?;
     let bytes = read_message(h.0, RESPONSE_LIMIT, 650_000)?;
     let r: Report = serde_json::from_slice(&bytes)?;
+    if let Some(root) = r.public_root.as_deref() {
+        // The service authenticates this response through the protected broker.
+        // Persist only the public CA and install it for the interactive operator
+        // so browser TLS works without a manual certificate action. Failure is
+        // deliberately best-effort: the report remains truthful and the next
+        // broker call retries the bounded import.
+        let _ = install_public_root(root);
+    }
     if r.schema != 1 || r.operation != op || (r.secret_kind.is_some() && op != "apply") {
         return Err(invalid());
     }
     write_message(h.0, b"A", 5000)?;
     Ok(r)
 }
+fn install_public_root(pem: &str) -> io::Result<()> {
+    if pem.len() > 16 * 1024
+        || !pem.starts_with("-----BEGIN CERTIFICATE-----")
+        || !pem.trim_end().ends_with("-----END CERTIFICATE-----")
+        || pem.contains('\0')
+    {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    let path = Path::new(super::setup::TARGET_DATA).join("root.crt");
+    crate::adapter::filesystem::atomic_write(&path, pem.as_bytes(), 0o644)
+        .map_err(|_| io::ErrorKind::PermissionDenied)?;
+    let status = Command::new(r"C:\Windows\System32\certutil.exe")
+        .args(["-user", "-f", "-addstore", "Root"])
+        .arg(&path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::from_raw_os_error(status.code().unwrap_or(1)))
+    }
+}
+
 pub fn serve_one() -> io::Result<()> {
     validate_operator_sid()?;
     let sid = std::fs::read_to_string(super::setup::TARGET_DATA.to_owned() + "\\operator.sid")?;

@@ -100,7 +100,7 @@ The `app.gnx` surface is a first-party HTML/CSS/JS interface for GNX presentatio
 - **BR-W06 Product-owned Linux artifact.** Windows release contains the GNX Linux binary built by the same release pipeline and pinned by manifest.
 - **BR-W07 Isolated Wide Linux runtime.** `GNXRuntime` owns fixed distro `GNX-0.3.1`; automount and Windows interop are disabled.
 - **BR-W08 Fixed Linux execution.** Service invokes only `/usr/local/bin/gnx` with fixed config path and allowlisted argv.
-- **BR-W09 Public export only.** Windows may receive the public GNX CA certificate and sanitized JSON results; private keys never cross back.
+- **BR-W09 Public export only.** Windows may receive the public GNX CA certificate and sanitized JSON results; private keys never cross back. The broker persists and imports the validated public root for the interactive operator automatically.
 - **BR-W10 Explicit trust boundary.** The design protects the normal operator session from accidental access. SYSTEM and local Administrators remain trusted.
 
 ## Release constraints and non-goals
