@@ -54,7 +54,7 @@ fn run() -> Report {
     let op = a.first().map(String::as_str).unwrap_or("");
     if op == "upgrade" {
         return if a.as_slice() == ["upgrade", "--check"] {
-            gnx::upgrade::check()
+            gnx::app::upgrade::check()
         } else {
             failure("upgrade", "INVALID_ARGUMENT")
         };
