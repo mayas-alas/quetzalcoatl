@@ -48,7 +48,7 @@ The pipe allows SYSTEM, Administrators and the exact installing operator SID. Re
 
 ### `--check`
 
-Non-mutating. Validates inputs, host conflicts and manifest/rootfs digests. Expected successful state is `ACTION_REQUIRED` with a source-found/proceed code, not `READY`.
+Non-mutating. Validates inputs, host conflicts, the sealed manifest, its detached Ed25519 signature and artifact/rootfs digests. Expected successful state is `ACTION_REQUIRED` with a source-found/proceed code, not `READY`.
 
 ### `--provision`
 
@@ -62,7 +62,7 @@ gnx-setup.exe --provision \
   --rootfs-sha256 <trusted SHA256>
 ```
 
-Hashes must come from the trusted release channel. Setup cannot prove provenance of a hash supplied by the caller.
+The manifest must be `sealed` and `manifest.sig` must verify against the public trust root compiled into `gnx-setup`. Artifact hashes are taken from that signed manifest. The rootfs hash is still supplied as a bounded input and remains a follow-up closure item until it is included in the signed manifest.
 
 Successful provisioning returns `ACTION_REQUIRED`/`SETUP_PROVISIONED` and exit 2. It means files/account/service were staged, not that runtime is usable.
 
@@ -77,7 +77,7 @@ A separate stage must import/configure WSL, install the verified Linux bundle, s
 | `C:\ProgramData\GNX-Setup-0.3.1\setup.lock` | exclusive OS-held setup lock |
 | `snapshot.json` | sanitized starting inventory and trusted digests |
 | `journal.json` / journal stream | durable phase and stable failure code |
-| `staged` | private copies of authenticated manifest/artifacts/rootfs |
+| `staged` | private copies of the authenticated manifest, `manifest.sig`, artifacts and rootfs |
 | `C:\Program Files\GNX-0.3.1` | versioned executable directory |
 | `C:\ProgramData\GNX-0.3.1` | protected runtime root |
 | `operator.sid` | elevated setup token user; alternate-admin elevation requires later explicit enrollment |
