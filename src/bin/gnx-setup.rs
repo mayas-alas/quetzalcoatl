@@ -20,7 +20,7 @@ struct Progress<'a> {
     apply_available: bool,
 }
 
-fn progress(result: Option<&Report>, operation: &'static str) -> Progress<'_> {
+fn progress<'a>(result: Option<&'a Report>, operation: &'static str) -> Progress<'a> {
     let prefix = if operation == "setup-provision" {
         "SETUP_PROVISION"
     } else {

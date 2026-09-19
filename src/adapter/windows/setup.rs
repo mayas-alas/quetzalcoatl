@@ -324,7 +324,14 @@ mod tests {
             ));
             fs::create_dir(&bundle).unwrap();
             let mut artifacts = serde_json::Map::new();
-            for name in ["gnx.exe", "gnx-service.exe", "gnx-linux-bundle.tar"] {
+            for name in [
+                "gnx.exe",
+                "gnx-service.exe",
+                "gnx-setup.exe",
+                "gnx-linux",
+                "gnx-linux-bundle.tar",
+                "gnx-linux.run",
+            ] {
                 fs::write(bundle.join(name), name).unwrap();
                 artifacts.insert(
                     name.into(),
