@@ -10,4 +10,5 @@ pub struct SetupObservation {
 
 pub trait SetupHost {
     fn preflight_setup(&self) -> SetupObservation;
+    fn validate_bundle(&self, input: &crate::domain::setup::BundleInput) -> Result<(), String>;
 }
