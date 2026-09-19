@@ -376,9 +376,24 @@ fn verify_installed() -> Result<SetupVerification, String> {
     if required.iter().any(|path| !path.is_file()) {
         return Err("SETUP_VERIFY_ARTIFACTS_MISSING".into());
     }
-    // Runtime service/broker/doctor/status verification occurs after the
-    // reboot boundary. Never claim READY while bootstrap is still pending.
-    Ok(SetupVerification::RebootRequired)
+    // Provisioning alone is never readiness. After bootstrap/reboot, use the
+    // same Linux core gates that the operator sees: doctor first, then status.
+    // Missing config means the bootstrap boundary has not completed yet.
+    let config_path = Path::new(TARGET_DATA).join("gnx.toml");
+    if !config_path.is_file() {
+        return Ok(SetupVerification::RebootRequired);
+    }
+    let intent = fs::read_to_string(&config_path).map_err(|_| "SETUP_CONFIG_READ_FAILED")?;
+    let doctor = super::runtime::invoke("doctor", &intent);
+    if doctor.state != crate::report::State::Ready {
+        return Ok(SetupVerification::RebootRequired);
+    }
+    let status = super::runtime::invoke("status", &intent);
+    if status.state == crate::report::State::Ready {
+        Ok(SetupVerification::Ready)
+    } else {
+        Ok(SetupVerification::RebootRequired)
+    }
 }
 
 fn recover(rollback: bool) -> Result<(), String> {
