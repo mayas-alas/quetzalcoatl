@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
  [string]$BuildDistro='Ubuntu-24.04',
- [string]$Rootfs=$env:GNX_ROOTFS
+ [string]$Rootfs=$env:GNX_ROOTFS,
+ [string]$RootfsSource=$env:GNX_ROOTFS_SOURCE,
+ [string]$RootfsVersion=$env:GNX_ROOTFS_VERSION,
+ [string]$RootfsArch=$env:GNX_ROOTFS_ARCH
 )
 $ErrorActionPreference='Stop'
 Push-Location (Join-Path $PSScriptRoot '../..')
@@ -19,7 +22,11 @@ try {
  & wsl -d $BuildDistro --cd $linuxPath --exec sh -c 'set -eu; cargo_bin=$(command -v cargo); "$cargo_bin" test --locked --all-targets --target-dir /tmp/gnx-build && "$cargo_bin" build --release --locked --bin gnx --target-dir /tmp/gnx-build && cp /tmp/gnx-build/release/gnx dist/gnx-linux && sh packaging/linux/build.sh'
  if ($LASTEXITCODE) { throw 'Linux build failed' }
  if ([string]::IsNullOrWhiteSpace($Rootfs) -or -not (Test-Path -LiteralPath $Rootfs -PathType Leaf)) { throw 'A verified rootfs is required to build a complete candidate.' }
+ if ([string]::IsNullOrWhiteSpace($RootfsSource) -or [string]::IsNullOrWhiteSpace($RootfsVersion) -or [string]::IsNullOrWhiteSpace($RootfsArch)) { throw 'Rootfs source, version and architecture metadata are required.' }
  $rootfsSha256=(Get-FileHash -LiteralPath $Rootfs -Algorithm SHA256).Hash.ToLowerInvariant()
+ $rootfsLinuxPath=(& wsl -d $BuildDistro --exec wslpath -a (Resolve-Path -LiteralPath $Rootfs).Path).Trim()
+ & wsl -d $BuildDistro --cd $linuxPath --exec sh packaging/linux/validate-rootfs.sh --rootfs $rootfsLinuxPath --sha256 $rootfsSha256 --source $RootfsSource --version $RootfsVersion --arch $RootfsArch --metadata dist/rootfs.metadata.json
+ if ($LASTEXITCODE) { throw 'Rootfs validation failed' }
  $artifacts=[ordered]@{}
  foreach($name in @('gnx.exe','gnx-service.exe','gnx-setup.exe','gnx-linux','gnx-linux-bundle.tar','gnx-linux.run')) {
    $path = Join-Path (Resolve-Path dist).Path $name

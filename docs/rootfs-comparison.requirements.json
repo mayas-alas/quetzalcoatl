@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "purpose": "Non-executable GNX P1 rootfs comparison requirements; records what evidence to collect without naming URLs or digests.",
+  "options": [
+    "ubuntu-24.04-lts-official-wsl",
+    "ubuntu-base-amd64",
+    "debian-slim-amd64"
+  ],
+  "must_not": [
+    "download_or_import_rootfs_during_this_fixture",
+    "invent_source_url_or_digest",
+    "declare_ready_from_static_evidence",
+    "place_secrets_in_git_argv_logs_or_evidence",
+    "modify_legacy_or_public_gnx_contract"
+  ],
+  "checks": [
+    { "id": "source_identity", "requires_host": false, "evidence": "official source identity, license/SBOM, support window, exact rootfs digest in sealed manifest" },
+    { "id": "architecture", "requires_host": true, "command_hint": "uname -m", "accept": "x86_64 or amd64 for GNX linux-amd64" },
+    { "id": "wsl_import", "requires_host": true, "evidence": "imported as GNX-0.3.1 under expected owner; no adoption of existing distro" },
+    { "id": "wsl_isolation", "requires_host": true, "evidence": "/etc/wsl.conf has systemd=true, automount=false, interop=false, appendWindowsPath=false after bootstrap/restart" },
+    { "id": "systemd", "requires_host": true, "evidence": "systemd is PID 1 or otherwise passes GNX host prerequisite checks" },
+    { "id": "cgroup_v2", "requires_host": true, "path": "/sys/fs/cgroup/cgroup.controllers" },
+    { "id": "podman", "requires_host": true, "evidence": "podman is available and can run release-pinned containers without unpinned install-time downloads" },
+    { "id": "shell", "requires_host": true, "paths": ["/bin/sh"] },
+    { "id": "tar", "requires_host": true, "paths": ["/bin/tar"] },
+    { "id": "timeout", "requires_host": true, "paths": ["/usr/bin/timeout"] },
+    { "id": "hash_tool", "requires_host": true, "commands": ["sha256sum"] },
+    { "id": "curl", "requires_host": true, "commands": ["curl --version"] },
+    { "id": "openssl", "requires_host": true, "commands": ["openssl version"] },
+    { "id": "size", "requires_host": true, "evidence": "compressed rootfs bytes, imported WSL size, post-bootstrap size, free /var/lib space" },
+    { "id": "attack_surface", "requires_host": true, "evidence": "package inventory, enabled services, open listeners before GNX apply, host integration state" },
+    { "id": "gnx_gates", "requires_host": true, "evidence": "doctor/plan/apply/status JSON and G0-G6 observations; missing gate remains FAILED or ACTION_REQUIRED" }
+  ],
+  "decision_policy": {
+    "candidate": "ubuntu-24.04-lts-official-wsl only if sealed as an authenticated importable rootfs with recorded digest and passing host gates",
+    "alternative": "ubuntu-base-amd64 if size/surface goals justify additional bootstrap evidence",
+    "reject": "any option with unpinned install-time downloads, unverifiable provenance, missing required tools, failed WSL/systemd/Podman gates, or premature READY"
+  }
+}

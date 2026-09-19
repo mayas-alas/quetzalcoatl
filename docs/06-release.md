@@ -51,6 +51,7 @@ Different digest or runtime default means a different candidate.
 - Windows package carries the exact Linux artifact produced by the candidate pipeline.
 - No install-time download of unpinned replacements.
 - Third-party runtime artifacts have immutable identity, digest, license and source recorded.
+- A locally supplied Wide Linux rootfs is validated before manifest generation with `packaging/linux/validate-rootfs.sh`: the build must provide its trusted SHA256, source identity, version and `amd64` architecture; the tar must stay within declared size limits (default 10 KiB minimum, 4 GiB maximum; overridable only by explicit `GNX_ROOTFS_MIN_BYTES`/`GNX_ROOTFS_MAX_BYTES` in the build environment), list as a plain `.tar`, contain GNX minimum command paths (`sh`, `env`, `tar`, `id`, `mkdir`, `chmod`, `cp`, `rm`, `timeout`, `curl`, `openssl`, `podman`, `systemd`), `etc/os-release`, `etc/passwd` and an amd64 architecture witness. The resulting `dist/rootfs.metadata.json` records only sanitized source/version/architecture/hash/size/format metadata and explicitly sets `reproducibility` to `not_claimed`.
 - Build-time Wide Linux/containers are compiler environments, never installed runtime state.
 - Secrets and local acceptance credentials are not build inputs.
 - The private release key is supplied only to the explicit sealing step through a protected environment reference; it is never committed, logged or passed in argv.
