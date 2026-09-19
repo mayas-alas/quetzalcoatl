@@ -52,8 +52,14 @@ struct Artifacts {
     cli: String,
     #[serde(rename = "gnx-service.exe")]
     service: String,
+    #[serde(rename = "gnx-setup.exe")]
+    setup: String,
+    #[serde(rename = "gnx-linux")]
+    linux: String,
     #[serde(rename = "gnx-linux-bundle.tar")]
     linux_bundle: String,
+    #[serde(rename = "gnx-linux.run")]
+    linux_run: String,
 }
 
 fn validate_bundle(input: &BundleInput) -> Result<(), String> {
@@ -71,7 +77,10 @@ fn validate_bundle(input: &BundleInput) -> Result<(), String> {
     for (name, expected) in [
         ("gnx.exe", manifest.artifacts.cli),
         ("gnx-service.exe", manifest.artifacts.service),
+        ("gnx-setup.exe", manifest.artifacts.setup),
+        ("gnx-linux", manifest.artifacts.linux),
         ("gnx-linux-bundle.tar", manifest.artifacts.linux_bundle),
+        ("gnx-linux.run", manifest.artifacts.linux_run),
     ] {
         if !valid_hash(&expected) {
             return Err("ARTIFACT_HASH_INVALID".into());
