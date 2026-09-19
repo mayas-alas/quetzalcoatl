@@ -190,6 +190,12 @@ Installation or update reports `READY` only when all of these hold:
 7. Bootstrap copies are absent after successful installation.
 8. Broker ping, `gnx doctor` and Windows/Linux schema parity pass.
 
+GNU-side builds and unit tests cannot exercise elevated WSL, SCM, ACL, or
+Hyper-V gates. Those checks require a disposable elevated Windows host. The
+runtime reports `REBOOT_REQUIRED` when WSL returns 3010 and stable failure
+codes for bounded import, bundle install, isolation, and verification errors;
+it does not retry indefinitely or emit command output, paths, or secrets.
+
 An update preserves the last valid Linux runtime until the candidate has passed
 digest, installation and health checks. A failed candidate returns `FAILED` and
 must not replace the last valid executable or configuration.
