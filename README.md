@@ -1,100 +1,118 @@
-# GNX
+# GNX 0.3.1
 
-GNX es una base de infraestructura privada local: un ejecutable Rust pequeño
-conecta Windows a una mesh propia, mientras WSL aloja el control y los servicios
-mediante Quadlet. Archivos de configuración expresan la intención y contratos
-GNX encapsulan las integraciones.
+**Private infrastructure behind one small, verifiable command contract.**
 
-El [corte de código del 2026-09-02](docs/audit.md#corte-de-código-del-2026-09-02)
-queda identificado por la etiqueta `gnx-cut-2026-09-02`.
+GNX reconciles a private infrastructure node around three business
+capabilities:
 
-## Primer corte
+- **Access** gives authorized clients a persistent private path and resolves the
+  private `.gnx` zone.
+- **Control** publishes explicit HTTPS names and routes each one to a declared
+  upstream.
+- **Compute** runs the persistent service behind Control and keeps its own
+  authentication boundary.
 
-El cliente cubre cuatro resultados en Windows x86_64:
+The PoC has one orchestration core, written in Rust and executed on Linux.
+Windows exposes the same contract through a narrow broker into an isolated WSL
+runtime; it is not a second implementation of the product.
 
-1. leer y validar la configuración;
-2. comprobar el host Windows;
-3. verificar e instalar un paquete MSI local del cliente de mesh;
-4. conectar el nodo local al `control_server` y reportar su estado real.
-
-La operación local añade dos servicios, separados del binario cliente:
-
-| Dirección | Función | Estado comprobado |
-|---|---|---|
-| `https://mesh.gnx` | Control plane y consola | TLS, conexión y misma identidad tras reboot Windows |
-| `https://proxmox.mesh.gnx` | Primer servicio de cómputo | TLS, login API y reinicio del servicio; `8006` interno |
-
-Ambas direcciones resuelven mediante `hosts` en este Windows y DNS privado
-desde Android, confirmado por el operador. El respaldo cifrado en USB
-cubre el control plane; faltan respaldo de cómputo y restauración operativa.
-
-La [capa de acceso Android](docs/access.md) tiene nodo WSL, DNS privado y dos
-comandos: `gnx access configure` pide la clave al humano sin eco; `gnx access dns`
-muestra los campos del nameserver y valida MTU/DNS/HTTPS/política. El uplink WSL
-se configura a MTU 1500 antes de iniciar la VPN. Faltan datos móviles y reboot.
-No sustituye la infraestructura existente.
-
-## Reglas
-
-- Rust compone el flujo; la configuración contiene la intención.
-- Comandos, módulos, archivos y servicios propios usan nombres GNX.
-- Las dependencias se identifican en adaptadores, imágenes, manifest, SBOM,
-  licencias y documentación técnica. Se conserva el alias de servicio
-  `proxmox.mesh.gnx` elegido por el operador.
-- No hay daemon VPN propio, fallback oculto ni secretos en Git, argv o logs.
-- Un gate fallido nunca produce `READY`.
-
-## Uso
-
-```text
-cargo build --release --locked
-gnx.exe install --config config/gnx.toml --release runtime/release.toml
-gnx.exe doctor --config config/gnx.toml
-gnx.exe connect --config config/gnx.toml
-gnx.exe access configure
-gnx.exe access dns
-gnx.exe credentials control
-gnx.exe credentials compute
+```mermaid
+flowchart LR
+    Client[Authorized client] -->|private transport| Access
+    Client -->|DNS for .gnx| Access
+    Client -->|HTTPS compute.gnx| Control
+    Access --- Control
+    Control -->|private upstream| Compute
 ```
 
-`release.toml` referencia un MSI local, su SHA-256 y licencia. No contiene
-URLs de descarga. Para enrolamiento desatendido, `connect` acepta
-`--setup-key-file`; nunca acepta la clave como valor.
-Ese contrato corresponde al cliente mesh Windows. Acceso usa sólo el prompt
-humano y toma `access.toml` junto al EXE; no solicita archivos de claves.
-`credentials` recupera las dos cuentas locales desde DPAPI: Enter revela en
-pantalla temporal y otro Enter oculta. Requiere consola y el usuario Windows
-original, sin redirección ni portapapeles. No grabar ni transcribir la terminal.
+## Current status
 
-`packaging/windows/build.ps1` produce `dist/windows/gnx.exe`. Con los tres
-insumos del cliente genera un bundle instalable; sin ellos produce sólo el
-bundle de desarrollo y no simula que la dependencia esté lista.
+This branch contains the integrated 0.3.1 functional slice. The finite apply,
+provision, verification, recovery and rollback paths, together with the Access,
+Control, Compute, service/broker, packaging and setup UI boundaries, are covered
+by repository tests and static gates. Host acceptance remains explicitly pending
+where this environment lacks MSVC, elevated Windows, WSL and Podman.
 
-Para registrar esa CLI en el host, ejecutar
-`packaging/windows/install-host.ps1` desde PowerShell **como administrador**.
-Verifica el SHA-256, instala en `C:/Program Files/GNX`, conserva la configuración
-existente y actualiza el PATH. Retira el servicio y las carpetas de la instalación
-anterior a un respaldo restringido en `C:/ProgramData/GNX/retired-host`;
-no borra discos ni modifica la VPN o el WSL actuales. Abrir una terminal nueva
-y comprobar `gnx access dns`. Las actualizaciones usan el mismo instalador.
+The first useful milestone is not “the project compiles.” It is an executable
+vertical slice in which `doctor`, `plan`, `apply` and `status` share one JSON
+contract, observe real state and preserve the last valid configuration.
 
-## Licencia
+## Public contract
 
-El código propio de GNX se distribuye bajo GNU Affero General Public License,
-versión 3 exclusivamente (`AGPL-3.0-only`). El texto completo está en
-[LICENSE](LICENSE); el bundle Windows y la instalación del host también lo
-incluyen. El programa se ofrece sin garantía, según los términos de la licencia.
+```text
+gnx doctor    # validate prerequisites and explain corrective action
+gnx plan      # compare intent with observed state; never mutate
+gnx apply     # reconcile a validated candidate and verify the result
+gnx status    # report observed capability health
+```
 
-Las dependencias y los componentes de terceros conservan sus licencias y
-atribuciones. Esta declaración no cambia las condiciones del archivo histórico
-`legacy` ni de versiones anteriores.
+Stdout is machine-readable JSON. The process exits `0` for `READY`, `1` for
+`FAILED`, and `2` for `ACTION_REQUIRED`. Human-readable diagnostics belong on
+stderr. The same request must have the same meaning on Linux and Windows.
 
-## Documentos
+## Configuration boundary
 
-- [Arquitectura](docs/architecture.md)
-- [Auditoría](docs/audit.md)
-- [Control plane local y rutinas del host](docs/control.md)
-- [Primer servicio de cómputo](docs/compute.md)
-- [Acceso privado desde Android](docs/access.md)
-- [ADR de plataforma mesh](docs/decisions/0001-mesh-platform.md)
-- [ADR de identidad y endpoint](docs/decisions/0002-mesh-identity-and-endpoint.md)
+[`gnx.toml`](gnx.toml) is operator intent, not a deployment manifest. It may
+name the node, network intent and optional explicit routes. It must not contain
+image repositories, digests, internal runtime paths or secrets.
+
+Immutable implementation choices belong to the release definition. Credentials,
+private keys and enrollment material belong only to protected runtime state.
+Keeping these three inputs separate is a core safety property:
+
+```text
+operator intent + immutable release + observed state
+                         |
+                         v
+                  application use case
+                         |
+                         v
+              candidate -> verify -> last valid
+```
+
+## Start the PoC
+
+Read the documents in this order:
+
+1. [`docs/business-requirements.md`](docs/business-requirements.md) defines the
+   outcome and the requirements every implementation choice must satisfy.
+2. [`docs/architecture.md`](docs/architecture.md) defines capability ownership,
+   dependency direction, state transitions and the target repository tree.
+3. [`docs/implementation-plan.md`](docs/implementation-plan.md) turns that design
+   into vertical milestones with an exit condition for each one.
+4. [`docs/poc.md`](docs/poc.md) defines the executable G0-G6 acceptance protocol
+   and required evidence.
+5. [`docs/windows-runtime.md`](docs/windows-runtime.md) specifies the Windows
+   identity, broker, WSL and secret boundaries.
+6. [`docs/release.md`](docs/release.md) defines what may be promoted as a 0.3.1
+   candidate.
+
+The historical review and the exact material retained from earlier versions are
+recorded in [`docs/documentation-audit.md`](docs/documentation-audit.md). Git
+history is design evidence, not implementation authority: old behavior is
+reintroduced only when it traces to a current requirement and acceptance gate.
+
+## Definition of done
+
+A change is complete only when all of the following are true:
+
+- its behavior traces to a `BR-*` requirement;
+- domain and application code do not depend on an operating-system or vendor
+  adapter;
+- success is based on observed runtime state, not generated files or process
+  launch alone;
+- failure preserves the last valid configuration and persistent identity;
+- tests cover the normal path and the relevant refusal or failure path;
+- evidence is sanitized and reproducible from a clean candidate.
+
+The complete PoC is accepted only when G0-G6 pass on the declared Linux and
+Windows test paths. Until then, documentation and command output must describe
+the unverified state honestly.
+
+## License and attribution
+
+GNX-owned code is distributed under GNU Affero General Public License version 3
+only (`AGPL-3.0-only`); the complete text is retained in [`LICENSE`](LICENSE).
+Third-party dependencies and components retain their own licenses and
+attributions. The historical `legacy` material and its behavior are preserved
+as historical records and are not modified by this integration.

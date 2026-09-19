@@ -1,17 +1,20 @@
 use crate::{
-    Error, Result,
-    port::{Host, Mesh},
+    port::host::Host,
+    report::{Report, State},
 };
-
-use super::App;
-
-impl<H: Host, M: Mesh> App<H, M> {
-    pub fn doctor(&self) -> Result<String> {
-        let host = self.host.inspect()?;
-        let version = self.mesh.installed_version()?.ok_or(Error::ClientMissing)?;
-        Ok(format!(
-            "doctor elevated={} client={version}",
-            host.elevated
-        ))
+pub fn run(mut r: Report, h: &dyn Host) -> Report {
+    match h.prerequisites() {
+        Ok(()) => {
+            r.code = "HOST_READY".into();
+            r.state = State::Ready;
+            r.next_action = None
+        }
+        Err(e) => {
+            r.code = e;
+            r.next_action = Some(
+                "Use Linux with systemd, cgroup v2, Podman, and a verified GNX release.".into(),
+            )
+        }
     }
+    r
 }

@@ -52,6 +52,24 @@ y revocación; HTTP sólo publica `/pki/root.crl`. No se usan excepciones TLS.
 El certificado se renueva a menos de 30 días de caducar; la CRL dura 30 días y
 se actualiza diariamente. La renovación de la propia CA requiere intervención.
 
+## Puerta de host limpio
+
+La preparación sólo es válida en un host desechable con WSL `gnx-node`,
+systemd, Podman compatible, red privada disponible y privilegios elevados.
+Antes de habilitar una tarea o servicio deben pasar, en orden, el render
+local, la instalación idempotente de unidades, la identidad/cadena TLS y la
+sonda HTTPS con nombre `mesh.gnx`; el estado existente se conserva y una
+instancia con propietario no se sobreescribe. El helper Rust limita las
+peticiones HTTP a 30 segundos, no sigue redirecciones y nunca imprime cuerpos
+de error o tokens.
+
+Un prerrequisito ausente produce `FAILED CONTROL_<GATE>` y un estado sin
+secretos; la operación queda `ACTION_REQUIRED` cuando requiere elevación,
+enrolamiento o aprobación del operador. No se afirma `READY` por la mera
+existencia de archivos o servicios: deben observarse identidad, certificado,
+revocación y endpoint. La clave privada de la CA, credenciales de bootstrap y
+claves de recuperación no entran en argv, logs ni artefactos de evidencia.
+
 ## Dependencias fijadas
 
 Los archivos de servicio contienen digests inmutables: servidor 0.77.1,

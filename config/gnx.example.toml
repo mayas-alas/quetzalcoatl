@@ -1,8 +1,12 @@
-version = 1
+schema = 1
+instance = "gnx"
+node = "compute"
 
-[mesh]
-# El primer corte conecta este nodo a un control plane ya existente.
-# El ejemplo privado requiere DNS y CA preparados antes de conectar.
-control_server = "https://mesh.gnx"
-
-# Identidades, claves y tokens nunca viven en este archivo.
+[network]
+subnet = "10.90.0.0/24"
+# Optional assertion after Access enrollment; normally discovered automatically.
+identity_ip = "100.64.0.10"
+# Existing application managed outside GNX. GNX only publishes its name and HTTPS route.
+[[routes]]
+hostname = "app.gnx"
+upstream = "http://192.168.1.50:8080"

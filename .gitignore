@@ -1,4 +1,6 @@
-# Configuración local y material sensible
+/target/
+/dist/
+/.AGENTS/
 /config/gnx.toml
 /config/*.local.toml
 /secrets/
@@ -9,8 +11,6 @@
 *.key
 *.p12
 *.pfx
-/target/
-/dist/
 /runtime/artifacts/
 /ops/control/target/
 /ops/control/*.local.toml

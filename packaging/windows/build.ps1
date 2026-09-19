@@ -1,77 +1,19 @@
 [CmdletBinding()]
-param(
-    [string]$OutputDirectory,
-    [string]$MeshClientMsi,
-    [string]$MeshClientVersion,
-    [string]$MeshClientLicense
-)
-
-$ErrorActionPreference = 'Stop'
-$projectRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
-if (-not $OutputDirectory) {
-    $OutputDirectory = Join-Path $projectRoot 'dist\windows'
-}
-
-& cargo build --locked --release --manifest-path (Join-Path $projectRoot 'Cargo.toml')
-if ($LASTEXITCODE -ne 0) {
-    throw 'Rust release build failed.'
-}
-
-$output = New-Item -ItemType Directory -Force -Path $OutputDirectory
-Copy-Item -Force (Join-Path $projectRoot 'target\release\gnx.exe') $output.FullName
-Copy-Item -Force -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Path $output 'LICENSE')
-Copy-Item -Force (Join-Path $projectRoot 'config\gnx.example.toml') (Join-Path $output 'gnx.example.toml')
-Copy-Item -Force (Join-Path $projectRoot 'packaging\windows\provision-gnx-runtime.ps1') (Join-Path $output 'provision-gnx-runtime.ps1')
-$accessConfig = Join-Path $output 'access.toml'
-if (-not (Test-Path -LiteralPath $accessConfig)) {
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'runtime\access\access.toml') -Destination $accessConfig
-}
-
-$inputs = @($MeshClientMsi, $MeshClientVersion, $MeshClientLicense)
-$completeRelease = ($inputs | Where-Object { $_ }).Count -eq $inputs.Count
-if (($inputs | Where-Object { $_ }).Count -notin @(0, $inputs.Count)) {
-    throw 'Provide all mesh client release inputs or none.'
-}
-
-if ($completeRelease) {
-    if ($MeshClientVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
-        throw 'The mesh client version must be SemVer.'
-    }
-    $msi = Resolve-Path -LiteralPath $MeshClientMsi
-    $license = Resolve-Path -LiteralPath $MeshClientLicense
-    $signature = Get-AuthenticodeSignature -LiteralPath $msi
-    if ($signature.Status -ne 'Valid') {
-        throw 'The mesh client MSI does not have a valid Authenticode signature.'
-    }
-
-    $artifacts = New-Item -ItemType Directory -Force -Path (Join-Path $output 'artifacts')
-    $legal = New-Item -ItemType Directory -Force -Path (Join-Path $output 'legal')
-    $bundledMsi = Join-Path $artifacts 'mesh-client.msi'
-    Copy-Item -Force -LiteralPath $msi -Destination $bundledMsi
-    Copy-Item -Force -LiteralPath $license -Destination (Join-Path $legal 'mesh-client.LICENSE')
-    $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $bundledMsi).Hash.ToLowerInvariant()
-
-    @"
-version = 1
-
-[windows.mesh_client]
-package = "artifacts/mesh-client.msi"
-version = "$MeshClientVersion"
-sha256 = "$digest"
-license = "legal/mesh-client.LICENSE"
-"@ | Set-Content -Encoding utf8 -NoNewline (Join-Path $output 'release.toml')
-    $exampleManifest = Join-Path $output 'release.example.toml'
-    if (Test-Path -LiteralPath $exampleManifest) {
-        Remove-Item -LiteralPath $exampleManifest
-    }
-} else {
-    $releaseManifest = Join-Path $output 'release.toml'
-    if (Test-Path -LiteralPath $releaseManifest) {
-        Remove-Item -LiteralPath $releaseManifest
-    }
-    Copy-Item -Force (Join-Path $projectRoot 'runtime\release.example.toml') $output.FullName
-}
-
-$exeDigest = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $output 'gnx.exe')).Hash.ToLowerInvariant()
-Set-Content -Encoding ascii -NoNewline -Path (Join-Path $output 'gnx.exe.sha256') -Value $exeDigest
-Write-Output $output.FullName
+param([string]$BuildDistro='Ubuntu-24.04')
+$ErrorActionPreference='Stop'
+Push-Location (Join-Path $PSScriptRoot '../..')
+try {
+ cargo test --locked --all-targets
+ if ($LASTEXITCODE) { throw 'Windows tests failed' }
+ cargo build --release --locked --bins
+ if ($LASTEXITCODE) { throw 'Windows build failed' }
+ New-Item -ItemType Directory -Force dist | Out-Null
+ Copy-Item target/release/gnx.exe,target/release/gnx-service.exe,target/release/gnx-setup.exe dist -Force
+ $linuxPath=(& wsl -d $BuildDistro --exec wslpath -a (Get-Location).Path).Trim()
+ & wsl -d $BuildDistro --cd $linuxPath --exec sh -c '$HOME/.cargo/bin/cargo test --locked --all-targets --target-dir /tmp/gnx-build && $HOME/.cargo/bin/cargo build --release --locked --bin gnx --target-dir /tmp/gnx-build && cp /tmp/gnx-build/release/gnx dist/gnx-linux && sh packaging/linux/build.sh'
+ if ($LASTEXITCODE) { throw 'Linux build failed' }
+ $artifacts=@{}
+ foreach($name in @('gnx.exe','gnx-service.exe','gnx-setup.exe','gnx-linux','gnx-linux-bundle.tar','gnx-linux.run')) {$artifacts[$name]=(Get-FileHash "dist/$name" -Algorithm SHA256).Hash.ToLowerInvariant()}
+ @{schema=1;version='0.3.1';artifacts=$artifacts} | ConvertTo-Json | Set-Content dist/manifest.json
+ Get-FileHash dist/manifest.json -Algorithm SHA256
+} finally {Pop-Location}

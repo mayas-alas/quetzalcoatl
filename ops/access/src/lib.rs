@@ -6,7 +6,7 @@ use std::{
     path::Path,
     process::{Command, Stdio},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
@@ -65,6 +65,21 @@ fn wsl(c: &Config, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
             let _ = child.kill();
             let _ = child.wait();
             return Err("WSL_INPUT");
+        }
+    }
+    // Host helpers must not wait forever on a wedged WSL distribution or
+    // service. Keep the limit private: diagnostics never include subprocess
+    // output, which may contain authentication URLs or credentials.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        match child.try_wait().map_err(|_| "WSL_WAIT")? {
+            Some(_) => break,
+            None if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("WSL_TIMEOUT");
+            }
         }
     }
     let output = child.wait_with_output().map_err(|_| "WSL_WAIT")?;

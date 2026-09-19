@@ -47,6 +47,22 @@ con CA/nombre válidos y una política recibida no vacía;
 `ACCESS_POLICY_EMPTY` señala una política que no permite tráfico entrante;
 una política no vacía tampoco prueba todos los permisos del teléfono.
 
+## Puerta de host limpio
+
+Antes de aplicar en una máquina desechable, `doctor`/el helper debe poder
+observar WSL `gnx-node`, systemd, Podman, `/dev/net/tun`, la interfaz `eth0`
+con MTU 1500 y el runtime de Control ya saludable. La comprobación de DNS
+usa una imagen fijada, `--pull=never`, un namespace de red explícito y límites
+de tiempo; no instala paquetes ni modifica el host. Si falta una puerta,
+el resultado es `FAILED <GATE>` o `ACTION_REQUIRED <GATE>` con una acción
+sanitizada; nunca se inventa una IP, identidad o nameserver listo.
+
+La prueba limpia debe cubrir primer enrolamiento, reejecución sin re-enrolar,
+reinicio y deriva de MTU/identidad. Los scripts `test-dns.sh` y
+`test-enrollment.sh` son sondas acotadas y limpian sus contenedores temporales;
+no deben ejecutarse contra una máquina de producción ni recibir secretos por
+argv, logs o archivos de evidencia.
+
 ## Campos de «Add nameserver»
 
 | Campo | Valor que muestra `gnx access dns` |

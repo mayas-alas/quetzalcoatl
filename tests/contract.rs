@@ -1,60 +1,45 @@
+use gnx::{
+    config::Config,
+    report::{Report, State},
+};
 use std::process::Command;
-
 #[test]
-fn missing_config_has_a_stable_failure_contract() {
-    let output = Command::new(env!("CARGO_BIN_EXE_gnx"))
-        .arg("doctor")
-        .output()
-        .unwrap();
-
-    assert_eq!(output.status.code(), Some(2));
-    assert_eq!(
-        String::from_utf8_lossy(&output.stderr),
-        "FAILED CONFIG_REQUIRED\n"
-    );
-    assert!(output.stdout.is_empty());
-}
-
-#[test]
-fn misplaced_key_material_is_not_echoed() {
-    let example = "GNX-NONSECRET-INPUT-MARKER";
-    let output = Command::new(env!("CARGO_BIN_EXE_gnx"))
-        .args(["access", "configure", example])
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(2));
-    assert_eq!(
-        String::from_utf8_lossy(&output.stderr),
-        "FAILED ARGUMENTS\n"
-    );
-    assert!(output.stdout.is_empty());
-}
-
-#[test]
-fn configure_rejects_redirected_input_before_mutation() {
-    let config =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/access/access.toml");
-    let output = Command::new(env!("CARGO_BIN_EXE_gnx"))
-        .args(["access", "configure", "--config"])
-        .arg(config)
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(6));
-    assert_eq!(
-        String::from_utf8_lossy(&output.stderr),
-        "FAILED ACCESS_TERMINAL_REQUIRED\n"
-    );
-    assert!(output.stdout.is_empty());
-}
-#[test]
-fn credentials_cannot_be_revealed_into_captured_streams() {
-    for account in ["control", "compute"] {
-        let output = std::process::Command::new(env!("CARGO_BIN_EXE_gnx"))
-            .args(["credentials", account])
-            .output()
-            .unwrap();
-        assert!(!output.status.success());
-        assert!(output.stdout.is_empty());
-        assert_eq!(output.stderr, b"FAILED CREDENTIAL_TERMINAL_REQUIRED\n");
+fn exit_contract() {
+    for (s, e) in [
+        (State::Ready, 0),
+        (State::Failed, 1),
+        (State::ActionRequired, 2),
+    ] {
+        assert_eq!(Report::new("status", s, "OK", None).exit(), e)
     }
+}
+#[test]
+fn strict_intent() {
+    let s = include_str!("../gnx.toml");
+    assert!(Config::parse(s).is_ok());
+    assert!(Config::parse(&s.replace("schema = 1", "schema = 99")).is_err());
+    assert!(Config::parse(&s.replace("schema = 1", "secret = 'canary'\nschema = 1")).is_err());
+    assert!(
+        Config::parse(&s.replace("http://192.168.1.50:8080", "http://user:secret@host")).is_err()
+    );
+}
+#[test]
+fn invalid_cli_is_single_json() {
+    let o = Command::new(env!("CARGO_BIN_EXE_gnx"))
+        .arg("exec")
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(1));
+    let r: Report = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(r.code, "INVALID_OPERATION");
+}
+#[test]
+fn unknown_arguments_refused() {
+    let o = Command::new(env!("CARGO_BIN_EXE_gnx"))
+        .args(["apply", "--shell", "canary"])
+        .output()
+        .unwrap();
+    let r: Report = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(r.code, "INVALID_ARGUMENT");
+    assert!(!String::from_utf8(o.stdout).unwrap().contains("canary"));
 }
