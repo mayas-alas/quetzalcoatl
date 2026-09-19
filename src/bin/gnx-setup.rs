@@ -1,5 +1,51 @@
-use gnx::{domain::setup::BundleInput, report::{Report, State}};
-use std::path::PathBuf;
+use gnx::{
+    domain::setup::BundleInput,
+    report::{Report, State},
+};
+use std::{
+    io::{self, Write},
+    path::PathBuf,
+};
+
+// This wire projection deliberately excludes paths, arguments, child output,
+// credentials, and arbitrary adapter error strings. UI clients only render it.
+#[derive(serde::Serialize)]
+struct Progress<'a> {
+    schema: u32,
+    operation: &'static str,
+    phase: &'static str,
+    code: &'static str,
+    state: Option<&'a State>,
+    exit_code: Option<i32>,
+    apply_available: bool,
+}
+
+fn progress(result: Option<&Report>) -> Progress<'_> {
+    Progress {
+        schema: 1,
+        operation: "setup-check",
+        phase: if result.is_some() {
+            "completed"
+        } else {
+            "started"
+        },
+        code: match result.map(|r| &r.state) {
+            None => "SETUP_CHECK_STARTED",
+            Some(State::Ready) => "SETUP_CHECK_COMPLETED",
+            Some(State::Failed) => "SETUP_CHECK_FAILED",
+            Some(State::ActionRequired) => "SETUP_CHECK_ACTION_REQUIRED",
+        },
+        state: result.map(|r| &r.state),
+        exit_code: result.map(Report::exit),
+        apply_available: false,
+    }
+}
+
+fn write_json(out: &mut impl Write, value: &impl serde::Serialize) -> io::Result<()> {
+    serde_json::to_writer(&mut *out, value)?;
+    writeln!(out)?;
+    out.flush()
+}
 
 fn report(code: &str, state: State, action: &str) -> Report {
     Report::new("setup", state, code, Some(action))
@@ -29,7 +75,13 @@ fn parse_bundle(args: &[String]) -> Result<Option<BundleInput>, &'static str> {
 fn run(args: &[String]) -> Report {
     let bundle = match parse_bundle(args) {
         Ok(value) => value,
-        Err(code) => return report(code, State::Failed, "Use gnx-setup --check [bundle options]."),
+        Err(code) => {
+            return report(
+                code,
+                State::Failed,
+                "Use gnx-setup --check [bundle options].",
+            )
+        }
     };
     #[cfg(windows)]
     {
@@ -46,8 +98,40 @@ fn run(args: &[String]) -> Report {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // The transport switch must precede the existing strict check arguments.
+    let streaming = args.first().is_some_and(|arg| arg == "--json-progress");
+    if streaming {
+        args.remove(0);
+    }
+    let mut out = io::stdout().lock();
+    if streaming && write_json(&mut out, &progress(None)).is_err() {
+        std::process::exit(1);
+    }
     let result = run(&args);
-    println!("{}", serde_json::to_string(&result).unwrap());
+    let written = if streaming {
+        write_json(&mut out, &progress(Some(&result)))
+    } else {
+        write_json(&mut out, &result)
+    };
+    if written.is_err() {
+        std::process::exit(1);
+    }
     std::process::exit(result.exit());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_excludes_untrusted_report_details() {
+        for state in [State::Ready, State::Failed, State::ActionRequired] {
+            let result = report("SECRET_CANARY", state, "C:\\private\\SECRET_CANARY");
+            let event = serde_json::to_value(progress(Some(&result))).unwrap();
+            assert!(!event.to_string().contains("SECRET_CANARY"));
+            assert_eq!(event["exit_code"], result.exit());
+            assert_eq!(event["apply_available"], false);
+        }
+    }
 }

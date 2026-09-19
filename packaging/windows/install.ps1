@@ -17,7 +17,7 @@ if (Get-Service GNXRuntime -ErrorAction SilentlyContinue){throw 'Existing instal
 $Bundle=(Resolve-Path -LiteralPath $Bundle).Path
 if ($ManifestSha256 -notmatch '^[a-fA-F0-9]{64}$' -or (Get-FileHash "$Bundle/manifest.json").Hash -ne $ManifestSha256){throw 'Manifest authentication failed'}
 $m=Get-Content "$Bundle/manifest.json" -Raw | ConvertFrom-Json
-foreach($name in @('gnx.exe','gnx-service.exe','gnx-linux-bundle.tar')){if((Get-FileHash "$Bundle/$name").Hash -ne $m.artifacts.$name){throw "Artifact verification failed: $name"}}
+foreach($name in @('gnx.exe','gnx-service.exe','gnx-setup.exe','gnx-linux-bundle.tar')){if((Get-FileHash "$Bundle/$name").Hash -ne $m.artifacts.$name){throw "Artifact verification failed: $name"}}
 if($RootfsSha256 -notmatch '^[a-fA-F0-9]{64}$' -or (Get-FileHash -LiteralPath $Rootfs).Hash -ne $RootfsSha256){throw 'Rootfs verification failed'}
 $data='C:\ProgramData\GNX'
 $bin='C:\Program Files\GNX'
@@ -26,7 +26,7 @@ $sid=(Get-LocalUser gnx-runtime).SID.Value
 & icacls $data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "*$($sid):(OI)(CI)F" | Out-Null
 if($LASTEXITCODE){throw 'Private ACL failed'}
 [Security.Principal.WindowsIdentity]::GetCurrent().User.Value | Set-Content "$data/operator.sid"
-Copy-Item "$Bundle/gnx.exe","$Bundle/gnx-service.exe" $bin
+Copy-Item "$Bundle/gnx.exe","$Bundle/gnx-service.exe","$Bundle/gnx-setup.exe" $bin
 Copy-Item -LiteralPath $Rootfs -Destination "$data/rootfs.tar"
 Copy-Item "$Bundle/gnx-linux-bundle.tar" "$data/bundle.tar"
 New-Service -Name GNXRuntime -BinaryPathName ('"'+$bin+'\gnx-service.exe"') -Credential $RuntimeCredential -StartupType Automatic | Out-Null
