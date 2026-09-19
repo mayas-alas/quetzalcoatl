@@ -29,7 +29,7 @@ Account rights are granted and read back: service logon plus denied interactive,
 
 Journal phases are `PREFLIGHT`, `STAGING`, `PUBLISHING`, `REGISTERING`, `SECURING`, and `PROVISIONED`. A phase is persisted before its mutation; a failure adds a stable code to that phase. Unknown adapter error text is suppressed in the public report. A journal write failure is reported as `SETUP_FAILURE_JOURNAL_FAILED`, retaining the prior checkpoint.
 
-The snapshot is an inventory of this stage's starting observations, not a backup of legacy data. All targets must be new, so no legacy backup or restoration is needed. Account/SCM changes are not transactional: interruption can leave a new account, stopped service, or partial files. Setup intentionally retains those objects and the journal rather than guessing ownership during cleanup or rotating an existing password.
+The snapshot is an inventory of this stage's starting observations, not a backup of legacy data. All targets must be new, so no legacy backup or restoration is needed. Account and SCM creation is transactional for ordinary install failures: a newly created account/service is removed only when the exact versioned GNX service target can be proven. An account-only interruption is retained for inspection because deleting it without a durable ownership witness could remove an unrelated administrator-created account.
 
 Any snapshot or journal blocks a blind retry with `SETUP_RECOVERY_REQUIRED`, including after successful provisioning. Concurrent callers receive `SETUP_BUSY`. An administrator must inspect the protected state and actual account/service/filesystem facts, then either advance a completed stage or explicitly recover the partial installation. Do not merely delete the journal and retry: setup will still refuse existing target account/service/directories. Automated recovery, bootstrap, automatic service startup, verification, and cutover belong to subsequent stages.
 
@@ -80,3 +80,29 @@ legacy files to make a gate pass.
 8. Reboot the host. Verify the service remains stopped and setup reports the
    required action honestly; only the subsequent, separately approved bootstrap
    and health gate may start WSL or enable service startup.
+
+## Exact lab recovery after a failed provision
+
+On the retained disposable guest, open an elevated PowerShell in the extracted
+release directory. Do not run these commands on the host or on a guest with
+legacy GNX data. First capture the sanitized setup report and inspect the
+journal; never copy passwords, tokens, private keys, update URLs, or full
+command output into evidence:
+
+```powershell
+Get-Content -LiteralPath 'C:\ProgramData\GNX-Setup-0.3.1\state.json'
+Get-Content -LiteralPath 'C:\ProgramData\GNX-Setup-0.3.1\journal.jsonl'
+```
+
+If the journal belongs to this exact 0.3.1 target, run the explicit rollback:
+
+```powershell
+.\gnx-setup.exe --rollback
+```
+
+Rollback removes staged/target artifact files and removes `GNXRuntime` plus
+`gnx-runtime` only when SCM proves the service points exactly to
+`C:\Program Files\GNX-0.3.1\gnx-service.exe` and runs as `.\gnx-runtime`.
+An account-only partial install is retained rather than guessed at; report it
+to the lab operator for manual review. Verify unrelated services and accounts
+remain present, then archive only the sanitized report and rerun `--check`.

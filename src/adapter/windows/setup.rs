@@ -332,6 +332,7 @@ fn recover(rollback: bool) -> Result<(), String> {
     }
     let tx = SetupTransaction::acquire_recovery(root)?;
     if rollback {
+        super::account::rollback_owned_resources()?;
         // Only remove artifacts owned by this transaction; legacy locations
         // and unrelated files are never traversed or deleted.
         // Remove only files created by this transaction. Never recursively

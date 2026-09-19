@@ -1,6 +1,8 @@
 use std::ptr;
 use windows_sys::Win32::{
-    Foundation::{GetLastError, LocalFree, ERROR_SERVICE_DOES_NOT_EXIST},
+    Foundation::{
+        GetLastError, LocalFree, ERROR_INSUFFICIENT_BUFFER, ERROR_SERVICE_DOES_NOT_EXIST,
+    },
     NetworkManagement::NetManagement::*,
     Security::{
         Authentication::Identity::*,
@@ -12,9 +14,14 @@ use windows_sys::Win32::{
 };
 use zeroize::Zeroizing;
 pub const SERVICE_ACCOUNT: &str = ".\\gnx-runtime";
+const ACCOUNT_NAME: &str = "gnx-runtime";
+const SERVICE_NAME: &str = "GNXRuntime";
 pub const PRIVATE_ROOT: &str = super::setup::TARGET_DATA;
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
+}
+fn target_binary_path() -> String {
+    format!("\"{}\\gnx-service.exe\"", super::setup::TARGET_PROGRAM)
 }
 struct Sc(SC_HANDLE);
 impl Drop for Sc {
@@ -33,11 +40,55 @@ impl Drop for Policy {
     }
 }
 
+struct AccountGuard {
+    active: bool,
+}
+impl Drop for AccountGuard {
+    fn drop(&mut self) {
+        if self.active {
+            unsafe {
+                NetUserDel(ptr::null(), wide(ACCOUNT_NAME).as_ptr());
+            }
+        }
+    }
+}
+
+struct ServiceGuard {
+    handle: SC_HANDLE,
+    binary: Vec<u16>,
+    account: Vec<u16>,
+    active: bool,
+}
+impl ServiceGuard {
+    fn new(handle: SC_HANDLE, binary: Vec<u16>, account: Vec<u16>) -> Self {
+        Self {
+            handle,
+            binary,
+            account,
+            active: true,
+        }
+    }
+}
+impl Drop for ServiceGuard {
+    fn drop(&mut self) {
+        unsafe {
+            if self.active
+                && service_matches_target(self.handle, &self.binary, &self.account).unwrap_or(false)
+            {
+                if DeleteService(self.handle) != 0 {
+                    let _ = NetUserDel(ptr::null(), wide(ACCOUNT_NAME).as_ptr());
+                }
+            }
+            CloseServiceHandle(self.handle);
+        }
+    }
+}
+
 /// Provision never takes over an account or service belonging to an earlier install.
 pub fn require_absent() -> Result<(), String> {
     unsafe {
         let mut info = ptr::null_mut();
-        let status = NetUserGetInfo(ptr::null(), wide("gnx-runtime").as_ptr(), 0, &mut info);
+        let status = NetUserGetInfo(ptr::null(), wide(ACCOUNT_NAME).as_ptr(), 0, &mut info);
         if status == 0 {
             NetApiBufferFree(info as *const _);
             return Err("SETUP_ACCOUNT_CONFLICT".into());
@@ -50,7 +101,7 @@ pub fn require_absent() -> Result<(), String> {
             return Err("SCM_OPEN_FAILED".into());
         }
         let manager = Sc(manager);
-        let service = OpenServiceW(manager.0, wide("GNXRuntime").as_ptr(), SERVICE_QUERY_CONFIG);
+        let service = OpenServiceW(manager.0, wide(SERVICE_NAME).as_ptr(), SERVICE_QUERY_CONFIG);
         if !service.is_null() {
             drop(Sc(service));
             return Err("SETUP_SERVICE_CONFLICT".into());
@@ -64,7 +115,7 @@ pub fn require_absent() -> Result<(), String> {
 pub fn install() -> Result<String, String> {
     require_absent()?;
     unsafe {
-        let name = wide("gnx-runtime");
+        let name = wide(ACCOUNT_NAME);
         let account = wide(SERVICE_ACCOUNT);
         let mut entropy = Zeroizing::new(vec![0u8; 48]);
         if BCryptGenRandom(
@@ -105,23 +156,27 @@ pub fn install() -> Result<String, String> {
         if status != 0 {
             return Err("ACCOUNT_CREATE_FAILED".into());
         }
+        let mut account_guard = AccountGuard { active: true };
         let mut sid_len = 0;
         let mut domain_len = 0;
         let mut kind = 0;
         LookupAccountNameW(
             ptr::null(),
-            account.as_ptr(),
+            name.as_ptr(),
             ptr::null_mut(),
             &mut sid_len,
             ptr::null_mut(),
             &mut domain_len,
             &mut kind,
         );
+        if GetLastError() != ERROR_INSUFFICIENT_BUFFER || sid_len == 0 || domain_len == 0 {
+            return Err("ACCOUNT_SID_FAILED".into());
+        }
         let mut sid = vec![0u8; sid_len as usize];
         let mut domain = vec![0u16; domain_len as usize];
         if LookupAccountNameW(
             ptr::null(),
-            account.as_ptr(),
+            name.as_ptr(),
             sid.as_mut_ptr() as *mut _,
             &mut sid_len,
             domain.as_mut_ptr(),
@@ -202,15 +257,16 @@ pub fn install() -> Result<String, String> {
         }
         let manager = Sc(manager);
         let service_name = wide("GNXRuntime");
-        let binary = wide(&format!(
-            "\"{}\\gnx-service.exe\"",
-            super::setup::TARGET_PROGRAM
-        ));
+        let binary = wide(&target_binary_path());
         let raw = CreateServiceW(
             manager.0,
             service_name.as_ptr(),
             service_name.as_ptr(),
-            SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_START,
+            SERVICE_DELETE
+                | SERVICE_CHANGE_CONFIG
+                | SERVICE_QUERY_CONFIG
+                | SERVICE_QUERY_STATUS
+                | SERVICE_START,
             SERVICE_WIN32_OWN_PROCESS,
             SERVICE_DEMAND_START,
             SERVICE_ERROR_NORMAL,
@@ -224,7 +280,8 @@ pub fn install() -> Result<String, String> {
         if raw.is_null() {
             return Err("SCM_CREATE_FAILED".into());
         }
-        let service = Sc(raw);
+        let mut service_guard = ServiceGuard::new(raw, binary.clone(), account.clone());
+        account_guard.active = false;
         drop(password);
         drop(text);
         drop(entropy);
@@ -254,14 +311,14 @@ pub fn install() -> Result<String, String> {
             lpsaActions: actions.as_mut_ptr(),
         };
         if ChangeServiceConfig2W(
-            service.0,
+            service_guard.handle,
             SERVICE_CONFIG_FAILURE_ACTIONS,
             &recovery as *const _ as *const _,
         ) == 0
         {
             return Err("SCM_RECOVERY_FAILED".into());
         }
-        verify_registration(service.0, &binary, &account)?;
+        verify_registration(service_guard.handle, &binary, &account)?;
         let mut string_sid = ptr::null_mut();
         if ConvertSidToStringSidW(sid.as_mut_ptr() as *mut _, &mut string_sid) == 0 {
             return Err("ACCOUNT_SID_FAILED".into());
@@ -272,6 +329,7 @@ pub fn install() -> Result<String, String> {
         }
         let result = String::from_utf16_lossy(std::slice::from_raw_parts(string_sid, len));
         LocalFree(string_sid as *mut _);
+        service_guard.active = false;
         Ok(result)
     }
 }
@@ -282,6 +340,69 @@ unsafe fn same_wide(actual: *const u16, expected: &[u16]) -> bool {
             .iter()
             .enumerate()
             .all(|(i, value)| *actual.add(i) == *value)
+}
+
+unsafe fn service_matches_target(
+    service: SC_HANDLE,
+    binary: &[u16],
+    account: &[u16],
+) -> Result<bool, String> {
+    let mut required = 0;
+    QueryServiceConfigW(service, ptr::null_mut(), 0, &mut required);
+    if required == 0 || required > 65536 {
+        return Err("SCM_VERIFY_FAILED".into());
+    }
+    let mut buffer = vec![
+        0usize;
+        (required as usize + std::mem::size_of::<usize>() - 1)
+            / std::mem::size_of::<usize>()
+    ];
+    let config = buffer.as_mut_ptr() as *mut QUERY_SERVICE_CONFIGW;
+    if QueryServiceConfigW(service, config, required, &mut required) == 0 {
+        return Err("SCM_VERIFY_FAILED".into());
+    }
+    Ok((*config).dwServiceType == SERVICE_WIN32_OWN_PROCESS
+        && (*config).dwStartType == SERVICE_DEMAND_START
+        && same_wide((*config).lpBinaryPathName, binary)
+        && same_wide((*config).lpServiceStartName, account))
+}
+
+/// Roll back only a service whose SCM configuration proves it is this
+/// versioned GNX target. An account-only partial install is retained because
+/// there is no durable ownership witness safe enough to delete it blindly.
+pub fn rollback_owned_resources() -> Result<(), String> {
+    unsafe {
+        let manager = OpenSCManagerW(ptr::null(), ptr::null(), SC_MANAGER_CONNECT);
+        if manager.is_null() {
+            return Err("SCM_OPEN_FAILED".into());
+        }
+        let manager = Sc(manager);
+        let raw = OpenServiceW(
+            manager.0,
+            wide(SERVICE_NAME).as_ptr(),
+            SERVICE_DELETE | SERVICE_QUERY_CONFIG,
+        );
+        if raw.is_null() {
+            if GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST {
+                return Ok(());
+            }
+            return Err("SCM_QUERY_FAILED".into());
+        }
+        let service = Sc(raw);
+        let binary = wide(&target_binary_path());
+        let account = wide(SERVICE_ACCOUNT);
+        if !service_matches_target(service.0, &binary, &account)? {
+            return Ok(());
+        }
+        if DeleteService(service.0) == 0 {
+            return Err("SETUP_ROLLBACK_FAILED".into());
+        }
+        let status = NetUserDel(ptr::null(), wide(ACCOUNT_NAME).as_ptr());
+        if status != 0 && status != 2221 {
+            return Err("SETUP_ROLLBACK_FAILED".into());
+        }
+        Ok(())
+    }
 }
 
 unsafe fn verify_registration(
@@ -356,4 +477,21 @@ unsafe fn verify_registration(
         return Err("SCM_RECOVERY_VERIFY_FAILED".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::target_binary_path;
+
+    #[test]
+    fn ownership_witness_is_versioned_and_exact() {
+        assert_eq!(
+            target_binary_path(),
+            r#""C:\Program Files\GNX-0.3.1\gnx-service.exe""#
+        );
+        assert_ne!(
+            target_binary_path(),
+            r#""C:\Program Files\GNX\gnx-service.exe""#
+        );
+    }
 }
