@@ -34,9 +34,16 @@ fn serve() -> windows_service::Result<()> {
         wait_hint: Duration::default(),
         process_id: None,
     };
+    // Provisioning is setup-owned and must not retry forever inside the
+    // service. A failed bootstrap stops the service; setup records the gate
+    // and decides whether a bounded resume is allowed.
+    if super::runtime::bootstrap().is_err() {
+        h.set_service_status(status(ServiceState::Stopped))?;
+        return Ok(());
+    }
     h.set_service_status(status(ServiceState::Running))?;
     std::thread::spawn(|| loop {
-        if super::runtime::bootstrap().is_err() || super::broker::serve_one().is_err() {
+        if super::broker::serve_one().is_err() {
             std::thread::sleep(Duration::from_secs(1))
         }
     });
