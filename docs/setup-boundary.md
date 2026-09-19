@@ -39,15 +39,26 @@ Both transports execute the same preflight exactly once and preserve its outcome
 `SETUP_REBOOT_REQUIRED` means provisioning completed but Windows must restart;
 it is not a success signal.
 
-A future UI must launch the packaged executable by absolute path with an argument
-array, consume this stream, and wait for process exit. It must treat a missing or
-malformed terminal event, an unknown schema, or an exit-code mismatch as a
-transport failure. A completed event is not automatically success. The UI must
-preserve failed/action-required states and keep apply disabled. It must not inspect
-installation paths, hash bundles, mutate services, invoke PowerShell installation,
-or duplicate setup policy. There is no credential input in this protocol.
+`packaging/windows/setup-ui.ps1` is the minimal native-host presentation surface.
+It launches `gnx-setup.exe` by absolute path with an argument array, consumes
+this stream, and waits for process exit. It treats a missing or malformed
+terminal event, an unknown schema, or an exit-code mismatch as a transport
+failure. The finite display states are `RUNNING`, `READY`, `ACTION_REQUIRED`,
+and `FAILED`; a reboot is never inferred or synthesized. A completed event is
+not automatically success. The UI preserves failed/action-required states and
+keeps apply disabled; it does not inspect installation paths, hash bundles,
+mutate services, invoke installation policy, or duplicate setup logic. There is
+no credential input in this protocol.
 
-The Windows build already produces and hashes `gnx-setup.exe`. The development
-installer now verifies its manifest hash before mutations and installs it beside
-`gnx.exe` and `gnx-service.exe`. A complete release still requires the documented
-Windows/WSL integration and promotion evidence.
+The Windows build produces and hashes `gnx.exe`, `gnx-service.exe`,
+`gnx-setup.exe`, `gnx-linux`, `gnx-linux-bundle.tar`, and `gnx-linux.run` in one
+manifest. The thin installer verifies every listed artifact and the rootfs,
+rejects known legacy/partial layouts, then forwards provisioning to
+`gnx-setup.exe`; it never accepts a service credential. A complete release still
+requires the documented Windows/WSL integration and promotion evidence.
+
+The setup host requires an elevated Windows process. Native MSVC builds are
+subject to the installed Visual Studio linker/toolchain; if `link.exe` resolves
+to a non-MSVC utility, fix PATH or use the documented GNU/LLD toolchain before
+claiming a native build. The wrapper does not claim that elevation, account
+rights, SCM behavior, WSL, reboot recovery, or post-install health were tested.
