@@ -3,6 +3,45 @@ use crate::{
     report::{Capability, Report, State},
 };
 
+pub fn provision(
+    host: Option<&dyn SetupHost>,
+    input: &crate::domain::setup::BundleInput,
+) -> Report {
+    let Some(host) = host else {
+        return Report::new(
+            "setup",
+            State::ActionRequired,
+            "SETUP_WINDOWS_ONLY",
+            Some("Run setup on the Windows host."),
+        );
+    };
+    match host.provision_setup(input) {
+        Ok(()) => {
+            let mut result = Report::new(
+                "setup",
+                State::ActionRequired,
+                "SETUP_PROVISIONED",
+                Some("Continue with runtime bootstrap and verification before cutover."),
+            );
+            result.changes = vec![
+                "Trusted release staged".into(),
+                "Dedicated account and stopped GNXRuntime registered".into(),
+                "Legacy installation preserved".into(),
+            ];
+            result
+        }
+        Err(code) => {
+            // Adapter errors are machine codes only; never return OS messages or input paths.
+            let safe = code.len() <= 80
+                && !code.is_empty()
+                && code
+                    .bytes()
+                    .all(|b| b.is_ascii_uppercase() || b == b'_' || b.is_ascii_digit());
+            Report::new("setup", State::Failed, if safe { &code } else { "SETUP_PROVISION_FAILED" }, Some("Inspect the protected setup journal and snapshot; recover partial provisioning before retrying. Legacy has not been cut over."))
+        }
+    }
+}
+
 /// Runs the non-mutating host preflight for a 0.3.1 upgrade.
 ///
 /// Upgrade is deliberately outside the four-operation runtime broker protocol.
@@ -23,20 +62,18 @@ pub fn preflight(
     let mut report = report(host.preflight_setup());
     if let Some(bundle) = bundle {
         match host.validate_bundle(bundle) {
-            Ok(()) => report.capabilities.push(capability(
-                "release-bundle",
-                true,
-                "BUNDLE_AUTHENTICATED",
-            )),
+            Ok(()) => {
+                report
+                    .capabilities
+                    .push(capability("release-bundle", true, "BUNDLE_AUTHENTICATED"))
+            }
             Err(code) => {
                 report.state = State::Failed;
                 report.code = code;
                 report.next_action = Some("Use a trusted GNX bundle and verify its hashes.".into());
-                report.capabilities.push(capability(
-                    "release-bundle",
-                    false,
-                    "BUNDLE_INVALID",
-                ));
+                report
+                    .capabilities
+                    .push(capability("release-bundle", false, "BUNDLE_INVALID"));
             }
         }
     }
@@ -57,7 +94,7 @@ fn report(observed: SetupObservation) -> Report {
             "SETUP_SOURCE_NOT_FOUND"
         },
         if observed.legacy_present {
-            Some("Review this preflight; the mutating setup phase is not enabled yet.")
+            Some("Review this preflight, then run --provision with trusted bundle and rootfs hashes.")
         } else {
             Some("Install the supported previous GNX release before setup.")
         },
@@ -73,11 +110,7 @@ fn report(observed: SetupObservation) -> Report {
             observed.target_present,
             "TARGET_PRESENT",
         ),
-        capability(
-            "non-mutating-preflight",
-            true,
-            "NO_MUTATION_PERFORMED",
-        ),
+        capability("non-mutating-preflight", true, "NO_MUTATION_PERFORMED"),
     ];
     report.changes = vec![
         "No services stopped".into(),
@@ -127,5 +160,47 @@ mod tests {
             .changes
             .iter()
             .any(|change| change == "No credentials read or changed"));
+    }
+
+    struct ProvisionFixture(Result<(), String>);
+    impl SetupHost for ProvisionFixture {
+        fn preflight_setup(&self) -> SetupObservation {
+            panic!("provision must own its preflight under lock")
+        }
+        fn validate_bundle(&self, _: &crate::domain::setup::BundleInput) -> Result<(), String> {
+            panic!("provision must authenticate its staged copies")
+        }
+        fn provision_setup(&self, _: &crate::domain::setup::BundleInput) -> Result<(), String> {
+            self.0.clone()
+        }
+    }
+    fn input() -> crate::domain::setup::BundleInput {
+        crate::domain::setup::BundleInput {
+            bundle: "unused".into(),
+            rootfs: "unused".into(),
+            manifest_sha256: "a".repeat(64),
+            rootfs_sha256: "b".repeat(64),
+        }
+    }
+    #[test]
+    fn provision_never_claims_runtime_readiness() {
+        let result = provision(Some(&ProvisionFixture(Ok(()))), &input());
+        assert_eq!(result.state, State::ActionRequired);
+        assert_eq!(result.code, "SETUP_PROVISIONED");
+    }
+    #[test]
+    fn provision_sanitizes_failures() {
+        let result = provision(
+            Some(&ProvisionFixture(Err("password=canary".into()))),
+            &input(),
+        );
+        assert_eq!(result.state, State::Failed);
+        assert_eq!(result.code, "SETUP_PROVISION_FAILED");
+        assert!(!serde_json::to_string(&result).unwrap().contains("canary"));
+        let result = provision(
+            Some(&ProvisionFixture(Err("SETUP_RECOVERY_REQUIRED".into()))),
+            &input(),
+        );
+        assert_eq!(result.code, "SETUP_RECOVERY_REQUIRED");
     }
 }

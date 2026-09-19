@@ -5,6 +5,7 @@ pub mod linux;
 pub mod podman;
 pub mod process;
 pub mod release;
+pub mod setup_state;
 pub mod systemd;
 #[cfg(windows)]
 pub mod windows;

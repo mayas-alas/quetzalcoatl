@@ -20,20 +20,49 @@ struct Progress<'a> {
     apply_available: bool,
 }
 
-fn progress(result: Option<&Report>) -> Progress<'_> {
+fn progress(result: Option<&Report>, operation: &'static str) -> Progress<'_> {
+    let prefix = if operation == "setup-provision" {
+        "SETUP_PROVISION"
+    } else {
+        "SETUP_CHECK"
+    };
     Progress {
         schema: 1,
-        operation: "setup-check",
+        operation,
         phase: if result.is_some() {
             "completed"
         } else {
             "started"
         },
         code: match result.map(|r| &r.state) {
-            None => "SETUP_CHECK_STARTED",
-            Some(State::Ready) => "SETUP_CHECK_COMPLETED",
-            Some(State::Failed) => "SETUP_CHECK_FAILED",
-            Some(State::ActionRequired) => "SETUP_CHECK_ACTION_REQUIRED",
+            None => {
+                if operation == "setup-provision" {
+                    "SETUP_PROVISION_STARTED"
+                } else {
+                    "SETUP_CHECK_STARTED"
+                }
+            }
+            Some(State::Ready) => {
+                if prefix == "SETUP_PROVISION" {
+                    "SETUP_PROVISION_COMPLETED"
+                } else {
+                    "SETUP_CHECK_COMPLETED"
+                }
+            }
+            Some(State::Failed) => {
+                if prefix == "SETUP_PROVISION" {
+                    "SETUP_PROVISION_FAILED"
+                } else {
+                    "SETUP_CHECK_FAILED"
+                }
+            }
+            Some(State::ActionRequired) => {
+                if prefix == "SETUP_PROVISION" {
+                    "SETUP_PROVISION_ACTION_REQUIRED"
+                } else {
+                    "SETUP_CHECK_ACTION_REQUIRED"
+                }
+            }
         },
         state: result.map(|r| &r.state),
         exit_code: result.map(Report::exit),
@@ -56,7 +85,7 @@ fn parse_bundle(args: &[String]) -> Result<Option<BundleInput>, &'static str> {
         return Ok(None);
     }
     if args.len() != 9
-        || args[0] != "--check"
+        || !matches!(args[0].as_str(), "--check" | "--provision")
         || args[1] != "--bundle"
         || args[3] != "--manifest-sha256"
         || args[5] != "--rootfs"
@@ -79,12 +108,18 @@ fn run(args: &[String]) -> Report {
             return report(
                 code,
                 State::Failed,
-                "Use gnx-setup --check [bundle options].",
+                "Use gnx-setup --check [bundle options] or --provision with all bundle options.",
             )
         }
     };
     #[cfg(windows)]
     {
+        if args[0] == "--provision" {
+            return gnx::app::setup::provision(
+                Some(&gnx::adapter::windows::setup::WindowsSetupHost),
+                bundle.as_ref().expect("provision requires bundle options"),
+            );
+        }
         gnx::app::setup::preflight(
             Some(&gnx::adapter::windows::setup::WindowsSetupHost),
             bundle.as_ref(),
@@ -99,18 +134,22 @@ fn run(args: &[String]) -> Report {
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    // The transport switch must precede the existing strict check arguments.
     let streaming = args.first().is_some_and(|arg| arg == "--json-progress");
     if streaming {
         args.remove(0);
     }
+    let operation = if args.first().is_some_and(|arg| arg == "--provision") {
+        "setup-provision"
+    } else {
+        "setup-check"
+    };
     let mut out = io::stdout().lock();
-    if streaming && write_json(&mut out, &progress(None)).is_err() {
+    if streaming && write_json(&mut out, &progress(None, operation)).is_err() {
         std::process::exit(1);
     }
     let result = run(&args);
     let written = if streaming {
-        write_json(&mut out, &progress(Some(&result)))
+        write_json(&mut out, &progress(Some(&result), operation))
     } else {
         write_json(&mut out, &result)
     };
@@ -128,10 +167,36 @@ mod tests {
     fn progress_excludes_untrusted_report_details() {
         for state in [State::Ready, State::Failed, State::ActionRequired] {
             let result = report("SECRET_CANARY", state, "C:\\private\\SECRET_CANARY");
-            let event = serde_json::to_value(progress(Some(&result))).unwrap();
+            let event = serde_json::to_value(progress(Some(&result), "setup-check")).unwrap();
             assert!(!event.to_string().contains("SECRET_CANARY"));
             assert_eq!(event["exit_code"], result.exit());
             assert_eq!(event["apply_available"], false);
         }
+    }
+
+    #[test]
+    fn provision_requires_all_trust_inputs() {
+        for args in [
+            vec![],
+            vec!["--provision"],
+            vec!["--provision", "--password", "canary"],
+        ] {
+            let result = run(&args.into_iter().map(String::from).collect::<Vec<_>>());
+            assert_eq!(result.code, "INVALID_ARGUMENT");
+            assert!(!serde_json::to_string(&result).unwrap().contains("canary"));
+        }
+        let args = [
+            "--provision",
+            "--bundle",
+            "bundle",
+            "--manifest-sha256",
+            "hash",
+            "--rootfs",
+            "rootfs",
+            "--rootfs-sha256",
+            "hash",
+        ]
+        .map(String::from);
+        assert!(parse_bundle(&args).unwrap().is_some());
     }
 }

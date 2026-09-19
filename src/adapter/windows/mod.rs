@@ -3,3 +3,4 @@ pub mod broker;
 pub mod runtime;
 pub mod service;
 pub mod setup;
+mod setup_security;

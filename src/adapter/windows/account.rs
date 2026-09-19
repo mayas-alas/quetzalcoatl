@@ -1,6 +1,6 @@
 use std::ptr;
 use windows_sys::Win32::{
-    Foundation::LocalFree,
+    Foundation::{GetLastError, LocalFree, ERROR_SERVICE_DOES_NOT_EXIST},
     NetworkManagement::NetManagement::*,
     Security::{
         Authentication::Identity::*,
@@ -32,7 +32,37 @@ impl Drop for Policy {
         }
     }
 }
+
+/// Provision never takes over an account or service belonging to an earlier install.
+pub fn require_absent() -> Result<(), String> {
+    unsafe {
+        let mut info = ptr::null_mut();
+        let status = NetUserGetInfo(ptr::null(), wide("gnx-runtime").as_ptr(), 0, &mut info);
+        if status == 0 {
+            NetApiBufferFree(info as *const _);
+            return Err("SETUP_ACCOUNT_CONFLICT".into());
+        }
+        if status != 2221 {
+            return Err("ACCOUNT_QUERY_FAILED".into());
+        }
+        let manager = OpenSCManagerW(ptr::null(), ptr::null(), SC_MANAGER_CONNECT);
+        if manager.is_null() {
+            return Err("SCM_OPEN_FAILED".into());
+        }
+        let manager = Sc(manager);
+        let service = OpenServiceW(manager.0, wide("GNXRuntime").as_ptr(), SERVICE_QUERY_CONFIG);
+        if !service.is_null() {
+            drop(Sc(service));
+            return Err("SETUP_SERVICE_CONFLICT".into());
+        }
+        if GetLastError() != ERROR_SERVICE_DOES_NOT_EXIST {
+            return Err("SCM_QUERY_FAILED".into());
+        }
+    }
+    Ok(())
+}
 pub fn install() -> Result<String, String> {
+    require_absent()?;
     unsafe {
         let name = wide("gnx-runtime");
         let account = wide(SERVICE_ACCOUNT);
@@ -46,7 +76,9 @@ pub fn install() -> Result<String, String> {
         {
             return Err("ACCOUNT_RANDOM_FAILED".into());
         }
-        let text = Zeroizing::new(format!("Aa1!{}", hex::encode(&*entropy)));
+        let encoded = Zeroizing::new(hex::encode(&*entropy));
+        let text = Zeroizing::new(format!("Aa1!{}", encoded.as_str()));
+        drop(encoded);
         let password = Zeroizing::new(wide(&text));
         let info = USER_INFO_1 {
             usri1_name: name.as_ptr() as *mut _,
@@ -68,20 +100,9 @@ pub fn install() -> Result<String, String> {
             ptr::null_mut(),
         );
         if status == 2224 {
-            let info = USER_INFO_1003 {
-                usri1003_password: password.as_ptr() as *mut _,
-            };
-            if NetUserSetInfo(
-                ptr::null(),
-                name.as_ptr(),
-                1003,
-                &info as *const _ as *const u8,
-                ptr::null_mut(),
-            ) != 0
-            {
-                return Err("ACCOUNT_RECONCILE_FAILED".into());
-            }
-        } else if status != 0 {
+            return Err("SETUP_ACCOUNT_CONFLICT".into());
+        }
+        if status != 0 {
             return Err("ACCOUNT_CREATE_FAILED".into());
         }
         let mut sid_len = 0;
@@ -181,52 +202,29 @@ pub fn install() -> Result<String, String> {
         }
         let manager = Sc(manager);
         let service_name = wide("GNXRuntime");
-        let binary = wide("\"C:\\Program Files\\GNX\\gnx-service.exe\"");
-        let existing = OpenServiceW(
+        let binary = wide(&format!(
+            "\"{}\\gnx-service.exe\"",
+            super::setup::TARGET_PROGRAM
+        ));
+        let raw = CreateServiceW(
             manager.0,
             service_name.as_ptr(),
-            SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG,
+            service_name.as_ptr(),
+            SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_START,
+            SERVICE_WIN32_OWN_PROCESS,
+            SERVICE_DEMAND_START,
+            SERVICE_ERROR_NORMAL,
+            binary.as_ptr(),
+            ptr::null(),
+            ptr::null_mut(),
+            ptr::null(),
+            account.as_ptr(),
+            password.as_ptr(),
         );
-        let service = if existing.is_null() {
-            let raw = CreateServiceW(
-                manager.0,
-                service_name.as_ptr(),
-                service_name.as_ptr(),
-                SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG,
-                SERVICE_WIN32_OWN_PROCESS,
-                SERVICE_AUTO_START,
-                SERVICE_ERROR_NORMAL,
-                binary.as_ptr(),
-                ptr::null(),
-                ptr::null_mut(),
-                ptr::null(),
-                account.as_ptr(),
-                password.as_ptr(),
-            );
-            if raw.is_null() {
-                return Err("SCM_CREATE_FAILED".into());
-            }
-            Sc(raw)
-        } else {
-            let service = Sc(existing);
-            if ChangeServiceConfigW(
-                service.0,
-                SERVICE_WIN32_OWN_PROCESS,
-                SERVICE_AUTO_START,
-                SERVICE_ERROR_NORMAL,
-                binary.as_ptr(),
-                ptr::null(),
-                ptr::null_mut(),
-                ptr::null(),
-                account.as_ptr(),
-                password.as_ptr(),
-                ptr::null(),
-            ) == 0
-            {
-                return Err("SCM_UPDATE_FAILED".into());
-            }
-            service
-        };
+        if raw.is_null() {
+            return Err("SCM_CREATE_FAILED".into());
+        }
+        let service = Sc(raw);
         drop(password);
         drop(text);
         drop(entropy);
@@ -243,12 +241,16 @@ pub fn install() -> Result<String, String> {
                 Type: SC_ACTION_RESTART,
                 Delay: 60000,
             },
+            SC_ACTION {
+                Type: SC_ACTION_NONE,
+                Delay: 0,
+            },
         ];
         let recovery = SERVICE_FAILURE_ACTIONSW {
             dwResetPeriod: 86400,
             lpRebootMsg: ptr::null_mut(),
             lpCommand: ptr::null_mut(),
-            cActions: 3,
+            cActions: 4,
             lpsaActions: actions.as_mut_ptr(),
         };
         if ChangeServiceConfig2W(
@@ -259,6 +261,7 @@ pub fn install() -> Result<String, String> {
         {
             return Err("SCM_RECOVERY_FAILED".into());
         }
+        verify_registration(service.0, &binary, &account)?;
         let mut string_sid = ptr::null_mut();
         if ConvertSidToStringSidW(sid.as_mut_ptr() as *mut _, &mut string_sid) == 0 {
             return Err("ACCOUNT_SID_FAILED".into());
@@ -271,4 +274,86 @@ pub fn install() -> Result<String, String> {
         LocalFree(string_sid as *mut _);
         Ok(result)
     }
+}
+
+unsafe fn same_wide(actual: *const u16, expected: &[u16]) -> bool {
+    !actual.is_null()
+        && expected
+            .iter()
+            .enumerate()
+            .all(|(i, value)| *actual.add(i) == *value)
+}
+
+unsafe fn verify_registration(
+    service: SC_HANDLE,
+    binary: &[u16],
+    account: &[u16],
+) -> Result<(), String> {
+    let mut required = 0;
+    QueryServiceConfigW(service, ptr::null_mut(), 0, &mut required);
+    if required == 0 || required > 65536 {
+        return Err("SCM_VERIFY_FAILED".into());
+    }
+    let mut buffer = vec![
+        0usize;
+        (required as usize + std::mem::size_of::<usize>() - 1)
+            / std::mem::size_of::<usize>()
+    ];
+    let config = buffer.as_mut_ptr() as *mut QUERY_SERVICE_CONFIGW;
+    if QueryServiceConfigW(service, config, required, &mut required) == 0 {
+        return Err("SCM_VERIFY_FAILED".into());
+    }
+    if (*config).dwServiceType != SERVICE_WIN32_OWN_PROCESS
+        || (*config).dwStartType != SERVICE_DEMAND_START
+        || !same_wide((*config).lpBinaryPathName, binary)
+        || !same_wide((*config).lpServiceStartName, account)
+    {
+        return Err("SCM_VERIFY_FAILED".into());
+    }
+    let mut status: SERVICE_STATUS = std::mem::zeroed();
+    if QueryServiceStatus(service, &mut status) == 0 || status.dwCurrentState != SERVICE_STOPPED {
+        return Err("SCM_VERIFY_FAILED".into());
+    }
+    required = 0;
+    QueryServiceConfig2W(
+        service,
+        SERVICE_CONFIG_FAILURE_ACTIONS,
+        ptr::null_mut(),
+        0,
+        &mut required,
+    );
+    if required == 0 || required > 65536 {
+        return Err("SCM_RECOVERY_VERIFY_FAILED".into());
+    }
+    let mut buffer = vec![
+        0usize;
+        (required as usize + std::mem::size_of::<usize>() - 1)
+            / std::mem::size_of::<usize>()
+    ];
+    if QueryServiceConfig2W(
+        service,
+        SERVICE_CONFIG_FAILURE_ACTIONS,
+        buffer.as_mut_ptr() as *mut u8,
+        required,
+        &mut required,
+    ) == 0
+    {
+        return Err("SCM_RECOVERY_VERIFY_FAILED".into());
+    }
+    let recovery = &*(buffer.as_ptr() as *const SERVICE_FAILURE_ACTIONSW);
+    if recovery.dwResetPeriod != 86400 || recovery.cActions != 4 || recovery.lpsaActions.is_null() {
+        return Err("SCM_RECOVERY_VERIFY_FAILED".into());
+    }
+    let actions = std::slice::from_raw_parts(recovery.lpsaActions, 4);
+    if actions[0].Type != SC_ACTION_RESTART
+        || actions[0].Delay != 5000
+        || actions[1].Type != SC_ACTION_RESTART
+        || actions[1].Delay != 15000
+        || actions[2].Type != SC_ACTION_RESTART
+        || actions[2].Delay != 60000
+        || actions[3].Type != SC_ACTION_NONE
+    {
+        return Err("SCM_RECOVERY_VERIFY_FAILED".into());
+    }
+    Ok(())
 }
