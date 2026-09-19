@@ -25,6 +25,25 @@ fn wide(s: &str) -> Vec<u16> {
 fn invalid() -> io::Error {
     io::ErrorKind::InvalidData.into()
 }
+pub fn validate_operator_sid() -> io::Result<()> {
+    let sid = std::fs::read_to_string("C:\\ProgramData\\GNX\\operator.sid")?;
+    let sid = sid.trim();
+    let valid = sid
+        .strip_prefix("S-1-")
+        .map(|rest| {
+            let parts: Vec<_> = rest.split('-').collect();
+            !parts.is_empty()
+                && parts.iter().all(|part| {
+                    !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())
+                        && part.parse::<u64>().is_ok()
+                })
+        })
+        .unwrap_or(false);
+    if !valid {
+        return Err(invalid());
+    }
+    Ok(())
+}
 fn event() -> io::Result<Handle> {
     let h = unsafe { CreateEventW(ptr::null(), 1, 0, ptr::null()) };
     if h.is_null() {
@@ -120,7 +139,10 @@ pub fn request_secret(op: &str, intent: &str, secret: Option<&Secret>) -> io::Re
     let service = manager
         .open_service("GNXRuntime", ServiceAccess::QUERY_STATUS)
         .map_err(|_| invalid())?;
-    if service.query_status().map_err(|_| invalid())?.process_id != Some(pid) {
+    let service_status = service.query_status().map_err(|_| invalid())?;
+    if service_status.current_state != windows_service::service::ServiceState::Running
+        || service_status.process_id != Some(pid)
+    {
         return Err(io::ErrorKind::PermissionDenied.into());
     }
     let mode = PIPE_READMODE_MESSAGE;
@@ -138,14 +160,27 @@ pub fn request_secret(op: &str, intent: &str, secret: Option<&Secret>) -> io::Re
     Ok(r)
 }
 pub fn serve_one() -> io::Result<()> {
+    validate_operator_sid()?;
     let sid = std::fs::read_to_string("C:\\ProgramData\\GNX\\operator.sid")?;
     let sid = sid.trim();
-    if !sid.starts_with("S-1-")
-        || !sid
-            .bytes()
-            .all(|b| b.is_ascii_digit() || b == b'S' || b == b'-')
+    // Do not create a readiness pipe while SCM still considers the service
+    // stopped, stopping, or start-pending. This also makes status evidence
+    // honest when startup failed before the broker became usable.
     {
-        return Err(invalid());
+        use windows_service::{
+            service::ServiceAccess,
+            service_manager::{ServiceManager, ServiceManagerAccess},
+        };
+        let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+            .map_err(|_| invalid())?;
+        let service = manager
+            .open_service("GNXRuntime", ServiceAccess::QUERY_STATUS)
+            .map_err(|_| invalid())?;
+        if service.query_status().map_err(|_| invalid())?.current_state
+            != windows_service::service::ServiceState::Running
+        {
+            return Err(io::ErrorKind::WouldBlock.into());
+        }
     }
     let sddl = wide(&format!("D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;{sid})"));
     let mut sd = ptr::null_mut();
