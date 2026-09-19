@@ -24,7 +24,7 @@ Before a clean install or acceptance run, verify and record:
 | Gate | Required observation |
 | --- | --- |
 | Host | supported OS/architecture and elevated rights only where required |
-| Linux runtime | WSL `GNX-0.3.1`, systemd and Podman available where applicable |
+| Linux runtime | Wide Linux `GNX-0.3.1`, systemd and Podman available where applicable |
 | Devices | `/dev/kvm`, `/dev/net/tun` or other required devices only for the selected release |
 | Network | private transport prerequisites, no unintended public bindings |
 | State | no conflicting `C:\Program Files\GNX`, `C:\ProgramData\GNX`, `GNX`, `gnx-node` adoption or stale setup journal unless explicitly recovering |
@@ -76,7 +76,7 @@ Required operational facts:
 - direct Compute ports and local Control interfaces are not remotely reachable;
 - optional routes may fail without degrading required capabilities.
 
-Historical control-plane notes retained as rules: keep protected state under ProgramData/WSL root-only locations, preserve existing identity on reprepare, renew certificates before expiry, and do not log tokens or request bodies.
+Historical control-plane notes retained as rules: keep protected state under ProgramData/Wide Linux root-only locations, preserve existing identity on reprepare, renew certificates before expiry, and do not log tokens or request bodies.
 
 ## Compute operation
 

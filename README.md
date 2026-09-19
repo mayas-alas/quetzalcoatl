@@ -13,8 +13,10 @@ capabilities:
   authentication boundary.
 
 The PoC has one orchestration core, written in Rust and executed on Linux.
-Windows exposes the same contract through a narrow broker into an isolated WSL
-runtime; it is not a second implementation of the product.
+Windows exposes the same contract through a narrow broker into the same isolated
+**Wide Linux** runtime layer; it is not a second implementation of the product.
+On Windows, the current Wide Linux host adapter is WSL2; that implementation detail
+is not a separate product or public capability.
 
 ```mermaid
 flowchart LR
@@ -29,12 +31,12 @@ flowchart LR
 
 This branch contains an implemented 0.3.1 product slice. Repository tests cover
 contracts, state transitions, setup boundaries and refusal paths; they are not a
-substitute for host acceptance. Windows/WSL, Linux runtime, remote-client and
-G0-G6 evidence remain pending where this environment lacks MSVC, elevated
-Windows, WSL and Podman. No release is READY until those gates produce
+substitute for host acceptance. Windows/Wide Linux, native Linux runtime,
+remote-client and G0-G6 evidence remain pending where this environment lacks
+MSVC, an elevated Windows host and Podman. No release is READY until those gates produce
 sanitized, reproducible evidence. The latest local Windows binaries are built
 under `target/release`; a complete `dist` candidate is **not** available yet
-because the configured WSL builder has no Linux Rust toolchain. Do not treat
+because the configured Wide Linux builder has no Linux Rust toolchain. Do not treat
 `target/release` as an installable release artifact.
 
 The first useful milestone is not “the project compiles.” It is an executable
@@ -89,7 +91,7 @@ source of truth:
 3. [`docs/03-operator-runbook.md`](docs/03-operator-runbook.md) gives the safe
    operating, recovery and evidence rules.
 4. [`docs/04-windows-runtime.md`](docs/04-windows-runtime.md) specifies the
-   Windows account, service, broker, WSL and setup boundaries.
+   Windows account, service, broker, Wide Linux and setup boundaries.
 5. [`docs/05-acceptance.md`](docs/05-acceptance.md) defines G0-G6 acceptance and
    summarizes current evidence without converting blockers into success.
 6. [`docs/06-release.md`](docs/06-release.md) defines candidate contents,

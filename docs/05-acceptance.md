@@ -25,7 +25,7 @@ Local loopback, container-internal checks or noVNC availability cannot substitut
 | --- | --- | --- |
 | Build environment | produces authenticated candidate artifacts | clean-host install or artifact verification |
 | GNX Linux runtime | owns application core and live services | Windows isolation |
-| Windows host | owns service boundary and isolated WSL distro | Linux business logic |
+| Windows host | owns service boundary and isolated Wide Linux distro | Linux business logic |
 | Authorized remote client | exercises DNS, private transport, TLS and Compute auth | loopback/container-only checks |
 | Optional external app | proves route isolation | required Compute health |
 
@@ -56,7 +56,7 @@ Linux and Windows use the same fixtures and exit semantics. Unparseable stdout, 
 | G2 Access | persistent enrollment, private reachability and authoritative `.gnx` DNS work from authorized client |
 | G3 Control | `compute.gnx` works over verified TLS; private/local ports remain unreachable |
 | G4 Reconcile | `plan` is read-only; unchanged `apply` is idempotent; invalid/unhealthy candidates do not replace last valid |
-| G5 Recovery | Linux reboot and Windows/WSL recovery restore required capabilities without recreating identity/storage |
+| G5 Recovery | Linux reboot and Windows/Wide Linux recovery restore required capabilities without recreating identity/storage |
 | G6 Parity | Windows `gnx.exe` and Linux `gnx` implement same operations, schema, diagnostics and exit codes |
 
 ## Required negative checks
@@ -78,7 +78,7 @@ Linux and Windows use the same fixtures and exit semantics. Unparseable stdout, 
 
 Use the [actionable lifecycle and uninstall checklist](../packaging/windows/uninstall-checklist.md) for ownership, the twelve lifecycle classifications, failure injections and retry decisions. Run `powershell -NoProfile -File packaging/windows/setup-ui.tests.ps1` from the candidate checkout and record its exit code. Missing packaging scripts or failed assertions fail the static gate; a passing static gate does not prove installation, removal or runtime health.
 
-On the declared disposable Windows matrix, retain sanitized pre/post observations for provision, interruption in each mutation phase, ownership conflicts, explicit recovery, removal, repeated removal, reboot and reinstall. Query SCM, local account SID/references, WSL registration in its owner's context, protected roots, shortcuts, tasks and applicable Path/Run scopes independently of the command under test. A query error is not absence; any residue or contradiction between exit/result/counters and observations fails the gate. Preserve foreign sentinels unchanged and record retained evidence outside the removed roots.
+On the declared disposable Windows matrix, retain sanitized pre/post observations for provision, interruption in each mutation phase, ownership conflicts, explicit recovery, removal, repeated removal, reboot and reinstall. Query SCM, local account SID/references, Wide Linux registration in its owner's context, protected roots, shortcuts, tasks and applicable Path/Run scopes independently of the command under test. A query error is not absence; any residue or contradiction between exit/result/counters and observations fails the gate. Preserve foreign sentinels unchanged and record retained evidence outside the removed roots.
 
 The setup `--json-progress` transport is an explicit NDJSON stream exception to the single-document command gate: require exactly one `started` followed by one `completed`, matching requested operation and terminal state/exit, with no extra output. Negative fixtures must reject duplicates, reversed phases, operation mismatch, malformed JSON and false `apply_available`. Existing source checks verify guards and mappings, but do not substitute for executing those fixtures; missing rejection is a reported transport gap.
 
@@ -107,7 +107,7 @@ Retained facts:
 - Safe pattern: disposable or retained Podman volume, `/dev/kvm`, `/dev/net/tun` only when required, web bound to loopback, temporary share, no secrets or legacy host mounts.
 - Initial bounded attempts were blocked while Windows ISO was still downloading and QEMU was absent; no guest readiness was claimed.
 - Follow-up boot reached Windows desktop and proved `/shared` visibility of GNX EXEs; GNX was not installed/exercised in that run.
-- A later persistent lab reached real setup/apply work and produced expected finite boundary `ACTION_REQUIRED SETUP_REBOOT_REQUIRED`; after reboot, WSL-required Windows features were disabled, then nested virtualization/boot-manager behavior blocked further `READY` claim.
+- A later persistent lab reached real setup/apply work and produced expected finite boundary `ACTION_REQUIRED SETUP_REBOOT_REQUIRED`; after reboot, Wide Linux-required Windows features were disabled, then nested virtualization/boot-manager behavior blocked further `READY` claim.
 
 Dockur evidence may support G0/G6 lab diagnosis only when the exact candidate, artifacts and guest observations are recorded. It cannot replace clean physical/declared Windows host acceptance unless the release explicitly declares that matrix.
 

@@ -1,5 +1,22 @@
 # TEMP 360 Tracker — alcance mínimo sin crecer arquitectura
 
+## Corte de trabajo — 2026-09-19
+
+| Área | Estado | Evidencia / siguiente acción |
+|---|---|---|
+| Base | PASS | `cargo fmt --all -- --check`; `cargo test --locked` (18+2+ integración, 1 ignorada) |
+| Artefactos Linux | PASS local | `gnx-linux`, bundle y `gnx-linux.run` generados con `gnx-node`; el `.run` instala la misma capa Wide Linux |
+| Candidate autenticado | BLOCKED | falta rootfs verificado y firma de producción; `runtime.lock.json` sigue `unsealed` |
+| Host Windows / reboot | BLOCKED | no hay PowerShell elevado disponible; no se declara instalación ni resiliencia |
+| Residuos del host | PASS preflight observado | ausentes las raíces GNX/Quetzalcoatl versionadas inspeccionadas; no se borró nada |
+| Terminología | IN PROGRESS | docs activos usan **Wide Linux**; la tecnología host queda sólo como detalle de implementación |
+
+No se modifica `legacy`; el análisis delegado quedó documentado y un gate bloqueado permanece bloqueado.
+
+## Resumen taxonomía 360 — 2026-09-19
+
+Se agregó `docs/TAXONOMY-PROPOSAL.md` como propuesta no normativa para separar vocabulario de producto, capas, estados públicos, fases de lifecycle, códigos estables, artefactos y evidencia Wide Linux. Hallazgos principales: `compute.gnx` es la ruta operativa requerida; `app.gnx` se conserva como superficie propia HTML/CSS/JS de presentación, no como capacidad adicional; `src/cli.rs` conserva una superficie no alineada con el contrato público actual; `install-host.ps1`, `install.ps1` y `gnx-setup.exe` deben nombrarse como flujos distintos; y Windows/rootfs/firma permanecen bloqueados hasta una prueba elevada con manifest sellado y rootfs verificado. Prioridad inmediata: no declarar READY desde provisioning, build local o bundle `unsealed`; registrar host/reboot/residuos como gates separados.
+
 > Tracker temporal. No es especificación nueva. No autoriza comandos nuevos ni cambios de arquitectura. No incluir secretos. `legacy` sólo se consulta como archivo histórico; no se modifica.
 
 ## Regla del 360
@@ -39,14 +56,14 @@ Pruebas:
 - `operator.sid` queda registrado sin exponer secretos.
 - Reinicio no rompe servicio ni estado.
 
-### B. WSL runtime GNX
+### B. Wide Linux runtime GNX
 
 Base documentada: distro `GNX-0.3.1`; `GNX` o `gnx-node` son conflicto legacy, no adopción.
 
 Pruebas:
 
 - setup/import usa nombre `GNX-0.3.1`.
-- WSL/systemd quedan disponibles según prerequisitos.
+- Wide Linux/systemd quedan disponibles según prerequisitos.
 - después de reboot, `GNXRuntime` puede verificar/continuar bootstrap.
 - acceso operativo normal es vía GNX/broker, no por flujo manual del usuario.
 
@@ -57,13 +74,13 @@ Pedido 360: validar servicios tipo quadlet para `app.gnx` y `compute.gnx` sobre 
 Estado actual a doble-check:
 
 - `compute.gnx` sí aparece como contrato normativo.
-- `app.gnx` debe tratarse como **gap o decisión pendiente** si no existe en docs/código.
+- `app.gnx` se conserva como superficie propia de presentación HTML/CSS/JS; sus assets/serving son implementación pendiente, no una nueva capacidad.
 
 Pruebas sin inventar arquitectura:
 
 - confirmar unidades/quadlets realmente generadas por el bundle actual;
 - confirmar `https://compute.gnx` con TLS válido;
-- si `app.gnx` no existe, registrar gap antes de implementar;
+- si `app.gnx` aún no tiene assets, mantenerlo como implementación pendiente y no declararlo operativo;
 - verificar reinicio y health sin imprimir secretos.
 
 ### D. Credenciales y secretos
@@ -104,8 +121,8 @@ Validar sin modificar `legacy`:
 
 - **G0 Base:** repo/toolchain/tests verdes.
 - **G1 Setup Windows:** check/provision con cuenta dedicada y ACLs.
-- **G2 WSL:** distro `GNX-0.3.1`, systemd/reboot ok.
-- **G3 HTTPS:** `compute.gnx` ok; `app.gnx` gap o prueba real si existe.
+- **G2 Wide Linux:** distro `GNX-0.3.1`, systemd/reboot ok.
+- **G3 HTTPS:** `compute.gnx` operativo; `app.gnx` tendrá gate separado de presentación cuando existan sus assets.
 - **G4 Secretos:** sin secretos en argv/logs/evidencia.
 - **G5 Branding:** assets instalador/tray/window verificados o gap.
 - **G6 Evidencia:** resultado pass/fail/block con comandos reales.

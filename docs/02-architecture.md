@@ -27,7 +27,9 @@ flowchart LR
     DNS[CoreDNS adapter: authoritative .gnx]
     Control[Control: TLS and explicit routing]
     Compute[Compute: persistent service]
+    App[App surface: HTML/CSS/JS]
     External[Optional external app]
+    Control -->|serves first-party UI| App
     Access --- DNS
     Access --- Control
     Control -->|private upstream| Compute
@@ -39,7 +41,7 @@ flowchart LR
   Client -->|HTTPS compute.gnx| Control
 ```
 
-CoreDNS is an adapter, not a fourth capability. The shared Linux runtime is a hosting boundary, not a business capability.
+CoreDNS is an adapter, not a fourth capability. The App surface is presentation, not a fourth capability. The shared Linux runtime is a hosting boundary, not a business capability.
 
 ## Ownership matrix
 
@@ -48,6 +50,7 @@ CoreDNS is an adapter, not a fourth capability. The shared Linux runtime is a ho
 | Access | private identity, authorized transport, `.gnx` authority | private entry address, DNS answers, identity health | HTTPS routing, Compute lifecycle, Compute auth |
 | Control | TLS identity, public-root export, explicit host routes | HTTPS entrypoints, route diagnostics | enrollment, Compute credentials, upstream lifecycle |
 | Compute | service lifecycle, persistent data, service credentials | private upstream contract and public CA/name data needed by Control | client DNS, public routes, Windows mediation |
+| App surface | first-party HTML/CSS/JS presentation at `app.gnx` | navigation/status presentation through Control | reconciliation, secrets, Compute lifecycle |
 
 ## Use-case flow
 
@@ -56,7 +59,7 @@ flowchart LR
   CLI[CLI / Windows bridge] --> App[src/app use case]
   App --> Domain[Access / Control / Compute rules]
   App --> Ports[Ports]
-  Adapters[Linux, WSL, systemd, Podman, CoreDNS, fs] --> Ports
+  Adapters[Linux, Wide Linux, systemd, Podman, CoreDNS, fs] --> Ports
   Adapters --> Runtime[Observed runtime state]
 ```
 
@@ -65,7 +68,7 @@ flowchart LR
 - `apply` stages a candidate, reconciles resources, verifies required health and only then promotes last valid.
 - `status` reports actual capability health.
 
-The CLI parses and renders. Domain and application modules do not import filesystem, process, WSL, container, DNS or vendor APIs. Adapters implement ports and are selected in the composition root.
+The CLI parses and renders. Domain and application modules do not import filesystem, process, Wide Linux, container, DNS or vendor APIs. Adapters implement ports and are selected in the composition root.
 
 ## State model
 
@@ -107,7 +110,7 @@ No step may hide a failed gate behind a later success.
 - Recover useful behavior, not old code.
 - Keep exactly one orchestration core in `src/app`.
 - Use capability names as product language; vendor names stay in adapters, SBOM and technical evidence.
-- Retain the Windows boundary: `gnx-runtime`, `GNXRuntime`, bounded pipe and isolated WSL.
+- Retain the Windows boundary: `gnx-runtime`, `GNXRuntime`, bounded pipe and isolated Wide Linux.
 - Success means observed behavior, not generated config or launched processes.
 
 ## Adapter decisions for 0.3.1

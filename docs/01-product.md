@@ -11,7 +11,7 @@ GNX is private infrastructure behind one small, verifiable command contract. It 
 - **Control**: explicit HTTPS names, TLS and routing to declared upstreams.
 - **Compute**: the persistent service behind Control with its own authentication and storage.
 
-Concrete products such as WSL, Podman, CoreDNS, Caddy, Tailscale, NetBird or Dockur are release/adaptor choices. They are not public capability names.
+Concrete products such as the Wide Linux layer, Podman, CoreDNS, Caddy, Tailscale, NetBird or Dockur are release/adaptor choices. They are not public capability names.
 
 ## Required outcome
 
@@ -48,7 +48,7 @@ Generated files, compiled binaries, active processes, HTTP 200 from a console an
 | Candidate | validated intent plus one release, staged but not yet promoted |
 | Last valid | most recent candidate whose required live checks passed |
 | Required route | `compute.gnx`; failure affects Control acceptance |
-| Optional route | explicit route to software whose lifecycle GNX does not own |
+| App surface | `app.gnx`, first-party HTML/CSS/JS presentation served through Control; it is not a fourth business capability |
 
 ## Requirements
 
@@ -66,12 +66,17 @@ Generated files, compiled binaries, active processes, HTTP 200 from a console an
 - **BR-C03 Explicit routing.** Every published hostname maps explicitly to one upstream. There is no wildcard fallback.
 - **BR-C04 Isolation.** Compute ports and local Control interfaces are not remotely exposed.
 - **BR-C05 Optional routes.** Failure of an optional externally managed route does not degrade required Access, Control or Compute health.
+- **BR-C06 App presentation.** `app.gnx` is the first-party GNX presentation surface: HTML/CSS/JS served through Control, with no secrets in browser assets and no replacement of the `compute.gnx` operational contract.
 
 ### Compute
 
 - **BR-K01 Persistent service.** Compute uses persistent storage and reports real authenticated health.
 - **BR-K02 Independent authentication.** Reaching Control never bypasses Compute credentials.
 - **BR-K03 Boundary.** Compute does not own client identity, DNS or public routing.
+
+### App presentation surface
+
+The `app.gnx` surface is a first-party HTML/CSS/JS interface for GNX presentation and navigation. It follows the same private transport, TLS, evidence and secret-boundary rules as the product, but it is not a new reconciliation domain or a replacement for Compute. The current checkout records the contract and taxonomy; UI assets and serving remain an implementation task.
 
 ### Product lifecycle
 
@@ -80,7 +85,7 @@ Generated files, compiled binaries, active processes, HTTP 200 from a console an
 - **BR-P03 Four use cases.** Public operations are exactly `doctor`, `plan`, `apply` and `status`.
 - **BR-P04 Safe reconciliation.** `plan` observes without mutation. Unchanged `apply` is idempotent. Invalid candidates never replace last valid.
 - **BR-P05 Honest results.** JSON/exit semantics are authoritative; missing runtime checks cannot be converted into success.
-- **BR-P06 Recovery.** Linux reboot and the documented Windows/WSL recovery path restore capabilities without recreating identity or storage.
+- **BR-P06 Recovery.** Linux reboot and the documented Windows/Wide Linux recovery path restore capabilities without recreating identity or storage.
 - **BR-P07 Platform parity.** Windows `gnx.exe` and Linux `gnx` expose the same operations, JSON schema and exit semantics.
 - **BR-P08 Single orchestration core.** Windows is a typed bridge to the Linux runtime; it does not duplicate reconciliation logic.
 - **BR-P09 Secret boundary.** Enrollment credentials, passwords, cookies, authorization headers and private keys are runtime state, never intent, argv, environment, logs or evidence.
@@ -93,7 +98,7 @@ Generated files, compiled binaries, active processes, HTTP 200 from a console an
 - **BR-W04 Closed broker.** `gnx.exe` talks to `GNXRuntime` through a local named pipe with bounded frames and only the four allowed operations.
 - **BR-W05 Separate secret channel.** Secrets are requested only after `ACTION_REQUIRED`, read without echo, carried in a dedicated bounded frame and delivered to Linux through stdin.
 - **BR-W06 Product-owned Linux artifact.** Windows release contains the GNX Linux binary built by the same release pipeline and pinned by manifest.
-- **BR-W07 Isolated WSL runtime.** `GNXRuntime` owns fixed distro `GNX-0.3.1`; automount and Windows interop are disabled.
+- **BR-W07 Isolated Wide Linux runtime.** `GNXRuntime` owns fixed distro `GNX-0.3.1`; automount and Windows interop are disabled.
 - **BR-W08 Fixed Linux execution.** Service invokes only `/usr/local/bin/gnx` with fixed config path and allowlisted argv.
 - **BR-W09 Public export only.** Windows may receive the public GNX CA certificate and sanitized JSON results; private keys never cross back.
 - **BR-W10 Explicit trust boundary.** The design protects the normal operator session from accidental access. SYSTEM and local Administrators remain trusted.

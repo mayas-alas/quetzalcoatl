@@ -25,7 +25,7 @@ release/
     gnx-service.exe            # service/broker
     gnx-setup.exe              # bounded setup
     GNX Linux bundle           # same pipeline; inner digest recorded
-    WSL rootfs reference       # immutable identity and digest
+    Wide Linux rootfs reference       # immutable identity and digest
   licenses and attribution
   schema and contract fixtures
 ```
@@ -40,7 +40,7 @@ The installer authenticates the manifest first, verifies every artifact before e
 | network intent and optional assertions | selected private transport implementation |
 | explicit optional hostname/upstream routes | images, digests, licenses and source identities |
 | no provider family, internal path or secret | systemd/Podman/CoreDNS/Caddy/runtime defaults |
-| portable between compatible releases | platform artifacts, WSL rootfs and required digests |
+| portable between compatible releases | platform artifacts, Wide Linux rootfs and required digests |
 
 Different digest or runtime default means a different candidate.
 
@@ -51,7 +51,7 @@ Different digest or runtime default means a different candidate.
 - Windows package carries the exact Linux artifact produced by the candidate pipeline.
 - No install-time download of unpinned replacements.
 - Third-party runtime artifacts have immutable identity, digest, license and source recorded.
-- Build-time WSL/containers are compiler environments, never installed runtime state.
+- Build-time Wide Linux/containers are compiler environments, never installed runtime state.
 - Secrets and local acceptance credentials are not build inputs.
 - The private release key is supplied only to the explicit sealing step through a protected environment reference; it is never committed, logged or passed in argv.
 
@@ -74,7 +74,7 @@ A version may be labeled `0.3.1` PoC candidate only when:
 - [ ] Authenticated manifest and detached signature cover every installed/imported artifact.
 - [ ] Linux and Windows output/exit fixtures are identical where required.
 - [ ] Clean-host Linux installation completes without undocumented mutation.
-- [ ] Clean-host Windows installation creates documented identity, service, ACL/DACL and isolated WSL runtime.
+- [ ] Clean-host Windows installation creates documented identity, service, ACL/DACL and isolated Wide Linux runtime.
 - [ ] G0-G6 pass using `05-acceptance.md`.
 - [ ] Evidence index contains no secrets and links every assertion to observation.
 - [ ] Known limitations match non-goals and hide no acceptance exception.

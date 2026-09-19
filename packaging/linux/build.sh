@@ -18,7 +18,9 @@ set -eu
 umask 077
 stage=\$(mktemp -d)
 trap 'rm -rf "\$stage"' EXIT
-tail -n +15 "\$0" > "\$stage/bundle.tar"
+payload_line=\$(awk '/^# payload$/ { print NR + 1; exit }' "\$0")
+[ -n "\$payload_line" ] || { echo 'Installer payload marker missing' >&2; exit 1; }
+tail -n +"\$payload_line" "\$0" > "\$stage/bundle.tar"
 echo '$hash  '"\$stage/bundle.tar" | sha256sum -c - >&2
 tar -xf "\$stage/bundle.tar" -C /
 [ -e /etc/gnx/gnx.toml ] || cp /etc/gnx/gnx.example.toml /etc/gnx/gnx.toml

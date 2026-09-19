@@ -29,7 +29,7 @@ flowchart TB
     Account --> Service
     Service --> State
   end
-  subgraph WSL[WSL distro GNX-0.3.1 owned by gnx-runtime]
+  subgraph WideLinux[Wide Linux distro GNX-0.3.1 owned by gnx-runtime]
     LinuxGNX[/usr/local/bin/gnx]
     Config[/etc/gnx/gnx.toml]
     Runtime[systemd + Podman + GNX runtime]
@@ -68,7 +68,7 @@ Successful provisioning returns `ACTION_REQUIRED`/`SETUP_PROVISIONED` and exit 2
 
 ### Later bootstrap/apply
 
-A separate stage must import/configure WSL, install the verified Linux bundle, start or enable `GNXRuntime` only when approved, and run `doctor`/health checks before any `READY` claim.
+A separate stage must import/configure the Wide Linux layer, install the verified Linux bundle, start or enable `GNXRuntime` only when approved, and run `doctor`/health checks before any `READY` claim.
 
 ## Provisioned objects
 
@@ -94,13 +94,15 @@ Directories are created with final DACLs before population. Reparse points, pree
 - The broker protocol has bounded frames and opcodes only for `PLAN`, `APPLY`, `STATUS`, `DOCTOR` and the dedicated secret-response frame.
 - The service invokes only `/usr/local/bin/gnx` inside `GNX-0.3.1` with fixed config path and allowlisted operation.
 
-## WSL rules
+## Wide Linux rules
 
 - Distro name is fixed: `GNX-0.3.1`.
 - Existing `GNX`, `gnx-node` or user-created distros are conflicts, not migration sources.
 - Automount and Windows interop are disabled.
 - The verified Linux bundle crosses the boundary through a controlled service path and is installed root-owned.
 - Bootstrap copies are removed after successful installation.
+- On Windows, the current implementation adapter is WSL2; this is an internal host
+  mechanism, not the product vocabulary or a second runtime.
 
 ## Failure and recovery
 
@@ -121,6 +123,6 @@ On a disposable Windows 11 host:
 5. Verify protected setup/runtime directories and `operator.sid`.
 6. Verify SCM: `GNXRuntime`, exact path, runtime account, stopped/demand-start or configured state expected for the stage, bounded recovery actions.
 7. Verify account rights and denied logons.
-8. Verify WSL ownership/import path when bootstrap stage runs.
+8. Verify Wide Linux ownership/import path when bootstrap stage runs.
 9. Test interruption, conflict, reparse refusal and reboot behavior.
 10. Only a later runtime health gate may report `READY`.
