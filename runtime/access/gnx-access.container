@@ -5,7 +5,8 @@ Wants=network-online.target
 After=network-online.target
 Requires=gnx-access-network.service
 After=gnx-access-network.service
-StartLimitIntervalSec=0
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Container]
 Image=docker.io/tailscale/tailscale@sha256:51fec4863144d6ba0a22504cfb455d020ee0307d0c04eb48f5afee63390bdba0
@@ -19,7 +20,7 @@ Volume=@STATE@/state:/var/lib/gnx/state
 LogDriver=none
 
 [Service]
-Restart=always
+Restart=on-failure
 RestartSec=5
 TimeoutStartSec=300
 

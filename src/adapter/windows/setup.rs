@@ -339,6 +339,7 @@ fn recover(rollback: bool) -> Result<(), String> {
             &root.join("bundle.tar"),
             &root.join("rootfs.tar"),
         ] {
+            crate::adapter::setup_state::reject_link(path)?;
             if path.is_dir() {
                 fs::remove_dir_all(path).map_err(|_| "SETUP_ROLLBACK_FAILED")?;
             } else if path.exists() {

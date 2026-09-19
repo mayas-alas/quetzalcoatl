@@ -123,7 +123,7 @@ impl Linux {
     fn unit(&self, cap: &str, args: &str, requires: &str) -> Result<(), String> {
         let name = self.name(cap);
         let path = PathBuf::from(format!("/etc/systemd/system/{name}.service"));
-        let content=format!("[Unit]\nDescription=GNX {cap} ({})\nAfter=network-online.target {requires}\nWants=network-online.target\nRequires={requires}\nStartLimitIntervalSec=0\n[Service]\nType=simple\nRestart=always\nRestartSec=5\nTimeoutStartSec=300\nTimeoutStopSec=120\nKillMode=control-group\nDelegate=yes\nStandardOutput=null\nStandardError=null\nExecStart=/usr/bin/podman run --rm --replace --pull=never --log-driver=none --name {name} {args}\nExecStop=/usr/bin/podman stop --ignore --time 90 {name}\nExecStopPost=/usr/bin/podman rm --ignore --force {name}\n[Install]\nWantedBy=multi-user.target\n",self.config.instance);
+        let content=format!("[Unit]\nDescription=GNX {cap} ({})\nAfter=network-online.target {requires}\nWants=network-online.target\nRequires={requires}\nStartLimitIntervalSec=300\nStartLimitBurst=5\n[Service]\nType=simple\nRestart=on-failure\nRestartSec=5\nTimeoutStartSec=300\nTimeoutStopSec=120\nKillMode=control-group\nDelegate=yes\nStandardOutput=null\nStandardError=null\nExecStart=/usr/bin/podman run --rm --replace --pull=never --log-driver=none --name {name} {args}\nExecStop=/usr/bin/podman stop --ignore --time 90 {name}\nExecStopPost=/usr/bin/podman rm --ignore --force {name}\n[Install]\nWantedBy=multi-user.target\n",self.config.instance);
         let changed = std::fs::read(&path).ok().as_deref() != Some(content.as_bytes());
         if changed {
             atomic_write(&path, content.as_bytes(), 0o644)?;

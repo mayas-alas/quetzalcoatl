@@ -3,7 +3,8 @@
 Description=GNX private name resolution
 Wants=gnx-access.service
 After=gnx-access.service
-StartLimitIntervalSec=0
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Container]
 Image=docker.io/pihole/pihole@sha256:7c96327ecfb96dbc74b0a47d073dbef7d60526e0aa87519b2a2f7a0007cb5c88
@@ -17,7 +18,7 @@ Volume=@STATE@/dns.toml:/etc/pihole/pihole.toml:ro
 LogDriver=none
 
 [Service]
-Restart=always
+Restart=on-failure
 RestartSec=5
 TimeoutStartSec=300
 
