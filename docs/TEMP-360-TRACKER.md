@@ -6,8 +6,9 @@
 |---|---|---|
 | Base | PASS | `cargo fmt --all -- --check`; `cargo test --locked` (18+2+ integración, 1 ignorada) |
 | Artefactos Linux | PASS local | `gnx-linux`, bundle y `gnx-linux.run` generados con `gnx-node`; el `.run` instala la misma capa Wide Linux |
-| Candidate autenticado | BLOCKED | falta rootfs verificado y firma de producción; `runtime.lock.json` sigue `unsealed` |
-| Host Windows / reboot | BLOCKED | no hay PowerShell elevado disponible; no se declara instalación ni resiliencia |
+| Candidate LAB_ONLY | PASS local | manifest sealed, firma de laboratorio y rootfs externo validado; no es release de producción |
+| Candidate producción | BLOCKED | falta rootfs de producción, clave de producción y aceptación de host; `runtime.lock.json` sigue `unsealed` |
+| Host Windows / reboot | BLOCKED | static/uninstall checks PASS; falta instalación elevada, reboot y resiliencia reales |
 | Residuos del host | PASS preflight observado | ausentes las raíces GNX/Quetzalcoatl versionadas inspeccionadas; no se borró nada |
 | Terminología | PASS local | docs activos usan **Wide Linux**; la tecnología host queda sólo como detalle de implementación |
 | Confianza TLS Windows | IMPLEMENTED | el broker persiste la CA pública y la importa automáticamente en el almacén de usuario; host real aún bloqueado |
@@ -16,7 +17,7 @@ No se modifica `legacy`; el análisis delegado quedó documentado y un gate bloq
 
 ## Resumen taxonomía 360 — 2026-09-19
 
-Se agregó `docs/TAXONOMY-PROPOSAL.md` como propuesta no normativa para separar vocabulario de producto, capas, estados públicos, fases de lifecycle, códigos estables, artefactos y evidencia Wide Linux. Hallazgos principales: `compute.gnx` es la ruta operativa requerida; `app.gnx` se conserva como superficie propia HTML/CSS/JS de presentación, no como capacidad adicional; `src/cli.rs` conserva una superficie no alineada con el contrato público actual; `install-host.ps1`, `install.ps1` y `gnx-setup.exe` deben nombrarse como flujos distintos; y Windows/rootfs/firma permanecen bloqueados hasta una prueba elevada con manifest sellado y rootfs verificado. Prioridad inmediata: no declarar READY desde provisioning, build local o bundle `unsealed`; registrar host/reboot/residuos como gates separados.
+Se agregó `docs/TAXONOMY-PROPOSAL.md` como propuesta no normativa para separar vocabulario de producto, capas, estados públicos, fases de lifecycle, códigos estables, artefactos y evidencia Wide Linux. El build local ya produce un candidate `LAB_ONLY`/controlled preview con rootfs externo y manifest sellado; producción permanece bloqueada hasta rootfs y firma de producción, instalación elevada, reboot, recuperación y G0-G6. Prioridad inmediata: entregar `dist` junto con el rootfs exacto como pareja inseparable; no declarar READY desde provisioning, build local o evidencia estática.
 
 > Tracker temporal. No es especificación nueva. No autoriza comandos nuevos ni cambios de arquitectura. No incluir secretos. `legacy` sólo se consulta como archivo histórico; no se modifica.
 

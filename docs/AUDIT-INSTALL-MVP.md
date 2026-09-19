@@ -1,15 +1,17 @@
 # Auditoría de instalación y cadena de confianza — MVP
 
-**Estado:** BLOQUEADO para release; implementación en curso.
-**Alcance:** instalación Windows, bootstrap WSL, transacción de setup, empaquetado Linux/Windows y evidencia.
+**Estado:** BLOQUEADO para release de producción; candidate `LAB_ONLY`/controlled preview disponible.
+**Alcance:** instalación Windows, bootstrap Wide Linux, transacción de setup, empaquetado Linux/Windows y evidencia.
+
+**Corte actual:** el build Windows/Wide Linux, rootfs validator, manifest sellado de laboratorio, `gnx-setup --check`, static setup checks y los 31 checks aislados de uninstall pasan. La instalación elevada, reboot, runtime health, rollback real y G0-G6 siguen sin evidencia de host.
 
 ## Hallazgos confirmados
 
 1. **La cadena de autenticidad del release estaba incompleta (P0).** Se cerró el límite de instalación: `gnx-setup` ahora exige manifiesto `sealed`, firma Ed25519 detached (`manifest.sig`), `rootfs_sha256` y verifica contra la raíz pública compilada. El flujo sigue bloqueado para release hasta operar una clave de producción gestionada fuera del repositorio y generar SBOM/atestado.
 2. **Había un falso positivo de aceptación (P0).** `install-host.ps1` instalaba el CLI y escribía `READY` aunque runtime/WSL, reinicio, `doctor` y `health` fueran gates posteriores.
 3. **El estado transaccional es conservador (P1).** Hay lock exclusivo, journal/snapshot atómicos, rechazo de reparse points, reautenticación después de copiar y rollback condicionado por evidencia de ownership.
-4. **La aceptación de host no está disponible en este entorno (P0).** No hay Windows/WSL elevado ni Podman Linux operativo desde esta sesión; `cargo clippy` tampoco está instalado para el toolchain activo.
-5. **El build de Windows aún no sella un candidate.** `runtime.lock.json` declara `unsealed` y el build genera un manifiesto de hashes sin autenticación criptográfica.
+4. **La aceptación de host no está disponible en este entorno (P0).** No se ejecutó Windows/Wide Linux elevado con reboot ni Podman runtime como instalación GNX; `cargo clippy` queda separado de los gates ejecutados.
+5. **La producción aún no tiene candidate autenticado.** Existe un candidate `LAB_ONLY` sellado con una raíz de laboratorio; `runtime.lock.json` de producción continúa `unsealed` y requiere rootfs/clave de producción.
 
 ## Cambios aplicados
 

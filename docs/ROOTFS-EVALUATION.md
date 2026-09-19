@@ -1,12 +1,12 @@
 # Evaluación P1 de rootfs para GNX
 
-Status: análisis P1, no READY
+Status: análisis P1; baseline LAB_ONLY disponible, no READY
 
 Alcance: Ubuntu 24.04 LTS oficial/WSL, Ubuntu Base y Debian slim para la distribución Wide Linux `GNX-0.3.1` de GNX.
 
 ## Reglas aplicadas
 
-- No se descargó, generó, borró ni importó ningún rootfs.
+- La evaluación no descargó ni importó un rootfs oficial. Existe un rootfs `LAB_ONLY` generado desde el builder local `gnx-node`; no se promueve como rootfs de producción.
 - No se inventan procedencias, URLs ni digests; los digests deben venir de un manifest autenticado o de evidencia de host.
 - `legacy` no se leyó ni modificó.
 - El contrato público sigue siendo GNX: `doctor`, `plan`, `apply`, `status` y JSON/exit semantics.

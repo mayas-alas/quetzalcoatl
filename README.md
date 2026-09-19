@@ -34,10 +34,11 @@ contracts, state transitions, setup boundaries and refusal paths; they are not a
 substitute for host acceptance. Windows/Wide Linux, native Linux runtime,
 remote-client and G0-G6 evidence remain pending where this environment lacks
 MSVC, an elevated Windows host and Podman. No release is READY until those gates produce
-sanitized, reproducible evidence. The latest local Windows binaries are built
-under `target/release`; a complete `dist` candidate is **not** available yet
-because the configured Wide Linux builder has no Linux Rust toolchain. Do not treat
-`target/release` as an installable release artifact.
+sanitized, reproducible evidence. A local `LAB_ONLY`/controlled-preview candidate is now generated under `dist/`,
+including Windows/Wide Linux artifacts, sealed manifest, detached signature and
+an external rootfs pair. It is not a production release: the rootfs comes from
+the local builder and host installation/reboot acceptance remains pending. Do not
+treat `target/release` or `dist/` as production release evidence.
 
 The first useful milestone is not “the project compiles.” It is an executable
 vertical slice in which `doctor`, `plan`, `apply` and `status` share one JSON
