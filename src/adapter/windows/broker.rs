@@ -26,7 +26,7 @@ fn invalid() -> io::Error {
     io::ErrorKind::InvalidData.into()
 }
 pub fn validate_operator_sid() -> io::Result<()> {
-    let sid = std::fs::read_to_string("C:\\ProgramData\\GNX\\operator.sid")?;
+    let sid = std::fs::read_to_string(super::setup::TARGET_DATA.to_owned() + "\\operator.sid")?;
     let sid = sid.trim();
     let valid = sid
         .strip_prefix("S-1-")
@@ -162,7 +162,7 @@ pub fn request_secret(op: &str, intent: &str, secret: Option<&Secret>) -> io::Re
 }
 pub fn serve_one() -> io::Result<()> {
     validate_operator_sid()?;
-    let sid = std::fs::read_to_string("C:\\ProgramData\\GNX\\operator.sid")?;
+    let sid = std::fs::read_to_string(super::setup::TARGET_DATA.to_owned() + "\\operator.sid")?;
     let sid = sid.trim();
     // Do not create a readiness pipe while SCM still considers the service
     // stopped, stopping, or start-pending. This also makes status evidence

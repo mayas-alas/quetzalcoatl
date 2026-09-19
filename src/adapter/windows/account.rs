@@ -12,7 +12,7 @@ use windows_sys::Win32::{
 };
 use zeroize::Zeroizing;
 pub const SERVICE_ACCOUNT: &str = ".\\gnx-runtime";
-pub const PRIVATE_ROOT: &str = "C:\\ProgramData\\GNX";
+pub const PRIVATE_ROOT: &str = super::setup::TARGET_DATA;
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }

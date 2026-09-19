@@ -36,21 +36,23 @@ impl SetupHost for WindowsSetupHost {
 
 fn preflight() -> SetupObservation {
     let legacy_program = Path::new(r"C:\Program Files\QuetzalcoatlNext");
-    let current_program = Path::new(r"C:\Program Files\GNX");
     let legacy_state = Path::new(r"C:\ProgramData\QuetzalcoatlNext");
-    let service_binary = current_program.join("gnx-service.exe");
-    let versioned_service = Path::new(TARGET_PROGRAM).join("gnx-service.exe");
-    let old_tray_binary = current_program.join("gnx-tray.exe");
-
-    // rama-mvp already installs under C:\Program Files\GNX. The tray binary
-    // and absence of the 0.3.1 service distinguish that layout from the target.
-    let legacy_present = legacy_program.exists()
-        || legacy_state.exists()
-        || (old_tray_binary.exists() && !service_binary.exists());
+    let legacy_gnx_program = Path::new(r"C:\Program Files\GNX");
+    let legacy_gnx_state = Path::new(r"C:\ProgramData\GNX");
+    // Legacy roots are never adopted, even when they contain files that look
+    // like a current service. Presence alone is an honest preflight conflict.
+    let legacy_present = [
+        legacy_program,
+        legacy_state,
+        legacy_gnx_program,
+        legacy_gnx_state,
+    ]
+    .iter()
+    .any(|path| path.exists());
 
     SetupObservation {
         legacy_present,
-        target_present: service_binary.exists() || versioned_service.exists(),
+        target_present: Path::new(TARGET_PROGRAM).exists() || Path::new(TARGET_DATA).exists(),
     }
 }
 
@@ -181,9 +183,9 @@ fn sha256_file(path: &Path) -> Result<String, String> {
 
 // State is deliberately kept beside the protected runtime data so lock,
 // snapshot, journal, and setup-state share one ACL boundary.
-const SETUP_ROOT: &str = TARGET_DATA;
+pub const SETUP_ROOT: &str = r"C:\ProgramData\GNX-Setup-0.3.1";
 pub const TARGET_PROGRAM: &str = r"C:\Program Files\GNX-0.3.1";
-const TARGET_DATA: &str = r"C:\ProgramData\GNX";
+pub const TARGET_DATA: &str = r"C:\ProgramData\GNX-0.3.1";
 
 fn provision(input: &BundleInput) -> Result<(), String> {
     use super::setup_security::{protected_dir, require_elevation};
@@ -490,5 +492,17 @@ mod tests {
         copy_new(&fixture.0.bundle.join("gnx.exe"), &copy).unwrap();
         assert!(copy_new(&fixture.0.bundle.join("gnx.exe"), &copy).is_err());
         assert_eq!(fs::read(copy).unwrap(), b"gnx.exe");
+    }
+
+    #[test]
+    fn target_and_transaction_roots_are_versioned_and_disjoint_from_legacy() {
+        assert_eq!(TARGET_PROGRAM, r"C:\Program Files\GNX-0.3.1");
+        assert_eq!(TARGET_DATA, r"C:\ProgramData\GNX-0.3.1");
+        assert_eq!(SETUP_ROOT, r"C:\ProgramData\GNX-Setup-0.3.1");
+        for root in [TARGET_PROGRAM, TARGET_DATA, SETUP_ROOT] {
+            assert!(!root.ends_with(r"\GNX"));
+            assert!(!root.ends_with(r"\GNX-Setup"));
+        }
+        assert_ne!(TARGET_DATA, SETUP_ROOT);
     }
 }

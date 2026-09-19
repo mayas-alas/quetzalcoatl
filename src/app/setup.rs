@@ -127,6 +127,12 @@ pub fn preflight(
     if let Some(bundle) = bundle {
         match host.validate_bundle(bundle) {
             Ok(()) => {
+                if report.code == "SETUP_SOURCE_NOT_FOUND" {
+                    report.code = "SETUP_SOURCE_FOUND".into();
+                    report.next_action = Some(
+                        "Run --provision with the authenticated bundle and rootfs inputs.".into(),
+                    );
+                }
                 report
                     .capabilities
                     .push(capability("release-bundle", true, "BUNDLE_AUTHENTICATED"))
@@ -145,23 +151,55 @@ pub fn preflight(
 }
 
 fn report(observed: SetupObservation) -> Report {
+    if observed.legacy_present {
+        let mut report = Report::new(
+            "setup",
+            State::Failed,
+            "SETUP_LEGACY_CONFLICT",
+            Some("Legacy GNX roots are present; setup refuses adoption or overwrite."),
+        );
+        report.capabilities = vec![
+            capability("legacy-installation", true, "LEGACY_CONFLICT"),
+            capability(
+                "target-installation",
+                observed.target_present,
+                "TARGET_PRESENT",
+            ),
+            capability("non-mutating-preflight", true, "NO_MUTATION_PERFORMED"),
+        ];
+        report.changes = vec![
+            "No services stopped".into(),
+            "No files migrated".into(),
+            "No credentials read or changed".into(),
+        ];
+        return report;
+    }
+    if observed.target_present {
+        let mut report = Report::new(
+            "setup",
+            State::Failed,
+            "SETUP_TARGET_CONFLICT",
+            Some(
+                "The GNX 0.3.1 target root already exists; recover it explicitly before retrying.",
+            ),
+        );
+        report.capabilities = vec![
+            capability("legacy-installation", false, "LEGACY_ABSENT"),
+            capability("target-installation", true, "TARGET_CONFLICT"),
+            capability("non-mutating-preflight", true, "NO_MUTATION_PERFORMED"),
+        ];
+        report.changes = vec![
+            "No services stopped".into(),
+            "No files migrated".into(),
+            "No credentials read or changed".into(),
+        ];
+        return report;
+    }
     let mut report = Report::new(
         "setup",
-        if observed.legacy_present {
-            State::Ready
-        } else {
-            State::ActionRequired
-        },
-        if observed.legacy_present {
-            "SETUP_PREFLIGHT_READY"
-        } else {
-            "SETUP_SOURCE_NOT_FOUND"
-        },
-        if observed.legacy_present {
-            Some("Review this preflight, then run --provision with trusted bundle and rootfs hashes.")
-        } else {
-            Some("Install the supported previous GNX release before setup.")
-        },
+        State::ActionRequired,
+        "SETUP_SOURCE_NOT_FOUND",
+        Some("Provide the trusted release bundle and rootfs inputs."),
     );
     report.capabilities = vec![
         capability(
@@ -219,11 +257,27 @@ mod tests {
         });
         let report = preflight(Some(&host), None);
         assert_eq!(report.operation, "setup");
-        assert_eq!(report.code, "SETUP_PREFLIGHT_READY");
+        assert_eq!(report.code, "SETUP_LEGACY_CONFLICT");
+        assert_eq!(report.state, State::Failed);
         assert!(report
             .changes
             .iter()
             .any(|change| change == "No credentials read or changed"));
+    }
+
+    #[test]
+    fn preflight_reports_target_conflict_as_failure() {
+        let host = Fixture(SetupObservation {
+            legacy_present: false,
+            target_present: true,
+        });
+        let report = preflight(Some(&host), None);
+        assert_eq!(report.state, State::Failed);
+        assert_eq!(report.code, "SETUP_TARGET_CONFLICT");
+        assert!(report
+            .changes
+            .iter()
+            .all(|change| change.starts_with("No ")));
     }
 
     struct ProvisionFixture(Result<(), String>);

@@ -9,7 +9,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 $bundlePath = (Resolve-Path -LiteralPath $Bundle).Path
-$destination = 'C:\Program Files\GNX'
+$destination = 'C:\Program Files\GNX-0.3.1'
 $oldProgram = 'C:\Program Files\QuetzalcoatlNext'
 $oldExe = Join-Path $oldProgram 'gnx.exe'
 $oldServiceName = 'QuetzalcoatlNext'
@@ -17,8 +17,8 @@ $runKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runName = 'QuetzalcoatlNextTray'
 $oldRoots = @($oldProgram, 'C:\ProgramData\QuetzalcoatlNext', 'C:\ProgramData\Quetzalcoatl', 'C:\ProgramData\Quetzalcoatl.Runtime')
 $files = @('gnx.exe', 'gnx.exe.sha256', 'LICENSE', 'access.toml', 'gnx.example.toml', 'provision-gnx-runtime.ps1')
-$report = Join-Path $env:ProgramData 'GNX\host-install-status.json'
-$backupRoot = Join-Path $env:ProgramData 'GNX\retired-host'
+$report = Join-Path $env:ProgramData 'GNX-0.3.1\host-install-status.json'
+$backupRoot = Join-Path $env:ProgramData 'GNX-0.3.1\retired-host'
 $backup = Join-Path $backupRoot ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'))
 $gate = 'PREFLIGHT'
 
@@ -75,6 +75,9 @@ function Protect-Backup([string]$Path) {
 }
 
 try {
+    foreach ($legacyRoot in @('C:\Program Files\GNX', 'C:\ProgramData\GNX')) {
+        if (Test-Path -LiteralPath $legacyRoot) { throw 'Legacy GNX roots are present; this installer never adopts, moves, or overwrites them.' }
+    }
     foreach ($file in $files) {
         $item = Get-Item -LiteralPath (Join-Path $bundlePath $file)
         if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid bundle file.' }
@@ -104,7 +107,7 @@ try {
     $oldAutorun = (Get-ItemProperty -LiteralPath $runKey).PSObject.Properties[$runName].Value
     if ($oldAutorun -and $oldAutorun -notmatch '^"?C:\\Program Files\\QuetzalcoatlNext\\gnx\.exe(?:"|\s|$)') { throw 'Unexpected retired startup entry.' }
     Assert-PlainDirectory $backupRoot
-    if ($backupRoot -ne 'C:\ProgramData\GNX\retired-host') { throw 'Unexpected backup root.' }
+    if ($backupRoot -ne 'C:\ProgramData\GNX-0.3.1\retired-host') { throw 'Unexpected backup root.' }
     New-Item -ItemType Directory -Path $backup -Force | Out-Null
     Protect-Backup $backupRoot
     Protect-Backup $backup

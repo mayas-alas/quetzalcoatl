@@ -50,7 +50,7 @@ una política no vacía tampoco prueba todos los permisos del teléfono.
 ## Puerta de host limpio
 
 Antes de aplicar en una máquina desechable, `doctor`/el helper debe poder
-observar WSL `gnx-node`, systemd, Podman, `/dev/net/tun`, la interfaz `eth0`
+observar WSL `GNX-0.3.1`, systemd, Podman, `/dev/net/tun`, la interfaz `eth0`
 con MTU 1500 y el runtime de Control ya saludable. La comprobación de DNS
 usa una imagen fijada, `--pull=never`, un namespace de red explícito y límites
 de tiempo; no instala paquetes ni modifica el host. Si falta una puerta,

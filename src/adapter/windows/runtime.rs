@@ -2,8 +2,8 @@ use crate::report::{Report, State};
 use std::{path::Path, time::Duration};
 
 const WSL: &str = "C:\\Windows\\System32\\wsl.exe";
-const ROOT: &str = "C:\\ProgramData\\GNX";
-const DISTRO: &str = "GNX";
+const ROOT: &str = super::setup::TARGET_DATA;
+const DISTRO: &str = "GNX-0.3.1";
 const MAX_BOOTSTRAP_BUNDLE_BYTES: u64 = 1024 * 1024 * 1024;
 
 pub fn invoke(op: &str, intent: &str) -> Report {
@@ -123,8 +123,8 @@ pub fn bootstrap() -> Result<(), String> {
             &[
                 "--import",
                 DISTRO,
-                "C:\\ProgramData\\GNX\\wsl",
-                "C:\\ProgramData\\GNX\\rootfs.tar",
+                "C:\\ProgramData\\GNX-0.3.1\\wsl",
+                "C:\\ProgramData\\GNX-0.3.1\\rootfs.tar",
                 "--version",
                 "2",
             ],
@@ -160,7 +160,7 @@ mod tests {
     use super::*;
     #[test]
     fn distro_matching_is_exact_and_handles_wsl_markers() {
-        assert!(has_distro(b"Ubuntu\n* GNX\n", "GNX"));
-        assert!(!has_distro(b"GNX-dev\n", "GNX"));
+        assert!(has_distro(b"Ubuntu\n* GNX-0.3.1\n", "GNX-0.3.1"));
+        assert!(!has_distro(b"GNX-0.3.10\n", "GNX-0.3.1"));
     }
 }

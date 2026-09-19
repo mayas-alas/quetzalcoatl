@@ -18,7 +18,7 @@ gnx-setup --check --bundle <directory> --manifest-sha256 <trusted-hash> --rootfs
 Apply a trusted bundle with the same strict arguments and `gnx-setup --apply`.
 Interrupted work requires explicit `gnx-setup --recover` or
 `gnx-setup --rollback`; retries preserve the protected journal, snapshot, lock,
-and `C:\ProgramData\GNX\setup-state.json`.
+and `C:\ProgramData\GNX-Setup-0.3.1\setup-state.json`.
 
 For UI consumption, prefix the same arguments with `--json-progress`. Stdout is
 UTF-8 newline-delimited JSON, flushed after each event. Schema 1 emits a `started`

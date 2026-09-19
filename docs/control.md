@@ -54,7 +54,7 @@ se actualiza diariamente. La renovación de la propia CA requiere intervención.
 
 ## Puerta de host limpio
 
-La preparación sólo es válida en un host desechable con WSL `gnx-node`,
+La preparación sólo es válida en un host desechable con WSL `GNX-0.3.1`,
 systemd, Podman compatible, red privada disponible y privilegios elevados.
 Antes de habilitar una tarea o servicio deben pasar, en orden, el render
 local, la instalación idempotente de unidades, la identidad/cadena TLS y la

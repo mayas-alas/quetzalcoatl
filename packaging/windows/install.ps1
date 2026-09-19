@@ -29,8 +29,17 @@ $rootfsActual = (Get-FileHash -LiteralPath $rootfsPath -Algorithm SHA256).Hash
 if ($rootfsActual -ne $RootfsSha256.ToLowerInvariant()) { throw 'Rootfs verification failed' }
 
 # Refuse known legacy/partial layouts; recovery is explicit and never guessed.
-$conflicts = @('C:\Program Files\QuetzalcoatlNext', 'C:\ProgramData\QuetzalcoatlNext', 'C:\Program Files\GNX', 'C:\Program Files\GNX-0.3.1', 'C:\ProgramData\GNX', 'C:\Program Files\GNX-Setup')
-foreach ($path in $conflicts) { if (Test-Path -LiteralPath $path) { throw 'Existing or partial GNX installation detected; recover it before retrying' } }
+$conflicts = @(
+    'C:\Program Files\QuetzalcoatlNext', 'C:\ProgramData\QuetzalcoatlNext',
+    'C:\Program Files\GNX', 'C:\ProgramData\GNX',
+    'C:\Program Files\GNX-0.3.1', 'C:\ProgramData\GNX-0.3.1',
+    'C:\ProgramData\GNX-Setup-0.3.1'
+)
+foreach ($path in $conflicts) {
+    if (Test-Path -LiteralPath $path) {
+        throw "Setup conflict at $path; GNX never adopts or overwrites existing roots. Recover explicitly before retrying."
+    }
+}
 
 $setup = Join-Path $bundlePath 'gnx-setup.exe'
 $psi = [Diagnostics.ProcessStartInfo]::new()

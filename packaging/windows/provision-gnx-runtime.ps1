@@ -15,11 +15,11 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$distribution = 'gnx-node'
+$distribution = 'GNX-0.3.1'
 $baseDistribution = 'Ubuntu-24.04'
 $runtimeUser = 'gnx-runtime'
-$runtimeRoot = 'C:\ProgramData\GNX\runtime'
-$reportRoot = 'C:\ProgramData\GNX'
+$runtimeRoot = 'C:\ProgramData\GNX-0.3.1\wsl'
+$reportRoot = 'C:\ProgramData\GNX-0.3.1'
 $stageTar = Join-Path $reportRoot 'ubuntu-base.tar'
 
 function Assert-Admin {

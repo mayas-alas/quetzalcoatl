@@ -30,8 +30,8 @@ flowchart TB
         SCM["Service Control Manager"]
         Service["GNXRuntime<br/>gnx-service.exe"]
         Account[".\gnx-runtime<br/>service logon only"]
-        State["C:\ProgramData\GNX<br/>protected ACL"]
-        Public["C:\ProgramData\GNX\public<br/>public CA only"]
+        State["C:\ProgramData\GNX-0.3.1<br/>protected ACL"]
+        Public["C:\ProgramData\GNX-0.3.1\public<br/>public CA only"]
         Trust["Explicit elevated CA trust step"]
 
         CLI --> Pipe
@@ -42,7 +42,7 @@ flowchart TB
         Public --> Trust
     end
 
-    subgraph IsolatedWSL["WSL distribution GNX — owned by gnx-runtime"]
+    subgraph IsolatedWSL["WSL distribution GNX-0.3.1 — owned by gnx-runtime"]
         LinuxGNX["/usr/local/bin/gnx<br/>product-built, verified"]
         Config["/etc/gnx/gnx.toml<br/>0600, no secrets"]
         Runtime["systemd + Podman<br/>Access / Control / Compute"]
@@ -75,7 +75,7 @@ configuration, state, logs or evidence.
 | Dedicated `gnx-runtime` account and `GNXRuntime` service | Same identity boundary, with explicit rights/ACL acceptance checks |
 | Local protected pipe with bounded frames | Four opcodes only: `PLAN`, `APPLY`, `STATUS`, `DOCTOR` |
 | Linux bundle streamed into the isolated distro | Authenticated manifest, inner binary digest and last-valid rollback |
-| Fixed WSL distro with interop disabled | Fixed `GNX` ownership plus executable post-install verification |
+| Fixed WSL distro with interop disabled | Fixed `GNX-0.3.1` ownership plus executable post-install verification |
 | Secret payload separate from configuration | Two-phase `ACTION_REQUIRED`, zeroization and negative-leak tests |
 
 ## Release build and installation
@@ -86,7 +86,7 @@ sequenceDiagram
     participant I as Elevated install.ps1
     participant SCM as Windows SCM
     participant S as GNXRuntime / gnx-runtime
-    participant W as WSL GNX
+    participant W as WSL GNX-0.3.1
 
     CI->>CI: test + lint + build Windows CLI/service
     CI->>CI: cross-build and test GNX Linux binary
@@ -120,7 +120,7 @@ establish producer authenticity.
 
 The build-time WSL distribution is only a compiler environment. It is never
 copied into product configuration. The installed distribution is always the
-fixed `GNX` runtime owned by `.\gnx-runtime`.
+fixed `GNX-0.3.1` runtime owned by `.\gnx-runtime`.
 
 ## Sensitive request flow
 
@@ -183,7 +183,7 @@ Installation or update reports `READY` only when all of these hold:
 3. `GNXRuntime` is automatic, runs under `.\gnx-runtime` and has bounded restart
    actions.
 4. The ProgramData ACL and pipe DACL match their exact principals.
-5. WSL `GNX` belongs to `.\gnx-runtime`; systemd is enabled while automount and
+5. WSL `GNX-0.3.1` belongs to `.\gnx-runtime`; systemd is enabled while automount and
    Windows interop are disabled.
 6. `/usr/local/bin/gnx` is root-owned, not group/world-writable, and matches the
    authenticated release digest.

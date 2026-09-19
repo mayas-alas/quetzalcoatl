@@ -140,7 +140,9 @@ recovers without recreating identity or persistent storage.
 - CoreDNS is the fixed 0.3.1 DNS adapter. Its name and configuration remain under
   `adapter` and `runtime/access`; business and application modules depend only on
   the DNS/Access port.
-- Windows uses a dedicated WSL distribution named `GNX`.
+- Windows uses a dedicated WSL distribution named `GNX-0.3.1`; an existing
+  `GNX` or `gnx-node` distribution is legacy/conflicting state and is never
+  adopted or modified by setup.
 - Provider/plugin frameworks, workload catalogs, VM/LXC provisioning, schedulers,
   HA, automatic upgrades, tray applications and commercial installers are out of
   scope.
