@@ -1,8 +1,8 @@
 pub mod apply;
 pub mod doctor;
 pub mod plan;
-pub mod status;
 pub mod setup;
+pub mod status;
 use crate::{
     config::Config,
     port::{host::Host, runtime::Runtime, state::StateStore},

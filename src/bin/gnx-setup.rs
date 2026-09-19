@@ -102,16 +102,15 @@ fn parse_bundle(args: &[String]) -> Result<Option<BundleInput>, &'static str> {
 }
 
 fn run(args: &[String]) -> Report {
-    let bundle = match parse_bundle(args) {
-        Ok(value) => value,
-        Err(code) => {
-            return report(
+    let bundle =
+        match parse_bundle(args) {
+            Ok(value) => value,
+            Err(code) => return report(
                 code,
                 State::Failed,
                 "Use gnx-setup --check [bundle options] or --provision with all bundle options.",
-            )
-        }
-    };
+            ),
+        };
     #[cfg(windows)]
     {
         if args[0] == "--provision" {
