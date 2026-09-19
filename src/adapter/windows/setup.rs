@@ -355,10 +355,25 @@ fn recover(rollback: bool) -> Result<(), String> {
             root.join("staged/gnx-linux-bundle.tar"),
             root.join("staged/gnx-linux.run"),
             root.join("staged/rootfs.tar"),
+            root.join("snapshot.json"),
+            root.join("journal.json"),
         ] {
             crate::adapter::setup_state::reject_link(&path)?;
             if path.exists() {
                 fs::remove_file(path).map_err(|_| "SETUP_ROLLBACK_FAILED")?;
+            }
+        }
+        // A successful rollback must make a later apply possible. Remove only
+        // empty directories owned by this transaction; unrelated content keeps
+        // the directory non-empty and therefore causes an honest failure.
+        for path in [
+            root.join("staged"),
+            PathBuf::from(TARGET_PROGRAM),
+            PathBuf::from(TARGET_DATA),
+        ] {
+            crate::adapter::setup_state::reject_link(&path)?;
+            if path.exists() {
+                fs::remove_dir(&path).map_err(|_| "SETUP_ROLLBACK_NOT_EMPTY")?;
             }
         }
     }

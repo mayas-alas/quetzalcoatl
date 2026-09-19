@@ -262,7 +262,7 @@ pub fn install() -> Result<String, String> {
             manager.0,
             service_name.as_ptr(),
             service_name.as_ptr(),
-            SERVICE_DELETE
+            0x0001_0000 // DELETE standard access right
                 | SERVICE_CHANGE_CONFIG
                 | SERVICE_QUERY_CONFIG
                 | SERVICE_QUERY_STATUS
@@ -380,7 +380,7 @@ pub fn rollback_owned_resources() -> Result<(), String> {
         let raw = OpenServiceW(
             manager.0,
             wide(SERVICE_NAME).as_ptr(),
-            SERVICE_DELETE | SERVICE_QUERY_CONFIG,
+            0x0001_0000 | SERVICE_QUERY_CONFIG,
         );
         if raw.is_null() {
             if GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST {
