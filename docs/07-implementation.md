@@ -84,15 +84,16 @@ Exit: `06-release.md` promotion checklist passes or candidate is explicitly reje
 
 - Public product contract, architecture, Windows boundary, acceptance protocol, release rules and implementation plan are now consolidated into seven normative docs.
 - Existing repo contains Rust source, runtime, packaging and tests from the functional slice.
-- Local `cargo fmt --all`, `cargo test --locked` and release compilation pass on the active MSVC toolchain. `cargo clippy` remains unavailable because the component is not installed.
+- Local `cargo fmt --all`, `cargo test --locked`, strict `cargo clippy --locked --all-targets -- -D warnings` and release compilation pass on the active MSVC toolchain.
 - The latest Windows executables are present under `target/release`; no complete `dist` candidate is declared because the configured WSL builder (`gnx-node`) has no Linux Rust toolchain.
+- Windows setup now performs post-bootstrap `doctor` and `status` observation before returning `SETUP_READY`; missing runtime config remains `ACTION_REQUIRED`.
 - Host cleanup on this workstation removed old active GNX Program Files/ProgramData roots by moving them to backup; no GNX process/service remained.
 - Dockur lab evidence proves useful Windows guest boot/share/setup observations but does not establish final GNX `READY`.
 
 ## Immediate next work
 
 1. Install/pin a Linux Rust toolchain in the selected WSL builder, without silently changing the builder distro.
-2. Install the `clippy` component and run script/static gates from a clean checkout.
+2. Run script/static gates from a clean checkout and keep their evidence.
 3. Rebuild the complete candidate, seal the manifest with the production key and record SHA256/SBOM evidence.
 4. Run `gnx-setup.exe --check` on the cleaned host or disposable VM only with trusted bundle/rootfs hashes.
 5. If using Dockur, run a share/OEM JSON-return test first; then only proceed to apply/bootstrap gates with retained-state decision recorded.
