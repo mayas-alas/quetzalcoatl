@@ -213,7 +213,7 @@ fn provision(input: &BundleInput) -> Result<(), String> {
     let result: Result<(), String> = (|| {
         tx.phase(phase, None)?;
         super::account::require_absent()?;
-        for path in [TARGET_PROGRAM] {
+        for path in [TARGET_PROGRAM, TARGET_DATA] {
             super::setup_security::check_ancestors(Path::new(path))?;
             if Path::new(path)
                 .try_exists()
@@ -334,17 +334,29 @@ fn recover(rollback: bool) -> Result<(), String> {
     if rollback {
         // Only remove artifacts owned by this transaction; legacy locations
         // and unrelated files are never traversed or deleted.
+        // Remove only files created by this transaction. Never recursively
+        // delete a target root: a partial or concurrent target must remain
+        // inspectable rather than turning rollback into an unsafe wipe.
         for path in [
-            Path::new(TARGET_PROGRAM),
-            &root.join("gnx-linux"),
-            &root.join("gnx-linux.run"),
-            &root.join("bundle.tar"),
-            &root.join("rootfs.tar"),
+            Path::new(TARGET_PROGRAM).join("gnx.exe"),
+            Path::new(TARGET_PROGRAM).join("gnx-service.exe"),
+            Path::new(TARGET_PROGRAM).join("gnx-setup.exe"),
+            Path::new(TARGET_DATA).join("gnx-linux"),
+            Path::new(TARGET_DATA).join("gnx-linux.run"),
+            Path::new(TARGET_DATA).join("bundle.tar"),
+            Path::new(TARGET_DATA).join("rootfs.tar"),
+            Path::new(TARGET_DATA).join("operator.sid"),
+            root.join("staged/manifest.json"),
+            root.join("staged/gnx.exe"),
+            root.join("staged/gnx-service.exe"),
+            root.join("staged/gnx-setup.exe"),
+            root.join("staged/gnx-linux"),
+            root.join("staged/gnx-linux-bundle.tar"),
+            root.join("staged/gnx-linux.run"),
+            root.join("staged/rootfs.tar"),
         ] {
-            crate::adapter::setup_state::reject_link(path)?;
-            if path.is_dir() {
-                fs::remove_dir_all(path).map_err(|_| "SETUP_ROLLBACK_FAILED")?;
-            } else if path.exists() {
+            crate::adapter::setup_state::reject_link(&path)?;
+            if path.exists() {
                 fs::remove_file(path).map_err(|_| "SETUP_ROLLBACK_FAILED")?;
             }
         }
