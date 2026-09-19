@@ -49,28 +49,9 @@ fn execute(op: &str, input: &str, secret: Option<&Secret>) -> Report {
         }
     }
 }
-#[cfg(windows)]
-fn upgrade_check() -> Report {
-    gnx::app::upgrade::check(Some(
-        &gnx::adapter::windows::upgrade::WindowsUpgradeHost,
-    ))
-}
-
-#[cfg(not(windows))]
-fn upgrade_check() -> Report {
-    gnx::app::upgrade::check(None)
-}
-
 fn run() -> Report {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let op = a.first().map(String::as_str).unwrap_or("");
-    if op == "upgrade" {
-        return if a.as_slice() == ["upgrade", "--check"] {
-            upgrade_check()
-        } else {
-            failure("upgrade", "INVALID_ARGUMENT")
-        };
-    }
     if gnx::wire::opcode(op).is_none() {
         return failure(op, "INVALID_OPERATION");
     }

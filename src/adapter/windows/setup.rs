@@ -1,15 +1,15 @@
-use crate::port::host::{UpgradeHost, UpgradeObservation};
+use crate::port::host::{SetupHost, SetupObservation};
 use std::path::Path;
 
-pub struct WindowsUpgradeHost;
+pub struct WindowsSetupHost;
 
-impl UpgradeHost for WindowsUpgradeHost {
-    fn preflight_upgrade(&self) -> UpgradeObservation {
+impl SetupHost for WindowsSetupHost {
+    fn preflight_setup(&self) -> SetupObservation {
         preflight()
     }
 }
 
-fn preflight() -> UpgradeObservation {
+fn preflight() -> SetupObservation {
     let legacy_program = Path::new(r"C:\Program Files\QuetzalcoatlNext");
     let current_program = Path::new(r"C:\Program Files\GNX");
     let legacy_state = Path::new(r"C:\ProgramData\QuetzalcoatlNext");
@@ -22,7 +22,7 @@ fn preflight() -> UpgradeObservation {
         || legacy_state.exists()
         || (old_tray_binary.exists() && !service_binary.exists());
 
-    UpgradeObservation {
+    SetupObservation {
         legacy_present,
         target_present: service_binary.exists(),
     }

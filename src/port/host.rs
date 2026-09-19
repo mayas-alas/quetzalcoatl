@@ -3,11 +3,11 @@ pub trait Host {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UpgradeObservation {
+pub struct SetupObservation {
     pub legacy_present: bool,
     pub target_present: bool,
 }
 
-pub trait UpgradeHost {
-    fn preflight_upgrade(&self) -> UpgradeObservation;
+pub trait SetupHost {
+    fn preflight_setup(&self) -> SetupObservation;
 }
