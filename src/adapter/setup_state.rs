@@ -60,10 +60,11 @@ impl SetupTransaction {
         };
         for name in ["journal.json", "snapshot.json"] {
             reject_link(&root.join(name))?;
-            if !recovery && root
-                .join(name)
-                .try_exists()
-                .map_err(|_| "SETUP_STATE_READ_FAILED")?
+            if !recovery
+                && root
+                    .join(name)
+                    .try_exists()
+                    .map_err(|_| "SETUP_STATE_READ_FAILED")?
             {
                 return Err("SETUP_RECOVERY_REQUIRED".into());
             }

@@ -152,7 +152,10 @@ fn main() {
     if streaming {
         args.remove(0);
     }
-    let operation = if args.first().is_some_and(|arg| arg == "--provision" || arg == "--apply") {
+    let operation = if args
+        .first()
+        .is_some_and(|arg| arg == "--provision" || arg == "--apply")
+    {
         "setup-provision"
     } else {
         "setup-check"

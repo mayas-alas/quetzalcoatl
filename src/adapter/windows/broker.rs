@@ -34,7 +34,8 @@ pub fn validate_operator_sid() -> io::Result<()> {
             let parts: Vec<_> = rest.split('-').collect();
             !parts.is_empty()
                 && parts.iter().all(|part| {
-                    !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())
+                    !part.is_empty()
+                        && part.bytes().all(|b| b.is_ascii_digit())
                         && part.parse::<u64>().is_ok()
                 })
         })
