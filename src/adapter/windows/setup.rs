@@ -41,6 +41,7 @@ fn preflight() -> SetupObservation {
 #[serde(deny_unknown_fields)]
 struct Manifest {
     schema: u32,
+    version: String,
     artifacts: Artifacts,
 }
 
@@ -64,7 +65,7 @@ fn validate_bundle(input: &BundleInput) -> Result<(), String> {
     }
     let bytes = read_bounded(&manifest_path, 1024 * 1024)?;
     let manifest: Manifest = serde_json::from_slice(&bytes).map_err(|_| "MANIFEST_INVALID")?;
-    if manifest.schema != 1 {
+    if manifest.schema != 1 || !manifest.version.starts_with("0.3.1") {
         return Err("MANIFEST_SCHEMA_INVALID".into());
     }
     for (name, expected) in [
