@@ -30,8 +30,10 @@ foreach ($name in $artifacts) {
     $actual = (Get-FileHash -LiteralPath (Join-Path $bundlePath $name) -Algorithm SHA256).Hash
     if ($actual -ne $expected) { throw "Artifact verification failed: $name" }
 }
+$rootfsExpected = [string]$manifest.rootfs_sha256
+if ($rootfsExpected -notmatch '^[a-fA-F0-9]{64}$' -or $rootfsExpected.ToLowerInvariant() -ne $RootfsSha256.ToLowerInvariant()) { throw 'Rootfs is not covered by the signed manifest.' }
 $rootfsActual = (Get-FileHash -LiteralPath $rootfsPath -Algorithm SHA256).Hash
-if ($rootfsActual -ne $RootfsSha256.ToLowerInvariant()) { throw 'Rootfs verification failed' }
+if ($rootfsActual -ne $rootfsExpected.ToUpperInvariant()) { throw 'Rootfs verification failed' }
 
 # Refuse known legacy/partial layouts; recovery is explicit and never guessed.
 $conflicts = @(

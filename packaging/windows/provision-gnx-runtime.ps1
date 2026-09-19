@@ -176,17 +176,21 @@ try {
     $createdRuntimeDistribution = $true
     Write-Journal 'SECURING' -StagingHash $hash
 
+    # Importing WSL is only a provisioning fact. Runtime health and product
+    # readiness require the GNX doctor/status gates after reboot.
     $report = [ordered]@{
-        result = 'READY'
+        result = 'ACTION_REQUIRED'
+        code = 'WSL_PROVISIONED'
         distribution = $distribution
         runtime_user = $runtimeUser
         runtime_root = $runtimeRoot
         source = $baseDistribution
         staging_sha256 = $hash
+        next_action = 'Run GNX bootstrap, doctor and status/health gates before declaring READY.'
     }
     $report | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $reportRoot 'runtime-provisioning.json') -Encoding UTF8
     Write-Journal 'PROVISIONED' -StagingHash $hash
-    Write-Output "READY GNX runtime '$distribution' provisioned under '$runtimeUser'."
+    Write-Output "ACTION_REQUIRED GNX runtime '$distribution' provisioned; run bootstrap and health gates."
 } catch {
     $code = if ($mutationStarted) { 'PROVISION_FAILED' } else { 'PROVISION_BLOCKED' }
     $needsRecovery = $false

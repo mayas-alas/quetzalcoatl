@@ -74,6 +74,7 @@ struct Manifest {
     version: String,
     platform: String,
     status: String,
+    rootfs_sha256: String,
     artifacts: Artifacts,
 }
 
@@ -115,6 +116,11 @@ fn validate_bundle(input: &BundleInput) -> Result<(), String> {
         return Err("RELEASE_UNAUTHENTICATED".into());
     }
     verify_manifest_signature(&bytes, &bundle.join("manifest.sig"))?;
+    if !valid_hash(&manifest.rootfs_sha256)
+        || manifest.rootfs_sha256.to_ascii_lowercase() != input.rootfs_sha256.to_ascii_lowercase()
+    {
+        return Err("ROOTFS_NOT_COVERED_BY_MANIFEST".into());
+    }
     for (name, expected) in [
         ("gnx.exe", manifest.artifacts.cli),
         ("gnx-service.exe", manifest.artifacts.service),
@@ -542,6 +548,7 @@ mod tests {
                 "version": "0.3.1",
                 "platform": "windows+linux-amd64",
                 "status": "sealed",
+                "rootfs_sha256": hex::encode(Sha256::digest(b"rootfs")),
                 "artifacts": artifacts
             }))
             .unwrap();

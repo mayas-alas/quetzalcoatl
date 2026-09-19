@@ -5,7 +5,7 @@
 
 ## Hallazgos confirmados
 
-1. **La cadena de autenticidad del release estaba incompleta (P0).** Se cerró el límite de instalación: `gnx-setup` ahora exige manifiesto `sealed`, firma Ed25519 detached (`manifest.sig`) y verifica contra la raíz pública compilada. El flujo sigue bloqueado para release hasta operar una clave de producción gestionada fuera del repositorio y generar SBOM/atestado.
+1. **La cadena de autenticidad del release estaba incompleta (P0).** Se cerró el límite de instalación: `gnx-setup` ahora exige manifiesto `sealed`, firma Ed25519 detached (`manifest.sig`), `rootfs_sha256` y verifica contra la raíz pública compilada. El flujo sigue bloqueado para release hasta operar una clave de producción gestionada fuera del repositorio y generar SBOM/atestado.
 2. **Había un falso positivo de aceptación (P0).** `install-host.ps1` instalaba el CLI y escribía `READY` aunque runtime/WSL, reinicio, `doctor` y `health` fueran gates posteriores.
 3. **El estado transaccional es conservador (P1).** Hay lock exclusivo, journal/snapshot atómicos, rechazo de reparse points, reautenticación después de copiar y rollback condicionado por evidencia de ownership.
 4. **La aceptación de host no está disponible en este entorno (P0).** No hay Windows/WSL elevado ni Podman Linux operativo desde esta sesión; `cargo clippy` tampoco está instalado para el toolchain activo.
@@ -32,7 +32,7 @@
 
 No se declara `READY` hasta que se cumplan todos:
 
-- manifiesto canónico firmado con la clave de producción y verificado contra la raíz pública incorporada al instalador;
+- manifiesto canónico firmado con la clave de producción, incluyendo `rootfs_sha256`, y verificado contra la raíz pública incorporada al instalador;
 - todos los artefactos y rootfs cubiertos por el manifiesto autenticado;
 - candidate generado desde checkout limpio, con SBOM y evidencia sanitizada;
 - setup Windows + WSL + reboot + `doctor` + `health` ejecutados en host desechable;

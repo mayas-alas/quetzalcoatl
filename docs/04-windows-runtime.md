@@ -62,7 +62,7 @@ gnx-setup.exe --provision \
   --rootfs-sha256 <trusted SHA256>
 ```
 
-The manifest must be `sealed` and `manifest.sig` must verify against the public trust root compiled into `gnx-setup`. Artifact hashes are taken from that signed manifest. The rootfs hash is still supplied as a bounded input and remains a follow-up closure item until it is included in the signed manifest.
+The manifest must be `sealed` and `manifest.sig` must verify against the public trust root compiled into `gnx-setup`. Artifact hashes are taken from that signed manifest. The rootfs hash must match the `rootfs_sha256` field in that signed manifest and the bytes supplied to setup.
 
 Successful provisioning returns `ACTION_REQUIRED`/`SETUP_PROVISIONED` and exit 2. It means files/account/service were staged, not that runtime is usable.
 

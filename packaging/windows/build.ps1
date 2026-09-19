@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param([string]$BuildDistro='Ubuntu-24.04')
+param(
+ [string]$BuildDistro='Ubuntu-24.04',
+ [string]$Rootfs=$env:GNX_ROOTFS
+)
 $ErrorActionPreference='Stop'
 Push-Location (Join-Path $PSScriptRoot '../..')
 try {
@@ -15,6 +18,8 @@ try {
  $linuxPath=(& wsl -d $BuildDistro --exec wslpath -a (Get-Location).Path).Trim()
  & wsl -d $BuildDistro --cd $linuxPath --exec sh -c 'set -eu; cargo_bin=$(command -v cargo); "$cargo_bin" test --locked --all-targets --target-dir /tmp/gnx-build && "$cargo_bin" build --release --locked --bin gnx --target-dir /tmp/gnx-build && cp /tmp/gnx-build/release/gnx dist/gnx-linux && sh packaging/linux/build.sh'
  if ($LASTEXITCODE) { throw 'Linux build failed' }
+ if ([string]::IsNullOrWhiteSpace($Rootfs) -or -not (Test-Path -LiteralPath $Rootfs -PathType Leaf)) { throw 'A verified rootfs is required to build a complete candidate.' }
+ $rootfsSha256=(Get-FileHash -LiteralPath $Rootfs -Algorithm SHA256).Hash.ToLowerInvariant()
  $artifacts=[ordered]@{}
  foreach($name in @('gnx.exe','gnx-service.exe','gnx-setup.exe','gnx-linux','gnx-linux-bundle.tar','gnx-linux.run')) {
    $path = Join-Path (Resolve-Path dist).Path $name
@@ -24,7 +29,7 @@ try {
  # A hash-only manifest is intentionally not a release trust anchor. The
  # signing/promotion step must replace status with sealed and attach the
  # authenticated release metadata before install.ps1 may consume it.
- $manifest=[ordered]@{schema=1;version='0.3.1';platform='windows+linux-amd64';status='unsealed';artifacts=$artifacts}
+ $manifest=[ordered]@{schema=1;version='0.3.1';platform='windows+linux-amd64';status='unsealed';rootfs_sha256=$rootfsSha256;artifacts=$artifacts}
  $json=$manifest | ConvertTo-Json -Depth 5 -Compress
  [IO.File]::WriteAllText((Join-Path (Resolve-Path dist).Path 'manifest.json'), $json, [Text.UTF8Encoding]::new($false))
  Get-FileHash -LiteralPath (Join-Path (Resolve-Path dist).Path 'manifest.json') -Algorithm SHA256

@@ -68,12 +68,13 @@ Gate 'journal-lock' { $journal = Get-Content (Join-Path $setup 'journal.json') -
 Gate 'acl' { foreach ($path in @($program,$data,$setup)) { Require (Test-Path -LiteralPath $path -PathType Container) "root_missing:$path"; $acl = Get-Acl -LiteralPath $path; Require ($acl.Access.Count -gt 0) "acl_unreadable:$path" } }
 Gate 'path-autorun' { $machinePath = [Environment]::GetEnvironmentVariable('Path','Machine') -split ';'; Require (@($machinePath | Where-Object { $_.TrimEnd('\') -ieq $program }).Count -eq 1) 'machine_path_missing_or_duplicate'; foreach ($key in @('HKLM:\Software\Microsoft\Windows\CurrentVersion\Run','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run')) { $entry = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue; Require ($null -eq $entry.GNXRuntime) 'unexpected_gnx_autorun' } }
 Gate 'residue' { $unexpected = @(Get-ChildItem -LiteralPath $setup -Force | Where-Object { $_.Name -notin @('journal.json','setup.lock','snapshot.json','state.json') }); Require ($unexpected.Count -eq 0) 'unexpected_setup_residue' }
-Gate 'runtime-ready' { & (Join-Path $program 'gnx.exe') doctor --config (Join-Path $data 'gnx.toml') --json *> $null; Require ($LASTEXITCODE -eq 0) 'doctor_failed'; & (Join-Path $program 'gnx.exe') health --json *> $null; Require ($LASTEXITCODE -eq 0) 'health_failed' }
+Gate 'runtime-ready' { & (Join-Path $program 'gnx.exe') doctor --config (Join-Path $data 'gnx.toml') *> $null; Require ($LASTEXITCODE -eq 0) 'doctor_failed'; & (Join-Path $program 'gnx.exe') status --config (Join-Path $data 'gnx.toml') *> $null; Require ($LASTEXITCODE -eq 0) 'status_failed' }
 $results | ConvertTo-Json -Compress; if (@($results | Where-Object result -ne 'PASS').Count) { exit 1 }; Write-Output 'POST_REBOOT_READY observed on this host'
 ```
 
-Todos los gates deben ser `PASS` y `doctor`/`health` deben terminar con código
-cero antes de observar `READY`. `PROVISIONED` sigue siendo
+Todos los gates deben ser `PASS` y `doctor`/`status` deben terminar con código
+cero antes de observar `READY`. El comando `health` no forma parte del contrato
+CLI actual; la salud se observa mediante `status`. `PROVISIONED` sigue siendo
 `ACTION_REQUIRED`/`SETUP_PROVISIONED`; `FAIL` y `BLOCKED` se reportan como tales.
 No conservar journal completo, SID/token, contraseñas, hashes privados, URLs ni
 líneas de comando con secretos.
