@@ -212,7 +212,10 @@ fn provision(input: &BundleInput) -> Result<(), String> {
             "manifest.json",
             "gnx.exe",
             "gnx-service.exe",
+            "gnx-setup.exe",
+            "gnx-linux",
             "gnx-linux-bundle.tar",
+            "gnx-linux.run",
         ] {
             copy_new(&input.bundle.join(name), &stage.join(name))?;
         }
@@ -229,8 +232,11 @@ fn provision(input: &BundleInput) -> Result<(), String> {
         // A sibling of legacy GNX avoids depending on its potentially weaker parent ACL.
         protected_dir(Path::new(TARGET_PROGRAM), false)?;
         protected_dir(Path::new(TARGET_DATA), false)?;
-        for name in ["gnx.exe", "gnx-service.exe"] {
+        for name in ["gnx.exe", "gnx-service.exe", "gnx-setup.exe"] {
             copy_new(&stage.join(name), &Path::new(TARGET_PROGRAM).join(name))?;
+        }
+        for name in ["gnx-linux", "gnx-linux.run"] {
+            copy_new(&stage.join(name), &Path::new(TARGET_DATA).join(name))?;
         }
         copy_new(
             &stage.join("rootfs.tar"),

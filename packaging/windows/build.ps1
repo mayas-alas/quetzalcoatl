@@ -14,6 +14,6 @@ try {
  if ($LASTEXITCODE) { throw 'Linux build failed' }
  $artifacts=@{}
  foreach($name in @('gnx.exe','gnx-service.exe','gnx-setup.exe','gnx-linux','gnx-linux-bundle.tar','gnx-linux.run')) {$artifacts[$name]=(Get-FileHash "dist/$name" -Algorithm SHA256).Hash.ToLowerInvariant()}
- @{schema=1;version='0.3.1-dev';artifacts=$artifacts} | ConvertTo-Json | Set-Content dist/manifest.json
+ @{schema=1;version='0.3.1';artifacts=$artifacts} | ConvertTo-Json | Set-Content dist/manifest.json
  Get-FileHash dist/manifest.json -Algorithm SHA256
 } finally {Pop-Location}
