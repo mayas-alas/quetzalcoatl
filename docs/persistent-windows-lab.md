@@ -67,6 +67,26 @@ rm -rf /mnt/c/Users/mayas/AppData/Local/Temp/gnx-windows-lab-staging
 The cleanup command is recorded for the owner; the container and volume were
 not removed by this task.
 
+## Full apply acceptance (2026-09-19)
+
+A complete LAB_ONLY six-artifact bundle and Ubuntu rootfs were supplied through
+the retained share. Elevated `--apply` first exposed `ACCOUNT_SID_FAILED`; the
+account SID lookup and transactional cleanup were corrected and rebuilt. A
+second real apply then returned the expected finite boundary:
+
+```json
+{"state":"ACTION_REQUIRED","code":"SETUP_REBOOT_REQUIRED"}
+```
+
+After reboot, Windows verified the dedicated `gnx-runtime` account, stopped
+`GNXRuntime` service, exact versioned service binary path, and installed
+artifacts. Starting the service remained `START_PENDING` because both Windows
+features required by WSL were disabled. Enabling `Microsoft-Windows-Subsystem-Linux`
+and `VirtualMachinePlatform` succeeded, but the nested Dockur guest then remained
+at Windows Boot Manager for more than the bounded observation window. This is a
+nested-virtualization acceptance blocker, not GNX `READY`; the persistent volume
+is retained for diagnosis and Windows is not downloaded again.
+
 ## Retained-lab follow-up poll (2026-09-18)
 
 The existing `gnx-windows-lab` container and `gnx-windows-lab-storage` volume
