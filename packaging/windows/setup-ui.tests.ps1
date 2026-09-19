@@ -54,6 +54,13 @@ foreach ($required in @('GNXRuntime', 'gnx-runtime', 'C:\Program Files\GNX-0.3.1
     if ($checklist -notmatch [regex]::Escape($required)) { throw "Uninstall checklist omits evidence item: $required" }
 }
 if ($checklist -notmatch 'No GNX-owned tray app exists') { throw 'Tray gap is not recorded.' }
+$audit = Get-Content (Join-Path $PSScriptRoot '../../docs/AUDIT-INSTALL-REBOOT.md') -Raw
+foreach ($gate in @('service', 'account-sid', 'wsl-distro', 'journal-lock', 'acl', 'path-autorun', 'residue', 'runtime-ready')) {
+    if ($audit -notmatch [regex]::Escape("Gate '$gate'")) { throw "Post-reboot audit gate missing: $gate" }
+}
+foreach ($contract in @('POST_REBOOT_READY', 'doctor_failed', 'health_failed', 'setup_lock_held', 'unexpected_setup_residue', 'BLOCKED', 'SETUP_PROVISIONED')) {
+    if ($audit -notmatch [regex]::Escape($contract)) { throw "Post-reboot audit contract missing: $contract" }
+}
 $setupSource = Get-Content (Join-Path $PSScriptRoot '../../src/adapter/windows/setup.rs') -Raw
 foreach ($phase in @('PREFLIGHT', 'STAGING', 'PUBLISHING', 'REGISTERING', 'SECURING', 'PROVISIONED')) {
     if ($setupSource -notmatch ('"' + $phase + '"')) { throw "Documented provisioning phase missing from implementation: $phase" }
