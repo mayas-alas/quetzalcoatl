@@ -1,5 +1,5 @@
 use crate::{
-    port::host::{SetupHost, SetupObservation},
+    port::host::{SetupHost, SetupObservation, SetupVerification},
     report::{Capability, Report, State},
 };
 
@@ -40,6 +40,48 @@ pub fn provision(
             Report::new("setup", State::Failed, if safe { &code } else { "SETUP_PROVISION_FAILED" }, Some("Inspect the protected setup journal and snapshot; recover partial provisioning before retrying. Legacy has not been cut over."))
         }
     }
+}
+
+/// Apply is the complete finite setup transaction. Provisioning alone never
+/// implies runtime readiness; readiness is granted only by host verification.
+pub fn apply(
+    host: Option<&dyn SetupHost>,
+    input: &crate::domain::setup::BundleInput,
+) -> Report {
+    let Some(host) = host else {
+        return Report::new("setup", State::ActionRequired, "SETUP_WINDOWS_ONLY", Some("Run setup on the Windows host."));
+    };
+    if let Err(code) = host.provision_setup(input) {
+        return failed(code);
+    }
+    match host.verify_setup() {
+        Ok(SetupVerification::Ready) => Report::new("setup", State::Ready, "SETUP_READY", None),
+        Ok(SetupVerification::RebootRequired) => Report::new(
+            "setup", State::ActionRequired, "SETUP_REBOOT_REQUIRED",
+            Some("Restart Windows, then run setup status to complete verification."),
+        ),
+        Err(code) => failed(code),
+    }
+}
+
+pub fn recover(host: Option<&dyn SetupHost>, rollback: bool) -> Report {
+    let Some(host) = host else {
+        return Report::new("setup", State::ActionRequired, "SETUP_WINDOWS_ONLY", Some("Run setup recovery on the Windows host."));
+    };
+    match host.recover_setup(rollback) {
+        Ok(()) => Report::new(
+            "setup", State::ActionRequired,
+            if rollback { "SETUP_ROLLED_BACK" } else { "SETUP_RECOVERED" },
+            Some("Run setup status before attempting another apply."),
+        ),
+        Err(code) => failed(code),
+    }
+}
+
+fn failed(code: String) -> Report {
+    let safe = code.len() <= 80 && !code.is_empty()
+        && code.bytes().all(|b| b.is_ascii_uppercase() || b == b'_' || b.is_ascii_digit());
+    Report::new("setup", State::Failed, if safe { &code } else { "SETUP_FAILED" }, Some("Inspect protected setup state and recover before retrying."))
 }
 
 /// Runs the non-mutating host preflight for a 0.3.1 upgrade.

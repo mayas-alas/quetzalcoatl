@@ -85,7 +85,7 @@ fn parse_bundle(args: &[String]) -> Result<Option<BundleInput>, &'static str> {
         return Ok(None);
     }
     if args.len() != 9
-        || !matches!(args[0].as_str(), "--check" | "--provision")
+        || !matches!(args[0].as_str(), "--check" | "--provision" | "--apply")
         || args[1] != "--bundle"
         || args[3] != "--manifest-sha256"
         || args[5] != "--rootfs"
@@ -102,6 +102,15 @@ fn parse_bundle(args: &[String]) -> Result<Option<BundleInput>, &'static str> {
 }
 
 fn run(args: &[String]) -> Report {
+    if args == ["--recover"] || args == ["--rollback"] {
+        #[cfg(windows)]
+        return gnx::app::setup::recover(
+            Some(&gnx::adapter::windows::setup::WindowsSetupHost),
+            args[0] == "--rollback",
+        );
+        #[cfg(not(windows))]
+        return gnx::app::setup::recover(None, args[0] == "--rollback");
+    }
     let bundle =
         match parse_bundle(args) {
             Ok(value) => value,
@@ -113,6 +122,12 @@ fn run(args: &[String]) -> Report {
         };
     #[cfg(windows)]
     {
+        if args[0] == "--apply" {
+            return gnx::app::setup::apply(
+                Some(&gnx::adapter::windows::setup::WindowsSetupHost),
+                bundle.as_ref().expect("apply requires bundle options"),
+            );
+        }
         if args[0] == "--provision" {
             return gnx::app::setup::provision(
                 Some(&gnx::adapter::windows::setup::WindowsSetupHost),
@@ -137,7 +152,7 @@ fn main() {
     if streaming {
         args.remove(0);
     }
-    let operation = if args.first().is_some_and(|arg| arg == "--provision") {
+    let operation = if args.first().is_some_and(|arg| arg == "--provision" || arg == "--apply") {
         "setup-provision"
     } else {
         "setup-check"

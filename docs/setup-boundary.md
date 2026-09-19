@@ -1,8 +1,10 @@
 # Setup presentation and headless boundary
 
 `gnx-setup.exe` owns setup orchestration through `app::setup` and the host port.
-The 0.3.1 boundary is headless and preflight-only; a desktop presentation shell
-is not shipped. No apply operation is implemented or advertised by this boundary.
+The 0.3.1 boundary is headless; a desktop presentation shell is not shipped.
+Apply is a finite PRECHECK -> PROVISION -> VERIFY operation and never reports
+READY until host verification succeeds. Windows elevation and a reboot may be
+required before service/broker/doctor/status verification can complete.
 The existing development bootstrap script remains a separate fresh-install tool,
 not an upgrade engine or evidence of upgrade readiness.
 
@@ -12,6 +14,11 @@ arguments retain their strict order:
 ```text
 gnx-setup --check --bundle <directory> --manifest-sha256 <trusted-hash> --rootfs <file> --rootfs-sha256 <trusted-hash>
 ```
+
+Apply a trusted bundle with the same strict arguments and `gnx-setup --apply`.
+Interrupted work requires explicit `gnx-setup --recover` or
+`gnx-setup --rollback`; retries preserve the protected journal, snapshot, lock,
+and `C:\ProgramData\GNX\setup-state.json`.
 
 For UI consumption, prefix the same arguments with `--json-progress`. Stdout is
 UTF-8 newline-delimited JSON, flushed after each event. Schema 1 emits a `started`
@@ -28,8 +35,9 @@ error text. The single-report mode supplies diagnostic detail when needed.
 Progress is an allowlisted projection: it never forwards arguments, paths,
 credentials, raw subprocess output, arbitrary error strings, or report details.
 Both transports execute the same preflight exactly once and preserve its outcome.
-`READY` means only that the current observation-based preflight returned ready;
-it does not certify full compatibility, successful installation, or apply readiness.
+`READY` means host verification completed. `ACTION_REQUIRED` with
+`SETUP_REBOOT_REQUIRED` means provisioning completed but Windows must restart;
+it is not a success signal.
 
 A future UI must launch the packaged executable by absolute path with an argument
 array, consume this stream, and wait for process exit. It must treat a missing or

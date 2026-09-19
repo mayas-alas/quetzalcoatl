@@ -16,6 +16,15 @@ pub struct Snapshot {
     pub rootfs_sha256: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SetupState {
+    pub schema: u32,
+    pub phase: String,
+    pub outcome: String,
+    pub code: Option<String>,
+}
+
 pub struct SetupTransaction {
     root: PathBuf,
     _lock: File,
@@ -23,6 +32,16 @@ pub struct SetupTransaction {
 
 impl SetupTransaction {
     pub fn acquire(root: &Path) -> Result<Self, String> {
+        Self::acquire_inner(root, false)
+    }
+
+    /// Open an interrupted transaction for explicit recovery/rollback. Normal
+    /// apply calls must continue to refuse blind retries.
+    pub fn acquire_recovery(root: &Path) -> Result<Self, String> {
+        Self::acquire_inner(root, true)
+    }
+
+    fn acquire_inner(root: &Path, recovery: bool) -> Result<Self, String> {
         reject_link(root)?;
         let path = root.join("setup.lock");
         reject_link(&path)?;
@@ -41,7 +60,7 @@ impl SetupTransaction {
         };
         for name in ["journal.json", "snapshot.json"] {
             reject_link(&root.join(name))?;
-            if root
+            if !recovery && root
                 .join(name)
                 .try_exists()
                 .map_err(|_| "SETUP_STATE_READ_FAILED")?
@@ -62,6 +81,10 @@ impl SetupTransaction {
             "journal.json",
             &serde_json::json!({"schema":1,"operation":"PROVISION","phase":phase,"code":code}),
         )
+    }
+
+    pub fn state(&self, state: &SetupState) -> Result<(), String> {
+        self.write("setup-state.json", state)
     }
 
     fn write(&self, name: &str, value: &impl Serialize) -> Result<(), String> {

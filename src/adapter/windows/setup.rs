@@ -1,6 +1,6 @@
 use crate::{
     domain::setup::BundleInput,
-    port::host::{SetupHost, SetupObservation},
+    port::host::{SetupHost, SetupObservation, SetupVerification},
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -23,6 +23,14 @@ impl SetupHost for WindowsSetupHost {
 
     fn provision_setup(&self, input: &BundleInput) -> Result<(), String> {
         provision(input)
+    }
+
+    fn verify_setup(&self) -> Result<SetupVerification, String> {
+        verify_installed()
+    }
+
+    fn recover_setup(&self, rollback: bool) -> Result<(), String> {
+        recover(rollback)
     }
 }
 
@@ -171,7 +179,9 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     Ok(hex::encode(digest.finalize()))
 }
 
-const SETUP_ROOT: &str = r"C:\Program Files\GNX-Setup";
+// State is deliberately kept beside the protected runtime data so lock,
+// snapshot, journal, and setup-state share one ACL boundary.
+const SETUP_ROOT: &str = TARGET_DATA;
 pub const TARGET_PROGRAM: &str = r"C:\Program Files\GNX-0.3.1";
 const TARGET_DATA: &str = r"C:\ProgramData\GNX";
 
@@ -191,11 +201,17 @@ fn provision(input: &BundleInput) -> Result<(), String> {
         manifest_sha256: input.manifest_sha256.to_ascii_lowercase(),
         rootfs_sha256: input.rootfs_sha256.to_ascii_lowercase(),
     })?;
+    tx.state(&crate::adapter::setup_state::SetupState {
+        schema: 1,
+        phase: "PRECHECK".into(),
+        outcome: "IN_PROGRESS".into(),
+        code: None,
+    })?;
     let mut phase = "PREFLIGHT";
     let result: Result<(), String> = (|| {
         tx.phase(phase, None)?;
         super::account::require_absent()?;
-        for path in [TARGET_PROGRAM, TARGET_DATA] {
+        for path in [TARGET_PROGRAM] {
             super::setup_security::check_ancestors(Path::new(path))?;
             if Path::new(path)
                 .try_exists()
@@ -260,6 +276,12 @@ fn provision(input: &BundleInput) -> Result<(), String> {
         super::setup_security::grant_runtime(Path::new(TARGET_PROGRAM), &runtime_sid, false)?;
         super::setup_security::grant_runtime(Path::new(TARGET_DATA), &runtime_sid, true)?;
         tx.phase("PROVISIONED", None)?;
+        tx.state(&crate::adapter::setup_state::SetupState {
+            schema: 1,
+            phase: "VERIFY".into(),
+            outcome: "PENDING".into(),
+            code: None,
+        })?;
         Ok(())
     })();
     if let Err(code) = &result {
@@ -267,8 +289,70 @@ fn provision(input: &BundleInput) -> Result<(), String> {
         if tx.phase(phase, Some(code)).is_err() {
             return Err("SETUP_FAILURE_JOURNAL_FAILED".into());
         }
+        if tx
+            .state(&crate::adapter::setup_state::SetupState {
+                schema: 1,
+                phase: phase.into(),
+                outcome: "FAILED".into(),
+                code: Some(code.clone()),
+            })
+            .is_err()
+        {
+            return Err("SETUP_FAILURE_STATE_FAILED".into());
+        }
     }
     result
+}
+
+fn verify_installed() -> Result<SetupVerification, String> {
+    let required = [
+        Path::new(TARGET_PROGRAM).join("gnx.exe"),
+        Path::new(TARGET_PROGRAM).join("gnx-service.exe"),
+        Path::new(TARGET_PROGRAM).join("gnx-setup.exe"),
+        Path::new(TARGET_DATA).join("gnx-linux"),
+        Path::new(TARGET_DATA).join("gnx-linux.run"),
+        Path::new(TARGET_DATA).join("bundle.tar"),
+        Path::new(TARGET_DATA).join("rootfs.tar"),
+    ];
+    if required.iter().any(|path| !path.is_file()) {
+        return Err("SETUP_VERIFY_ARTIFACTS_MISSING".into());
+    }
+    // Runtime service/broker/doctor/status verification occurs after the
+    // reboot boundary. Never claim READY while bootstrap is still pending.
+    Ok(SetupVerification::RebootRequired)
+}
+
+fn recover(rollback: bool) -> Result<(), String> {
+    use crate::adapter::setup_state::{SetupState, SetupTransaction};
+    let root = Path::new(SETUP_ROOT);
+    if !root.is_dir() {
+        return Err("SETUP_STATE_NOT_FOUND".into());
+    }
+    let tx = SetupTransaction::acquire_recovery(root)?;
+    if rollback {
+        // Only remove artifacts owned by this transaction; legacy locations
+        // and unrelated files are never traversed or deleted.
+        for path in [
+            Path::new(TARGET_PROGRAM),
+            &root.join("gnx-linux"),
+            &root.join("gnx-linux.run"),
+            &root.join("bundle.tar"),
+            &root.join("rootfs.tar"),
+        ] {
+            if path.is_dir() {
+                fs::remove_dir_all(path).map_err(|_| "SETUP_ROLLBACK_FAILED")?;
+            } else if path.exists() {
+                fs::remove_file(path).map_err(|_| "SETUP_ROLLBACK_FAILED")?;
+            }
+        }
+    }
+    tx.state(&SetupState {
+        schema: 1,
+        phase: "RECOVERY".into(),
+        outcome: if rollback { "ROLLED_BACK" } else { "RECOVERED" }.into(),
+        code: None,
+    })?;
+    Ok(())
 }
 
 fn copy_new(from: &Path, to: &Path) -> Result<(), String> {
