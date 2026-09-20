@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
- [string]$BuildDistro='Ubuntu-24.04',
+ [string]$BuildDistro='gnx-node',
  [string]$Rootfs=$env:GNX_ROOTFS,
  [string]$RootfsSource=$env:GNX_ROOTFS_SOURCE,
  [string]$RootfsVersion=$env:GNX_ROOTFS_VERSION,

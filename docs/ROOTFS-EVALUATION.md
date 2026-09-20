@@ -23,7 +23,7 @@ Alcance: Ubuntu 24.04 LTS oficial/WSL, Ubuntu Base y Debian slim para la distrib
 
 ### Implementación y empaquetado
 
-- `packaging/windows/build.ps1` usa por defecto `BuildDistro='Ubuntu-24.04'` para compilar Linux en WSL y exige un `Rootfs` verificado antes de producir un candidate completo.
+- `packaging/windows/build.ps1` usa por defecto el builder Wide Linux local `gnx-node` para compilar Linux y exige un `Rootfs` verificado antes de producir un candidate completo; el builder se puede sustituir explícitamente con `-BuildDistro`.
 - `packaging/windows/install.ps1` valida manifest sellado, artefactos y `rootfs_sha256` antes de invocar `gnx-setup.exe --provision`.
 - `packaging/windows/runtime.lock.json` está `unsealed` y tiene `rootfs:null`; el repo no contiene una selección de rootfs lista para release.
 - `src/adapter/windows/runtime.rs` importa `C:\ProgramData\GNX-0.3.1\rootfs.tar` si la distro no existe, instala `bundle.tar` con `/bin/tar`, escribe `/etc/wsl.conf` con `systemd=true`, `automount=false`, `interop=false`, `appendWindowsPath=false`, exige `/bin/sh`, y luego borra los bootstrap copies.
@@ -54,7 +54,7 @@ El archivo no ejecutable `docs/rootfs-comparison.requirements.json` fija los che
 
 **Hechos del repo**
 
-- `Ubuntu-24.04` sólo se referencia como distro de build en `packaging/windows/build.ps1`; la provisión de runtime no descarga ni exporta una distro por nombre.
+- `gnx-node` se referencia como builder local en `packaging/windows/build.ps1`; la provisión de runtime no descarga ni exporta una distro por nombre.
 - La documentación actual exige distro GNX propia, no que el usuario opere directamente la distro base.
 - La antigua ruta que usaba `wsl.exe --install` fue retirada. El runtime debe importar únicamente el `rootfs.tar` cubierto por el manifest firmado exigido por `install.ps1`.
 
@@ -124,7 +124,7 @@ El archivo no ejecutable `docs/rootfs-comparison.requirements.json` fija los che
 
 ## Recomendación P1
 
-**Candidate recomendado: Ubuntu 24.04 LTS oficial/WSL, pero sólo como rootfs sellado/importable por GNX, no como descarga dinámica en instalación.** Es la opción con más señales internas del repo (`Ubuntu-24.04` ya se usa para build/provision experimental) y probablemente minimiza el cambio para llegar a evidencia P1. La aceptación requiere que el coordinador aporte procedencia oficial, digest, soporte/licencia y manifest sellado; sin eso no debe etiquetarse como candidate release.
+**Candidate recomendado: Ubuntu 24.04 LTS oficial/WSL como rootfs de runtime, pero sólo sellado/importable por GNX, no como descarga dinámica en instalación.** El builder local actual es `gnx-node` y sólo define el entorno de compilación; no sustituye la procedencia del rootfs de runtime. La aceptación requiere procedencia, digest, soporte/licencia y manifest sellado; sin eso no debe etiquetarse como candidate release.
 
 **Alternativa: Ubuntu Base amd64.** Es la alternativa preferida si el objetivo primario es reducir superficie/tamaño y el equipo acepta crear evidencia de bootstrap reproducible. Debian slim queda como opción de investigación posterior, no como alternativa P1 principal, porque el repo actual no la referencia y el delta de compatibilidad es mayor.
 
