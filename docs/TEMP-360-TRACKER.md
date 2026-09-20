@@ -76,13 +76,13 @@ Pedido 360: validar servicios tipo quadlet para `app.gnx` y `compute.gnx` sobre 
 Estado actual a doble-check:
 
 - `compute.gnx` sí aparece como contrato normativo.
-- `app.gnx` se conserva como superficie propia de presentación HTML/CSS/JS; sus assets/serving son implementación pendiente, no una nueva capacidad.
+- `app.gnx` se conserva como superficie propia de presentación HTML/CSS/JS; el portal histórico fue reincorporado como assets embebidos y serving Caddy, sin crear una nueva capacidad. Falta evidencia live de HTTPS/presentación.
 
 Pruebas sin inventar arquitectura:
 
 - confirmar unidades/quadlets realmente generadas por el bundle actual;
 - confirmar `https://compute.gnx` con TLS válido;
-- si `app.gnx` aún no tiene assets, mantenerlo como implementación pendiente y no declararlo operativo;
+- aunque `app.gnx` tenga assets embebidos, mantenerlo como `ACTION_REQUIRED` hasta observar serving HTTPS y gate de presentación;
 - verificar reinicio y health sin imprimir secretos.
 
 ### D. Credenciales y secretos

@@ -392,8 +392,33 @@ impl Linux {
         self.identity()
     }
     fn control_start(&self, r: &PinnedRelease, ip: &str) -> Result<(), String> {
-        for dir in ["control", "control/data", "control/config", "dns"] {
+        for dir in [
+            "control",
+            "control/data",
+            "control/config",
+            "control/app",
+            "dns",
+        ] {
             private_dir(&self.root.join(dir))?;
+        }
+        for (name, bytes) in [
+            (
+                "index.html",
+                include_bytes!("../../runtime/control/app/index.html").as_slice(),
+            ),
+            (
+                "style.css",
+                include_bytes!("../../runtime/control/app/style.css").as_slice(),
+            ),
+            (
+                "app.js",
+                include_bytes!("../../runtime/control/app/app.js").as_slice(),
+            ),
+        ] {
+            let path = self.root.join("control/app").join(name);
+            if std::fs::read(&path).ok().as_deref() != Some(bytes) {
+                atomic_write(&path, bytes, 0o644)?;
+            }
         }
         let core = super::coredns::render_at(&self.config, ip)?;
         let caddy =
@@ -423,7 +448,7 @@ impl Linux {
             0o644,
         )?;
         self.unit("dns",&format!("--network container:{} --volume {}:/Corefile:ro --volume {}:/gnx.zone:ro {} -conf /Corefile",self.name("access"),self.path("dns/Corefile"),self.path("dns/gnx.zone"),r.dns),&requires)?;
-        self.unit("control",&format!("--network container:{} --volume {}:/etc/caddy/Caddyfile:ro --volume {}:/data --volume {}:/config --volume {}:/gnx-compute-ca.pem:ro {} caddy run --config /etc/caddy/Caddyfile --adapter caddyfile",self.name("access"),self.path("control/Caddyfile"),self.path("control/data"),self.path("control/config"),self.path("compute/root-ca.pem"),r.control),&requires)?;
+        self.unit("control",&format!("--network container:{} --volume {}:/etc/caddy/Caddyfile:ro --volume {}:/data --volume {}:/config --volume {}:/gnx-compute-ca.pem:ro --volume {}:/gnx-app:ro {} caddy run --config /etc/caddy/Caddyfile --adapter caddyfile",self.name("access"),self.path("control/Caddyfile"),self.path("control/data"),self.path("control/config"),self.path("compute/root-ca.pem"),self.path("control/app"),r.control),&requires)?;
         if dns_changed {
             process::checked(
                 "systemctl",

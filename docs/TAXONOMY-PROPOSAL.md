@@ -15,7 +15,7 @@ Esta propuesta no cambia el contrato público GNX ni declara READY. Resume incon
 5. Hay una tensión de release: `packaging/windows/build.ps1` genera `manifest.json` `unsealed`; `seal-manifest.ps1` muta a `sealed` y firma. Esto es correcto, pero la evidencia debe nombrar el estado como **build candidate unsealed** vs **release candidate sealed**, no “manifest listo”.
 6. Wide Linux está bien usado como vocabulario de producto interno, con WSL2 como adaptador. La antigua ruta `provision-gnx-runtime.ps1` que instalaba/exportaba Ubuntu fue retirada: el runtime sólo consume el rootfs autenticado exigido por el setup actual.
 7. Residuo/remoción tiene una taxonomía más rica que setup: el checklist distingue `BLOCKED` de `RECOVERY_REQUIRED`, pero `uninstall.ps1` todavía agrupa fallos capturados como `BLOCKED`; la aceptación ya exige reclasificar como `RECOVERY_REQUIRED` cuando hubo mutación.
-8. `compute.gnx` sigue siendo la ruta operativa requerida. `app.gnx` se conserva como superficie propia de presentación GNX (HTML/CSS/JS, servida bajo Control y sin convertirse en una cuarta capacidad); sus assets aún no están presentes en este checkout y requieren implementación explícita.
+8. `compute.gnx` sigue siendo la ruta operativa requerida. `app.gnx` se conserva como superficie propia de presentación GNX (HTML/CSS/JS, servida bajo Control y sin convertirse en una cuarta capacidad); el portal histórico se reincorpora como assets embebidos, pero su serving y gate HTTPS aún requieren host evidence.
 
 ## Glosario canónico propuesto
 
@@ -63,7 +63,7 @@ Esta propuesta no cambia el contrato público GNX ni declara READY. Resume incon
 | `unsealed` manifest | `build candidate (unsealed)` | Evita confundir build con release | Bajo |
 | `sealed` manifest | `release candidate (sealed+signed)` | Explicita firma/raíz de confianza | Bajo |
 | `src/cli.rs` comandos `install/connect/access/credentials` | `legacy/unwired CLI surface` hasta decisión | No coincide con README/main | Medio; puede ocultar deuda si no se decide |
-| `app.gnx` en tracker | `first-party presentation surface` | Conserva la UI HTML/CSS/JS sin crear otra capacidad de negocio | Medio; requiere assets, serving y gate de UI |
+| `app.gnx` en tracker | `first-party presentation surface` | Conserva la UI HTML/CSS/JS sin crear otra capacidad de negocio | Medio; assets reincorporados, requiere serving y gate HTTPS de UI |
 | `BLOCKED` genérico en uninstall | `BLOCKED pre-mutation` vs `RECOVERY_REQUIRED after mutation` | Clasificación segura de residuos | Medio; requiere cambios de script si se automatiza |
 | `gnx-node` | builder/lab distro conflict for setup | Docs ya dicen conflicto en host runtime | Bajo |
 | `target/release` | local binaries, not installable release | Evita promoción accidental | Bajo |

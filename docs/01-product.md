@@ -76,7 +76,7 @@ Generated files, compiled binaries, active processes, HTTP 200 from a console an
 
 ### App presentation surface
 
-The `app.gnx` surface is a first-party HTML/CSS/JS interface for GNX presentation and navigation. It follows the same private transport, TLS, evidence and secret-boundary rules as the product, but it is not a new reconciliation domain or a replacement for Compute. The current checkout records the contract and taxonomy; UI assets and serving remain an implementation task.
+The `app.gnx` surface is a first-party HTML/CSS/JS interface for GNX presentation and navigation. It follows the same private transport, TLS, evidence and secret-boundary rules as the product, but it is not a new reconciliation domain or a replacement for Compute. The static portal is embedded into the Linux runtime and served by Control under HTTPS; live serving, certificate trust and presentation health remain separate acceptance gates.
 
 ### Product lifecycle
 
