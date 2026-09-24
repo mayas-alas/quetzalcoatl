@@ -1,0 +1,8 @@
+# Capacidad: plataforma GnX Node
+# Orquesta mesh, dns, gateway y compute; no sustituye verify.run readiness.
+[Unit]
+Description=GnX Node platform capabilities
+Requires=gnx-ingress.service mesh.service dns.service gateway.service compute.service
+After=gnx-ingress.service mesh.service dns.service gateway.service compute.service
+[Install]
+WantedBy=multi-user.target

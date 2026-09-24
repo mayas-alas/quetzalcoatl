@@ -1,0 +1,13 @@
+/build/
+/target/
+*.msi
+*.wixpdb
+*.wixobj
+*.log
+.env
+*.pem
+*.key
+/installer/obj/
+/installer/bin/
+/installer/bundle/bin/
+/installer/bundle/obj/
