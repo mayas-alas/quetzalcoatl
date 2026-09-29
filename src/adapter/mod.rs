@@ -4,6 +4,7 @@ pub mod filesystem;
 pub mod linux;
 pub mod podman;
 pub mod process;
+pub mod quadlet;
 pub mod release;
 pub mod setup_state;
 pub mod systemd;

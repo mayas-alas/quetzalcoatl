@@ -120,21 +120,38 @@ impl Linux {
         .map_err(|_| "NETWORK_CREATE_FAILED")?;
         Ok(())
     }
+    fn quadlet_paths(&self) -> Result<(), String> {
+        for cap in super::quadlet::CAPABILITIES {
+            let name = self.name(cap);
+            let quadlet = PathBuf::from(format!("/etc/containers/systemd/{name}.container"));
+            let services: Vec<_> = ["/etc/systemd/system", "/run/systemd/system",
+                "/usr/lib/systemd/system", "/lib/systemd/system"]
+                .iter().map(|dir| PathBuf::from(format!("{dir}/{name}.service"))).collect();
+            let paths: Vec<_> = services.iter().map(|p| p.as_path()).collect();
+            super::quadlet::check_paths(&quadlet, &paths)?;
+        }
+        Ok(())
+    }
     fn unit(&self, cap: &str, args: &str, requires: &str) -> Result<(), String> {
+        self.quadlet_paths()?;
         let name = self.name(cap);
-        let path = PathBuf::from(format!("/etc/systemd/system/{name}.service"));
-        let content=format!("[Unit]\nDescription=GNX {cap} ({})\nAfter=network-online.target {requires}\nWants=network-online.target\nRequires={requires}\nStartLimitIntervalSec=300\nStartLimitBurst=5\n[Service]\nType=simple\nRestart=on-failure\nRestartSec=5\nTimeoutStartSec=300\nTimeoutStopSec=120\nKillMode=control-group\nDelegate=yes\nStandardOutput=null\nStandardError=null\nExecStart=/usr/bin/podman run --rm --replace --pull=never --log-driver=none --name {name} {args}\nExecStop=/usr/bin/podman stop --ignore --time 90 {name}\nExecStopPost=/usr/bin/podman rm --ignore --force {name}\n[Install]\nWantedBy=multi-user.target\n",self.config.instance);
+        let path = PathBuf::from(format!("/etc/containers/systemd/{name}.container"));
+        let content = super::quadlet::render(&self.config.instance, cap, args, requires)?;
         let changed = std::fs::read(&path).ok().as_deref() != Some(content.as_bytes());
+        std::fs::create_dir_all("/etc/containers/systemd")
+            .map_err(|_| "RUNTIME_UNIT_DIRECTORY_FAILED")?;
         if changed {
             atomic_write(&path, content.as_bytes(), 0o644)?;
-            process::checked("systemctl", &["daemon-reload"], None, 30)?;
         }
-        process::checked(
-            "systemctl",
-            &["enable", &format!("{name}.service")],
-            None,
-            30,
-        )?;
+        // Reload even after an interrupted prior write. Quadlet's [Install] creates
+        // boot dependencies; generated .service files must not be systemctl-enabled.
+        process::checked("systemctl", &["daemon-reload"], None, 30)?;
+        let source = process::checked("systemctl", &["show", "--property=SourcePath", "--value",
+            &format!("{name}.service")], None, 10)?;
+        if String::from_utf8_lossy(&source).trim() != path.to_string_lossy() {
+            return Err("QUADLET_GENERATION_FAILED".into());
+        }
+        process::checked("systemctl", &["reset-failed", &format!("{name}.service")], None, 10)?;
         if changed {
             process::checked(
                 "systemctl",
@@ -570,9 +587,8 @@ impl Host for Linux {
             }
         }
         PinnedRelease::embedded()?;
-        if !super::podman::available() {
-            return Err("PODMAN_REQUIRED".into());
-        }
+        super::podman::require_supported()?;
+        self.quadlet_paths()?;
         for p in ["curl", "openssl"] {
             process::checked(p, &["--version"], None, 10)
                 .or_else(|_| process::checked(p, &["version"], None, 10))
@@ -605,6 +621,9 @@ impl Runtime for Linux {
         self.reconcile_secret(c, None)
     }
     fn reconcile_secret(&self, _: &Config, secret: Option<&Secret>) -> Result<(), String> {
+        // Guard direct reconciliation/recovery entrypoints as well as doctor/apply.
+        super::podman::require_supported()?;
+        self.quadlet_paths()?;
         let release = PinnedRelease::embedded()?;
         self.ensure_images(&release)?;
         self.ensure_network()?;

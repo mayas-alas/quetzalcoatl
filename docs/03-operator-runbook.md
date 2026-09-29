@@ -24,7 +24,7 @@ Before a clean install or acceptance run, verify and record:
 | Gate | Required observation |
 | --- | --- |
 | Host | supported OS/architecture and elevated rights only where required |
-| Linux runtime | Wide Linux `GNX-0.3.1`, systemd and Podman available where applicable |
+| Linux runtime | Native Linux or Wide Linux `GNX-0.3.1`, systemd, cgroup v2, Podman **6+**, and the installed Quadlet system generator |
 | Devices | `/dev/kvm`, `/dev/net/tun` or other required devices only for the selected release |
 | Network | private transport prerequisites, no unintended public bindings |
 | State | no conflicting `C:\Program Files\GNX`, `C:\ProgramData\GNX`, `GNX`, `gnx-node` adoption or stale setup journal unless explicitly recovering |
@@ -92,6 +92,26 @@ Required operational facts:
 - credentials are not printed, logged, copied to clipboard or stored in evidence.
 
 The old Proxmox/Dockur deployment is historical evidence of how to run a first Compute service. It is not a product promise of VM/LXC provisioning for 0.3.1.
+
+## Quadlet lifecycle and an existing LXC
+
+This implements BR-K01 and BR-P06 without introducing a new capability, naming tier, workload scheduler, or LXC provisioner. Existing GNX unit/container names and persistent paths are unchanged. LXC creation and host boot policy remain operator responsibilities.
+
+The Linux adapter writes managed `.container` files under `/etc/containers/systemd/`. Quadlet generates the corresponding `.service` files. `WantedBy=multi-user.target` supplies boot startup; `Restart=on-failure` with bounded restart attempts supplies crash recovery without hiding a permanently broken service. Do **not** run `systemctl enable` on generated services. GNX reloads systemd, verifies the service's `SourcePath`, and starts/restarts only its named units. Existing capability probes still decide health; generated files alone are not acceptance.
+
+Before running in an already-created LXC:
+
+1. Confirm its identity on the virtualization host and enable that guest's boot startup explicitly. Guest Quadlets cannot start a stopped LXC.
+2. Inside the guest, verify systemd is PID 1, cgroup v2 is delegated/writable, and `podman version --format '{{.Client.Version}}'` reports major version 6 or newer. Install Podman and its Quadlet generator from an approved distribution source; do not bypass the version check.
+3. Verify nested OCI containers are supported by the host's approved LXC configuration. Supply only the devices required by the signed release (the current Compute adapter checks KVM, FUSE and TUN). Do not disable AppArmor, grant blanket privileges, or change unrelated guests merely to silence a gate.
+4. Install the verified GNX release, preserve protected state, then run `gnx doctor`, `gnx plan`, `gnx apply`, and `gnx status` **inside that Linux runtime**. The Windows checkout or a browser response is not guest acceptance.
+5. Inspect each generated service's `SourcePath` and live health. In an approved maintenance window, verify guest restart and host reboot restore the same identity, storage and authenticated service health without reapplying.
+
+### Existing handwritten services
+
+`QUADLET_MIGRATION_REQUIRED` means an existing `.service` shadows the intended generated unit. GNX refuses **before reconciliation**: it does not stop, disable, delete or adopt that file. `RUNTIME_UNIT_CONFLICT` similarly protects unowned or symlinked Quadlet files. Back up the exact unit configuration, last-valid state and protected storage; review unit ownership and dependencies; schedule an explicit maintenance migration. Only the operator may retire the matching old unit after review. Preserve its backup for rollback and never remove persistent volumes, CA keys, credentials or network identity. Then reload systemd and rerun the normal command sequence. If migration is not approved, keep the previous release and running services.
+
+`PODMAN_6_REQUIRED`, `QUADLET_GENERATOR_REQUIRED` and `QUADLET_GENERATION_FAILED` remain failed gates, not successful deployment. Host acceptance for nested LXC, generation on Podman 6+, crash recovery and reboot is still required.
 
 ## Troubleshooting states
 

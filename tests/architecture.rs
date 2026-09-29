@@ -29,8 +29,22 @@ fn app_portal_is_embedded_and_published_under_control() {
 }
 
 #[test]
-fn managed_runtime_restart_policies_are_bounded() {
+fn runtime_uses_quadlet_without_enabling_generated_services() {
     let linux = std::fs::read_to_string("src/adapter/linux.rs").unwrap();
+    assert!(linux.contains("/etc/containers/systemd/{name}.container"));
+    assert!(linux.contains("super::quadlet::render"));
+    assert!(linux.contains("--property=SourcePath"));
+    assert!(linux.contains("super::podman::require_supported()?"));
+    assert!(!linux.contains("ExecStart=/usr/bin/podman run"));
+    assert!(!linux.contains("&[\"enable\""));
+    let reconcile = linux.split("fn reconcile_secret").nth(1).unwrap();
+    assert!(reconcile.find("self.quadlet_paths()?").unwrap()
+        < reconcile.find("self.ensure_images").unwrap());
+}
+
+#[test]
+fn managed_runtime_restart_policies_are_bounded() {
+    let linux = std::fs::read_to_string("src/adapter/quadlet.rs").unwrap();
     assert!(linux.contains("StartLimitIntervalSec=300"));
     assert!(linux.contains("StartLimitBurst=5"));
     assert!(linux.contains("Restart=on-failure"));

@@ -44,6 +44,12 @@ The first useful milestone is not “the project compiles.” It is an executabl
 vertical slice in which `doctor`, `plan`, `apply` and `status` share one JSON
 contract, observe real state and preserve the last valid configuration.
 
+## Linux service lifecycle
+
+The Linux adapter now requires **Podman 6+ and Quadlet** and writes boot-persistent `.container` definitions, retaining existing GNX names, image digests and storage. It refuses conflicting legacy services rather than deleting or silently migrating them. Hosting in an existing LXC additionally requires verified nesting, device/cgroup access and guest boot policy; GNX does not provision the LXC. See the [operator runbook](docs/03-operator-runbook.md#quadlet-lifecycle-and-an-existing-lxc).
+
+Repository tests cover rendering, version gates and refusal paths. Live LXC/Podman generation and reboot acceptance are not claimed by those tests.
+
 ## Public contract
 
 ```text
