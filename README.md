@@ -46,7 +46,9 @@ contract, observe real state and preserve the last valid configuration.
 
 ## Service access from app.gnx
 
-The portal includes an **Abrir Voice** button linking directly to `https://voice.gnx/`. This is navigation only: no iframe, reverse-proxy path, background health request or new naming hierarchy. The independent service still needs its own deployment, private DNS, trusted TLS and authentication. The button does not claim it is online. Updating the repository does not update an already-running dashboard; deploy the matching portal assets/runtime separately.
+The portal includes **Abrir Compute** (`https://computer.gnx/`) and **Abrir Voice** (`https://voice.gnx/`) buttons. Compute keeps `compute.gnx` and `proxmox.gnx` as aliases. This is navigation only: no iframe, reverse-proxy path, background health request or new naming hierarchy. The independent service still needs its own deployment, private DNS, trusted TLS and authentication. The button does not claim it is online. Updating the repository does not update an already-running dashboard; deploy the matching portal assets/runtime separately.
+
+The optional Voice LXC recipe is in [`config/voice.toml`](config/voice.toml), with a [private-only route configuration](config/gnx.private.example.toml), external rootless Quadlets under `runtime/voice/` and a [Rust configuration-supply helper](ops/voice/README.md). The new runtime and the guest require Podman 6+; the older installation is not upgraded by this helper. It reuses existing GNX DNS/TLS routing for `voice.gnx`; the sidecar provides private TCP transport only. The repository workflow does not create an LXC automatically or treat rendered configuration as deployment evidence.
 
 ## Linux service lifecycle
 

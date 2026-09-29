@@ -15,8 +15,11 @@ pub fn render_at(_c: &Config, ip: &str) -> Result<String, String> {
 pub fn zone(c: &Config, ip: &str) -> String {
     let revision = c.revision();
     let serial = u32::from_str_radix(&revision[..8], 16).unwrap();
-    let mut s=format!("$ORIGIN gnx.\n$TTL 60\n@ IN SOA ns.gnx. hostmaster.gnx. {serial} 60 60 3600 60\n@ IN NS ns.gnx.\nns IN A {ip}\ncompute IN A {ip}\n");
+    let mut s=format!("$ORIGIN gnx.\n$TTL 60\n@ IN SOA ns.gnx. hostmaster.gnx. {serial} 60 60 3600 60\n@ IN NS ns.gnx.\nns IN A {ip}\ncompute IN A {ip}\ncomputer IN A {ip}\nproxmox IN A {ip}\napp IN A {ip}\n");
     for r in &c.routes {
+        if r.hostname == "app.gnx" {
+            continue;
+        }
         s.push_str(&format!(
             "{} IN A {ip}\n",
             r.hostname.trim_end_matches(".gnx")

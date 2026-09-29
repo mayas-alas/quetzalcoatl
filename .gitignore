@@ -18,3 +18,6 @@
 /ops/compute/*.local.toml
 /ops/access/target/
 /ops/access/*.local.toml
+/ops/voice/target/
+/ops/voice/*.local.toml
+/voice-bundle/

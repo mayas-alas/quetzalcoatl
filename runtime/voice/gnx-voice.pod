@@ -1,0 +1,11 @@
+# Managed by GNX Voice v1
+[Unit]
+Description=GNX Voice network namespace
+# User units: network readiness is retried by the containers, not a system target.
+
+[Pod]
+PodName=gnx-voice
+# No PublishPort: only the Tailscale sidecar accepts remote traffic.
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,13 @@
+# Operator-reviewed recipe for an EXISTING LXC; separate from core gnx.toml.
+# No credentials here. Empty release inputs deliberately block rendering.
+schema = 1
+guest_hostname = "gnx-voice"
+tailscale_hostname = "voice"
+# Existing GNX Control owns DNS publication and TLS, as with compute.gnx.
+public_origin = "https://voice.gnx"
+# Supply verified, immutable OCI image references: repository@sha256:<64 hex>.
+voice_image = ""
+tailscale_image = ""
+hf_model = "Qwen/Qwen3-8B"
+hf_tts_model = "hexgrad/Kokoro-82M"
+hf_tts_provider = "fal-ai"

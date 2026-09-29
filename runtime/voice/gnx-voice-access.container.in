@@ -1,0 +1,37 @@
+# Managed by GNX Voice v1
+[Unit]
+Description=GNX Voice private access
+Wants=gnx-voice.service
+After=gnx-voice.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Container]
+Image=@TAILSCALE_IMAGE@
+Pull=never
+ContainerName=gnx-voice-access
+Pod=gnx-voice.pod
+# Userspace mode: no privileged container, host networking or TUN device.
+Environment=TS_USERSPACE=true
+Environment=TS_HOSTNAME=@TAILSCALE_HOSTNAME@
+Environment=TS_STATE_DIR=/var/lib/tailscale
+Environment=TS_AUTH_ONCE=true
+Environment=TS_AUTHKEY=file:/run/secrets/enrollment-key
+Environment=TS_SERVE_CONFIG=/config/serve.json
+Environment=TS_ACCEPT_DNS=false
+Volume=gnx-voice-state.volume:/var/lib/tailscale:Z
+Volume=%h/.config/gnx/voice/serve.json:/config/serve.json:ro,Z
+Volume=%h/.config/gnx/voice/secrets/enrollment-key:/run/secrets/enrollment-key:ro,Z
+NoNewPrivileges=true
+DropCapability=all
+LogDriver=none
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=default.target

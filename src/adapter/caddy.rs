@@ -3,10 +3,13 @@ pub fn render(c: &crate::config::Config, ip: &str, compute_name: &str, compute_i
     text = text.replacen(" admin off\n", " admin off\n pki {\n ca local {\n name \"GNX Local Auth\"\n root_cn \"GNX Root\"\n intermediate_cn \"GNX Local Auth\"\n }\n }\n", 1);
     text = text.replacen(
         "https://compute.gnx {",
-        "https://compute.gnx, https://proxmox.gnx {",
+        "https://compute.gnx, https://computer.gnx, https://proxmox.gnx {",
         1,
     );
-    text.push_str(&format!("https://app.gnx {{\n bind {ip}\n tls internal\n root * /gnx-app\n header X-Content-Type-Options nosniff\n header Referrer-Policy no-referrer\n file_server\n}}\n"));
+    // Preserve an explicitly configured external app without duplicate sites.
+    if !c.routes.iter().any(|r| r.hostname == "app.gnx") {
+        text.push_str(&format!("https://app.gnx {{\n bind {ip}\n tls internal\n root * /gnx-app\n header X-Content-Type-Options nosniff\n header Referrer-Policy no-referrer\n file_server\n}}\n"));
+    }
     for r in &c.routes {
         text.push_str(&format!(
             "https://{} {{\n bind {ip}\n tls internal\n reverse_proxy {}\n}}\n",

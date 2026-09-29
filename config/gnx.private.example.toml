@@ -1,0 +1,22 @@
+# PRIVATE-ONLY gateway example; illustrative IPs, NOT deployment observations.
+# Keep the existing gateway identity, subnet and other routes when merging.
+# app.gnx is the built-in portal: do NOT add a duplicate app.gnx route.
+# No Windows/LAN port publishing or loopback forwarding is requested here.
+schema = 1
+instance = "gnx"
+node = "compute"
+
+[network]
+subnet = "10.90.0.0/24"
+# Replace with the existing gateway's observed Tailscale identity.
+identity_ip = "100.64.0.10"
+
+[[routes]]
+hostname = "voice.gnx"
+# Replace with the ONLINE LXC sidecar IP returned by gnx-voice-config route.
+# HTTP is inside encrypted Tailscale transport; browser TLS stays at GNX Control.
+upstream = "http://100.64.0.20:8080"
+
+# Tailnet DNS: app.gnx and voice.gnx -> gateway identity, NOT sidecar IP.
+# ACL/grants: authorized clients -> gateway TCP 443; gateway -> voice TCP 8080.
+# HF inference uses outbound Internet; private-only refers to service ingress.

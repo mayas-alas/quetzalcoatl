@@ -1,0 +1,42 @@
+# Managed by GNX Voice v1
+[Unit]
+Description=GNX Voice
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Container]
+Image=@VOICE_IMAGE@
+Pull=never
+ContainerName=gnx-voice
+Pod=gnx-voice.pod
+# Root inside the user namespace maps to the unprivileged service account.
+User=0
+Environment=NODE_ENV=production
+Environment=BIND_HOST=127.0.0.1
+Environment=PORT=8080
+Environment=APP_ORIGIN=@PUBLIC_ORIGIN@
+Environment=CLOUD_ROUTE=public
+Environment=VOICE_ENABLED=true
+Environment=VOICE_PROVIDER=huggingface
+Environment=HF_MODEL=@HF_MODEL@
+Environment=HF_TTS_MODEL=@HF_TTS_MODEL@
+Environment=HF_TTS_PROVIDER=@HF_TTS_PROVIDER@
+Environment=HF_TOKEN_FILE=/run/secrets/hf-token
+Environment=GNX_API_TOKEN_FILE=/run/secrets/api-token
+Volume=%h/.config/gnx/voice/secrets/hf-token:/run/secrets/hf-token:ro,Z
+Volume=%h/.config/gnx/voice/secrets/api-token:/run/secrets/api-token:ro,Z
+NoNewPrivileges=true
+DropCapability=all
+ReadOnly=true
+Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m
+LogDriver=none
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=default.target

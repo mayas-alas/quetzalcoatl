@@ -107,6 +107,10 @@ Before running in an already-created LXC:
 4. Install the verified GNX release, preserve protected state, then run `gnx doctor`, `gnx plan`, `gnx apply`, and `gnx status` **inside that Linux runtime**. The Windows checkout or a browser response is not guest acceptance.
 5. Inspect each generated service's `SourcePath` and live health. In an approved maintenance window, verify guest restart and host reboot restore the same identity, storage and authenticated service health without reapplying.
 
+### Optional Voice service
+
+Use the separate [Voice configuration recipe and Rust helper](../ops/voice/README.md) for an existing LXC. It reuses the declared optional `Route` contract, CoreDNS zone generation, and Control's GNX TLS identity. Tailscale Serve forwards private TCP to the loopback-only app; it does not replace the `voice.gnx` browser address or own its certificate. Do not publish the route until guest enrollment, peer reachability, application auth and health have been verified. No guest is selected automatically.
+
 ### Existing handwritten services
 
 `QUADLET_MIGRATION_REQUIRED` means an existing `.service` shadows the intended generated unit. GNX refuses **before reconciliation**: it does not stop, disable, delete or adopt that file. `RUNTIME_UNIT_CONFLICT` similarly protects unowned or symlinked Quadlet files. Back up the exact unit configuration, last-valid state and protected storage; review unit ownership and dependencies; schedule an explicit maintenance migration. Only the operator may retire the matching old unit after review. Preserve its backup for rollback and never remove persistent volumes, CA keys, credentials or network identity. Then reload systemd and rerun the normal command sequence. If migration is not approved, keep the previous release and running services.
