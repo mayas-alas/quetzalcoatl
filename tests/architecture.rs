@@ -29,6 +29,19 @@ fn app_portal_is_embedded_and_published_under_control() {
 }
 
 #[test]
+fn voice_access_is_a_plain_independent_service_link() {
+    let html = std::fs::read_to_string("runtime/control/app/index.html").unwrap();
+    assert_eq!(html.matches("id=\"voice-link\"").count(), 1);
+    assert!(html.contains("id=\"voice-link\" class=\"button\" href=\"https://voice.gnx/\" rel=\"noreferrer\""));
+    assert!(html.contains("Abrir Voice"));
+    assert!(!html.contains("<iframe"));
+    let js = std::fs::read_to_string("runtime/control/app/app.js").unwrap();
+    assert!(!js.contains("voice.gnx"), "Navigation must not trigger background service requests");
+    let caddy = std::fs::read_to_string("src/adapter/caddy.rs").unwrap();
+    assert!(!caddy.contains("voice.gnx"), "The link must not provision a route");
+}
+
+#[test]
 fn runtime_uses_quadlet_without_enabling_generated_services() {
     let linux = std::fs::read_to_string("src/adapter/linux.rs").unwrap();
     assert!(linux.contains("/etc/containers/systemd/{name}.container"));

@@ -44,6 +44,10 @@ The first useful milestone is not “the project compiles.” It is an executabl
 vertical slice in which `doctor`, `plan`, `apply` and `status` share one JSON
 contract, observe real state and preserve the last valid configuration.
 
+## Service access from app.gnx
+
+The portal includes an **Abrir Voice** button linking directly to `https://voice.gnx/`. This is navigation only: no iframe, reverse-proxy path, background health request or new naming hierarchy. The independent service still needs its own deployment, private DNS, trusted TLS and authentication. The button does not claim it is online. Updating the repository does not update an already-running dashboard; deploy the matching portal assets/runtime separately.
+
 ## Linux service lifecycle
 
 The Linux adapter now requires **Podman 6+ and Quadlet** and writes boot-persistent `.container` definitions, retaining existing GNX names, image digests and storage. It refuses conflicting legacy services rather than deleting or silently migrating them. Hosting in an existing LXC additionally requires verified nesting, device/cgroup access and guest boot policy; GNX does not provision the LXC. See the [operator runbook](docs/03-operator-runbook.md#quadlet-lifecycle-and-an-existing-lxc).
