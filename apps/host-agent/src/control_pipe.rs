@@ -155,7 +155,13 @@ fn run_windows() -> Result<(), Box<dyn std::error::Error>> {
             // state-changing work remain behind the authorization decision.
             if let Some(frame) = read_client_frame(pipe) {
                 if authorize_client(pipe) {
-                    serve_client_frame(pipe, &frame, &mut current)?;
+                    // A client can close immediately after submitting a valid
+                    // frame (console interruption, process termination, or a
+                    // timeout). WriteFile/FlushFileBuffers then reports a
+                    // broken pipe. That is a per-connection failure: never let
+                    // it terminate the only server thread while SCM continues
+                    // to report the surrounding service process as Running.
+                    let _ = serve_client_frame(pipe, &frame, &mut current);
                 }
             }
         }
