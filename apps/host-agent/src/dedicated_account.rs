@@ -260,7 +260,19 @@ fn logon_managed_identity(password: &str) -> std::io::Result<ManagedIdentity> {
 }
 
 #[cfg(windows)]
+fn managed_process_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[cfg(windows)]
 fn bootstrap_profile(password: &str) -> std::io::Result<std::path::PathBuf> {
+    // LoadUserProfile/UnloadUserProfile operate on shared per-user state.
+    // Serialize bootstrap with every WSL child so keepalive and monitoring
+    // cannot race provisioning for the same dedicated Windows profile.
+    let _guard = managed_process_guard();
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0, WAIT_TIMEOUT};
     use windows_sys::Win32::System::Threading::{
@@ -413,6 +425,10 @@ pub(crate) fn run_wsl_as_windows_identity(
         STARTUPINFOW,
     };
 
+    // Keep the profile token lifecycle single-threaded. The service has a
+    // keepalive, a status monitor, and control requests that otherwise call
+    // LoadUserProfile/UnloadUserProfile concurrently for gnxnodesvc.
+    let _guard = managed_process_guard();
     let blob_path = crate::state::state_dir().join(PASSWORD_BLOB);
     let mut password = decrypt_password_file(&blob_path)?;
     let identity_result = logon_managed_identity(&password);
@@ -1262,6 +1278,8 @@ mod tests {
         assert!(source.contains("CreateEnvironmentBlock"));
         assert!(source.contains("DestroyEnvironmentBlock"));
         assert!(source.contains("UnloadUserProfile"));
+        assert!(source.contains("managed_process_guard()"));
+        assert!(source.contains("OnceLock<std::sync::Mutex<()>>"));
     }
 
     #[cfg(windows)]

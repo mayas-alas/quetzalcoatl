@@ -251,6 +251,7 @@ fn run_wsl(script: &str, args: &[&str]) -> io::Result<std::process::Output> {
     ];
     command.extend(args.iter().map(|arg| (*arg).to_string()));
     crate::dedicated_account::run_wsl_as_windows_identity(&command)
+        .map_err(|error| io::Error::new(error.kind(), format!("WSL_IDENTITY_FAILED: {error}")))
 }
 
 fn wsl_reports_no_distributions(status: Option<i32>, stdout: &[u8], stderr: &[u8]) -> bool {
