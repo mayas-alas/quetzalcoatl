@@ -36,34 +36,36 @@ fn main() {
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(&'static str, bool)> {
-    let mut command = None;
+    let mut words = Vec::new();
     let mut pause = false;
     for arg in args {
         if arg == "--pause" && !pause {
             pause = true;
-            continue;
+        } else {
+            words.push(arg);
         }
-        if command.is_some() {
-            return Err(
-                "invalid command line; use gnx-setup help (never pass credentials as arguments)"
-                    .into(),
-            );
-        }
-        command = Some(match arg.as_str() {
-            "help" | "--help" | "-h" => "help",
-            "version" | "--version" | "-v" => "version",
-            "status" => "status",
-            "provision" => "provision",
-            "join" => "join",
-            "retry" => "retry",
-            "cancel" => "cancel",
-            _ => return Err(
-                "invalid command line; use gnx-setup help (never pass credentials as arguments)"
-                    .into(),
-            ),
-        });
     }
-    Ok((command.unwrap_or("setup"), pause))
+    let command = match words
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        [] | ["setup"] => "setup",
+        ["help" | "--help" | "-h"] => "help",
+        ["version" | "--version" | "-v"] => "version",
+        ["status"] => "status",
+        ["provision"] | ["password"] | ["set", "password"] => "password",
+        ["join"] => "join",
+        ["retry"] => "retry",
+        ["cancel"] => "cancel",
+        _ => {
+            return Err(
+                "invalid command line; use gnx help (never pass credentials as arguments)".into(),
+            )
+        }
+    };
+    Ok((command, pause))
 }
 
 fn run(command: &str) -> Result<()> {
@@ -71,18 +73,21 @@ fn run(command: &str) -> Result<()> {
         "help" => {
             println!("GnX Node Setup {}", env!("CARGO_PKG_VERSION"));
             println!(
-                "Usage: gnx-setup [status|provision|join|retry|cancel|help|version] [--pause]"
+                "Usage: gnx [setup|status|set password|join|retry|cancel|help|version] [--pause]"
             );
             println!("Run in an Administrator terminal. No command: guided initial setup.");
             println!(
                 "Proxmox password, confirmation, then Tailscale auth key: hidden prompts only."
             );
             println!(
+                "set password: securely set or rotate the Proxmox root password with hidden prompts."
+            );
+            println!(
                 "status: read-only; retry: reconcile without credentials; cancel: safe checkpoint."
             );
             println!("Existing ready nodes are preserved. Daily access: https://app.gnx");
         }
-        "version" => println!("gnx-setup {}", env!("CARGO_PKG_VERSION")),
+        "version" => println!("gnx {}", env!("CARGO_PKG_VERSION")),
         "status" => {
             finish(send(&request(Operation::GetProgress))?)?;
         }
@@ -92,7 +97,7 @@ fn run(command: &str) -> Result<()> {
         "cancel" => {
             finish(send(&request(Operation::Cancel))?)?;
         }
-        "provision" => {
+        "password" => {
             provision()?;
         }
         "join" => {
@@ -168,19 +173,20 @@ fn interactive() -> Result<()> {
 
 fn provision() -> Result<Progress> {
     let current = get_progress()?;
-    if current.state == NodeState::NodeReady {
-        print_progress(&current);
-        check_error(&current)?;
-        return Ok(current);
-    }
-    if has_enrollment(&current)
-        || current.requires_restart
+    let updating_existing = has_enrollment(&current) || current.state == NodeState::NodeReady;
+    if current.requires_restart
         || !matches!(
             current.state,
-            NodeState::New | NodeState::Blocked | NodeState::Failed | NodeState::RecoveryRequired
+            NodeState::New
+                | NodeState::Blocked
+                | NodeState::Failed
+                | NodeState::RecoveryRequired
+                | NodeState::NodeReady
         )
     {
-        return Err("checkpoint does not allow initial provisioning; use status or retry; existing credentials were preserved".into());
+        return Err(
+            "checkpoint does not allow setting the Proxmox password; use gnx status first".into(),
+        );
     }
     require_terminal()?;
     let password = prompt_secret("Proxmox password: ")?;
@@ -192,11 +198,17 @@ fn provision() -> Result<Progress> {
         return Err("Proxmox passwords do not match; nothing was sent".into());
     }
     println!("Preparing Windows and the Linux runtime; this can take several minutes...");
-    finish(send_secrets(
+    let progress = finish(send_secrets(
         &request(Operation::Provision),
         None,
         Some(&password),
-    )?)
+    )?)?;
+    if updating_existing {
+        println!("Proxmox password updated; reconciling the enrolled runtime...");
+        finish(send(&request(Operation::Retry))?)
+    } else {
+        Ok(progress)
+    }
 }
 
 fn join_mesh() -> Result<Progress> {
@@ -281,7 +293,7 @@ fn print_progress(progress: &Progress) {
         println!("Error code: {code}");
     }
     if progress.requires_restart || progress.state == NodeState::RebootRequired {
-        println!("Restart required; restart Windows, then run gnx-setup again.");
+        println!("Restart required; restart Windows, then run gnx again.");
     }
     if let Some(ip) = progress
         .node_private_ip
@@ -486,9 +498,18 @@ mod tests {
             parse_args(["status".into(), "--pause".into()]).unwrap(),
             ("status", true)
         );
+        assert_eq!(
+            parse_args(["set".into(), "password".into()]).unwrap(),
+            ("password", false)
+        );
+        assert_eq!(
+            parse_args(["password".into()]).unwrap(),
+            ("password", false)
+        );
         for args in [
             vec!["--password", "do-not-print"],
             vec!["join", "tskey-auth-do-not-print"],
+            vec!["set", "password", "do-not-print"],
             vec!["--pause", "--pause"],
         ] {
             let error = parse_args(args.into_iter().map(str::to_owned))

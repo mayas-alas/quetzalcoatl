@@ -12,7 +12,7 @@ y su distro WSL2 `gnx-node`. Podman/systemd ejecutan cuatro capacidades:
 | `gateway` | Caddy | HTTPS para `app.gnx` y `compute.gnx` |
 | `compute` | Imagen sellada Proxmox | KVM y HTTPS interno `8006` |
 
-Desde v0.1.2, **Setup es una CLI Rust mínima**. v0.1.3 la publica en el PATH del host y corrige el flujo de actualización. No hay WebView2, assets locales
+Desde v0.1.2, **Setup es una CLI Rust mínima**. v0.1.4 la publica como `gnx` en el PATH del host, permite rotar de forma segura la contraseña de Proxmox y conserva el flujo de actualización. No hay WebView2, assets locales
 de Setup ni puente de credenciales en el navegador. `https://app.gnx` conserva
 exclusivamente la vista cotidiana de estado y acceso a compute.
 
@@ -23,7 +23,7 @@ identidad dedicada, distro, imágenes ni límites de confianza.
 
 1. Burn eleva e instala el MSI. El MSI copia archivos y registra/inicia
    `GnXHostAgent`; no ejecuta provisioning Linux dentro de su transacción.
-2. Al terminar, el usuario pulsa **Launch** para abrir `gnx-setup --pause` elevado.
+2. Al terminar, el usuario pulsa **Launch** para abrir `gnx --pause` elevado.
    Burn usa `ApprovedExeForElevation` y la ruta escrita por el MSI en HKLM.
    Las instalaciones silenciosas no abren prompts. Con MSI directo se ejecuta
    la consola instalada manualmente como administrador.
@@ -39,15 +39,19 @@ identidad dedicada, distro, imágenes ni límites de confianza.
 
 ```powershell
 # En PowerShell elevado, después de instalar:
-& "${env:ProgramFiles(x86)}\GnX Node\gnx-setup.exe"
-& "${env:ProgramFiles(x86)}\GnX Node\gnx-setup.exe" status
-& "${env:ProgramFiles(x86)}\GnX Node\gnx-setup.exe" retry
+& "${env:ProgramFiles(x86)}\GnX Node\gnx.exe"
+& "${env:ProgramFiles(x86)}\GnX Node\gnx.exe" status
+& "${env:ProgramFiles(x86)}\GnX Node\gnx.exe" set password
+& "${env:ProgramFiles(x86)}\GnX Node\gnx.exe" retry
 ```
 
-El MSI agrega el directorio instalado al PATH de sistema. Una terminal nueva del usuario host puede invocar `gnx-setup`; la identidad dedicada sigue sin login interactivo y no ejecuta la CLI.
+El MSI agrega el directorio instalado al PATH de sistema. Una terminal nueva del usuario host puede invocar `gnx`; la identidad dedicada sigue sin login interactivo y no ejecuta la CLI.
 
-Comandos: alta guiada sin argumentos; `status`, `provision`, `join`, `retry`,
-`cancel`, `help`, `version`. `--pause` mantiene visible el resultado en una
+Comandos: alta guiada sin argumentos o con `setup`; `status`, `set password`,
+`join`, `retry`, `cancel`, `help`, `version`. `password` y `provision` se
+mantienen como alias de `set password`. Esta operación permite definir o rotar
+la contraseña de `root@pam` sin reemplazar la identidad mesh existente; el valor
+se solicita dos veces con eco desactivado y nunca se acepta en argv. `--pause` mantiene visible el resultado en una
 consola interactiva. No se aceptan credenciales por argumentos, variables de
 entorno ni entrada redirigida. Un error del servicio produce salida no cero.
 

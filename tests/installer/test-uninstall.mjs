@@ -16,20 +16,22 @@ const [product, bundle, wixproj, buildScript, readme] = await Promise.all([
   read('installer/README.md'),
 ]);
 
-assert.match(product, /Version="0\.1\.3\.0"/);
-assert.match(bundle, /Version="0\.1\.3\.0"/);
+assert.match(product, /Version="0\.1\.4\.0"/);
+assert.match(bundle, /Version="0\.1\.4\.0"/);
 assert.match(product, /UpgradeCode="5EAA2C0C-1E4C-4E4D-89E5-3D6F1A7E4C11"/);
 assert.match(bundle, /UpgradeCode="DB8BFB10-FA20-4F4F-9B3E-35DBD15A2A1A"/);
-assert.match(bundle, /LaunchTarget="\[ProgramFilesFolder\]GnX Node\\gnx-setup\.exe"/);
+assert.match(bundle, /LaunchTarget="\[ProgramFilesFolder\]GnX Node\\gnx\.exe"/);
 assert.match(bundle, /LaunchTargetElevatedId="GnxSetupElevated"/);
 assert.match(bundle, /ApprovedExeForElevation[^>]*Id="GnxSetupElevated"[^>]*Key="SOFTWARE\\GnX\\Node"[^>]*Value="SetupPath"[^>]*Bitness="always32"/);
 assert.match(product, /RegistryValue[^>]*Root="HKLM"[^>]*Key="SOFTWARE\\GnX\\Node"[^>]*Name="SetupPath"[^>]*Value="\[#SetupExe\]"/);
 assert.match(product, /RemoveFolderEx[^>]*Id="RemoveLegacyWebViewData"[^>]*On="install"/);
 assert.match(product, /LEGACYWEBVIEWCACHE[^>]*gnx-setup\.exe\.WebView2/);
-assert.match(product, /Environment[^>]*Id="GnxSetupHostPath"[^>]*Name="PATH"[^>]*Value="\[INSTALLFOLDER\]"[^>]*Part="last"[^>]*Action="set"[^>]*System="yes"/);
+assert.match(product, /Environment[^>]*Id="GnxCliHostPath"[^>]*Name="PATH"[^>]*Value="\[INSTALLFOLDER\]"[^>]*Part="last"[^>]*Action="set"[^>]*System="yes"/);
 assert.match(bundle, /LaunchArguments="--pause"/);
 assert.doesNotMatch(bundle, /WebView2|RegistrySearch|EdgeUpdate/i);
 assert.doesNotMatch(await read('installer/bundle/Bundle.wixproj'), /WixToolset\.Util/i);
+assert.match(wixproj, /target\\release\\gnx\.exe/);
+assert.doesNotMatch(wixproj, /target\\release\\gnx-setup\.exe/);
 assert.doesNotMatch(wixproj, /SetupUi|apps\\setup\\ui/);
 assert.doesNotMatch(buildScript, /apps\\setup\\ui|Copy-Item.*SetupUi/);
 assert.match(readme, /silent installs do not prompt/i);

@@ -380,6 +380,7 @@ fn allowed(operation: Operation, state: &NodeState) -> bool {
                 | NodeState::Failed
                 | NodeState::RecoveryRequired
                 | NodeState::RebootRequired
+                | NodeState::NodeReady
         ),
         Operation::JoinMesh => matches!(
             state,
@@ -458,6 +459,18 @@ mod tests {
         let next = handle(&request(Operation::Provision), &crate::state::initial());
         assert_eq!(next.state, NodeState::WindowsReady);
         assert_eq!(next.sequence, 1);
+    }
+
+    #[test]
+    fn provision_can_rotate_password_without_destroying_ready_enrollment() {
+        let mut current = crate::state::initial();
+        current.state = NodeState::NodeReady;
+        current.phase = "ready".into();
+        current.node_private_ip = Some("100.64.0.12".into());
+        let next = handle(&request(Operation::Provision), &current);
+        assert_eq!(next.state, NodeState::WindowsReady);
+        assert_eq!(next.node_private_ip, current.node_private_ip);
+        assert_ne!(next.error_code.as_deref(), Some("INVALID_TRANSITION"));
     }
 
     #[test]

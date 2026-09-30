@@ -3,6 +3,10 @@ name = "gnx-setup"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "gnx"
+path = "src/main.rs"
+
 [dependencies]
 gnx-control-protocol = { path = "../../crates/control-protocol" }
 serde_json.workspace = true
