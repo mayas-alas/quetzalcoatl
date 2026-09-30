@@ -8,11 +8,28 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = relative => readFile(join(root, relative), 'utf8');
 
-const [product, bundle, readme] = await Promise.all([
+const [product, bundle, wixproj, buildScript, readme] = await Promise.all([
   read('installer/Product.wxs'),
   read('installer/bundle/Bundle.wxs'),
+  read('installer/GnxNode.wixproj'),
+  read('installer/scripts/build.ps1'),
   read('installer/README.md'),
 ]);
+
+assert.match(product, /Version="0\.1\.2\.0"/);
+assert.match(bundle, /Version="0\.1\.2\.0"/);
+assert.match(bundle, /LaunchTarget="\[ProgramFilesFolder\]GnX Node\\gnx-setup\.exe"/);
+assert.match(bundle, /LaunchTargetElevatedId="GnxSetupElevated"/);
+assert.match(bundle, /ApprovedExeForElevation[^>]*Id="GnxSetupElevated"[^>]*Key="SOFTWARE\\GnX\\Node"[^>]*Value="SetupPath"[^>]*Bitness="always32"/);
+assert.match(product, /RegistryValue[^>]*Root="HKLM"[^>]*Key="SOFTWARE\\GnX\\Node"[^>]*Name="SetupPath"[^>]*Value="\[#SetupExe\]"/);
+assert.match(bundle, /LaunchArguments="--pause"/);
+assert.doesNotMatch(bundle, /WebView2|RegistrySearch|EdgeUpdate/i);
+assert.doesNotMatch(await read('installer/bundle/Bundle.wixproj'), /WixToolset\.Util/i);
+assert.doesNotMatch(wixproj, /SetupUi|apps\\setup\\ui/);
+assert.doesNotMatch(buildScript, /apps\\setup\\ui|Copy-Item.*SetupUi/);
+assert.match(readme, /silent installs do not prompt/i);
+assert.match(readme, /Start-Process -Verb RunAs -Wait/);
+
 
 // MSI owns only the Windows package: service lifecycle plus installed payload.
 assert.match(product, /ServiceInstall[^>]*Name="GnXHostAgent"[^>]*Start="auto"/);

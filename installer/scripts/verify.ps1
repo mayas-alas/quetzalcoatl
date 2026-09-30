@@ -1,6 +1,6 @@
 param(
     [Alias("Artifact")]
-    [string]$MsiArtifact = (Join-Path $PSScriptRoot "..\..\build\installer\en-us\GnxNode.msi"),
+    [string]$MsiArtifact = (Join-Path $PSScriptRoot "..\..\build\installer\GnxNode.msi"),
     [string]$BurnArtifact = (Join-Path $PSScriptRoot "..\..\build\installer\GnxNodeSetup.exe")
 )
 $ErrorActionPreference = "Stop"

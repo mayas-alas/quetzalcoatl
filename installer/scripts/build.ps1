@@ -25,7 +25,7 @@ if ($actualRootfsDigest -ne $manifestDigest) {
     throw "Sealed WSL rootfs digest mismatch: expected $manifestDigest, got $actualRootfsDigest"
 }
 New-Item -ItemType Directory -Force $out | Out-Null
-$msi = Join-Path $out "en-us\GnxNode.msi"
+$msi = Join-Path $out "GnxNode.msi"
 $exe = Join-Path $out "GnxNodeSetup.exe"
 foreach ($artifact in @($msi, $exe)) {
     if (Test-Path -LiteralPath $artifact -PathType Leaf) {
@@ -34,12 +34,10 @@ foreach ($artifact in @($msi, $exe)) {
 }
 Push-Location $root
 try {
-    cargo build --workspace --release
+    cargo build --workspace --release --locked
     if ($LASTEXITCODE) { throw "cargo build failed" }
 }
 finally { Pop-Location }
-$ui = Join-Path $out "ui"; if (Test-Path -LiteralPath $ui) { Remove-Item -LiteralPath $ui -Recurse -Force }; New-Item -ItemType Directory -Force $ui | Out-Null
-Copy-Item (Join-Path $root "apps\setup\ui\*") $ui -Recurse -Force
 $node = Join-Path $out "..\payload\node"; if (Test-Path -LiteralPath $node) { Remove-Item -LiteralPath $node -Recurse -Force }; New-Item -ItemType Directory -Force $node | Out-Null
 Copy-Item (Join-Path $root "payload\node\*") $node -Recurse -Force
 $hostPayload = Join-Path $out "..\payload\host"; if (Test-Path -LiteralPath $hostPayload) { Remove-Item -LiteralPath $hostPayload -Recurse -Force }; New-Item -ItemType Directory -Force $hostPayload | Out-Null
@@ -68,7 +66,7 @@ $project = Join-Path $PSScriptRoot "..\GnxNode.wixproj"
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { throw "WiX build unavailable: dotnet SDK not found" }
 dotnet build $project -p:Configuration=$Configuration -p:OutputPath=$out
 if ($LASTEXITCODE) { throw "WiX build failed" }
-if (!(Test-Path -LiteralPath $msi)) { throw "WiX did not produce the localized MSI: $msi" }
+if (!(Test-Path -LiteralPath $msi)) { throw "WiX did not produce the MSI: $msi" }
 
 # Burn is intentionally built after MSI so the bundle embeds this exact MSI.
 $bundle = Join-Path $PSScriptRoot "..\bundle\Bundle.wixproj"

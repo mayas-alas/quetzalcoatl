@@ -1,20 +1,20 @@
 # GnX Node installer
 
-Installer assets live with the product workspace. `scripts/build.ps1` builds both release executables, stages the local Setup UI, the host payload, and the node payload (including the PWA), then invokes WiX from this directory.
+Installer assets live with the product workspace. `scripts/build.ps1` builds both release executables, stages the host and node payloads (including the PWA), then invokes WiX from this directory.
 
-The MSI is the package boundary: it copies files and registers `GnXHostAgent`; it does not run Linux provisioning. `bundle/Bundle.wixproj` is the Burn bootstrapper boundary and refuses to continue when the Evergreen WebView2 Runtime registry marker is absent. Build the MSI first, then the bundle:
+The MSI is the package boundary: it copies files and registers `GnXHostAgent`; it does not run Linux provisioning. `bundle/Bundle.wixproj` is the Burn bootstrapper boundary and offers the installed Rust console Setup as its elevated post-transaction Launch action. Build the MSI first, then the bundle:
 
 ```powershell
 ./installer/scripts/build.ps1
 ./installer/scripts/verify.ps1
 ```
 
-The deterministic final artifacts are `build/installer/en-us/GnxNode.msi` and
+The deterministic final artifacts are `build/installer/GnxNode.msi` and
 `build/installer/GnxNodeSetup.exe`; the verification script checks both files,
 their non-zero sizes, and SHA-256 hashes. To compile Burn independently after
 an MSI build, run `dotnet build installer/bundle/Bundle.wixproj -p:Configuration=release`.
 
-Setup uses the Windows WebView2 desktop control. The Evergreen WebView2 Runtime must be installed on the machine before launching `gnx-setup.exe`; Burn detects the runtime but does not download or bootstrap it. Install the runtime from Microsoft on offline/provisioned images, then launch Setup from the installed directory.
+Setup is a minimal elevated Rust console and needs no browser runtime or packaged web assets. Its default workflow completes the Proxmox password step and then the Tailscale key step through the existing administrator-only named pipe, prompting only when required; `status`, `retry`, `cancel`, `help`, and `version` are safe operational commands. Re-running after an upgrade preserves the existing node and asks for credentials only when enrollment is needed; silent installs do not prompt or launch interactive onboarding. For a direct MSI install, run the default onboarding flow elevated with `Start-Process -Verb RunAs -Wait -FilePath (Join-Path ${env:ProgramFiles(x86)} 'GnX Node\\gnx-setup.exe')`; for a later credential-free diagnostic use `-ArgumentList 'retry'` (or `status`). Add `-ArgumentList '--pause'` when an externally spawned terminal must remain visible after success or error.
 
 Onboarding credentials are accepted only by the five allowlisted control
 operations. Setup writes a one-shot bundle under the interactive user's
@@ -23,7 +23,7 @@ named pipe; the host consumes and unlinks the bundle and stages separate
 `TS_AUTHKEY`/`PROXMOX_PASSWORD` files for the fixed `install.run` contract.
 Neither value is placed in argv, progress, logs, or durable state. The host
 creates the product private CA under its protected state directory and reports
-only the public certificate path plus explicit Split DNS and CA-trust actions.
+only the public certificate path plus explicit Split DNS and CA-trust actions. The named pipe remains the sole secret boundary; credentials are never sent through the PWA.
 
 ## Uninstallation boundary
 
@@ -31,8 +31,7 @@ Uninstalling the MSI is intentionally a small, achievable package operation: it 
 and removes `GnXHostAgent` and deletes the installed Setup/payload files. It does not
 pretend to tear down the already-provisioned WSL node, runtime data, private CA,
 `hosts` entries, or port-proxy rules. Setup therefore exposes no fake `Deprovision`
-action. Full runtime teardown is a separate future operation and must be implemented
-and tested as a complete cleanup mission before it is offered.
+action. There is no runtime teardown operation: uninstall retains the node, state, CA material, and credentials for recovery or manual removal.
 
 ### Minimal uninstall acceptance checklist
 
