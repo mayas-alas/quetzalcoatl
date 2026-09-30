@@ -7,7 +7,7 @@ node tests/node-runtime/test-runtime.mjs
 node tests/security/test-network-pwa.mjs
 ```
 
-These checks validate the reviewed contracts: private hostnames, explicit gateway TLS files, backend CA validation for `compute.gnx`, no insecure TLS bypass, ingress restricted to loopback and `tailscale0`, protected secret-file inputs, local-only onboarding bridge access, and an asset-only offline cache with no credentials or privileged browser APIs.
+These checks validate the reviewed contracts: private hostnames, explicit gateway TLS files, backend CA validation for `compute.gnx`, no insecure TLS bypass, ingress restricted to loopback and `tailscale0`, protected secret-file inputs, CLI-only onboarding through the named pipe, and an asset-only offline cache with no credentials or privileged browser APIs.
 
 The following require an authorized tailnet and cannot be proven by static tests:
 

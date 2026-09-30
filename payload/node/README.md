@@ -55,10 +55,10 @@ endpoints. Its JSONL includes sanitized `tailscale_ip` and `pihole_ip` fields an
 the required operator actions: configure Split DNS for `gnx` to the reported
 Tailscale address and trust the gateway CA on authorized tailnet clients.
 
-The remote `https://app.gnx` PWA has no bridge or control privilege. The same
-static assets show credential onboarding only under the trusted `gnx://ui`
-WebView origin; credentials are posted to the allowlisted local `JoinMesh`
-bridge and cleared immediately. The service worker caches only immutable app
+The remote `https://app.gnx` PWA has no bridge, onboarding form, or control
+privilege. Enrollment is performed by the elevated `gnx-setup` console through
+the existing administrator-only named pipe; the one-shot file transport is
+consumed and removed by the host. The service worker caches only immutable app
 assets, never compute responses, authentication data, or secrets.
 
 Host-only acceptance gates are Podman image pull/start, KVM and TUN access,

@@ -1,12 +1,5 @@
-// PWA sin sesiones propias, credenciales ni APIs privilegiadas.
-// La instalación solo puede usar los assets locales confiables de GnX Setup.
-// Un documento servido por https://app.gnx nunca puede ver el puente gnx://.
+// PWA de estado y acceso, sin APIs administrativas.
 const isTrustedAppOrigin = window.location.protocol === 'https:' && window.location.hostname === 'app.gnx';
-const isTrustedLocalSetup = window.location.protocol === 'gnx:' && window.location.hostname === 'ui';
-
-const onboarding = document.querySelector('#onboarding');
-const onboardingForm = document.querySelector('#onboarding-form');
-const onboardingStatus = document.querySelector('#onboarding-status');
 const statusTitle = document.querySelector('#status-title');
 const statusMessage = document.querySelector('#status-message');
 const statusBar = document.querySelector('#status-bar');
@@ -56,39 +49,6 @@ async function refreshStatus() {
 if (isTrustedAppOrigin) {
   void refreshStatus();
   window.setInterval(() => void refreshStatus(), 15000);
-}
-
-if (isTrustedLocalSetup && onboarding && onboardingForm) {
-  onboarding.hidden = false;
-  onboardingForm.addEventListener('submit', async event => {
-    event.preventDefault();
-    const key = document.querySelector('#tailscale-key');
-    const password = document.querySelector('#proxmox-password');
-    const submit = onboardingForm.querySelector('button[type="submit"]');
-    submit.disabled = true;
-    onboardingStatus.textContent = 'Entregando las credenciales al servicio local…';
-    try {
-      const response = await fetch('gnx://bridge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          method: 'JoinMesh',
-          tailscale_auth_key: key.value,
-          proxmox_password: password.value
-        })
-      });
-      const result = await response.json();
-      if (result.error) throw new Error(result.error);
-      onboardingStatus.textContent = result.progress?.message || 'Credenciales aceptadas por el servicio local.';
-    } catch (_error) {
-      onboardingStatus.textContent = 'No se pudo contactar el servicio local. Revisa GnX Setup e inténtalo de nuevo.';
-    } finally {
-      // Clear both controls immediately; no credential is retained in page state.
-      key.value = '';
-      password.value = '';
-      submit.disabled = false;
-    }
-  });
 }
 
 if (isTrustedAppOrigin && 'serviceWorker' in navigator) {
