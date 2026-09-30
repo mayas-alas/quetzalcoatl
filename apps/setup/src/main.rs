@@ -1,161 +1,500 @@
+//! Minimal console onboarding. Only the Windows service performs privileged work.
 mod agent_client;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let ui = locate_ui();
-    if !ui.exists() {
-        return Err(format!("Setup UI asset missing: {}", ui.display()).into());
+use gnx_control_protocol::{NodeState, Operation, Progress, Request, Response, PROTOCOL_VERSION};
+use std::io::{self, IsTerminal, Write};
+use uuid::Uuid;
+use zeroize::Zeroizing;
+
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+#[derive(Debug, PartialEq, Eq)]
+enum Action {
+    Password,
+    MeshKey,
+    Retry,
+    Stop,
+}
+
+fn main() {
+    let (result, pause) = match parse_args(std::env::args().skip(1)) {
+        Ok((command, pause)) => (run(command), pause),
+        Err(error) => (Err(error), false),
+    };
+    if let Err(error) = &result {
+        eprintln!("Setup failed: {error}");
     }
-    #[cfg(windows)]
-    launch_local_ui(&ui)?;
+    if pause && io::stdin().is_terminal() && io::stdout().is_terminal() {
+        print!("Press Enter to close...");
+        let _ = io::stdout().flush();
+        let mut ignored = Zeroizing::new(String::new());
+        let _ = io::stdin().read_line(&mut ignored);
+    }
+    if result.is_err() {
+        std::process::exit(1);
+    }
+}
+
+fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(&'static str, bool)> {
+    let mut command = None;
+    let mut pause = false;
+    for arg in args {
+        if arg == "--pause" && !pause {
+            pause = true;
+            continue;
+        }
+        if command.is_some() {
+            return Err(
+                "invalid command line; use gnx-setup help (never pass credentials as arguments)"
+                    .into(),
+            );
+        }
+        command = Some(match arg.as_str() {
+            "help" | "--help" | "-h" => "help",
+            "version" | "--version" | "-v" => "version",
+            "status" => "status",
+            "provision" => "provision",
+            "join" => "join",
+            "retry" => "retry",
+            "cancel" => "cancel",
+            _ => return Err(
+                "invalid command line; use gnx-setup help (never pass credentials as arguments)"
+                    .into(),
+            ),
+        });
+    }
+    Ok((command.unwrap_or("setup"), pause))
+}
+
+fn run(command: &str) -> Result<()> {
+    match command {
+        "help" => {
+            println!("GnX Node Setup {}", env!("CARGO_PKG_VERSION"));
+            println!(
+                "Usage: gnx-setup [status|provision|join|retry|cancel|help|version] [--pause]"
+            );
+            println!("Run in an Administrator terminal. No command: guided initial setup.");
+            println!(
+                "Proxmox password, confirmation, then Tailscale auth key: hidden prompts only."
+            );
+            println!(
+                "status: read-only; retry: reconcile without credentials; cancel: safe checkpoint."
+            );
+            println!("Existing ready nodes are preserved. Daily access: https://app.gnx");
+        }
+        "version" => println!("gnx-setup {}", env!("CARGO_PKG_VERSION")),
+        "status" => {
+            finish(send(&request(Operation::GetProgress))?)?;
+        }
+        "retry" => {
+            finish(send(&request(Operation::Retry))?)?;
+        }
+        "cancel" => {
+            finish(send(&request(Operation::Cancel))?)?;
+        }
+        "provision" => {
+            provision()?;
+        }
+        "join" => {
+            join_mesh()?;
+        }
+        _ => interactive()?,
+    }
     Ok(())
 }
 
-fn locate_ui() -> std::path::PathBuf {
-    if let Ok(path) = std::env::var("GNX_SETUP_UI") {
-        return path.into();
+fn request(operation: Operation) -> Request {
+    Request {
+        version: PROTOCOL_VERSION,
+        request_id: Uuid::new_v4(),
+        operation,
+        tailscale_auth_key: None,
+        proxmox_password: None,
+        secret_file: None,
     }
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.join(r"ui\index.html")))
-        .unwrap_or_else(|| std::path::PathBuf::from("apps/setup/ui/index.html"))
 }
 
-#[cfg(windows)]
-fn launch_local_ui(path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    use tao::{
-        event::{Event, WindowEvent},
-        event_loop::{ControlFlow, EventLoop},
-        window::WindowBuilder,
-    };
-    use wry::{http::Request, WebViewBuilder};
-    // WebView2 rejects file URLs in some installed/runtime contexts. Serve every
-    // local asset from our private protocol instead; no browser or HTTP listener.
-    let ui_root = std::fs::canonicalize(path)?
-        .parent()
-        .ok_or("Setup UI has no parent directory")?
-        .to_path_buf();
-    let event_loop = EventLoop::new();
-    let window = WindowBuilder::new()
-        .with_title("GnX Node Setup")
-        .build(&event_loop)?;
-    let webview = WebViewBuilder::new()
-        .with_custom_protocol("gnx".into(), move |_, request: Request<Vec<u8>>| {
-            handle_request(&ui_root, request)
-        })
-        .with_navigation_handler(|url| {
-            // WebView2 maps custom protocols to an internal HTTP origin on
-            // Windows. Wry maps requests back before invoking our protocol
-            // handler, but navigation policy observes the internal form.
-            matches!(
-                url.as_str(),
-                "gnx://ui/index.html" | "http://gnx.ui/index.html" | "http://gnx.ui/index.html/"
-            )
-        })
-        .with_url("gnx://ui/index.html")
-        .build(&window)?;
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
-        if let Event::WindowEvent {
-            event: WindowEvent::CloseRequested,
-            ..
-        } = event
-        {
-            *control_flow = ControlFlow::Exit;
-        }
-        let _ = &webview;
-    })
+fn has_enrollment(progress: &Progress) -> bool {
+    progress.node_private_ip.is_some() || progress.tailscale_ip.is_some()
 }
 
-#[cfg(windows)]
-fn handle_request(
-    ui_root: &std::path::Path,
-    request: wry::http::Request<Vec<u8>>,
-) -> wry::http::Response<std::borrow::Cow<'static, [u8]>> {
-    use std::borrow::Cow;
-    let uri = request.uri();
-    let response = if matches!(uri.scheme_str(), Some("gnx") | Some("http"))
-        && uri.host() == Some("ui")
-        && uri.path() == "/bridge"
-        && uri.query().is_none()
-        && request.method() == "POST"
-        && request.body().len() <= 8 * 1024
+fn next_action(progress: &Progress) -> Action {
+    if progress.state == NodeState::NodeReady
+        || progress.requires_restart
+        || progress.state == NodeState::RebootRequired
     {
-        ("application/json", handle_bridge(request.body()))
-    } else if uri.host() == Some("ui") {
-        let relative = uri.path().trim_start_matches('/');
-        let allowed = matches!(relative, "index.html" | "styles.css" | "app.js");
-        let path = ui_root.join(relative);
-        if allowed && path.is_file() {
-            let mime = if relative.ends_with(".css") {
-                "text/css; charset=utf-8"
-            } else if relative.ends_with(".js") {
-                "text/javascript; charset=utf-8"
-            } else {
-                "text/html; charset=utf-8"
-            };
-            (mime, std::fs::read(path).unwrap_or_default())
-        } else {
-            ("text/plain; charset=utf-8", b"not found".to_vec())
+        return Action::Stop;
+    }
+    // A verifier failure is not evidence that existing credentials are missing.
+    if has_enrollment(progress) {
+        return Action::Retry;
+    }
+    match progress.error_code.as_deref() {
+        Some("MESH_CREDENTIAL_MISSING") => return Action::MeshKey,
+        Some("PROXMOX_CREDENTIAL_MISSING") => return Action::Password,
+        Some(_) => return Action::Retry,
+        None => {}
+    }
+    match progress.state {
+        NodeState::New => Action::Password,
+        NodeState::RuntimeReady | NodeState::MeshPending => Action::MeshKey,
+        NodeState::Blocked | NodeState::Failed | NodeState::RecoveryRequired => Action::Retry,
+        _ => Action::Stop,
+    }
+}
+
+fn interactive() -> Result<()> {
+    let current = get_progress()?;
+    print_progress(&current);
+    match next_action(&current) {
+        Action::Password => {
+            let progress = provision()?;
+            if next_action(&progress) == Action::MeshKey {
+                join_mesh()?;
+            }
         }
-    } else {
-        ("text/plain; charset=utf-8", b"forbidden".to_vec())
-    };
-    wry::http::Response::builder()
-        .header("Content-Type", response.0)
-        .header("X-Content-Type-Options", "nosniff")
-        .body(Cow::Owned(response.1))
-        .unwrap()
+        Action::MeshKey => {
+            join_mesh()?;
+        }
+        Action::Retry => {
+            finish(send(&request(Operation::Retry))?)?;
+        }
+        Action::Stop => {
+            check_error(&current)?;
+        }
+    }
+    Ok(())
+}
+
+fn provision() -> Result<Progress> {
+    let current = get_progress()?;
+    if current.state == NodeState::NodeReady {
+        print_progress(&current);
+        check_error(&current)?;
+        return Ok(current);
+    }
+    if has_enrollment(&current)
+        || current.requires_restart
+        || !matches!(
+            current.state,
+            NodeState::New | NodeState::Blocked | NodeState::Failed | NodeState::RecoveryRequired
+        )
+    {
+        return Err("checkpoint does not allow initial provisioning; use status or retry; existing credentials were preserved".into());
+    }
+    require_terminal()?;
+    let password = prompt_secret("Proxmox password: ")?;
+    if password.is_empty() || password.len() > 1024 || password.chars().any(char::is_control) {
+        return Err("invalid Proxmox password; nothing was sent".into());
+    }
+    let confirmation = prompt_secret("Confirm Proxmox password: ")?;
+    if password != confirmation {
+        return Err("Proxmox passwords do not match; nothing was sent".into());
+    }
+    println!("Preparing Windows and the Linux runtime; this can take several minutes...");
+    finish(send_secrets(
+        &request(Operation::Provision),
+        None,
+        Some(&password),
+    )?)
+}
+
+fn join_mesh() -> Result<Progress> {
+    let current = get_progress()?;
+    if current.state == NodeState::NodeReady {
+        print_progress(&current);
+        check_error(&current)?;
+        return Ok(current);
+    }
+    if current.requires_restart
+        || !matches!(
+            current.state,
+            NodeState::RuntimeReady | NodeState::MeshPending | NodeState::Blocked
+        )
+    {
+        return Err(
+            "checkpoint does not allow mesh enrollment; run initial setup or status first".into(),
+        );
+    }
+    // Explicit join may renew an interrupted enrollment, never implicitly reset a password.
+    if has_enrollment(&current) {
+        return Err("node already has an enrollment; use retry, not a new key".into());
+    }
+    require_terminal()?;
+    let key = prompt_secret("Tailscale auth key (tskey-auth-*): ")?;
+    if !key.starts_with("tskey-auth-")
+        || key.len() <= "tskey-auth-".len()
+        || key.len() > 512
+        || key.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return Err("invalid Tailscale key; nothing was sent".into());
+    }
+    println!("Joining the private network and verifying the node...");
+    finish(send_secrets(
+        &request(Operation::JoinMesh),
+        Some(&key),
+        None,
+    )?)
+}
+
+fn get_progress() -> Result<Progress> {
+    // A read-only snapshot may describe a failed checkpoint; the caller decides recovery.
+    Ok(send(&request(Operation::GetProgress))?.progress)
+}
+
+fn check_error(progress: &Progress) -> Result<()> {
+    if let Some(code) = &progress.error_code {
+        return Err(format!("host operation failed ({code}); use status for details").into());
+    }
+    Ok(())
+}
+
+fn finish(response: Response) -> Result<Progress> {
+    print_progress(&response.progress);
+    check_error(&response.progress)?;
+    Ok(response.progress)
 }
 
 #[cfg(windows)]
-fn handle_bridge(body: &[u8]) -> Vec<u8> {
-    use gnx_control_protocol::{Operation, Request};
-    use serde::Deserialize;
-    use uuid::Uuid;
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct BridgeRequest {
-        method: String,
-        tailscale_auth_key: Option<String>,
-        proxmox_password: Option<String>,
+fn send(req: &Request) -> Result<Response> {
+    agent_client::request(req).map_err(|e| explain_pipe(e).into())
+}
+#[cfg(not(windows))]
+fn send(_req: &Request) -> Result<Response> {
+    Err("Setup requires Windows and the installed GnX host service".into())
+}
+#[cfg(windows)]
+fn send_secrets(req: &Request, key: Option<&str>, password: Option<&str>) -> Result<Response> {
+    agent_client::request_with_secrets(req, key, password).map_err(|e| explain_pipe(e).into())
+}
+#[cfg(not(windows))]
+fn send_secrets(_req: &Request, _key: Option<&str>, _password: Option<&str>) -> Result<Response> {
+    Err("Setup requires Windows; no secret was staged".into())
+}
+
+fn print_progress(progress: &Progress) {
+    println!(
+        "[{}] {:?}: {}",
+        progress.phase, progress.state, progress.message
+    );
+    if let Some(code) = &progress.error_code {
+        println!("Error code: {code}");
     }
-    let result = (|| -> Result<Vec<u8>, String> {
-        let bridge: BridgeRequest = serde_json::from_slice(body).map_err(|e| e.to_string())?;
-        let operation = match bridge.method.as_str() {
-            "GetProgress" => Operation::GetProgress,
-            "Provision" => Operation::Provision,
-            "JoinMesh" => Operation::JoinMesh,
-            "Retry" => Operation::Retry,
-            "Cancel" => Operation::Cancel,
-            _ => return Err("unsupported bridge method".into()),
-        };
-        if operation != Operation::JoinMesh && bridge.tailscale_auth_key.is_some() {
-            return Err("credentials are accepted only by JoinMesh".into());
+    if progress.requires_restart || progress.state == NodeState::RebootRequired {
+        println!("Restart required; restart Windows, then run gnx-setup again.");
+    }
+    if let Some(ip) = progress
+        .node_private_ip
+        .as_deref()
+        .or(progress.tailscale_ip.as_deref())
+    {
+        println!("Node private IP: {ip}");
+    }
+    if let Some(ip) = progress
+        .pihole_private_ip
+        .as_deref()
+        .or(progress.pihole_ip.as_deref())
+    {
+        println!("Pi-hole private IP: {ip}");
+    }
+    for action in &progress.required_actions {
+        println!(
+            "Action {:?}: {}{}",
+            action.kind,
+            action.target,
+            action
+                .value
+                .as_deref()
+                .map(|v| format!(" ({v})"))
+                .unwrap_or_default()
+        );
+    }
+    if progress.state == NodeState::NodeReady {
+        println!("Node already configured; credentials preserved.");
+    }
+    println!("Daily access: https://app.gnx | Compute: https://compute.gnx");
+}
+
+fn require_terminal() -> Result<()> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err(
+            "onboarding requires an Administrator console; redirected secret input is not accepted"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn prompt_secret(prompt: &str) -> Result<Zeroizing<String>> {
+    use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Console::{
+        GetConsoleMode, GetStdHandle, ReadConsoleW, SetConsoleMode, ENABLE_ECHO_INPUT,
+        STD_INPUT_HANDLE,
+    };
+    struct ModeGuard {
+        handle: HANDLE,
+        original: u32,
+    }
+    impl Drop for ModeGuard {
+        fn drop(&mut self) {
+            unsafe {
+                SetConsoleMode(self.handle, self.original);
+            }
         }
-        if !matches!(operation, Operation::Provision | Operation::JoinMesh)
-            && bridge.proxmox_password.is_some()
-        {
-            return Err("Proxmox credentials are accepted only by Provision or JoinMesh".into());
+    }
+    let input = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+    if input.is_null() || input == INVALID_HANDLE_VALUE {
+        return Err("no interactive console available".into());
+    }
+    let mut original = 0u32;
+    if unsafe { GetConsoleMode(input, &mut original) } == 0 {
+        return Err("standard input is not a console".into());
+    }
+    if unsafe { SetConsoleMode(input, original & !ENABLE_ECHO_INPUT) } == 0 {
+        return Err("could not disable console echo; secret was not requested".into());
+    }
+    let _mode = ModeGuard {
+        handle: input,
+        original,
+    };
+    print!("{prompt}");
+    io::stdout().flush()?;
+    let mut buffer = Zeroizing::new([0u16; 4096]);
+    let mut read = 0u32;
+    let ok = unsafe {
+        ReadConsoleW(
+            input,
+            buffer.as_mut_ptr().cast(),
+            buffer.len() as u32,
+            &mut read,
+            std::ptr::null_mut(),
+        )
+    };
+    println!();
+    if ok == 0 || read == 0 {
+        return Err("secret entry cancelled; nothing was sent".into());
+    }
+    if read as usize >= buffer.len() {
+        return Err("secret is too long; nothing was sent".into());
+    }
+    while read > 0 && matches!(buffer[(read - 1) as usize], 10 | 13) {
+        read -= 1;
+    }
+    Ok(Zeroizing::new(String::from_utf16(
+        &buffer[..read as usize],
+    )?))
+}
+#[cfg(not(windows))]
+fn prompt_secret(_prompt: &str) -> Result<Zeroizing<String>> {
+    Err("hidden prompts require Windows".into())
+}
+
+#[cfg(windows)]
+fn explain_pipe(error: io::Error) -> String {
+    match error.kind() {
+        io::ErrorKind::NotFound | io::ErrorKind::TimedOut => {
+            "GnX service is unavailable; start or repair GnXHostAgent".into()
         }
-        let request = Request {
-            version: agent_client::protocol_version(),
-            request_id: Uuid::new_v4(),
-            operation,
-            tailscale_auth_key: bridge.tailscale_auth_key,
-            proxmox_password: bridge.proxmox_password,
-            secret_file: None,
-        };
-        let tailscale_auth_key = request.tailscale_auth_key.as_deref();
-        let proxmox_password = request.proxmox_password.as_deref();
-        let response = if tailscale_auth_key.is_some() || proxmox_password.is_some() {
-            agent_client::request_with_secrets(&request, tailscale_auth_key, proxmox_password)
-        } else {
-            agent_client::request(&request)
+        io::ErrorKind::PermissionDenied => {
+            "access denied: run the installed Setup from an Administrator terminal".into()
         }
-        .map_err(|e| e.to_string())?;
-        serde_json::to_vec(&response).map_err(|e| e.to_string())
-    })();
-    result.unwrap_or_else(|error| {
-        serde_json::to_vec(&serde_json::json!({"error": error})).unwrap_or_default()
-    })
+        _ => format!("unable to contact the GnX host agent: {error}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn progress(state: NodeState, error: Option<&str>) -> Progress {
+        Progress {
+            request_id: None,
+            operation_id: Uuid::nil(),
+            sequence: 0,
+            phase: "test".into(),
+            state,
+            message: "safe".into(),
+            error_code: error.map(str::to_owned),
+            retryable: true,
+            requires_restart: false,
+            percent: None,
+            node_private_ip: None,
+            pihole_private_ip: None,
+            tailscale_ip: None,
+            pihole_ip: None,
+            required_actions: vec![],
+            private_ca_certificate: None,
+        }
+    }
+    #[test]
+    fn fresh_password_then_mesh() {
+        assert_eq!(
+            next_action(&progress(NodeState::New, None)),
+            Action::Password
+        );
+        assert_eq!(
+            next_action(&progress(NodeState::MeshPending, None)),
+            Action::MeshKey
+        );
+        assert_eq!(
+            next_action(&progress(NodeState::RuntimeReady, None)),
+            Action::MeshKey
+        );
+    }
+    #[test]
+    fn ready_preserves_even_with_stale_missing_error() {
+        assert_eq!(
+            next_action(&progress(
+                NodeState::NodeReady,
+                Some("PROXMOX_CREDENTIAL_MISSING")
+            )),
+            Action::Stop
+        );
+    }
+    #[test]
+    fn blocked_runtime_failure_does_not_rekey() {
+        assert_eq!(
+            next_action(&progress(NodeState::Blocked, Some("RUNTIME_FAILED"))),
+            Action::Retry
+        );
+        let mut p = progress(NodeState::Blocked, Some("MESH_CREDENTIAL_MISSING"));
+        p.node_private_ip = Some("100.64.0.1".into());
+        assert_eq!(next_action(&p), Action::Retry);
+    }
+    #[test]
+    fn restart_and_in_progress_checkpoints_do_not_provision() {
+        for state in [
+            NodeState::RebootRequired,
+            NodeState::WindowsReady,
+            NodeState::WslReady,
+        ] {
+            assert_eq!(next_action(&progress(state, None)), Action::Stop);
+        }
+        let mut p = progress(NodeState::New, None);
+        p.requires_restart = true;
+        assert_eq!(next_action(&p), Action::Stop);
+    }
+    #[test]
+    fn host_failure_has_nonzero_result() {
+        assert!(check_error(&progress(NodeState::Blocked, Some("RUNTIME_FAILED"))).is_err());
+    }
+    #[test]
+    fn parses_commands_and_pause_without_secret_flags() {
+        assert_eq!(parse_args(Vec::new()).unwrap(), ("setup", false));
+        assert_eq!(parse_args(["--pause".into()]).unwrap(), ("setup", true));
+        assert_eq!(
+            parse_args(["status".into(), "--pause".into()]).unwrap(),
+            ("status", true)
+        );
+        for args in [
+            vec!["--password", "do-not-print"],
+            vec!["join", "tskey-auth-do-not-print"],
+            vec!["--pause", "--pause"],
+        ] {
+            let error = parse_args(args.into_iter().map(str::to_owned))
+                .unwrap_err()
+                .to_string();
+            assert!(!error.contains("do-not-print"));
+        }
+    }
 }

@@ -36,7 +36,10 @@ pub fn request_with_secrets(
             // used: the host agent must be able to open the file separately.
             .custom_flags(0)
             .open(&path)?;
-        let mut bytes = Vec::new();
+        // Establish the protected DACL before writing a single credential byte.
+        // A failed ACL operation therefore leaves only an empty disposable file.
+        restrict_secret_file(&path)?;
+        let mut bytes = zeroize::Zeroizing::new(Vec::new());
         bytes.extend_from_slice(b"GNXSEC01");
         bytes.push(u8::from(tailscale_auth_key.is_some()));
         bytes.push(u8::from(proxmox_password.is_some()));
@@ -46,7 +49,6 @@ pub fn request_with_secrets(
         file.write_all(&bytes)?;
         file.sync_all()?;
         drop(file);
-        restrict_secret_file(&path)?;
         // `%TEMP%` inherits the interactive user's SYSTEM/Administrators ACL;
         // the explicit protected DACL retains the creator SID so Setup can
         // unlink it if the pipe fails before delivery.
