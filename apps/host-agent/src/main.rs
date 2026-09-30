@@ -95,6 +95,16 @@ mod service {
                 "5".into(),
             ];
             while !keepalive_flag.load(Ordering::Relaxed) {
+                // A fresh node has no runtime to keep alive. Starting WSL as
+                // soon as the account credential appears races Provision's
+                // required .wslconfig copy and first distro import.
+                let enrolled = crate::state::load()
+                    .map(|progress| progress.node_private_ip.is_some())
+                    .unwrap_or(false);
+                if !enrolled {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    continue;
+                }
                 if crate::dedicated_account::run_wsl_as_windows_identity(&args).is_err() {
                     std::thread::sleep(std::time::Duration::from_secs(2));
                 }

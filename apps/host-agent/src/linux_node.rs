@@ -352,7 +352,9 @@ pub fn ensure_distro() -> io::Result<()> {
     let node_root = payload_dir();
     validate_payload(&node_root)?;
     let profile = crate::dedicated_account::managed_profile_dir()?;
-    copy_wsl_config(&host_root, &profile)?;
+    copy_wsl_config(&host_root, &profile).map_err(|error| {
+        io::Error::new(error.kind(), format!("WSL_CONFIG_COPY_FAILED: {error}"))
+    })?;
     if !distro_is_registered()? {
         import_distro(&artifact)?;
     }

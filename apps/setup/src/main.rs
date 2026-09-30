@@ -134,6 +134,14 @@ fn next_action(progress: &Progress) -> Action {
     if has_enrollment(progress) {
         return Action::Retry;
     }
+    // Provisioning credentials are one-shot. A fresh node blocked in a
+    // Windows/account/CA phase must ask again instead of first issuing a
+    // secretless Retry that can only report PROXMOX_CREDENTIAL_MISSING.
+    if progress.state == NodeState::Blocked
+        && matches!(progress.phase.as_str(), "windows" | "account" | "ca")
+    {
+        return Action::Password;
+    }
     match progress.error_code.as_deref() {
         Some("MESH_CREDENTIAL_MISSING") => return Action::MeshKey,
         Some("PROXMOX_CREDENTIAL_MISSING") => return Action::Password,
@@ -463,6 +471,13 @@ mod tests {
             Action::Stop
         );
     }
+    #[test]
+    fn fresh_windows_failure_prompts_for_the_one_shot_password_again() {
+        let mut p = progress(NodeState::Blocked, Some("ACCESS_DENIED"));
+        p.phase = "windows".into();
+        assert_eq!(next_action(&p), Action::Password);
+    }
+
     #[test]
     fn blocked_runtime_failure_does_not_rekey() {
         assert_eq!(
