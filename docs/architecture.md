@@ -12,7 +12,7 @@ y su distro WSL2 `gnx-node`. Podman/systemd ejecutan cuatro capacidades:
 | `gateway` | Caddy | HTTPS para `app.gnx` y `compute.gnx` |
 | `compute` | Imagen sellada Proxmox | KVM y HTTPS interno `8006` |
 
-Desde v0.1.2, **Setup es una CLI Rust mínima**. No hay WebView2, assets locales
+Desde v0.1.2, **Setup es una CLI Rust mínima**. v0.1.3 la publica en el PATH del host y corrige el flujo de actualización. No hay WebView2, assets locales
 de Setup ni puente de credenciales en el navegador. `https://app.gnx` conserva
 exclusivamente la vista cotidiana de estado y acceso a compute.
 
@@ -43,6 +43,8 @@ identidad dedicada, distro, imágenes ni límites de confianza.
 & "${env:ProgramFiles(x86)}\GnX Node\gnx-setup.exe" status
 & "${env:ProgramFiles(x86)}\GnX Node\gnx-setup.exe" retry
 ```
+
+El MSI agrega el directorio instalado al PATH de sistema. Una terminal nueva del usuario host puede invocar `gnx-setup`; la identidad dedicada sigue sin login interactivo y no ejecuta la CLI.
 
 Comandos: alta guiada sin argumentos; `status`, `provision`, `join`, `retry`,
 `cancel`, `help`, `version`. `--pause` mantiene visible el resultado en una
@@ -138,8 +140,7 @@ requiere consentimiento; no se usa para validar una actualización por sorpresa.
 
 ## Actualización, retirada y organización
 
-MSI/Burn mantienen sus UpgradeCodes y aumentan versión. La actualización
-conserva identidad, distro, datos, CA y credenciales. El MSI elimina los archivos
+MSI/Burn mantienen UpgradeCodes estables y versiones crecientes. Cada versión nueva activa MajorUpgrade; ejecutar exactamente la misma versión es Repair, no se presenta como release nueva. Burn es la única entrada visible en Aplicaciones instaladas y oculta su MSI encadenado. La actualización conserva identidad, distro, datos, CA y credenciales. El MSI elimina los archivos
 de Setup web de la versión anterior; no se mantienen dos mecanismos de alta.
 `retry` aplica los assets nuevos al nodo existente sin introducir claves nuevas.
 Desinstalar retira servicio y archivos Windows, **no** la distro, estado, CA,

@@ -14,7 +14,7 @@ The deterministic final artifacts are `build/installer/GnxNode.msi` and
 their non-zero sizes, and SHA-256 hashes. To compile Burn independently after
 an MSI build, run `dotnet build installer/bundle/Bundle.wixproj -p:Configuration=release`.
 
-Setup is a minimal elevated Rust console and needs no browser runtime or packaged web assets. The v0.1.2 upgrade removes the obsolete `gnx-setup.exe.WebView2` profile left by older Setup builds. Its default workflow completes the Proxmox password step and then the Tailscale key step through the existing administrator-only named pipe, prompting only when required; `status`, `retry`, `cancel`, `help`, and `version` are safe operational commands. Re-running after an upgrade preserves the existing node and asks for credentials only when enrollment is needed; silent installs do not prompt or launch interactive onboarding. For a direct MSI install, run the default onboarding flow elevated with `Start-Process -Verb RunAs -Wait -FilePath (Join-Path ${env:ProgramFiles(x86)} 'GnX Node\\gnx-setup.exe')`; for a later credential-free diagnostic use `-ArgumentList 'retry'` (or `status`). Add `-ArgumentList '--pause'` when an externally spawned terminal must remain visible after success or error.
+Setup is a minimal elevated Rust console and needs no browser runtime or packaged web assets. Upgrades remove the obsolete `gnx-setup.exe.WebView2` profile left by older Setup builds. The MSI appends `[INSTALLFOLDER]` to the Windows **system PATH**, so a newly opened host-user terminal can run `gnx-setup`; `gnxnodesvc` remains a non-interactive service identity and never receives a Setup session. Its default workflow completes the Proxmox password step and then the Tailscale key step through the existing administrator-only named pipe, prompting only when required; `status`, `retry`, `cancel`, `help`, and `version` are safe operational commands. Re-running after an upgrade preserves the existing node and asks for credentials only when enrollment is needed; silent installs do not prompt or launch interactive onboarding. For a direct MSI install, open a new elevated terminal and run `gnx-setup`; before reopening the terminal, use `Start-Process -Verb RunAs -Wait -FilePath (Join-Path ${env:ProgramFiles(x86)} 'GnX Node\\gnx-setup.exe')`. Add `--pause` when an externally spawned console must remain visible.
 
 Onboarding credentials are accepted only by the five allowlisted control
 operations. Setup writes a one-shot bundle under the interactive user's
@@ -43,7 +43,9 @@ This is a short operator smoke check, not a second cleanup implementation:
 - Product state, CA material, and credentials are retained and must be removed or rotated manually when required.
 - `hosts` entries and port-proxy rules are retained and must be removed manually if the operator no longer wants the names routed locally.
 
-## Reinstallation contract
+## Upgrade and reinstallation contract
+
+Install a newer numbered bundle for an upgrade; installing the exact same bundle version is intentionally maintenance/Repair, not a new release. MSI and Burn keep stable, distinct UpgradeCodes while every published release increments both versions. Burn owns the visible Installed Apps entry and chains its MSI with `Visible="no"`, avoiding a second package entry on bundle installs. The MSI performs a major upgrade of the previous MSI product.
 
 A later MSI reinstall is expected to reuse the retained `gnx-node` distro, the
 managed `gnxnodesvc` identity, and product state. The host verifies the sealed
