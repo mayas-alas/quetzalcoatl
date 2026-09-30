@@ -60,12 +60,24 @@ mod service {
             wait_hint: std::time::Duration::default(),
             process_id: None,
         });
-        let server = std::thread::spawn(|| control_pipe::run().map_err(|e| e.to_string()));
+        // A service process is not healthy without its control pipe. Supervise
+        // the pipe loop so a transient startup collision during MSI removal /
+        // reinstall, or any unexpected server error, cannot leave SCM showing
+        // Running while every CLI request reports the service unavailable.
+        let stop_service = Arc::new(AtomicBool::new(false));
+        let server_flag = Arc::clone(&stop_service);
+        let server = std::thread::spawn(move || {
+            while !server_flag.load(Ordering::Acquire) {
+                let _ = control_pipe::run();
+                if !server_flag.load(Ordering::Acquire) {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+            }
+        });
         // WSL intentionally shuts a distro down when its last Windows-side
         // client exits, even while systemd units are active. Keep one harmless
         // client attached so the private DNS and HTTPS endpoints stay online.
-        let stop_keepalive = Arc::new(AtomicBool::new(false));
-        let keepalive_flag = Arc::clone(&stop_keepalive);
+        let keepalive_flag = Arc::clone(&stop_service);
         let keepalive = std::thread::spawn(move || {
             let args = vec![
                 "--distribution".into(),
@@ -83,7 +95,7 @@ mod service {
         // Reuse the canonical verifier instead of inventing browser-side
         // health checks. This is a thread of the existing host service, not a
         // new network service or a browser control channel.
-        let status_flag = Arc::clone(&stop_keepalive);
+        let status_flag = Arc::clone(&stop_service);
         let status_monitor = std::thread::spawn(move || {
             while !status_flag.load(Ordering::Relaxed) {
                 let _ = crate::state::refresh_app_status();
@@ -96,7 +108,7 @@ mod service {
             }
         });
         let _ = stop_rx.recv();
-        stop_keepalive.store(true, Ordering::Relaxed);
+        stop_service.store(true, Ordering::Release);
         let _ = status_handle.set_service_status(service::ServiceStatus {
             service_type: service::ServiceType::OWN_PROCESS,
             current_state: service::ServiceState::StopPending,
