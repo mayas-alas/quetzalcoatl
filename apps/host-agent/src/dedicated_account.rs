@@ -862,6 +862,59 @@ pub(crate) fn managed_account_sid_text() -> std::io::Result<String> {
     account_sid().map(|(_, text)| text)
 }
 
+/// Delete only the fixed product identity and its complete Windows profile,
+/// including its per-user WSL registration and VHDX. Missing identity is a clean no-op.
+#[cfg(windows)]
+pub(crate) fn remove_managed_identity() -> std::io::Result<()> {
+    use std::ptr::null;
+    use windows_sys::Win32::NetworkManagement::NetManagement::NetUserDel;
+    use windows_sys::Win32::UI::Shell::DeleteProfileW;
+
+    let exists = std::process::Command::new("net")
+        .args(["user", ACCOUNT_NAME])
+        .output()?
+        .status
+        .success();
+    if !exists {
+        return Ok(());
+    }
+    let (_, sid_text) = account_sid()?;
+    let sid = sid_text
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    // Service/process exit can release the profile hive asynchronously.
+    // Retry for a bounded period before refusing to leave a
+    // half-removed identity behind.
+    let mut profile_deleted = false;
+    for _ in 0..20 {
+        if unsafe { DeleteProfileW(sid.as_ptr(), null(), null()) } != 0 {
+            profile_deleted = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    if !profile_deleted {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "ACCOUNT_PROFILE_DELETE_FAILED",
+        ));
+    }
+    let mut name = ACCOUNT_NAME
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let status = unsafe { NetUserDel(std::ptr::null(), name.as_mut_ptr()) };
+    name.fill(0);
+    if status != 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "ACCOUNT_DELETE_FAILED",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(all(windows, not(test)))]
 pub(crate) fn managed_profile_dir() -> std::io::Result<std::path::PathBuf> {
     let (sid, sid_text) = account_sid()?;

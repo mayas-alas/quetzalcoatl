@@ -1,4 +1,5 @@
 mod ca;
+mod cleanup;
 mod control_pipe;
 mod dedicated_account;
 mod linux_node;
@@ -9,6 +10,13 @@ mod state;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(windows)]
     {
+        let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+        if args.as_slice() == [std::ffi::OsStr::new("--cleanup")] {
+            return cleanup::run();
+        }
+        if !args.is_empty() {
+            return Err("invalid host-agent command".into());
+        }
         // The installed binary is a real SCM service. GNX_CONSOLE=1 is an explicit
         // developer/diagnostic escape hatch for running the same pipe server in a console.
         if std::env::var_os("GNX_CONSOLE").is_some() {

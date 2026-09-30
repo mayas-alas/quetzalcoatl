@@ -147,8 +147,12 @@ requiere consentimiento; no se usa para validar una actualización por sorpresa.
 MSI/Burn mantienen UpgradeCodes estables y versiones crecientes. Cada versión nueva activa MajorUpgrade; ejecutar exactamente la misma versión es Repair, no se presenta como release nueva. Burn es la única entrada visible en Aplicaciones instaladas y oculta su MSI encadenado. La actualización conserva identidad, distro, datos, CA y credenciales. El MSI elimina los archivos
 de Setup web de la versión anterior; no se mantienen dos mecanismos de alta.
 `retry` aplica los assets nuevos al nodo existente sin introducir claves nuevas.
-Desinstalar retira servicio y archivos Windows, **no** la distro, estado, CA,
-credenciales, entradas `hosts` ni reglas port-proxy preexistentes.
+Una desinstalación real es destructiva: después de detener el servicio elimina la
+distro administrada, identidad/perfil dedicados, estado, datos runtime, CA,
+credenciales, entradas `hosts` GnX y el port-proxy loopback heredado. Las condiciones
+`UPGRADINGPRODUCTCODE`/`WIX_UPGRADE_DETECTED` excluyen esta limpieza durante upgrades.
+Una instalación genuinamente limpia también retira residuos de versiones antiguas
+antes de iniciar el servicio, evitando publicar un Proxmox/LXC anterior.
 
 El workspace es la raíz de este repositorio:
 

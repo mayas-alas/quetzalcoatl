@@ -27,31 +27,38 @@ only the public certificate path plus explicit Split DNS and CA-trust actions. T
 
 ## Uninstallation boundary
 
-Uninstalling the MSI is intentionally a small, achievable package operation: it stops
-and removes `GnXHostAgent` and deletes the installed Setup/payload files. It does not
-pretend to tear down the already-provisioned WSL node, runtime data, private CA,
-`hosts` entries, or port-proxy rules. Setup therefore exposes no fake `Deprovision`
-action. There is no runtime teardown operation: uninstall retains the node, state, CA material, and credentials for recovery or manual removal.
+A real uninstall is destructive and complete. After stopping `GnXHostAgent`, MSI runs
+the installed host binary in its fixed `--cleanup` mode as LocalSystem. It removes
+the product-owned `gnxnodesvc` profile containing the `gnx-node` WSL registration
+and VHDX, then removes the managed account, runtime data, private CA, credentials, product state,
+GnX `hosts` entries, and the legacy loopback HTTPS port-proxy rule. It then removes
+the service and installed files. The DPAPI credential is the ownership marker: a
+same-named account on a clean host is never adopted or deleted.
 
-### Minimal uninstall acceptance checklist
+A genuinely fresh installation also runs this cleanup before starting the new service,
+so residue left by releases predating complete uninstall cannot expose an old Proxmox
+node or LXC through the new package. Setup exposes no interactive `Deprovision` action;
+cleanup belongs exclusively to MSI uninstall/fresh-install transactions.
 
-This is a short operator smoke check, not a second cleanup implementation:
+### Complete uninstall acceptance checklist
 
 - `GnXHostAgent` is absent after uninstall.
 - Installed Windows files under `GnX Node` are absent.
-- The WSL node and Linux runtime are retained.
-- Product state, CA material, and credentials are retained and must be removed or rotated manually when required.
-- `hosts` entries and port-proxy rules are retained and must be removed manually if the operator no longer wants the names routed locally.
+- The managed WSL node and Linux runtime are absent.
+- Product state, CA material, and credentials are absent.
+- Product `hosts` entries and the owned port-proxy rule are absent.
+- The `gnxnodesvc` account and managed profile are absent.
 
 ## Upgrade and reinstallation contract
 
 Install a newer numbered bundle for an upgrade; installing the exact same bundle version is intentionally maintenance/Repair, not a new release. MSI and Burn keep stable, distinct UpgradeCodes while every published release increments both versions. Burn owns the visible Installed Apps entry and chains its MSI with `Visible="no"`, avoiding a second package entry on bundle installs. The MSI performs a major upgrade of the previous MSI product.
 
-A later MSI reinstall is expected to reuse the retained `gnx-node` distro, the
-managed `gnxnodesvc` identity, and product state. The host verifies the sealed
-payload and refreshes the runtime payload; it imports the distro only when it is
-not already registered. Do not remove the WSL path, identity, CA, or state
-between uninstall and reinstall if preserving the node is intended.
+A numbered in-place upgrade preserves and reuses the existing `gnx-node` distro,
+managed `gnxnodesvc` identity, state, CA, credentials, and runtime data. The old
+MSI receives `UPGRADINGPRODUCTCODE`, and the new MSI receives
+`WIX_UPGRADE_DETECTED`; both conditions explicitly suppress destructive cleanup.
+The host verifies and refreshes the sealed payload and imports only when no managed
+distro exists. In contrast, uninstall followed by reinstall intentionally starts clean.
 
 The WSL image contract is a sealed `payload/host/gnx-node-rootfs.tar` paired
 with `payload/host/gnx-node-rootfs.tar.sha256` containing
