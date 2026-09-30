@@ -22,6 +22,8 @@ assert.match(bundle, /LaunchTarget="\[ProgramFilesFolder\]GnX Node\\gnx-setup\.e
 assert.match(bundle, /LaunchTargetElevatedId="GnxSetupElevated"/);
 assert.match(bundle, /ApprovedExeForElevation[^>]*Id="GnxSetupElevated"[^>]*Key="SOFTWARE\\GnX\\Node"[^>]*Value="SetupPath"[^>]*Bitness="always32"/);
 assert.match(product, /RegistryValue[^>]*Root="HKLM"[^>]*Key="SOFTWARE\\GnX\\Node"[^>]*Name="SetupPath"[^>]*Value="\[#SetupExe\]"/);
+assert.match(product, /RemoveFolderEx[^>]*Id="RemoveLegacyWebViewData"[^>]*On="install"/);
+assert.match(product, /LEGACYWEBVIEWCACHE[^>]*gnx-setup\.exe\.WebView2/);
 assert.match(bundle, /LaunchArguments="--pause"/);
 assert.doesNotMatch(bundle, /WebView2|RegistrySearch|EdgeUpdate/i);
 assert.doesNotMatch(await read('installer/bundle/Bundle.wixproj'), /WixToolset\.Util/i);

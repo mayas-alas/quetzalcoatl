@@ -26,8 +26,9 @@ if ($actualRootfsDigest -ne $manifestDigest) {
 }
 New-Item -ItemType Directory -Force $out | Out-Null
 $msi = Join-Path $out "GnxNode.msi"
+$localizedMsi = Join-Path $out "en-us\GnxNode.msi"
 $exe = Join-Path $out "GnxNodeSetup.exe"
-foreach ($artifact in @($msi, $exe)) {
+foreach ($artifact in @($msi, $localizedMsi, $exe)) {
     if (Test-Path -LiteralPath $artifact -PathType Leaf) {
         Remove-Item -LiteralPath $artifact -Force
     }
@@ -66,6 +67,9 @@ $project = Join-Path $PSScriptRoot "..\GnxNode.wixproj"
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { throw "WiX build unavailable: dotnet SDK not found" }
 dotnet build $project -p:Configuration=$Configuration -p:OutputPath=$out
 if ($LASTEXITCODE) { throw "WiX build failed" }
+if (!(Test-Path -LiteralPath $msi) -and (Test-Path -LiteralPath $localizedMsi)) {
+    Move-Item -LiteralPath $localizedMsi -Destination $msi -Force
+}
 if (!(Test-Path -LiteralPath $msi)) { throw "WiX did not produce the MSI: $msi" }
 
 # Burn is intentionally built after MSI so the bundle embeds this exact MSI.
