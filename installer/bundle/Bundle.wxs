@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
-  <Bundle Name="GnX Node" Manufacturer="GnX" Version="0.1.2.0"
+  <Bundle Name="GnX Node" Manufacturer="GnX" Version="0.1.3.0"
           UpgradeCode="DB8BFB10-FA20-4F4F-9B3E-35DBD15A2A1A"
           Compressed="yes">
     <BootstrapperApplication>
@@ -13,7 +13,7 @@
     </BootstrapperApplication>
     <ApprovedExeForElevation Id="GnxSetupElevated" Key="SOFTWARE\GnX\Node" Value="SetupPath" Bitness="always32" />
     <Chain>
-      <MsiPackage SourceFile="$(var.MsiPackage)" DisplayName="GnX Node" />
+      <MsiPackage SourceFile="$(var.MsiPackage)" DisplayName="GnX Node" Visible="no" />
     </Chain>
   </Bundle>
 </Wix>
