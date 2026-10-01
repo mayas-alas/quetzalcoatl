@@ -52,8 +52,10 @@ Mesh enrollment is accepted only after Tailscale reports an online identity and
 a tailnet address. `verify.run` checks KVM/TUN, service
 liveness, pinned images, nftables, DNS, both CA chains, and all three HTTPS
 endpoints. Its JSONL includes sanitized `tailscale_ip` and `pihole_ip` fields and
-the required operator actions: configure Split DNS for `gnx` to the reported
-Tailscale address and trust the gateway CA on authorized tailnet clients.
+the required operator actions for external tailnet clients: configure Split DNS
+for `gnx` to the reported Tailscale address and trust the gateway CA. The local
+Windows host is handled by the host agent instead: it trusts the public product
+CA and reaches gateway HTTPS through loopback before `NODE_READY` is reported.
 
 The remote `https://app.gnx` PWA has no bridge, onboarding form, or control
 privilege. Enrollment and Proxmox password rotation are performed by the elevated `gnx` console through
@@ -62,5 +64,6 @@ consumed and removed by the host. The service worker caches only immutable app
 assets, never compute responses, authentication data, or secrets.
 
 Host-only acceptance gates are Podman image pull/start, KVM and TUN access,
-systemd activation, Split DNS, client CA trust, and live HTTPS health checks.
+systemd activation, local Windows CA/loopback publication, external-client Split
+DNS/client CA trust, and live HTTPS health checks.
 Missing KVM must remain `kvm:fail`; no simulated service counts as readiness.

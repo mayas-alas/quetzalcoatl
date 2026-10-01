@@ -33,9 +33,11 @@ identidad dedicada, distro, imágenes ni límites de confianza.
 4. Un nodo `NODE_READY` no vuelve a pedir credenciales. Un nodo ya inscrito con
    fallo de verificación conserva sus credenciales; se reconcilia con `Retry`,
    no se interpreta el fallo como permiso para volver a inscribirlo.
-5. El administrador completa Split DNS y confianza de la CA pública cuando sean
-   necesarios. La interfaz cotidiana queda en `https://app.gnx`; Proxmox en
-   `https://compute.gnx`.
+5. El host Windows local recibe automáticamente la confianza de la CA pública
+   del nodo y acceso HTTPS loopback a `app.gnx`/`compute.gnx` antes de declarar
+   `NODE_READY`. El administrador completa Split DNS y confianza de la CA pública
+   solo en clientes tailnet externos cuando sean necesarios. La interfaz cotidiana
+   queda en `https://app.gnx`; Proxmox en `https://compute.gnx`.
 
 ```powershell
 # En PowerShell elevado, después de instalar:
@@ -115,9 +117,11 @@ Estados definidos: `NEW`, `WINDOWS_READY`, `REBOOT_REQUIRED`, `WSL_READY`,
 `RECOVERY_REQUIRED`. No se promete reanudación automática de pasos que necesiten
 secretos después de reiniciar; se vuelve a ejecutar Setup para consultar y continuar.
 
-`NODE_READY` exige verificación local; Split DNS y confianza de CA siguen siendo
-acciones humanas separadas. Un fallo no se convierte en estado verde ni autoriza
-borrar identidad, distro, datos o credenciales.
+`NODE_READY` exige verificación del runtime y publicación local de acceso en el
+host Windows: confianza de CA y loopback HTTPS se reconcilian con un código de
+error estable antes de afirmar ready. Split DNS y confianza de CA siguen siendo
+acciones humanas separadas solo para clientes tailnet externos. Un fallo no se
+convierte en estado verde ni autoriza borrar identidad, distro, datos o credenciales.
 
 ## Runtime y contratos externos
 
@@ -146,10 +150,13 @@ requiere consentimiento; no se usa para validar una actualización por sorpresa.
 
 MSI/Burn mantienen UpgradeCodes estables y versiones crecientes. Cada versión nueva activa MajorUpgrade; ejecutar exactamente la misma versión es Repair, no se presenta como release nueva. Burn es la única entrada visible en Aplicaciones instaladas y oculta su MSI encadenado. La actualización conserva identidad, distro, datos, CA y credenciales. El MSI elimina los archivos
 de Setup web de la versión anterior; no se mantienen dos mecanismos de alta.
-`retry` aplica los assets nuevos al nodo existente sin introducir claves nuevas.
+`retry` aplica los assets nuevos al nodo existente sin introducir claves nuevas y
+vuelve a reconciliar la confianza CA/acceso loopback del host antes de restaurar
+`NODE_READY`.
 Una desinstalación real es destructiva: después de detener el servicio elimina la
-distro administrada, identidad/perfil dedicados, estado, datos runtime, CA,
-credenciales, entradas `hosts` GnX y el port-proxy loopback heredado. Las condiciones
+distro administrada, identidad/perfil dedicados, datos runtime, CA, credenciales,
+confianza local, entradas `hosts` GnX, port-proxy loopback heredado y finalmente
+estado. Las condiciones
 `UPGRADINGPRODUCTCODE`/`WIX_UPGRADE_DETECTED` excluyen esta limpieza durante upgrades.
 Una instalación genuinamente limpia también retira residuos de versiones antiguas
 antes de iniciar el servicio, evitando publicar un Proxmox/LXC anterior.

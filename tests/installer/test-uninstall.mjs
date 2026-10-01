@@ -16,8 +16,8 @@ const [product, bundle, wixproj, buildScript, readme] = await Promise.all([
   read('installer/README.md'),
 ]);
 
-assert.match(product, /Version="0\.1\.10\.0"/);
-assert.match(bundle, /Version="0\.1\.10\.0"/);
+assert.match(product, /Version="0\.1\.17\.0"/);
+assert.match(bundle, /Version="0\.1\.17\.0"/);
 assert.match(product, /UpgradeCode="5EAA2C0C-1E4C-4E4D-89E5-3D6F1A7E4C11"/);
 assert.match(bundle, /UpgradeCode="DB8BFB10-FA20-4F4F-9B3E-35DBD15A2A1A"/);
 assert.match(bundle, /LaunchTarget="\[ProgramFilesFolder\]GnX Node\\gnx\.exe"/);
@@ -70,6 +70,16 @@ for (const check of [
   'state.*absent',
   'hosts.*port-proxy.*absent',
 ]) assert.match(readme, new RegExp(check, 'i'), `missing uninstall check: ${check}`);
+
+const cleanup = await read('apps/host-agent/src/cleanup.rs');
+assert.match(cleanup, /host_access::cleanup\(&state_dir\)\?/);
+assert.ok(cleanup.indexOf('host_access::cleanup(&state_dir)?;') < cleanup.indexOf('std::fs::remove_dir_all(&state_root)?;'), 'host access cleanup must run before state deletion');
+assert.match(cleanup, /listenaddress=127\.0\.0\.1/);
+assert.match(cleanup, /listenport=443/);
+const dedicatedAccount = await read('apps/host-agent/src/dedicated_account.rs');
+assert.match(dedicatedAccount, /"--unregister"\.into\(\)[\s\S]*linux_node::DISTRO_NAME/);
+assert.match(dedicatedAccount, /remove_dir_all\(&profile\)/);
+assert.doesNotMatch(dedicatedAccount, /["']--shutdown["']/i);
 
 const linuxNode = await read('apps/host-agent/src/linux_node.rs');
 assert.match(linuxNode, /if !distro_is_registered\(\)/);

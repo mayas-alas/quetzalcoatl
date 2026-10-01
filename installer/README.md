@@ -22,16 +22,19 @@ temporary directory and sends only its bounded path over the administrator-only
 named pipe; the host consumes and unlinks the bundle and stages separate
 `TS_AUTHKEY`/`PROXMOX_PASSWORD` files for the fixed `install.run` contract.
 Neither value is placed in argv, progress, logs, or durable state. The host
-creates the product private CA under its protected state directory and reports
-only the public certificate path plus explicit Split DNS and CA-trust actions. The named pipe remains the sole secret boundary; credentials are never sent through the PWA.
+creates the product private CA under its protected state directory, installs only
+the public certificate into local Windows trust, and publishes loopback-only host
+access before reporting ready. It reports the public certificate path plus explicit
+Split DNS and CA-trust actions only for external tailnet clients. The named pipe remains the sole secret boundary; credentials are never sent through the PWA.
 
 ## Uninstallation boundary
 
 A real uninstall is destructive and complete. After stopping `GnXHostAgent`, MSI runs
 the installed host binary in its fixed `--cleanup` mode as LocalSystem. It removes
 the product-owned `gnxnodesvc` profile containing the `gnx-node` WSL registration
-and VHDX, then removes the managed account, runtime data, private CA, credentials, product state,
-GnX `hosts` entries, and the legacy loopback HTTPS port-proxy rule. It then removes
+and VHDX, then removes the managed account, runtime data, private CA, credentials,
+local Windows CA trust and loopback access, GnX `hosts` entries, the legacy
+loopback HTTPS port-proxy rule, and finally product state. It then removes
 the service and installed files. The DPAPI credential is the ownership marker: a
 same-named account on a clean host is never adopted or deleted.
 
@@ -46,7 +49,7 @@ cleanup belongs exclusively to MSI uninstall/fresh-install transactions.
 - Installed Windows files under `GnX Node` are absent.
 - The managed WSL node and Linux runtime are absent.
 - Product state, CA material, and credentials are absent.
-- Product `hosts` entries and the owned port-proxy rule are absent.
+- Product `hosts` entries, local CA trust, and owned loopback port-proxy rule are absent.
 - The `gnxnodesvc` account and managed profile are absent.
 
 ## Upgrade and reinstallation contract

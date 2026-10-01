@@ -64,10 +64,15 @@ pub fn execute(req: &Request, current: &Progress) -> Progress {
             if let Err(error) =
                 crate::linux_node::ensure_distro().and_then(|_| join_mesh(req, &mut p))
             {
+                let code = classify_error(&error);
                 p.state = NodeState::Blocked;
                 p.phase = "mesh".into();
-                p.message = "Mesh enrollment did not complete; no ready state was reported.".into();
-                p.error_code = Some(classify_error(&error));
+                p.message = if code == "HOST_ACCESS_RECONCILE_FAILED" {
+                    "Local Windows CA trust and loopback access could not be published.".into()
+                } else {
+                    "Mesh enrollment did not complete; no ready state was reported.".into()
+                };
+                p.error_code = Some(code);
                 p.retryable = true;
             }
         }
@@ -83,14 +88,23 @@ pub fn execute(req: &Request, current: &Progress) -> Progress {
             let state_dir = crate::state::state_dir();
             let readiness = crate::linux_node::reconcile_ingress()
                 .and_then(|_| crate::linux_node::verify(&state_dir))
-                .and_then(|_| crate::linux_node::private_ip());
+                .and_then(|_| crate::linux_node::private_ip())
+                .and_then(|ip| {
+                    reconcile_host_access(&state_dir)?;
+                    Ok(ip)
+                });
             match readiness {
                 Ok(ip) => mark_ready(&mut p, ip),
                 Err(error) => {
+                    let code = classify_error(&error);
                     p.state = NodeState::Blocked;
                     p.phase = "mesh".into();
-                    p.message = "The enrolled runtime is not ready yet.".into();
-                    p.error_code = Some(classify_error(&error));
+                    p.message = if code == "HOST_ACCESS_RECONCILE_FAILED" {
+                        "Local Windows CA trust and loopback access could not be published.".into()
+                    } else {
+                        "The enrolled runtime is not ready yet.".into()
+                    };
+                    p.error_code = Some(code);
                     p.retryable = true;
                 }
             }
@@ -103,12 +117,12 @@ fn required_actions(certificate: Option<&str>) -> Vec<gnx_control_protocol::Requ
     vec![
         gnx_control_protocol::RequiredAction {
             kind: gnx_control_protocol::ActionKind::ConfigureSplitDns,
-            target: "gnx".into(),
+            target: "external tailnet clients: gnx".into(),
             value: None,
         },
         gnx_control_protocol::RequiredAction {
             kind: gnx_control_protocol::ActionKind::TrustPrivateCa,
-            target: "app.gnx,compute.gnx".into(),
+            target: "external tailnet clients: app.gnx,compute.gnx".into(),
             value: certificate.map(str::to_owned),
         },
     ]
@@ -180,7 +194,8 @@ fn consume_secrets(
 
 #[cfg(windows)]
 fn join_mesh(req: &Request, p: &mut Progress) -> std::io::Result<()> {
-    let material = consume_secrets(req, Operation::JoinMesh)?;
+    let material = consume_secrets(req, Operation::JoinMesh)
+        .map_err(|error| stage_error("MESH_SECRET_CONSUME_FAILED", error))?;
     let mut material = material;
     let mut key = material.tailscale_auth_key.take().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "MESH_CREDENTIAL_MISSING")
@@ -191,9 +206,11 @@ fn join_mesh(req: &Request, p: &mut Progress) -> std::io::Result<()> {
     // is consumed by its owning Quadlet and never appears in argv.
     let compute_path = staging.join(format!("compute-{}.env", req.request_id));
     let result = (|| {
-        crate::secret_store::stage_runtime_file(&path, "TS_AUTHKEY", &key)?;
+        crate::secret_store::stage_runtime_file(&path, "TS_AUTHKEY", &key)
+            .map_err(|error| stage_error("MESH_SECRET_STAGE_FAILED", error))?;
         if let Some(password) = material.proxmox_password.as_deref() {
-            crate::secret_store::stage_runtime_file(&compute_path, "PROXMOX_PASSWORD", password)?;
+            crate::secret_store::stage_runtime_file(&compute_path, "PROXMOX_PASSWORD", password)
+                .map_err(|error| stage_error("COMPUTE_SECRET_STAGE_FAILED", error))?;
         }
         crate::linux_node::install_with_secrets(
             &crate::state::state_dir(),
@@ -203,21 +220,32 @@ fn join_mesh(req: &Request, p: &mut Progress) -> std::io::Result<()> {
                 .as_ref()
                 .map(|_| compute_path.as_path()),
         )
+        .map_err(|error| stage_error("MESH_RUNTIME_INSTALL_FAILED", error))
     })();
     crate::secret_store::clear_string(&mut key);
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(&compute_path);
     result?;
-    crate::linux_node::verify(&crate::state::state_dir())?;
-    let ip = crate::linux_node::private_ip()?;
+    crate::linux_node::verify(&crate::state::state_dir())
+        .map_err(|error| stage_error("MESH_RUNTIME_VERIFY_FAILED", error))?;
+    let state_dir = crate::state::state_dir();
+    let ip = crate::linux_node::private_ip()
+        .map_err(|error| stage_error("MESH_PRIVATE_IP_FAILED", error))?;
+    reconcile_host_access(&state_dir)?;
     mark_ready(p, ip);
     Ok(())
+}
+
+#[cfg(windows)]
+fn reconcile_host_access(state_dir: &std::path::Path) -> std::io::Result<()> {
+    crate::host_access::reconcile(&state_dir.join("ca/private-ca.cert.pem"))
+        .map_err(|error| stage_error("HOST_ACCESS_RECONCILE_FAILED", error))
 }
 
 fn mark_ready(p: &mut Progress, ip: String) {
     p.state = NodeState::NodeReady;
     p.phase = "ready".into();
-    p.message = "Node is ready; complete the displayed private-network actions.".into();
+    p.message = "Node is ready locally; this Windows host trusts the CA and uses loopback access automatically. Complete the displayed actions only for external tailnet clients.".into();
     p.error_code = None;
     p.retryable = false;
     p.node_private_ip = Some(ip.clone());
@@ -225,6 +253,21 @@ fn mark_ready(p: &mut Progress, ip: String) {
     p.tailscale_ip = p.node_private_ip.clone();
     p.pihole_ip = p.pihole_private_ip.clone();
     p.percent = Some(100);
+}
+
+fn stage_error(stage: &str, error: std::io::Error) -> std::io::Error {
+    let text = error.to_string();
+    let code = text.split_once(':').map(|(code, _)| code).unwrap_or(&text);
+    let classified = !code.is_empty()
+        && code.len() <= 80
+        && code.chars().all(|character| {
+            character.is_ascii_uppercase() || character.is_ascii_digit() || character == '_'
+        });
+    if classified && code != "ACCESS_DENIED" {
+        error
+    } else {
+        std::io::Error::new(error.kind(), format!("{stage}: {error}"))
+    }
 }
 
 fn classify_error(error: &std::io::Error) -> String {
@@ -517,6 +560,14 @@ mod tests {
         assert_eq!(classify_error(&error), "KVM_UNAVAILABLE");
         let wrapped = std::io::Error::other("DISTRO_IMPORT_FAILED: details");
         assert_eq!(classify_error(&wrapped), "DISTRO_IMPORT_FAILED");
+    }
+
+    #[test]
+    fn required_actions_are_external_tailnet_only() {
+        let actions = required_actions(Some("ca/private-ca.cert.pem"));
+        assert!(actions
+            .iter()
+            .all(|action| action.target.contains("external tailnet clients")));
     }
 
     #[test]

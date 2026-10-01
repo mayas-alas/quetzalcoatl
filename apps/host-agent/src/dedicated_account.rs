@@ -153,13 +153,89 @@ fn ensure_profile_and_credential(password: Option<&str>) -> std::io::Result<()> 
 }
 
 #[cfg(windows)]
-fn profile_bootstrap_error(error: std::io::Error) -> std::io::Error {
-    // Keep the OS diagnostic for local/service logs while exposing only this
-    // stable, credential-free classification through Progress.
-    std::io::Error::new(
-        error.kind(),
-        format!("ACCOUNT_PROFILE_BOOTSTRAP_FAILED: {error}"),
-    )
+fn identity_api_error(code: &'static str, error: std::io::Error) -> std::io::Error {
+    // A Win32 number is useful to local/service diagnostics but does not leak
+    // credentials, paths, or child output into the progress protocol.
+    let win32 = error.raw_os_error().unwrap_or(0);
+    std::io::Error::new(error.kind(), format!("{code}: win32={win32}"))
+}
+
+#[cfg(windows)]
+fn enable_identity_privileges() -> std::io::Result<()> {
+    use std::ptr::{null, null_mut};
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_NOT_ALL_ASSIGNED, LUID};
+    use windows_sys::Win32::Security::{
+        AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES,
+        SE_ASSIGNPRIMARYTOKEN_NAME, SE_BACKUP_NAME, SE_INCREASE_QUOTA_NAME, SE_PRIVILEGE_ENABLED,
+        SE_RESTORE_NAME, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let mut token = null_mut();
+    if unsafe {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            &mut token,
+        )
+    } == 0
+    {
+        return Err(identity_api_error(
+            "ACCOUNT_PRIVILEGE_TOKEN_FAILED",
+            std::io::Error::last_os_error(),
+        ));
+    }
+    let result = (|| {
+        for privilege in [
+            SE_ASSIGNPRIMARYTOKEN_NAME,
+            SE_INCREASE_QUOTA_NAME,
+            SE_BACKUP_NAME,
+            SE_RESTORE_NAME,
+        ] {
+            let mut luid = LUID {
+                LowPart: 0,
+                HighPart: 0,
+            };
+            if unsafe { LookupPrivilegeValueW(null(), privilege, &mut luid) } == 0 {
+                return Err(identity_api_error(
+                    "ACCOUNT_PRIVILEGE_LOOKUP_FAILED",
+                    std::io::Error::last_os_error(),
+                ));
+            }
+            let privileges = TOKEN_PRIVILEGES {
+                PrivilegeCount: 1,
+                Privileges: [LUID_AND_ATTRIBUTES {
+                    Luid: luid,
+                    Attributes: SE_PRIVILEGE_ENABLED,
+                }],
+            };
+            let adjusted = unsafe {
+                AdjustTokenPrivileges(token, 0, &privileges, 0, null_mut(), null_mut()) != 0
+            };
+            let status = unsafe { GetLastError() };
+            if !adjusted {
+                return Err(identity_api_error(
+                    "ACCOUNT_PRIVILEGE_ENABLE_FAILED",
+                    std::io::Error::from_raw_os_error(status as i32),
+                ));
+            }
+            if status == ERROR_NOT_ALL_ASSIGNED {
+                return Err(identity_api_error(
+                    "ACCOUNT_PRIVILEGE_NOT_ASSIGNED",
+                    std::io::Error::from_raw_os_error(status as i32),
+                ));
+            }
+            if status != 0 {
+                return Err(identity_api_error(
+                    "ACCOUNT_PRIVILEGE_ENABLE_FAILED",
+                    std::io::Error::from_raw_os_error(status as i32),
+                ));
+            }
+        }
+        Ok(())
+    })();
+    unsafe { CloseHandle(token) };
+    result
 }
 
 /// A token, loaded profile, and environment owned by one managed process.
@@ -196,6 +272,7 @@ impl Drop for ManagedIdentity {
 
 #[cfg(windows)]
 fn logon_managed_identity(password: &str) -> std::io::Result<ManagedIdentity> {
+    enable_identity_privileges()?;
     use std::ptr::null_mut;
     use windows_sys::Win32::Security::{
         LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
@@ -230,18 +307,28 @@ fn logon_managed_identity(password: &str) -> std::io::Result<ManagedIdentity> {
     if !logged_on {
         username.fill(0);
         domain.fill(0);
-        return Err(std::io::Error::last_os_error());
+        return Err(identity_api_error(
+            "ACCOUNT_LOGON_FAILED",
+            std::io::Error::last_os_error(),
+        ));
     }
 
     let mut profile_info: PROFILEINFOW = unsafe { std::mem::zeroed() };
     profile_info.dwSize = std::mem::size_of::<PROFILEINFOW>() as u32;
+    // A service has no interactive desktop; PI_NOUI prevents profile setup
+    // from attempting an invisible prompt and turning into ACCESS_DENIED.
+    // PI_NOUI (userenv.h; kept local so no extra windows-sys feature is needed).
+    profile_info.dwFlags = 0x0000_0001;
     profile_info.lpUserName = username.as_mut_ptr();
     let loaded = unsafe { LoadUserProfileW(token, &mut profile_info) != 0 };
     username.fill(0);
     domain.fill(0);
     if !loaded {
         unsafe { windows_sys::Win32::Foundation::CloseHandle(token) };
-        return Err(std::io::Error::last_os_error());
+        return Err(identity_api_error(
+            "ACCOUNT_PROFILE_LOAD_FAILED",
+            std::io::Error::last_os_error(),
+        ));
     }
 
     let mut environment = null_mut();
@@ -250,7 +337,10 @@ fn logon_managed_identity(password: &str) -> std::io::Result<ManagedIdentity> {
             windows_sys::Win32::UI::Shell::UnloadUserProfile(token, profile_info.hProfile);
             windows_sys::Win32::Foundation::CloseHandle(token);
         }
-        return Err(std::io::Error::last_os_error());
+        return Err(identity_api_error(
+            "ACCOUNT_ENVIRONMENT_BLOCK_FAILED",
+            std::io::Error::last_os_error(),
+        ));
     }
     Ok(ManagedIdentity {
         token,
@@ -280,9 +370,18 @@ fn bootstrap_profile(password: &str) -> std::io::Result<std::path::PathBuf> {
         CREATE_UNICODE_ENVIRONMENT, PROCESS_INFORMATION, STARTF_USESHOWWINDOW, STARTUPINFOW,
     };
 
-    let identity = logon_managed_identity(password).map_err(profile_bootstrap_error)?;
-    let profile = profile_directory(identity.token).map_err(profile_bootstrap_error)?;
+    let identity = logon_managed_identity(password)?;
+    let profile = profile_directory(identity.token)
+        .map_err(|error| identity_api_error("ACCOUNT_PROFILE_DIRECTORY_FAILED", error))?;
     let mut command = "C:\\Windows\\System32\\cmd.exe /c exit 0"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    // Never inherit the LocalSystem service directory: it may be inaccessible
+    // to gnxnodesvc and makes CreateProcessAsUser/child startup look like an
+    // unrelated ACCESS_DENIED. The token-derived profile is user-owned.
+    let mut current_directory = profile
+        .to_string_lossy()
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
@@ -302,14 +401,18 @@ fn bootstrap_profile(password: &str) -> std::io::Result<std::path::PathBuf> {
             0,
             CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
             identity.environment,
-            null_mut(),
+            current_directory.as_mut_ptr(),
             &startup,
             &mut process,
         )
     } != 0;
     command.fill(0);
+    current_directory.fill(0);
     if !launched {
-        return Err(profile_bootstrap_error(std::io::Error::last_os_error()));
+        return Err(identity_api_error(
+            "ACCOUNT_BOOTSTRAP_PROCESS_CREATE_FAILED",
+            std::io::Error::last_os_error(),
+        ));
     }
     let wait = unsafe { WaitForSingleObject(process.hProcess, 30_000) };
     let mut exit_code = 1u32;
@@ -319,16 +422,19 @@ fn bootstrap_profile(password: &str) -> std::io::Result<std::path::PathBuf> {
         CloseHandle(process.hProcess);
     }
     if wait == WAIT_TIMEOUT {
-        return Err(profile_bootstrap_error(std::io::Error::new(
-            std::io::ErrorKind::TimedOut,
-            "no-op process timed out",
-        )));
+        return Err(identity_api_error(
+            "ACCOUNT_BOOTSTRAP_PROCESS_TIMEOUT",
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "no-op process timed out"),
+        ));
     }
     if wait != WAIT_OBJECT_0 || exit_code != 0 {
-        return Err(profile_bootstrap_error(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            format!("no-op process exited with status {exit_code}"),
-        )));
+        return Err(identity_api_error(
+            "ACCOUNT_BOOTSTRAP_PROCESS_FAILED",
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("no-op process exited with status {exit_code}"),
+            ),
+        ));
     }
     Ok(profile)
 }
@@ -436,6 +542,13 @@ pub(crate) fn run_wsl_as_windows_identity(
     // process launch or output handling.
     unsafe { password.as_mut_vec().fill(0) };
     let identity = identity_result?;
+    let profile = profile_directory(identity.token)
+        .map_err(|error| identity_api_error("ACCOUNT_PROFILE_DIRECTORY_FAILED", error))?;
+    let mut current_directory = profile
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
 
     let mut stdout_read: HANDLE = null_mut();
     let mut stdout_write: HANDLE = null_mut();
@@ -463,7 +576,10 @@ pub(crate) fn run_wsl_as_windows_identity(
         if !stderr_write.is_null() {
             unsafe { CloseHandle(stderr_write) };
         }
-        return Err(std::io::Error::last_os_error());
+        return Err(identity_api_error(
+            "ACCOUNT_WSL_PIPE_CREATE_FAILED",
+            std::io::Error::last_os_error(),
+        ));
     }
     if unsafe { SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0) == 0 }
         || unsafe { SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0) == 0 }
@@ -474,7 +590,10 @@ pub(crate) fn run_wsl_as_windows_identity(
             CloseHandle(stderr_read);
             CloseHandle(stderr_write);
         }
-        return Err(std::io::Error::last_os_error());
+        return Err(identity_api_error(
+            "ACCOUNT_WSL_PIPE_CONFIG_FAILED",
+            std::io::Error::last_os_error(),
+        ));
     }
 
     let command = windows_command_line(args);
@@ -518,12 +637,13 @@ pub(crate) fn run_wsl_as_windows_identity(
             1,
             CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
             identity.environment,
-            null_mut(),
+            current_directory.as_mut_ptr(),
             &startup,
             &mut process,
         )
     } != 0;
     command_wide.fill(0);
+    current_directory.fill(0);
     unsafe {
         CloseHandle(stdout_write);
         CloseHandle(stderr_write);
@@ -533,7 +653,10 @@ pub(crate) fn run_wsl_as_windows_identity(
             CloseHandle(stdout_read);
             CloseHandle(stderr_read);
         }
-        return Err(std::io::Error::last_os_error());
+        return Err(identity_api_error(
+            "ACCOUNT_WSL_PROCESS_CREATE_FAILED",
+            std::io::Error::last_os_error(),
+        ));
     }
     let stdout_handle = stdout_read as usize;
     let stderr_handle = stderr_read as usize;
@@ -561,7 +684,10 @@ pub(crate) fn run_wsl_as_windows_identity(
         ));
     }
     if result != WAIT_OBJECT_0 {
-        return Err(std::io::Error::last_os_error());
+        return Err(identity_api_error(
+            "ACCOUNT_WSL_PROCESS_WAIT_FAILED",
+            std::io::Error::last_os_error(),
+        ));
     }
     if stdout.len() > 1024 * 1024 {
         stdout.truncate(1024 * 1024);
@@ -879,6 +1005,44 @@ pub(crate) fn remove_managed_identity() -> std::io::Result<()> {
         return Ok(());
     }
     let (_, sid_text) = account_sid()?;
+    let profile = profile_path(&sid_text)?;
+    let distro_dir = profile
+        .join("AppData")
+        .join("Local")
+        .join("GnX")
+        .join("wsl")
+        .join(crate::linux_node::DISTRO_NAME);
+    // Unregister only the product distro before deleting its profile. Merely
+    // terminating it can leave WSL asynchronously recreating the VHDX after
+    // DeleteProfileW succeeds. Never cross the machine-wide `wsl --shutdown`
+    // boundary or disturb unrelated distributions.
+    let unregister = run_wsl_as_windows_identity(&[
+        "--unregister".into(),
+        crate::linux_node::DISTRO_NAME.into(),
+    ]);
+    if unregister.as_ref().is_err_and(|_| distro_dir.exists())
+        || unregister
+            .as_ref()
+            .is_ok_and(|output| !output.status.success() && distro_dir.exists())
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "DISTRO_UNREGISTER_FAILED",
+        ));
+    }
+    for _ in 0..80 {
+        if !distro_dir.exists() {
+            break;
+        }
+        let _ = std::fs::remove_dir_all(&distro_dir);
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    if distro_dir.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "DISTRO_FILES_DELETE_FAILED",
+        ));
+    }
     let sid = sid_text
         .encode_utf16()
         .chain(std::iter::once(0))
@@ -898,6 +1062,22 @@ pub(crate) fn remove_managed_identity() -> std::io::Result<()> {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             "ACCOUNT_PROFILE_DELETE_FAILED",
+        ));
+    }
+    // DeleteProfileW can return success while WSL is still releasing the VHDX.
+    // Do not delete the account (and lose the ownership marker) until the
+    // complete product profile has actually disappeared.
+    for _ in 0..40 {
+        match std::fs::remove_dir_all(&profile) {
+            Ok(()) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(250)),
+        }
+    }
+    if profile.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "ACCOUNT_PROFILE_FILES_DELETE_FAILED",
         ));
     }
     let mut name = ACCOUNT_NAME
@@ -1288,15 +1468,12 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn profile_bootstrap_error_has_stable_sanitized_code() {
-        let error = profile_bootstrap_error(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "access denied",
-        ));
-        assert_eq!(
-            error.to_string(),
-            "ACCOUNT_PROFILE_BOOTSTRAP_FAILED: access denied"
+    fn identity_api_error_has_stable_sanitized_code() {
+        let error = identity_api_error(
+            "ACCOUNT_PROFILE_LOAD_FAILED",
+            std::io::Error::from_raw_os_error(5),
         );
+        assert_eq!(error.to_string(), "ACCOUNT_PROFILE_LOAD_FAILED: win32=5");
     }
 
     #[cfg(windows)]

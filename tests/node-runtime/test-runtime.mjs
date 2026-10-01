@@ -42,8 +42,8 @@ assert.match(await read('install.run'), /podman exec gnx-mesh tailscale status -
 assert.match(await read('install.run'), /address=\/app\.gnx\//);
 assert.match(await read('install.run'), /systemctl restart mesh\.service/);
 assert.match(await read('install.run'), /install -y podman nftables curl dnsutils libc-bin python3 openssl kmod/);
-assert.match(await read('install.run'), /require_podman_6\(\)/);
-assert.match(await read('install.run'), /PODMAN_6_REQUIRED/);
+assert.match(await read('install.run'), /require_supported_podman\(\)/);
+assert.match(await read('install.run'), /PODMAN_VERSION_UNSUPPORTED/);
 assert.match(await read('install.run'), /modprobe kvm_amd/);
 assert.match(await read('install.run'), /modprobe kvm_intel/);
 assert.match(await read('install.run'), /wait_for_mesh_auth/);
@@ -111,7 +111,7 @@ assert.doesNotMatch(ingress, /iifname "tailscale0" (?:udp|tcp) dport 53 accept/)
 assert.doesNotMatch(ingress, /dport 8006/);
 
 const verify = await read('verify.run');
-for (const check of ['podman_6', 'tun', 'fuse', 'kvm', 'platform_target', 'mesh_authenticated', 'compute_https', 'app_https', 'compute_gateway_https']) assert.match(verify, new RegExp(`check ${check}`));
+for (const check of ['podman', 'tun', 'fuse', 'kvm', 'platform_target', 'mesh_authenticated', 'compute_https', 'app_https', 'compute_gateway_https']) assert.match(verify, new RegExp(`check ${check}`));
 assert.match(verify, /--resolve compute\.gnx:8006:127\.0\.0\.1/);
 assert.match(verify, /gateway-ca\.pem/);
 assert.match(verify, /backend-ca\.pem/);
@@ -135,7 +135,11 @@ assert.match(linuxNode, /pub fn reconcile_ingress[\s\S]*materialize_payload\(&no
 assert.match(linuxNode, /pub fn runtime_checks[\s\S]*mesh_authenticated[\s\S]*compute_gateway_https[\s\S]*compute_https/);
 assert.match(linuxNode, /reconcile_ingress[\s\S]*restart", "compute\.service[\s\S]*start", "platform\.target/);
 const provisioning = await readFile(join(root, 'apps', 'host-agent', 'src', 'provisioning.rs'), 'utf8');
-assert.match(provisioning, /linux_node::reconcile_ingress\(\)[\s\S]*linux_node::verify\(&state_dir\)/);
+assert.match(provisioning, /linux_node::reconcile_ingress\(\)[\s\S]*linux_node::verify\(&state_dir\)[\s\S]*linux_node::private_ip\(\)[\s\S]*reconcile_host_access\(&state_dir\)\?/);
+assert.match(provisioning, /host_access::reconcile\(&state_dir\.join\("ca\/private-ca\.cert\.pem"\)\)/);
+assert.match(provisioning, /HOST_ACCESS_RECONCILE_FAILED/);
+assert.match(provisioning, /Local Windows CA trust and loopback access could not be published/);
+assert.ok(provisioning.indexOf('reconcile_host_access(&state_dir)?;') < provisioning.indexOf('mark_ready(p, ip);'), 'local host access must publish before NODE_READY');
 const hostMain = await readFile(join(root, 'apps', 'host-agent', 'src', 'main.rs'), 'utf8');
 assert.match(hostMain, /state::refresh_app_status\(\)/);
 assert.match(provisioning, /stage_runtime_file\(&path, "TS_AUTHKEY", &key\)/);

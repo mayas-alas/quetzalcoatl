@@ -3,11 +3,12 @@
 
 #[cfg(windows)]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let state_root = crate::state::state_dir()
+    let state_dir = crate::state::state_dir();
+    let state_root = state_dir
         .parent()
         .ok_or("state directory has no product parent")?
         .to_path_buf();
-    let credential = crate::state::state_dir().join("identity/password.dpapi");
+    let credential = state_dir.join("identity/password.dpapi");
     let had_product_residue = state_root.exists() || hosts_contains_gnx_marker()?;
 
     // The machine-protected credential is the ownership marker for both the
@@ -21,6 +22,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if had_product_residue {
+        crate::host_access::cleanup(&state_dir)?;
         remove_hosts_entries()?;
         remove_legacy_portproxy();
     }
@@ -41,7 +43,7 @@ fn hosts_path() -> std::path::PathBuf {
         .join(r"System32\drivers\etc\hosts")
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 fn is_gnx_hosts_line(line: &str) -> bool {
     let content = line.split('#').next().unwrap_or_default();
     let names = content

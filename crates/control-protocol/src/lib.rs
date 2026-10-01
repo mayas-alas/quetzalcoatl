@@ -32,8 +32,10 @@ pub enum NodeState {
     RecoveryRequired,
 }
 
-/// A bounded action which must be completed by the operator, not by a
-/// privileged host command.
+/// A bounded action which must be completed by the operator for external
+/// tailnet clients. The local Windows host is reconciled separately by the
+/// privileged agent: it receives CA trust and 127.0.0.1 HTTPS access
+/// automatically before `NodeReady` is reported.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ActionKind {

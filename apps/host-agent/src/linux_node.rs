@@ -152,23 +152,53 @@ pub fn validate_payload(root: &Path) -> io::Result<()> {
     Ok(())
 }
 
+// Add a stage code only to errors that do not already carry one.  The
+// provisioning layer uses the first token as its public error code; keeping
+// an existing contract code here preserves useful distinctions such as a
+// missing artifact or an invalid profile instead of collapsing them into
+// ACCESS_DENIED.  The original OS error remains in the local diagnostic.
+fn stage_error(stage: &str, error: io::Error) -> io::Error {
+    let text = error.to_string();
+    let code = text.split_once(':').map(|(code, _)| code).unwrap_or(&text);
+    let classified = !code.is_empty()
+        && code != "ACCESS_DENIED"
+        && code.len() <= 80
+        && code.chars().all(|character| {
+            character.is_ascii_uppercase() || character.is_ascii_digit() || character == '_'
+        });
+    if classified {
+        error
+    } else {
+        io::Error::new(error.kind(), format!("{stage}: {error}"))
+    }
+}
+
 #[cfg(windows)]
 fn copy_wsl_config(host_root: &Path, profile: &Path) -> io::Result<()> {
     let source = host_root.join(WSL_CONFIG_NAME);
-    let metadata = std::fs::symlink_metadata(&source).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "WSL_CONFIG_MISSING: payload-host/.wslconfig",
-        )
-    })?;
+    let metadata = match std::fs::symlink_metadata(&source) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "WSL_CONFIG_MISSING: payload-host/.wslconfig",
+            ));
+        }
+        Err(error) => return Err(stage_error("WSL_CONFIG_SOURCE_ACCESS_FAILED", error)),
+    };
     if !metadata.file_type().is_file() || is_reparse_point(&source) || metadata.len() > 64 * 1024 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "WSL_CONFIG_INVALID: expected a bounded regular file",
         ));
     }
-    let content = std::fs::read_to_string(&source)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "WSL_CONFIG_INVALID: not UTF-8"))?;
+    let content = std::fs::read_to_string(&source).map_err(|error| {
+        if error.kind() == io::ErrorKind::InvalidData {
+            io::Error::new(io::ErrorKind::InvalidData, "WSL_CONFIG_INVALID: not UTF-8")
+        } else {
+            stage_error("WSL_CONFIG_SOURCE_READ_FAILED", error)
+        }
+    })?;
     if !content
         .lines()
         .any(|line| line.trim().eq_ignore_ascii_case("[wsl2]"))
@@ -184,9 +214,14 @@ fn copy_wsl_config(host_root: &Path, profile: &Path) -> io::Result<()> {
     // managed_profile_dir() resolves the exact token-derived profile path and
     // validates its allowed owner and gnxnodesvc FullControl ACE before copy.
     let destination = wsl_config_path(profile);
-    std::fs::write(&destination, content.as_bytes())?;
-    crate::dedicated_account::restrict_read_file(&destination)?;
-    if std::fs::read(&destination)? != content.as_bytes() {
+    std::fs::write(&destination, content.as_bytes())
+        .map_err(|error| stage_error("WSL_CONFIG_DESTINATION_WRITE_FAILED", error))?;
+    crate::dedicated_account::restrict_read_file(&destination)
+        .map_err(|error| stage_error("WSL_CONFIG_ACL_FAILED", error))?;
+    if std::fs::read(&destination)
+        .map_err(|error| stage_error("WSL_CONFIG_VERIFY_READ_FAILED", error))?
+        != content.as_bytes()
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "WSL_CONFIG_COPY_FAILED",
@@ -282,10 +317,9 @@ fn decode_wsl_text(bytes: &[u8]) -> String {
 
 #[cfg(windows)]
 fn distro_is_registered() -> io::Result<bool> {
-    let output = crate::dedicated_account::run_wsl_as_windows_identity(&[
-        "--list".into(),
-        "--quiet".into(),
-    ])?;
+    let output =
+        crate::dedicated_account::run_wsl_as_windows_identity(&["--list".into(), "--quiet".into()])
+            .map_err(|error| stage_error("WSL_LIST_LAUNCH_FAILED", error))?;
     if !output.status.success() {
         // `wsl.exe --list` returns unsigned exit code 0xffffffff and a
         // localized informational message when this Windows identity has no
@@ -317,28 +351,35 @@ fn distro_import_args(install_dir: &Path, artifact: &Path) -> [String; 6] {
 
 #[cfg(windows)]
 fn import_distro(artifact: &Path) -> io::Result<()> {
-    let install_dir = crate::dedicated_account::managed_profile_dir()?
+    let profile = crate::dedicated_account::managed_profile_dir()
+        .map_err(|error| stage_error("WSL_PROFILE_VALIDATION_FAILED", error))?;
+    let install_dir = profile
         .join("AppData")
         .join("Local")
         .join("GnX")
         .join("wsl")
         .join(DISTRO_NAME);
     if let Some(parent) = install_dir.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent)
+            .map_err(|error| stage_error("DISTRO_IMPORT_PARENT_FAILED", error))?;
     }
-    if std::fs::symlink_metadata(&install_dir).is_ok() {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "DISTRO_INSTALL_PATH_OCCUPIED: refusing to adopt an existing path",
-        ));
+    match std::fs::symlink_metadata(&install_dir) {
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "DISTRO_INSTALL_PATH_OCCUPIED: refusing to adopt an existing path",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(stage_error("DISTRO_IMPORT_PATH_CHECK_FAILED", error)),
     }
     let args = distro_import_args(&install_dir, artifact);
-    let output = crate::dedicated_account::run_wsl_as_windows_identity(&args)?;
+    let output = crate::dedicated_account::run_wsl_as_windows_identity(&args)
+        .map_err(|error| stage_error("DISTRO_IMPORT_LAUNCH_FAILED", error))?;
     if output.status.success() {
         Ok(())
     } else {
-        Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
+        Err(io::Error::other(
             "DISTRO_IMPORT_FAILED: register gnx-node as gnxnodesvc",
         ))
     }
@@ -347,14 +388,18 @@ fn import_distro(artifact: &Path) -> io::Result<()> {
 #[cfg(windows)]
 pub fn ensure_distro() -> io::Result<()> {
     let artifact = rootfs_artifact();
-    validate_rootfs_artifact(&artifact)?;
+    validate_rootfs_artifact(&artifact)
+        .map_err(|error| stage_error("ROOTFS_VALIDATION_FAILED", error))?;
     let host_root = host_payload_dir();
     let node_root = payload_dir();
-    validate_payload(&node_root)?;
-    let profile = crate::dedicated_account::managed_profile_dir()?;
-    copy_wsl_config(&host_root, &profile).map_err(|error| {
-        io::Error::new(error.kind(), format!("WSL_CONFIG_COPY_FAILED: {error}"))
-    })?;
+    validate_payload(&node_root)
+        .map_err(|error| stage_error("PAYLOAD_VALIDATION_FAILED", error))?;
+    let profile = crate::dedicated_account::managed_profile_dir()
+        .map_err(|error| stage_error("WSL_PROFILE_VALIDATION_FAILED", error))?;
+    // This is deliberately the first WSL-facing stage: no registration query
+    // or import may start until the managed profile has its validated config.
+    copy_wsl_config(&host_root, &profile)
+        .map_err(|error| stage_error("WSL_CONFIG_COPY_FAILED", error))?;
     if !distro_is_registered()? {
         import_distro(&artifact)?;
     }
@@ -455,7 +500,7 @@ pub fn reconcile_ingress() -> io::Result<()> {
     }
     // A target restart does not restart its already-active dependencies.
     // Restart compute explicitly so a changed TLS hook/Quadlet is applied,
-    // then let Podman 6's Notify=healthy wait for its bounded healthcheck.
+    // then let Quadlet's Notify=healthy wait for its bounded healthcheck.
     let compute = run_wsl("/usr/bin/systemctl", &["restart", "compute.service"])?;
     if !compute.status.success() {
         return Err(io::Error::other("COMPUTE_RESTART_FAILED"));
@@ -469,6 +514,19 @@ pub fn reconcile_ingress() -> io::Result<()> {
         return Err(io::Error::other("PLATFORM_START_FAILED"));
     }
     Ok(())
+}
+
+#[cfg(windows)]
+pub fn wsl_nat_ipv4() -> io::Result<std::net::Ipv4Addr> {
+    let output = run_wsl("/usr/bin/hostname", &["-I"])?;
+    if !output.status.success() {
+        return Err(runtime_error(&output));
+    }
+    let output_text = String::from_utf8_lossy(&output.stdout);
+    output_text
+        .split_whitespace()
+        .find_map(|value| validate_wsl_nat_ipv4(value).ok())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "WSL_NAT_IPV4_UNAVAILABLE"))
 }
 
 #[cfg(windows)]
@@ -502,6 +560,25 @@ fn validate_private_ip(value: &str) -> io::Result<String> {
     Ok(parsed.to_string())
 }
 
+fn validate_wsl_nat_ipv4(value: &str) -> io::Result<std::net::Ipv4Addr> {
+    let parsed = value
+        .parse::<std::net::Ipv4Addr>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid WSL NAT IPv4"))?;
+    if parsed.is_unspecified()
+        || parsed.is_loopback()
+        || parsed.is_multicast()
+        || parsed.is_link_local()
+        || parsed.is_broadcast()
+        || !parsed.is_private()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid WSL NAT IPv4",
+        ));
+    }
+    Ok(parsed)
+}
+
 #[cfg(windows)]
 pub fn verify(state_dir: &Path) -> io::Result<RuntimeResult> {
     let output = run_wsl(
@@ -519,7 +596,7 @@ pub fn verify(state_dir: &Path) -> io::Result<RuntimeResult> {
 #[cfg(windows)]
 pub fn runtime_checks(state_dir: &Path) -> io::Result<Vec<crate::state::RuntimeCheck>> {
     const ALLOWED: &[&str] = &[
-        "podman_6",
+        "podman",
         "tun",
         "fuse",
         "kvm",
@@ -716,14 +793,14 @@ mod tests {
 
     #[test]
     fn installed_service_payloads_resolve_beside_executable() {
-        let executable = Path::new(r"C:\Program Files\GnX Node\gnx-host-agent.exe");
+        let executable = Path::new("install").join("gnx-host-agent.exe");
         assert_eq!(
-            installed_payload_path(executable, "payload-node").unwrap(),
-            Path::new(r"C:\Program Files\GnX Node\payload-node")
+            installed_payload_path(&executable, "payload-node").unwrap(),
+            Path::new("install").join("payload-node")
         );
         assert_eq!(
-            installed_payload_path(executable, "payload-host").unwrap(),
-            Path::new(r"C:\Program Files\GnX Node\payload-host")
+            installed_payload_path(&executable, "payload-host").unwrap(),
+            Path::new("install").join("payload-host")
         );
     }
 
@@ -741,7 +818,7 @@ mod tests {
 
     #[test]
     fn wsl_config_is_in_managed_profile_and_acl_staged_for_managed_identity() {
-        let profile = Path::new(r"C:\Users\gnxnodesvc");
+        let profile = Path::new("gnxnodesvc");
         assert_eq!(wsl_config_path(profile), profile.join(WSL_CONFIG_NAME));
         assert_eq!(WSL_CONFIG_NAME, ".wslconfig");
         assert_eq!(

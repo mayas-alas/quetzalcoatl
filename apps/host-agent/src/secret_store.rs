@@ -580,6 +580,8 @@ mod tests {
         let path = root.join(format!("gnx-onboarding-{}.secret", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         fs::write(&path, b"bad").unwrap();
+        #[cfg(unix)]
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
         assert!(consume(&path).is_err());
         assert!(!path.exists());
         let _ = fs::remove_dir_all(root);

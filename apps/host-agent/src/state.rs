@@ -160,7 +160,7 @@ fn app_checks(progress: &Progress, runtime: Option<&[RuntimeCheck]>) -> Vec<AppC
             result: "pending",
         },
         AppCheck {
-            label: "Podman 6+",
+            label: "Podman compatible",
             result: "pending",
         },
         AppCheck {
@@ -203,7 +203,7 @@ fn app_checks(progress: &Progress, runtime: Option<&[RuntimeCheck]>) -> Vec<AppC
     if let Some(runtime) = runtime {
         for (index, names) in [
             ["platform_target", "tun", "fuse", "kvm"].as_slice(),
-            ["podman_6"].as_slice(),
+            ["podman"].as_slice(),
             ["mesh", "mesh_authenticated"].as_slice(),
             ["gateway", "app_https"].as_slice(),
             ["compute", "compute_gateway_https", "compute_https"].as_slice(),
@@ -348,7 +348,7 @@ mod tests {
                 result: "pass".into(),
             },
             RuntimeCheck {
-                name: "podman_6".into(),
+                name: "podman".into(),
                 result: "pass".into(),
             },
             RuntimeCheck {

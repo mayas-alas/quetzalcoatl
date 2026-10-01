@@ -10,14 +10,14 @@ usage() { printf '%s\n' 'usage: install.run check|install --payload-dir DIR --st
 die() { printf '{"event":"error","code":"%s"}\n' "$1" >&2; exit 1; }
 emit() { printf '{"event":"%s"}\n' "$1"; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "MISSING_${1^^}"; }
-podman_6_or_newer() {
-  local version major
+podman_supported() {
+  local version major minor
   version=$(podman version --format '{{.Client.Version}}' 2>/dev/null || true)
-  [[ "$version" =~ ^([0-9]+)\. ]] || return 1
-  major=${BASH_REMATCH[1]}
-  ((10#$major >= 6))
+  [[ "$version" =~ ^([0-9]+)\.([0-9]+)\. ]] || return 1
+  major=${BASH_REMATCH[1]}; minor=${BASH_REMATCH[2]}
+  ((10#$major > 4 || (10#$major == 4 && 10#$minor >= 9)))
 }
-require_podman_6() { podman_6_or_newer || die PODMAN_6_REQUIRED; }
+require_supported_podman() { podman_supported || die PODMAN_VERSION_UNSUPPORTED; }
 
 mode="${1:-}"
 [[ "$mode" == check || "$mode" == install ]] || { usage >&2; exit 64; }
@@ -201,7 +201,7 @@ check_prereqs() {
   [[ -c /dev/net/tun && -r /dev/net/tun && -w /dev/net/tun ]] || die TUN_UNAVAILABLE
   if [[ "$mode" == check ]]; then kvm_usable || die KVM_UNAVAILABLE; fi
   if [[ "$mode" == check ]]; then
-    require_cmd nft; require_cmd curl; require_cmd getent; require_cmd python3; require_cmd podman; require_podman_6
+    require_cmd nft; require_cmd curl; require_cmd getent; require_cmd python3; require_cmd podman; require_supported_podman
   fi
   check_image_refs
   [[ -z "$mesh_secret_file" ]] || check_secret_file "$mesh_secret_file" TS_AUTHKEY
@@ -209,14 +209,14 @@ check_prereqs() {
 }
 
 install_dependencies() {
-  if command -v podman >/dev/null 2>&1 && podman_6_or_newer && command -v nft >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && command -v dig >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then return 0; fi
+  if command -v podman >/dev/null 2>&1 && podman_supported && command -v nft >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && command -v dig >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then return 0; fi
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update >/dev/null 2>&1 || die DEPENDENCY_INSTALL_FAILED
     DEBIAN_FRONTEND=noninteractive apt-get install -y podman nftables curl dnsutils libc-bin python3 openssl kmod >/dev/null 2>&1 || die DEPENDENCY_INSTALL_FAILED
   elif command -v dnf >/dev/null 2>&1; then
     dnf install -y podman nftables curl bind-utils glibc-common python3 openssl kmod >/dev/null 2>&1 || die DEPENDENCY_INSTALL_FAILED
   else die DEPENDENCY_INSTALL_UNSUPPORTED; fi
-  require_cmd podman; require_podman_6; require_cmd nft; require_cmd curl; require_cmd dig; require_cmd python3; require_cmd openssl; require_cmd modprobe
+  require_cmd podman; require_supported_podman; require_cmd nft; require_cmd curl; require_cmd dig; require_cmd python3; require_cmd openssl; require_cmd modprobe
 }
 
 load_kvm() {

@@ -2,6 +2,7 @@ mod ca;
 mod cleanup;
 mod control_pipe;
 mod dedicated_account;
+mod host_access;
 mod linux_node;
 mod provisioning;
 mod secret_store;
@@ -31,6 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(windows)]
 mod service {
     use super::control_pipe;
+    use gnx_control_protocol::NodeState;
     use std::ffi::OsString;
     use std::sync::{
         atomic::{AtomicBool, Ordering},
@@ -110,6 +112,17 @@ mod service {
                 }
             }
         });
+        // Best-effort host browser access reconciliation is intentionally
+        // limited to an already-ready persisted node. Provisioning remains the
+        // only path that creates readiness, and startup never exports secrets or
+        // restarts WSL to force a network address.
+        if let Ok(progress) = crate::state::load() {
+            if progress.state == NodeState::NodeReady {
+                if let Some(certificate) = progress.private_ca_certificate.as_deref() {
+                    let _ = crate::host_access::reconcile(std::path::Path::new(certificate));
+                }
+            }
+        }
         // Reuse the canonical verifier instead of inventing browser-side
         // health checks. This is a thread of the existing host service, not a
         // new network service or a browser control channel.
