@@ -14,7 +14,7 @@ The deterministic final artifacts are `build/installer/GnxNode.msi` and
 their non-zero sizes, and SHA-256 hashes. To compile Burn independently after
 an MSI build, run `dotnet build installer/bundle/Bundle.wixproj -p:Configuration=release`.
 
-Setup is a minimal elevated Rust console and needs no browser runtime or packaged web assets. Upgrades remove the obsolete `gnx-setup.exe.WebView2` profile left by older Setup builds. The MSI appends `[INSTALLFOLDER]` to the Windows **system PATH**, so a newly opened host-user terminal can run `gnx`; `gnxnodesvc` remains a non-interactive service identity and never receives a Setup session. Its default workflow completes the Proxmox password step and then the Tailscale key step through the existing administrator-only named pipe, prompting only when required; `status`, `set password`, `retry`, `cancel`, `help`, and `version` are safe operational commands. `gnx set password` securely defines or rotates the Proxmox `root@pam` password on new and enrolled nodes without replacing the mesh identity. Re-running after an upgrade preserves the existing node and asks for credentials only when enrollment is needed; silent installs do not prompt or launch interactive onboarding. For a direct MSI install, open a new elevated terminal and run `gnx`; before reopening the terminal, use `Start-Process -Verb RunAs -Wait -FilePath (Join-Path ${env:ProgramFiles(x86)} 'GnX Node\\gnx.exe')`. Add `--pause` when an externally spawned console must remain visible.
+Setup is a minimal elevated Rust console and needs no browser runtime or packaged web assets. Upgrades remove the obsolete `gnx-setup.exe.WebView2` profile left by older Setup builds. The MSI appends `[INSTALLFOLDER]` to the Windows **system PATH**, so a newly opened host-user terminal can run `gnx`; `gnxnodesvc` remains a non-interactive service identity and never receives a Setup session. Its default workflow completes the Proxmox password step and then the Tailscale key step through the existing administrator-only named pipe, prompting only when required; `status`, `set password`, `retry`, `runtime stop --confirm`, `runtime start`, `cancel`, `help`, and `version` are safe operational commands. `gnx set password` securely defines or rotates the Proxmox `root@pam` password on new and enrolled nodes without replacing the mesh identity. Re-running after an upgrade preserves the existing node and asks for credentials only when enrollment is needed; silent installs do not prompt or launch interactive onboarding. For a direct MSI install, open a new elevated terminal and run `gnx`; before reopening the terminal, use `Start-Process -Verb RunAs -Wait -FilePath (Join-Path ${env:ProgramFiles(x86)} 'GnX Node\\gnx.exe')`. Add `--pause` when an externally spawned console must remain visible.
 
 Onboarding credentials are accepted only by the five allowlisted control
 operations. Setup writes a one-shot bundle under the interactive user's
@@ -26,6 +26,25 @@ creates the product private CA under its protected state directory, installs onl
 the public certificate into local Windows trust, and publishes loopback-only host
 access before reporting ready. It reports the public certificate path plus explicit
 Split DNS and CA-trust actions only for external tailnet clients. The named pipe remains the sole secret boundary; credentials are never sent through the PWA.
+
+## Managed runtime stop and start
+
+To release RAM while preserving the GnX enrollment, state, credentials, and WSL image, run from an elevated terminal:
+
+```powershell
+gnx runtime stop --confirm
+# equivalent alias: gnx shutdown --confirm
+```
+
+The host agent stops only its allowlisted GnX services, then terminates only the managed `gnx-node` WSL distribution under the `gnxnodesvc` identity. It never invokes global `wsl --shutdown`, so unrelated WSL distributions remain untouched. While stopped, `gnx status` reports `RuntimeStopped` and the host agent deliberately does not hold its WSL keepalive open.
+
+Resume the node with:
+
+```powershell
+gnx runtime start
+```
+
+Start verifies the fixed distro and allowlisted services before reporting `NodeReady`. Do not use `wsl --shutdown` when the intent is only to pause GnX: that Windows-wide command stops every WSL distribution.
 
 ## Uninstallation boundary
 

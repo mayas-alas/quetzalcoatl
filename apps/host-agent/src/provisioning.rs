@@ -109,6 +109,36 @@ pub fn execute(req: &Request, current: &Progress) -> Progress {
                 }
             }
         }
+        if matches!(req.operation, Operation::StopRuntime) && p.error_code.is_none() {
+            if let Err(error) = crate::linux_node::stop_runtime() {
+                p.state = current.state.clone();
+                p.phase = current.phase.clone();
+                p.message = "The managed GnX runtime could not be stopped safely.".into();
+                p.error_code = Some(classify_error(&error));
+                p.retryable = true;
+            }
+        }
+        if matches!(req.operation, Operation::StartRuntime) && p.error_code.is_none() {
+            let state_dir = crate::state::state_dir();
+            let readiness = crate::linux_node::start_runtime()
+                .and_then(|_| crate::linux_node::verify(&state_dir))
+                .and_then(|_| crate::linux_node::private_ip())
+                .and_then(|ip| {
+                    reconcile_host_access(&state_dir)?;
+                    Ok(ip)
+                });
+            match readiness {
+                Ok(ip) => mark_ready(&mut p, ip),
+                Err(error) => {
+                    p.state = current.state.clone();
+                    p.phase = "runtime-stopped".into();
+                    p.message =
+                        "The managed GnX runtime did not become healthy after start.".into();
+                    p.error_code = Some(classify_error(&error));
+                    p.retryable = true;
+                }
+            }
+        }
     }
     p
 }
@@ -410,6 +440,20 @@ pub fn handle(req: &Request, current: &Progress) -> Progress {
             p.message = "Operation cancelled at a safe checkpoint.".into();
             p
         }
+        Operation::StopRuntime => {
+            p.state = NodeState::RuntimeStopped;
+            p.phase = "runtime-stopped".into();
+            p.message =
+                "The managed GnX runtime is stopped; its WSL memory has been released.".into();
+            p.percent = Some(100);
+            p
+        }
+        Operation::StartRuntime => {
+            p.state = NodeState::RuntimeReady;
+            p.phase = "runtime-starting".into();
+            p.message = "Starting the managed GnX runtime.".into();
+            p
+        }
     }
 }
 
@@ -437,6 +481,8 @@ fn allowed(operation: Operation, state: &NodeState) -> bool {
                 | NodeState::MeshPending
                 | NodeState::NodeReady
         ),
+        Operation::StopRuntime => matches!(state, NodeState::NodeReady),
+        Operation::StartRuntime => matches!(state, NodeState::RuntimeStopped),
     }
 }
 

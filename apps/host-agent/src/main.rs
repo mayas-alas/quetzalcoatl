@@ -101,7 +101,11 @@ mod service {
                 // soon as the account credential appears races Provision's
                 // required .wslconfig copy and first distro import.
                 let enrolled = crate::state::load()
-                    .map(|progress| progress.node_private_ip.is_some())
+                    // A stopped runtime retains its address in the durable
+                    // checkpoint. Only NodeReady is permitted to hold the
+                    // keepalive client open, otherwise it would immediately
+                    // restart a runtime the operator intentionally stopped.
+                    .map(|progress| progress.state == NodeState::NodeReady)
                     .unwrap_or(false);
                 if !enrolled {
                     std::thread::sleep(std::time::Duration::from_secs(1));

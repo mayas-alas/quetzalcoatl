@@ -58,6 +58,8 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(&'static str, b
         ["provision"] | ["password"] | ["set", "password"] => "password",
         ["join"] => "join",
         ["retry"] => "retry",
+        ["runtime", "stop", "--confirm"] | ["shutdown", "--confirm"] => "runtime-stop",
+        ["runtime", "start"] => "runtime-start",
         ["cancel"] => "cancel",
         _ => {
             return Err(
@@ -73,7 +75,7 @@ fn run(command: &str) -> Result<()> {
         "help" => {
             println!("GnX Node Setup {}", env!("CARGO_PKG_VERSION"));
             println!(
-                "Usage: gnx [setup|status|set password|join|retry|cancel|help|version] [--pause]"
+                "Usage: gnx [setup|status|set password|join|retry|runtime stop --confirm|runtime start|cancel|help|version] [--pause]"
             );
             println!("Run in an Administrator terminal. No command: guided initial setup.");
             println!(
@@ -83,7 +85,7 @@ fn run(command: &str) -> Result<()> {
                 "set password: securely set or rotate the Proxmox root password with hidden prompts."
             );
             println!(
-                "status: read-only; retry: reconcile without credentials; cancel: safe checkpoint."
+                "status: read-only; retry: reconcile without credentials; runtime stop --confirm (or shutdown --confirm): stop only GnX WSL and free its RAM."
             );
             println!("Existing ready nodes are preserved. Daily access: https://app.gnx");
         }
@@ -96,6 +98,12 @@ fn run(command: &str) -> Result<()> {
         }
         "cancel" => {
             finish(send(&request(Operation::Cancel))?)?;
+        }
+        "runtime-stop" => {
+            finish(send(&request(Operation::StopRuntime))?)?;
+        }
+        "runtime-start" => {
+            finish(send(&request(Operation::StartRuntime))?)?;
         }
         "password" => {
             provision()?;

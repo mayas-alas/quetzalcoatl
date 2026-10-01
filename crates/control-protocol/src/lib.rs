@@ -15,6 +15,8 @@ pub enum Operation {
     JoinMesh,
     Retry,
     Cancel,
+    StopRuntime,
+    StartRuntime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -27,6 +29,7 @@ pub enum NodeState {
     RuntimeReady,
     MeshPending,
     NodeReady,
+    RuntimeStopped,
     Blocked,
     Failed,
     RecoveryRequired,

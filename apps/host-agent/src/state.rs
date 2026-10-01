@@ -78,11 +78,15 @@ pub fn save(progress: &Progress) -> io::Result<()> {
         // `verify.run` remains the canonical service check. Its bounded,
         // allowlisted results enrich only the browser projection; a missing
         // runtime must never prevent the durable control checkpoint.
-        let runtime = crate::linux_node::runtime_checks(&dir).ok();
-        if let Some(checks) = runtime.as_deref() {
-            let _ = write_app_status(&dir, &safe, Some(checks));
+        // RuntimeStopped is an intentional operator checkpoint. Running the
+        // verifier would launch WSL and defeat the requested RAM release.
+        if safe.state != NodeState::RuntimeStopped {
+            let runtime = crate::linux_node::runtime_checks(&dir).ok();
+            if let Some(checks) = runtime.as_deref() {
+                let _ = write_app_status(&dir, &safe, Some(checks));
+            }
+            let _ = crate::linux_node::publish_app_status(&dir.join(APP_STATUS_FILE));
         }
-        let _ = crate::linux_node::publish_app_status(&dir.join(APP_STATUS_FILE));
     }
     Ok(())
 }
@@ -96,7 +100,7 @@ pub fn refresh_app_status() -> io::Result<()> {
     // A recovered backend can remain at a blocked provisioning checkpoint
     // (for example, a runtime-version action). Keep publishing live health
     // whenever the node has already reported a runtime address.
-    if progress.node_private_ip.is_none() {
+    if progress.node_private_ip.is_none() || progress.state == NodeState::RuntimeStopped {
         return Ok(());
     }
     let runtime = crate::linux_node::runtime_checks(&dir).ok();
@@ -187,6 +191,9 @@ fn app_checks(progress: &Progress, runtime: Option<&[RuntimeCheck]>) -> Vec<AppC
             checks[2].result = "attention";
         }
         NodeState::WindowsReady | NodeState::WslReady | NodeState::RuntimeReady => {
+            checks[0].result = "pass";
+        }
+        NodeState::RuntimeStopped => {
             checks[0].result = "pass";
         }
         NodeState::Blocked | NodeState::Failed | NodeState::RecoveryRequired => {

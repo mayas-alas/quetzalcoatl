@@ -276,6 +276,55 @@ pub fn verify(_state_dir: &Path) -> io::Result<RuntimeResult> {
     Ok(RuntimeResult::Ready)
 }
 
+/// Stop only the distro owned by the managed `gnxnodesvc` identity. This is
+/// deliberately not `wsl --shutdown`, which would terminate unrelated WSL
+/// distributions on the Windows host.
+#[cfg(windows)]
+pub fn stop_runtime() -> io::Result<()> {
+    let output = run_wsl(
+        "/usr/bin/systemctl",
+        &[
+            "stop",
+            "platform.target",
+            "mesh.service",
+            "gnx-ingress.service",
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(io::Error::other("RUNTIME_STOP_FAILED"));
+    }
+    let output = crate::dedicated_account::run_wsl_as_windows_identity(&[
+        "--terminate".into(),
+        DISTRO_NAME.into(),
+    ])
+    .map_err(|error| io::Error::new(error.kind(), format!("WSL_IDENTITY_FAILED: {error}")))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other("RUNTIME_TERMINATE_FAILED"))
+    }
+}
+
+/// Start the fixed managed distro and its allowlisted platform units.
+#[cfg(windows)]
+pub fn start_runtime() -> io::Result<()> {
+    ensure_distro()?;
+    let output = run_wsl(
+        "/usr/bin/systemctl",
+        &[
+            "start",
+            "gnx-ingress.service",
+            "mesh.service",
+            "platform.target",
+        ],
+    )?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other("RUNTIME_START_FAILED"))
+    }
+}
+
 #[cfg(windows)]
 fn run_wsl(script: &str, args: &[&str]) -> io::Result<std::process::Output> {
     let mut command = vec![
