@@ -80,7 +80,7 @@ pub fn save(progress: &Progress) -> io::Result<()> {
         // runtime must never prevent the durable control checkpoint.
         // RuntimeStopped is an intentional operator checkpoint. Running the
         // verifier would launch WSL and defeat the requested RAM release.
-        if safe.state != NodeState::RuntimeStopped {
+        if safe.state != NodeState::RuntimeStopped && !crate::linux_node::runtime_stop_requested() {
             let runtime = crate::linux_node::runtime_checks(&dir).ok();
             if let Some(checks) = runtime.as_deref() {
                 let _ = write_app_status(&dir, &safe, Some(checks));
@@ -100,7 +100,10 @@ pub fn refresh_app_status() -> io::Result<()> {
     // A recovered backend can remain at a blocked provisioning checkpoint
     // (for example, a runtime-version action). Keep publishing live health
     // whenever the node has already reported a runtime address.
-    if progress.node_private_ip.is_none() || progress.state == NodeState::RuntimeStopped {
+    if progress.node_private_ip.is_none()
+        || progress.state == NodeState::RuntimeStopped
+        || crate::linux_node::runtime_stop_requested()
+    {
         return Ok(());
     }
     let runtime = crate::linux_node::runtime_checks(&dir).ok();

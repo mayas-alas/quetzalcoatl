@@ -5,6 +5,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use sha2::{Digest, Sha256};
 
@@ -13,6 +14,15 @@ pub const ROOTFS_ARTIFACT_NAME: &str = "gnx-node-rootfs.tar";
 pub const ROOTFS_MANIFEST_NAME: &str = "gnx-node-rootfs.tar.sha256";
 pub const PAYLOAD_MARKER_PATH: &str = "/opt/gnx/payload/node/.gnx-payload.sha256";
 pub const WSL_CONFIG_NAME: &str = ".wslconfig";
+
+// Set before the final client connection is terminated. The service keepalive
+// and status monitor consult this gate so neither can reopen WSL in the small
+// window between a successful termination and persistence of RuntimeStopped.
+static RUNTIME_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+pub fn runtime_stop_requested() -> bool {
+    RUNTIME_STOP_REQUESTED.load(Ordering::Acquire)
+}
 
 pub fn payload_dir() -> PathBuf {
     std::env::var_os("GNX_NODE_PAYLOAD")
@@ -281,28 +291,37 @@ pub fn verify(_state_dir: &Path) -> io::Result<RuntimeResult> {
 /// distributions on the Windows host.
 #[cfg(windows)]
 pub fn stop_runtime() -> io::Result<()> {
-    let output = run_wsl(
-        "/usr/bin/systemctl",
-        &[
-            "stop",
-            "platform.target",
-            "mesh.service",
-            "gnx-ingress.service",
-        ],
-    )?;
-    if !output.status.success() {
-        return Err(io::Error::other("RUNTIME_STOP_FAILED"));
+    RUNTIME_STOP_REQUESTED.store(true, Ordering::Release);
+    let result = (|| {
+        let output = run_wsl(
+            "/usr/bin/systemctl",
+            &[
+                "stop",
+                "platform.target",
+                "mesh.service",
+                "gnx-ingress.service",
+            ],
+        )?;
+        if !output.status.success() {
+            return Err(io::Error::other("RUNTIME_STOP_FAILED"));
+        }
+        let output = crate::dedicated_account::run_wsl_as_windows_identity(&[
+            "--terminate".into(),
+            DISTRO_NAME.into(),
+        ])
+        .map_err(|error| io::Error::new(error.kind(), format!("WSL_IDENTITY_FAILED: {error}")))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::other("RUNTIME_TERMINATE_FAILED"))
+        }
+    })();
+    // A failed stop leaves the durable checkpoint at NodeReady, so the
+    // existing keepalive must remain available to preserve that runtime.
+    if result.is_err() {
+        RUNTIME_STOP_REQUESTED.store(false, Ordering::Release);
     }
-    let output = crate::dedicated_account::run_wsl_as_windows_identity(&[
-        "--terminate".into(),
-        DISTRO_NAME.into(),
-    ])
-    .map_err(|error| io::Error::new(error.kind(), format!("WSL_IDENTITY_FAILED: {error}")))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(io::Error::other("RUNTIME_TERMINATE_FAILED"))
-    }
+    result
 }
 
 /// Start the fixed managed distro and its allowlisted platform units.
@@ -319,6 +338,7 @@ pub fn start_runtime() -> io::Result<()> {
         ],
     )?;
     if output.status.success() {
+        RUNTIME_STOP_REQUESTED.store(false, Ordering::Release);
         Ok(())
     } else {
         Err(io::Error::other("RUNTIME_START_FAILED"))

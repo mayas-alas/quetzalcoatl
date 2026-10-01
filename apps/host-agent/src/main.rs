@@ -105,7 +105,10 @@ mod service {
                     // checkpoint. Only NodeReady is permitted to hold the
                     // keepalive client open, otherwise it would immediately
                     // restart a runtime the operator intentionally stopped.
-                    .map(|progress| progress.state == NodeState::NodeReady)
+                    .map(|progress| {
+                        progress.state == NodeState::NodeReady
+                            && !crate::linux_node::runtime_stop_requested()
+                    })
                     .unwrap_or(false);
                 if !enrolled {
                     std::thread::sleep(std::time::Duration::from_secs(1));

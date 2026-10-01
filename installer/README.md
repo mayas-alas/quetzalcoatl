@@ -36,7 +36,9 @@ gnx runtime stop --confirm
 # equivalent alias: gnx shutdown --confirm
 ```
 
-The host agent stops only its allowlisted GnX services, then terminates only the managed `gnx-node` WSL distribution under the `gnxnodesvc` identity. It never invokes global `wsl --shutdown`, so unrelated WSL distributions remain untouched. While stopped, `gnx status` reports `RuntimeStopped` and the host agent deliberately does not hold its WSL keepalive open.
+The host agent first gates its keepalive and status monitor, stops only its allowlisted GnX services, then terminates only the managed `gnx-node` WSL distribution under the `gnxnodesvc` identity. This prevents a new WSL client from racing the termination before `RuntimeStopped` is durably saved. It never invokes global `wsl --shutdown`, so unrelated WSL distributions remain untouched. While stopped, `gnx status` reports `RuntimeStopped` and the host agent deliberately does not hold its WSL keepalive open.
+
+The managed account's `.wslconfig` also enables page reporting and gradual automatic memory reclaim while the runtime is active. Those settings reduce idle memory pressure but are not treated as proof of a stop; only successful termination of the fixed distro completes `runtime stop`.
 
 Resume the node with:
 

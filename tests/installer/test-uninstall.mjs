@@ -16,8 +16,8 @@ const [product, bundle, wixproj, buildScript, readme] = await Promise.all([
   read('installer/README.md'),
 ]);
 
-assert.match(product, /Version="0\.1\.18\.0"/);
-assert.match(bundle, /Version="0\.1\.18\.0"/);
+assert.match(product, /Version="0\.1\.19\.0"/);
+assert.match(bundle, /Version="0\.1\.19\.0"/);
 assert.match(product, /UpgradeCode="5EAA2C0C-1E4C-4E4D-89E5-3D6F1A7E4C11"/);
 assert.match(bundle, /UpgradeCode="DB8BFB10-FA20-4F4F-9B3E-35DBD15A2A1A"/);
 assert.match(bundle, /LaunchTarget="\[ProgramFilesFolder\]GnX Node\\gnx\.exe"/);

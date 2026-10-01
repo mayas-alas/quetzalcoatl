@@ -1,2 +1,7 @@
 [wsl2]
 nestedVirtualization=true
+# Return unused guest pages to Windows while GnX is running. This complements
+# (but never replaces) the explicit managed-runtime stop operation.
+pageReporting=true
+autoMemoryReclaim=gradual
+vmIdleTimeout=60000
