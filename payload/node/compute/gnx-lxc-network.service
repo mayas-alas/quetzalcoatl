@@ -1,0 +1,11 @@
+[Unit]
+Description=GnX managed LXC transport
+After=pve-cluster.service dnsmasq.service pve-firewall.service
+Requires=pve-cluster.service dnsmasq.service
+Before=pveproxy.service pve-guests.service
+
+[Service]
+Type=oneshot
+ExecStart=/etc/gnx/network/network.run
+RemainAfterExit=yes
+TimeoutStartSec=90

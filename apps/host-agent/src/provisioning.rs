@@ -10,6 +10,64 @@ pub fn execute(req: &Request, current: &Progress) -> Progress {
         return current.clone();
     }
     let mut p = handle(req, current);
+    if matches!(
+        req.operation,
+        Operation::Connect | Operation::Start | Operation::Stop | Operation::Status
+    ) {
+        #[cfg(windows)]
+        let action_material = if req.operation == Operation::Connect {
+            match consume_secrets(req, Operation::Connect) {
+                Ok(material) => Some(material),
+                Err(error) => {
+                    p.phase = "github".into();
+                    p.message = "GitHub Actions credential bundle was rejected.".into();
+                    p.error_code = Some(classify_error(&error));
+                    p.retryable = false;
+                    return p;
+                }
+            }
+        } else {
+            None
+        };
+        #[cfg(not(windows))]
+        let action_material: Option<crate::secret_store::SecretMaterial> = None;
+        let action = match req.operation {
+            Operation::Connect => "connect",
+            Operation::Start => "start",
+            Operation::Stop => "stop",
+            Operation::Status => "status",
+            _ => unreachable!(),
+        };
+        match crate::github::execute(
+            action,
+            &crate::state::state_dir(),
+            req.github.as_ref(),
+            p.github.as_ref(),
+            action_material
+                .as_ref()
+                .and_then(|material| material.tailscale_auth_key.as_deref()),
+        ) {
+            Ok(status) => {
+                p.github = Some(status.clone());
+                p.phase = "github".into();
+                p.message = status
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "GitHub Actions status updated.".into());
+                p.state = current.state.clone();
+                p.percent = Some(100);
+            }
+            Err(error) => {
+                p.github = Some(p.github.clone().unwrap_or_else(crate::github::initial_status));
+                p.phase = "github".into();
+                p.message = "GitHub Actions operation did not complete.".into();
+                p.state = current.state.clone();
+                p.error_code = Some(classify_error(&error));
+                p.retryable = true;
+            }
+        }
+        return p;
+    }
     if matches!(req.operation, Operation::Provision) && p.error_code.is_none() {
         #[cfg(windows)]
         let ca_result = account_then_ca(
@@ -139,6 +197,47 @@ pub fn execute(req: &Request, current: &Progress) -> Progress {
                 }
             }
         }
+        if matches!(req.operation, Operation::DiagnoseCompute) && p.error_code.is_none() {
+            match crate::linux_node::diagnose_compute_file(&crate::state::state_dir()) {
+                Ok(()) => {
+                    p.state = current.state.clone();
+                    p.phase = current.phase.clone();
+                    p.message = "Compute diagnostic captured locally.".into();
+                }
+                Err(error) => {
+                    p.state = current.state.clone();
+                    p.phase = current.phase.clone();
+                    p.message = "Compute diagnostic could not be captured.".into();
+                    p.error_code = Some(classify_error(&error));
+                }
+            }
+        }
+        if matches!(
+            req.operation,
+            Operation::StartWorkload | Operation::StopWorkload
+        ) && p.error_code.is_none()
+        {
+            let start = req.operation == Operation::StartWorkload;
+            match crate::linux_node::control_workload(&crate::state::state_dir(), start) {
+                Ok(status) => {
+                    p.state = NodeState::NodeReady;
+                    p.phase = "workloads".into();
+                    p.message = if status.state == "running" {
+                        "RustFS is running in its managed LXC.".into()
+                    } else {
+                        "RustFS is stopped; persistent data is retained.".into()
+                    };
+                    p.percent = Some(100);
+                }
+                Err(error) => {
+                    p.state = current.state.clone();
+                    p.phase = "workloads".into();
+                    p.message = "The RustFS LXC operation did not complete safely.".into();
+                    p.error_code = Some(classify_error(&error));
+                    p.retryable = true;
+                }
+            }
+        }
     }
     p
 }
@@ -213,10 +312,16 @@ fn consume_secrets(
             "PROXMOX_CREDENTIAL_MISSING",
         ));
     }
-    if operation == Operation::JoinMesh && material.tailscale_auth_key.is_none() {
+    if matches!(operation, Operation::JoinMesh | Operation::Connect)
+        && material.tailscale_auth_key.is_none()
+    {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "MESH_CREDENTIAL_MISSING",
+            if operation == Operation::Connect {
+                "ACTIONS_TAILSCALE_CREDENTIAL_MISSING"
+            } else {
+                "MESH_CREDENTIAL_MISSING"
+            },
         ));
     }
     Ok(std::mem::take(&mut material))
@@ -454,6 +559,30 @@ pub fn handle(req: &Request, current: &Progress) -> Progress {
             p.message = "Starting the managed GnX runtime.".into();
             p
         }
+        Operation::StartWorkload => {
+            p.state = current.state.clone();
+            p.phase = "workloads".into();
+            p.message = "Starting the managed RustFS LXC.".into();
+            p
+        }
+        Operation::StopWorkload => {
+            p.state = current.state.clone();
+            p.phase = "workloads".into();
+            p.message = "Stopping the managed RustFS LXC cleanly.".into();
+            p
+        }
+        Operation::DiagnoseCompute => {
+            p.state = current.state.clone();
+            p.phase = current.phase.clone();
+            p.message = "Capturing a bounded local compute diagnostic.".into();
+            p
+        }
+        Operation::Connect | Operation::Start | Operation::Stop | Operation::Status => {
+            p.state = current.state.clone();
+            p.phase = "github".into();
+            p.message = "Updating the native GitHub Actions integration.".into();
+            p
+        }
     }
 }
 
@@ -483,6 +612,9 @@ fn allowed(operation: Operation, state: &NodeState) -> bool {
         ),
         Operation::StopRuntime => matches!(state, NodeState::NodeReady),
         Operation::StartRuntime => matches!(state, NodeState::RuntimeStopped),
+        Operation::StartWorkload | Operation::StopWorkload => matches!(state, NodeState::NodeReady),
+        Operation::DiagnoseCompute => !matches!(state, NodeState::New),
+        Operation::Connect | Operation::Start | Operation::Stop | Operation::Status => true,
     }
 }
 
@@ -500,6 +632,8 @@ mod tests {
             tailscale_auth_key: key,
             proxmox_password: None,
             secret_file: None,
+            github: None,
+            workload: None,
         }
     }
 
@@ -575,6 +709,8 @@ mod tests {
             tailscale_auth_key: None,
             proxmox_password: None,
             secret_file: None,
+            github: None,
+            workload: None,
         };
         assert_eq!(execute(&request, &current), current);
     }

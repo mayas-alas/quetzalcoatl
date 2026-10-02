@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+# GnX-owned LXC workload adapter. The caller selects only an allowlisted workload
+# and action; no user-supplied shell, VMID, path, or Proxmox argument is accepted.
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 077
+
+fail() { printf '{"workload":"rustfs","state":"error","code":"%s"}\n' "$1" >&2; exit 1; }
+[[ "$(id -u)" == 0 ]] || fail ROOT_REQUIRED
+[[ $# == 2 ]] || fail INVALID_ARGUMENT
+action=$1
+workload=$2
+[[ "$workload" == rustfs ]] || fail WORKLOAD_NOT_ALLOWED
+case "$action" in status|provision|start|shutdown|diagnose) ;; *) fail ACTION_NOT_ALLOWED ;; esac
+command -v podman >/dev/null 2>&1 || fail PODMAN_MISSING
+podman container exists gnx-compute || fail COMPUTE_MISSING
+
+pve() { podman exec gnx-compute "$@"; }
+find_vmid() {
+  local id config found=""
+  while read -r id; do
+    [[ "$id" =~ ^[1-9][0-9]{2,8}$ ]] || continue
+    config=$(pve /usr/sbin/pct config "$id" 2>/dev/null || true)
+    if grep -Eq '^tags: .*\bgnx-rustfs\b' <<<"$config"; then
+      [[ -z "$found" ]] || fail DUPLICATE_WORKLOAD
+      found=$id
+    fi
+  done < <(pve /usr/sbin/pct list 2>/dev/null | awk 'NR > 1 {print $1}')
+  printf '%s' "$found"
+}
+status() {
+  local vmid state version="1.0.0-gnx.1" service=unknown
+  vmid=$(find_vmid)
+  if [[ -z "$vmid" ]]; then
+    printf '{"workload":"rustfs","state":"off","service":"absent","version":"%s"}\n' "$version"
+    return
+  fi
+  state=$(pve /usr/sbin/pct status "$vmid" 2>/dev/null | awk '{print $2}')
+  if [[ "$state" == running ]]; then
+    if pve /usr/sbin/pct exec "$vmid" -- /usr/bin/systemctl is-active --quiet rustfs.service >/dev/null 2>&1 &&
+       pve /usr/sbin/pct exec "$vmid" -- /usr/bin/podman healthcheck run gnx-rustfs >/dev/null 2>&1 &&
+       curl --proto '=https' --fail --silent --connect-timeout 2 --max-time 5 \
+         --cacert /var/lib/gnx-node/ca/gateway-ca.pem --resolve rustfs.gnx:443:127.0.0.1 \
+         https://rustfs.gnx/rustfs/console/ >/dev/null 2>&1; then service=healthy
+    else service=attention
+    fi
+  else
+    state=off; service=stopped
+  fi
+  printf '{"workload":"rustfs","state":"%s","service":"%s","version":"%s"}\n' "$state" "$service" "$version"
+}
+configure_network() {
+  local vmid=$1
+  pve /usr/sbin/pct exec "$vmid" -- /usr/bin/mkdir -p /etc/systemd/network /usr/local/libexec || fail GUEST_NETWORK_CONFIG_FAILED
+  pve /usr/sbin/pct push "$vmid" /etc/gnx/network/eth0.network /etc/systemd/network/10-gnx-eth0.network --perms 0644 || fail GUEST_NETWORK_CONFIG_FAILED
+  pve /usr/sbin/pct push "$vmid" /etc/gnx/network/guest-network.run /usr/local/libexec/gnx-configure-network --perms 0755 || fail GUEST_NETWORK_CONFIG_FAILED
+  pve /etc/gnx/network/network.run open "$vmid" || fail MESH_GUARD_REQUIRED
+  if ! pve /usr/sbin/pct exec "$vmid" -- /usr/local/libexec/gnx-configure-network; then
+    pve /etc/gnx/network/network.run close "$vmid" || true
+    fail GUEST_DHCP_TIMEOUT
+  fi
+}
+install_tls() {
+  local vmid=$1 ca=/var/lib/gnx-node/ca key=/var/lib/gnx-node/ca-private/gateway-ca.key
+  [[ -s "$key" && -s "$ca/gateway-ca.pem" ]] || return 1
+  if ! openssl verify -CAfile "$ca/gateway-ca.pem" -verify_hostname rustfs.gnx "$ca/rustfs-cert.pem" >/dev/null 2>&1 ||
+     ! openssl x509 -in "$ca/rustfs-cert.pem" -checkend 86400 -noout >/dev/null 2>&1; then
+    (umask 077
+      openssl req -new -newkey rsa:2048 -nodes -keyout "$ca/rustfs-key.pem" -out "$ca/rustfs.csr" -subj '/CN=rustfs.gnx' >/dev/null 2>&1
+      printf 'subjectAltName=DNS:rustfs.gnx\nextendedKeyUsage=serverAuth\n' > "$ca/rustfs.ext"
+      openssl x509 -req -days 825 -in "$ca/rustfs.csr" -CA "$ca/gateway-ca.pem" -CAkey "$key" -set_serial "0x$(openssl rand -hex 16)" -out "$ca/rustfs-cert.pem" -extfile "$ca/rustfs.ext" >/dev/null 2>&1
+      rm -f "$ca/rustfs.csr" "$ca/rustfs.ext") || return 1
+  fi
+  pve /usr/sbin/pct exec "$vmid" -- mkdir -p /var/lib/gnx/rustfs/tls || return 1
+  podman cp "$ca/rustfs-key.pem" gnx-compute:/tmp/gnx-rustfs-key.pem || return 1
+  podman cp "$ca/rustfs-cert.pem" gnx-compute:/tmp/gnx-rustfs-cert.pem || return 1
+  podman cp "$ca/gateway-ca.pem" gnx-compute:/tmp/gnx-rustfs-ca.pem || return 1
+  pve /usr/sbin/pct push "$vmid" /tmp/gnx-rustfs-key.pem /var/lib/gnx/rustfs/tls/rustfs_key.pem --perms 0600 || return 1
+  pve /usr/sbin/pct push "$vmid" /tmp/gnx-rustfs-cert.pem /var/lib/gnx/rustfs/tls/rustfs_cert.pem --perms 0644 || return 1
+  pve /usr/sbin/pct push "$vmid" /tmp/gnx-rustfs-ca.pem /var/lib/gnx/rustfs/tls/ca.crt --perms 0644 || return 1
+  pve /usr/sbin/pct exec "$vmid" -- chown -R 10001:10001 /var/lib/gnx/rustfs/tls || return 1
+  pve /usr/sbin/pct exec "$vmid" -- rm -f /var/lib/gnx/rustfs/tls/private.key /var/lib/gnx/rustfs/tls/public.crt || return 1
+  pve rm -f /tmp/gnx-rustfs-key.pem /tmp/gnx-rustfs-cert.pem /tmp/gnx-rustfs-ca.pem
+}
+install_bundle() {
+  local vmid=$1 stage=/tmp/gnx-rustfs-bundle
+  rm -rf -- "$stage"
+  install -d -m 0700 "$stage"
+  cp -a /opt/gnx/payload/node/workloads/rustfs/. "$stage/"
+  podman exec gnx-compute /usr/bin/rm -rf -- /tmp/gnx-rustfs-bundle || return 1
+  podman cp "$stage"/. gnx-compute:/tmp/gnx-rustfs-bundle || return 1
+  rm -rf -- "$stage"
+  pve /usr/sbin/pct exec "$vmid" -- /usr/bin/mkdir -p /usr/local/libexec /opt/gnx/workloads/rustfs /etc/containers/systemd || return 1
+  pve /usr/sbin/pct push "$vmid" /tmp/gnx-rustfs-bundle/install.run /usr/local/libexec/gnx-install-rustfs --perms 0755 || return 1
+  for file in Containerfile rustfs.container mesh.run mesh.nft workload-mesh.container workload-mesh-guard.service networkd-mesh-guard.conf offline.tar.gz; do
+    pve /usr/sbin/pct push "$vmid" "/tmp/gnx-rustfs-bundle/$file" "/opt/gnx/workloads/rustfs/$file" --perms 0644 || return 1
+  done
+  install_tls "$vmid" || return 1
+  pve /usr/sbin/pct exec "$vmid" -- /usr/local/libexec/gnx-install-rustfs --prepare || return 1
+  podman exec gnx-compute /usr/bin/rm -rf -- /tmp/gnx-rustfs-bundle || true
+}
+provision() {
+  local vmid template template_store root_store
+  vmid=$(find_vmid)
+  if [[ -n "$vmid" ]]; then
+    pve /etc/gnx/network/network.run close "$vmid" || fail TRANSPORT_GATE_FAILED
+    if ! pve /usr/sbin/pct status "$vmid" | grep -q running; then
+      pve /usr/sbin/pct set "$vmid" --dev0 'path=/dev/net/tun,mode=0666' || fail GUEST_TUN_CONFIG_FAILED
+      pve /usr/bin/systemd-run --quiet --scope -- /usr/sbin/pct start "$vmid" || fail GUEST_START_FAILED
+    fi
+    install_bundle "$vmid" || fail OFFLINE_PREPARATION_FAILED
+    configure_network "$vmid"
+    pve /usr/sbin/pct exec "$vmid" -- /usr/local/libexec/gnx-install-rustfs || fail WORKLOAD_INSTALL_FAILED
+    return
+  fi
+  template_store=$(pve /usr/sbin/pvesm status -content vztmpl 2>/dev/null | awk '$3 == "active" {print $1; exit}')
+  root_store=$(pve /usr/sbin/pvesm status -content rootdir 2>/dev/null | awk '$3 == "active" {print $1; exit}')
+  [[ -n "$template_store" && -n "$root_store" ]] || fail STORAGE_UNAVAILABLE
+  template=debian-13-standard_13.6-1_amd64.tar.zst
+  if ! pve /usr/bin/pveam list "$template_store" 2>/dev/null | grep -Fq "$template"; then
+    [[ "$template_store" == local ]] || fail TEMPLATE_STORAGE_UNSUPPORTED
+    install -d -m 0755 /var/lib/gnx-node/compute/template/cache
+    curl --fail --location --silent --show-error \
+      http://download.proxmox.com/images/system/$template \
+      --output /var/lib/gnx-node/compute/template/cache/$template.part || fail TEMPLATE_DOWNLOAD_FAILED
+    digest=$(sha512sum "/var/lib/gnx-node/compute/template/cache/$template.part" | awk '{print $1}')
+    [[ "$digest" == '4c0c27ca6ceab5ef0b84db57825a00f26157ef1854bafe97297813e1cbe8ecb8cc9c453cab6b3b0efe1ba193a50c47ece1e41d950e411b8730b835b71e9e754b' ]] || fail TEMPLATE_DIGEST_MISMATCH
+    mv "/var/lib/gnx-node/compute/template/cache/$template.part" "/var/lib/gnx-node/compute/template/cache/$template"
+  fi
+  vmid=$(pve /usr/bin/pvesh get /cluster/nextid --output-format json | tr -dc '0-9')
+  [[ "$vmid" =~ ^[1-9][0-9]{2,8}$ ]] || fail VMID_UNAVAILABLE
+  pve /etc/gnx/network/network.run close "$vmid" || fail TRANSPORT_GATE_FAILED
+  pve /usr/bin/systemd-run --quiet --scope -- /usr/sbin/pct create "$vmid" "$template_store:vztmpl/$template" \
+    --hostname rustfs --unprivileged 1 --features nesting=1,keyctl=1 \
+    --cores 2 --memory 2048 --rootfs "$root_store:16" \
+    --net0 'name=eth0,bridge=vmbr0,ip=dhcp,type=veth' --nameserver 100.100.100.100 \
+    --dev0 'path=/dev/net/tun,mode=0666' \
+    --onboot 1 --tags 'gnx;gnx-rustfs' --start 1
+  install_bundle "$vmid" || fail OFFLINE_PREPARATION_FAILED
+  configure_network "$vmid"
+  pve /usr/sbin/pct exec "$vmid" -- /usr/local/libexec/gnx-install-rustfs || fail WORKLOAD_INSTALL_FAILED
+}
+
+publish_dns() {
+  local vmid ip
+  vmid=$(find_vmid)
+  ip=$(pve /usr/sbin/pct exec "$vmid" -- /usr/bin/podman exec gnx-workload-mesh tailscale --socket=/var/lib/tailscale/tailscaled.sock ip -4) || fail WORKLOAD_DNS_FAILED
+  [[ "$ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail WORKLOAD_DNS_FAILED
+  # The public hostname belongs to the existing Caddy gateway. Only this
+  # backend record points to the workload's enrolled mesh identity.
+  printf 'address=/rustfs.mesh.gnx/%s\n' "$ip" > /var/lib/gnx-node/dnsmasq.d/03-rustfs.conf
+  chmod 0644 /var/lib/gnx-node/dnsmasq.d/03-rustfs.conf
+  systemctl restart dns.service || fail WORKLOAD_DNS_FAILED
+  for _ in {1..15}; do
+    if [[ $(podman exec gnx-dns dig +short +time=1 +tries=1 @127.0.0.1 -p 5353 rustfs.mesh.gnx A 2>/dev/null) == "$ip" ]]; then
+      curl --proto '=https' --fail --silent --connect-timeout 2 --max-time 5 \
+        --cacert /var/lib/gnx-node/ca/gateway-ca.pem --resolve rustfs.gnx:443:127.0.0.1 \
+        https://rustfs.gnx/rustfs/console/ >/dev/null || fail WORKLOAD_GATEWAY_HTTPS_FAILED
+      return 0
+    fi
+    sleep 1
+  done
+  fail WORKLOAD_DNS_FAILED
+}
+case "$action" in
+  status) status ;;
+  provision) provision; publish_dns; status ;;
+  start)
+    vmid=$(find_vmid)
+    if [[ -z "$vmid" ]]; then provision
+    else
+      pve /etc/gnx/network/network.run close "$vmid" || fail TRANSPORT_GATE_FAILED
+      pve /usr/sbin/pct set "$vmid" --onboot 1 --nameserver 100.100.100.100 >/dev/null
+      if ! pve /usr/sbin/pct status "$vmid" | grep -q running; then
+        pve /usr/sbin/pct set "$vmid" --dev0 'path=/dev/net/tun,mode=0666' || fail GUEST_TUN_CONFIG_FAILED
+        pve /usr/bin/systemd-run --quiet --scope -- /usr/sbin/pct start "$vmid" >/dev/null || fail GUEST_START_FAILED
+      fi
+      install_bundle "$vmid" || fail OFFLINE_PREPARATION_FAILED
+      configure_network "$vmid"
+      # Do not overwrite guest DNS with a public underlay resolver.
+      # Reconcile native private-CA HTTPS; dashboard access needs no exit lease.
+      pve /usr/sbin/pct exec "$vmid" -- /usr/local/libexec/gnx-install-rustfs || fail WORKLOAD_START_FAILED
+    fi
+    publish_dns
+    status
+    ;;
+  shutdown)
+    vmid=$(find_vmid)
+    [[ -n "$vmid" ]] || { status; exit 0; }
+    pve /etc/gnx/network/network.run close "$vmid" || fail TRANSPORT_GATE_FAILED
+    pve /usr/sbin/pct set "$vmid" --onboot 0 >/dev/null
+    pve /usr/sbin/pct shutdown "$vmid" --timeout 90 >/dev/null || fail SHUTDOWN_FAILED
+    status
+    ;;
+  diagnose)
+    vmid=$(find_vmid)
+    [[ -n "$vmid" ]] || fail WORKLOAD_ABSENT
+    pve /usr/sbin/pct status "$vmid" || true
+    pve /usr/sbin/pct config "$vmid" || true
+    pve /usr/sbin/ip -brief address || true
+    pve /usr/sbin/ip route || true
+    pve /usr/sbin/pct exec "$vmid" -- /usr/sbin/ip -brief address || true
+    pve /usr/sbin/pct exec "$vmid" -- /usr/sbin/ip route || true
+    pve /usr/sbin/pct exec "$vmid" -- /usr/bin/systemctl status rustfs.service --no-pager --lines=40 || true
+    pve /usr/sbin/pct exec "$vmid" -- /usr/bin/tail -80 /var/log/gnx-rustfs-install.log || true
+    pve /usr/sbin/pct exec "$vmid" -- /usr/bin/df -h / || true
+    pve /usr/sbin/pct exec "$vmid" -- /usr/bin/nft list table inet gnx_workload_mesh || true
+    pve /usr/sbin/pct exec "$vmid" -- /usr/local/libexec/gnx-workload-mesh status || true
+    pve /usr/sbin/pct exec "$vmid" -- /usr/bin/podman ps -a || true
+    pve /usr/sbin/pct exec "$vmid" -- /usr/bin/podman logs --tail 80 gnx-rustfs || true
+    ;;
+esac

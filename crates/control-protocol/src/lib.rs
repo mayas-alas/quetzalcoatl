@@ -17,6 +17,17 @@ pub enum Operation {
     Cancel,
     StopRuntime,
     StartRuntime,
+    StartWorkload,
+    StopWorkload,
+    DiagnoseCompute,
+    /// Start the native GitHub Actions integration (device OAuth or gh import).
+    Connect,
+    /// Dispatch the fixed GnX workflow with a typed start command.
+    Start,
+    /// Cancel the latest GnX workflow run.
+    Stop,
+    /// Read the sanitized GitHub integration and workflow projection.
+    Status,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -54,6 +65,56 @@ pub struct RequiredAction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum GitHubConnectionState {
+    Disconnected,
+    AwaitingAuthorization,
+    Connected,
+    Error,
+}
+
+/// Safe-to-display GitHub projection. It intentionally has no token, API
+/// response body, headers, or arbitrary diagnostic text.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GitHubStatus {
+    pub connection: GitHubConnectionState,
+    #[serde(default)]
+    pub auth_method: Option<String>,
+    #[serde(default)]
+    pub repository: Option<String>,
+    #[serde(default)]
+    pub workflow: Option<String>,
+    #[serde(default)]
+    pub run_id: Option<u64>,
+    #[serde(default)]
+    pub run_state: Option<String>,
+    #[serde(default)]
+    pub conclusion: Option<String>,
+    #[serde(default)]
+    pub verification_uri: Option<String>,
+    #[serde(default)]
+    pub user_code: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+/// Typed workflow target. Paths and URLs are never accepted from callers;
+/// the host agent constructs requests against GitHub's fixed API authorities.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GitHubWorkflowRequest {
+    pub owner: String,
+    pub repository: String,
+    #[serde(default = "default_github_workflow")]
+    pub workflow: String,
+    #[serde(default = "default_github_ref")]
+    pub reference: String,
+}
+
+fn default_github_workflow() -> String { "gnx-ephemeral-exit-node.yml".into() }
+fn default_github_ref() -> String { "main".into() }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Progress {
     #[serde(default)]
     pub request_id: Option<Uuid>,
@@ -80,6 +141,9 @@ pub struct Progress {
     /// Public certificate path only; the private key is never returned.
     #[serde(default)]
     pub private_ca_certificate: Option<String>,
+    /// Sanitized native GitHub Actions status; never populated with secrets.
+    #[serde(default)]
+    pub github: Option<GitHubStatus>,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -97,6 +161,13 @@ pub struct Request {
     /// A bounded local path to an ACL-protected, one-shot secret bundle.
     #[serde(default)]
     pub secret_file: Option<String>,
+    /// Native GitHub action target; credentials stay in the host agent.
+    #[serde(default)]
+    pub github: Option<GitHubWorkflowRequest>,
+    /// Fixed product workload selected by lifecycle operations. It is never a
+    /// shell fragment, VMID, path, or user-defined Proxmox identifier.
+    #[serde(default)]
+    pub workload: Option<String>,
 }
 
 impl fmt::Debug for Request {
@@ -115,6 +186,8 @@ impl fmt::Debug for Request {
                 &self.proxmox_password.as_ref().map(|_| "[redacted]"),
             )
             .field("secret_file", &self.secret_file)
+            .field("github", &self.github)
+            .field("workload", &self.workload)
             .finish()
     }
 }
@@ -155,6 +228,18 @@ impl Request {
         if self.version != PROTOCOL_VERSION {
             return Err(ProtocolError::UnsupportedVersion);
         }
+        let github_operation = matches!(
+            self.operation,
+            Operation::Connect | Operation::Start | Operation::Stop | Operation::Status
+        );
+        if let Some(target) = &self.github {
+            validate_github_target(target)?;
+        }
+        if !github_operation && self.github.is_some() {
+            return Err(ProtocolError::Invalid(
+                "GitHub target is only accepted by GitHub actions".into(),
+            ));
+        }
         if self.operation != Operation::JoinMesh && self.tailscale_auth_key.is_some() {
             return Err(ProtocolError::Invalid(
                 "secret is only accepted by JoinMesh".into(),
@@ -167,11 +252,36 @@ impl Request {
                 "Proxmox credential is only accepted by Provision or JoinMesh".into(),
             ));
         }
+        let workload_operation = matches!(
+            self.operation,
+            Operation::StartWorkload | Operation::StopWorkload
+        );
+        if workload_operation != self.workload.is_some() {
+            return Err(ProtocolError::Invalid(
+                "workload is required only by workload lifecycle operations".into(),
+            ));
+        }
+        if let Some(workload) = &self.workload {
+            if workload != "rustfs" {
+                return Err(ProtocolError::Invalid("unsupported workload".into()));
+            }
+        }
         if self.secret_file.is_some()
-            && !matches!(self.operation, Operation::Provision | Operation::JoinMesh)
+            && !matches!(
+                self.operation,
+                Operation::Provision | Operation::JoinMesh | Operation::Connect
+            )
         {
             return Err(ProtocolError::Invalid(
-                "secret reference is only accepted by Provision or JoinMesh".into(),
+                "secret reference is only accepted by onboarding or GitHub connect".into(),
+            ));
+        }
+        if self.operation == Operation::Connect
+            && self.secret_file.is_none()
+            && self.tailscale_auth_key.is_none()
+        {
+            return Err(ProtocolError::Invalid(
+                "Tailscale auth key is required by GitHub connect".into(),
             ));
         }
         if let Some(path) = &self.secret_file {
@@ -236,6 +346,36 @@ impl Request {
     }
 }
 
+fn validate_github_target(target: &GitHubWorkflowRequest) -> Result<(), ProtocolError> {
+    for (label, value, max) in [
+        ("owner", target.owner.as_str(), 100usize),
+        ("repository", target.repository.as_str(), 100usize),
+        ("workflow", target.workflow.as_str(), 128usize),
+        ("reference", target.reference.as_str(), 256usize),
+    ] {
+        if value.is_empty()
+            || value.len() > max
+            || value.chars().any(|c| c.is_control() || c.is_whitespace())
+            || (label != "reference" && value.contains('/'))
+            || value.contains('\\')
+            || value.contains("..")
+            || value.chars().any(|c| {
+                if label == "reference" { !(c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.')) }
+                else { !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) }
+            })
+        {
+            return Err(ProtocolError::Invalid(format!("invalid GitHub {label}")));
+        }
+    }
+    if target.workflow != "gnx-ephemeral-exit-node.yml" {
+        return Err(ProtocolError::Invalid("unsupported GitHub workflow".into()));
+    }
+    if target.reference.starts_with('-') {
+        return Err(ProtocolError::Invalid("invalid GitHub reference".into()));
+    }
+    Ok(())
+}
+
 fn valid_secret_reference(path: &str) -> bool {
     if path.is_empty()
         || path.len() > 512
@@ -277,6 +417,8 @@ mod tests {
             tailscale_auth_key: Some("tskey-auth-a".into()),
             proxmox_password: None,
             secret_file: None,
+            github: None,
+            workload: None,
         };
         assert!(matches!(r.validate(), Err(ProtocolError::Invalid(_))));
     }
@@ -289,6 +431,8 @@ mod tests {
             tailscale_auth_key: None,
             proxmox_password: None,
             secret_file: None,
+            github: None,
+            workload: None,
         };
         assert_eq!(r.validate(), Err(ProtocolError::UnsupportedVersion));
     }
@@ -301,6 +445,8 @@ mod tests {
             tailscale_auth_key: Some("tskey-auth-a".into()),
             proxmox_password: None,
             secret_file: None,
+            github: None,
+            workload: None,
         };
         assert!(!String::from_utf8(r.to_frame().unwrap())
             .unwrap()
@@ -316,6 +462,8 @@ mod tests {
             tailscale_auth_key: Some("tskey-auth-a\n--bad".into()),
             proxmox_password: None,
             secret_file: None,
+            github: None,
+            workload: None,
         };
         assert!(matches!(r.validate(), Err(ProtocolError::Invalid(_))));
     }
@@ -329,6 +477,8 @@ mod tests {
             tailscale_auth_key: None,
             proxmox_password: None,
             secret_file: None,
+            github: None,
+            workload: None,
         };
         assert!(matches!(r.validate(), Err(ProtocolError::Invalid(_))));
     }
@@ -359,6 +509,8 @@ mod tests {
             tailscale_auth_key: None,
             proxmox_password: None,
             secret_file: None,
+            github: None,
+            workload: None,
         };
         let mut value = serde_json::to_value(request).unwrap();
         value["proxmox_password"] = serde_json::json!("should-not-cross-the-pipe");
@@ -380,6 +532,8 @@ mod tests {
             secret_file: Some(
                 r"C:\Users\mayas\AppData\Local\Temp\gnx-onboarding-550e8400-e29b-41d4-a716-446655440000.secret".into(),
             ),
+            github: None,
+            workload: None,
         };
         let frame = String::from_utf8(r.to_frame().unwrap()).unwrap();
         assert!(frame.contains("secret_file"));
@@ -387,6 +541,37 @@ mod tests {
         let debug = format!("{r:?}");
         assert!(!debug.contains("correct horse"));
         assert!(debug.contains("redacted"));
+    }
+
+    #[test]
+    fn github_actions_are_typed_and_have_no_credential_field() {
+        let request = Request {
+            version: PROTOCOL_VERSION,
+            request_id: Uuid::new_v4(),
+            operation: Operation::Start,
+            tailscale_auth_key: None,
+            proxmox_password: None,
+            secret_file: None,
+            github: Some(GitHubWorkflowRequest {
+                owner: "gnx".into(),
+                repository: "node".into(),
+                workflow: "gnx-ephemeral-exit-node.yml".into(),
+                reference: "main".into(),
+            }),
+            workload: None,
+        };
+        let frame = String::from_utf8(request.to_frame().unwrap()).unwrap();
+        assert!(frame.contains("gnx-ephemeral-exit-node.yml"));
+        assert!(!frame.to_ascii_lowercase().contains("token"));
+    }
+
+    #[test]
+    fn rejects_arbitrary_github_workflows() {
+        let target = GitHubWorkflowRequest {
+            owner: "gnx".into(), repository: "node".into(),
+            workflow: "https://evil.invalid/run".into(), reference: "main".into(),
+        };
+        assert!(matches!(validate_github_target(&target), Err(ProtocolError::Invalid(_))));
     }
 
     #[test]

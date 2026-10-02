@@ -9,7 +9,7 @@ y su distro WSL2 `gnx-node`. Podman/systemd ejecutan cuatro capacidades:
 | --- | --- | --- |
 | `mesh` | Tailscale | Red privada, `/dev/net/tun` |
 | `dns` | Pi-hole | Split DNS privado `gnx` |
-| `gateway` | Caddy | HTTPS para `app.gnx` y `compute.gnx` |
+| `gateway` | Caddy | HTTPS para `app.gnx`, `compute.gnx` y `rustfs.gnx` |
 | `compute` | Imagen sellada Proxmox | KVM y HTTPS interno `8006` |
 
 Desde v0.1.2, **Setup es una CLI Rust mínima**. v0.1.4 la publica como `gnx` en el PATH del host, permite rotar de forma segura la contraseña de Proxmox y conserva el flujo de actualización. No hay WebView2, assets locales
@@ -118,7 +118,7 @@ Estados definidos: `NEW`, `WINDOWS_READY`, `REBOOT_REQUIRED`, `WSL_READY`,
 secretos después de reiniciar; se vuelve a ejecutar Setup para consultar y continuar.
 
 `NODE_READY` exige verificación del runtime y publicación local de acceso en el
-host Windows: confianza de CA y loopback HTTPS se reconcilian con un código de
+host Windows: confianza de CA y loopback HTTPS (incluido `rustfs.gnx`) se reconcilian con un código de
 error estable antes de afirmar ready. Split DNS y confianza de CA siguen siendo
 acciones humanas separadas solo para clientes tailnet externos. Un fallo no se
 convierte en estado verde ni autoriza borrar identidad, distro, datos o credenciales.
@@ -136,8 +136,15 @@ Linux incrustados. Se conserva la arquitectura de archivos externos:
 | `payload/node/verify.run` | Verificador canónico, JSONL sanitizado y exit code |
 | `payload/node/services/` | Quadlets por capacidad e imágenes por digest |
 | `payload/node/network/ingress.nft` | Ingreso limitado a loopback y tailnet |
-| `payload/node/gateway/routes.conf` | PWA estática y proxy HTTPS a compute |
+| `payload/node/gateway/routes.conf` | PWA estática y proxies HTTPS a compute y al sidecar RustFS |
 | `apps/web-app/` | Assets estáticos ensamblados dentro del payload Linux |
+
+RustFS conserva su sidecar Tailscale y TLS nativo con la CA privada del nodo.
+`rustfs.gnx` resuelve al gateway existente; `rustfs.mesh.gnx` resuelve sólo al
+sidecar para el backend de Caddy. Caddy consulta Pi-hole en loopback:5353 y valida
+CA y nombre `rustfs.gnx` del backend. La política del tailnet debe permitir al
+nodo gateway conectar a los servicios RustFS en TCP 443; no se abre el underlay.
+La salud del workload exige también HTTPS del dashboard a través de Caddy.
 
 Tailscale requiere TUN, **no KVM**. Compute requiere `/dev/kvm` funcional y
 virtualización habilitada en firmware/Windows; no se simula disponibilidad.
@@ -170,7 +177,8 @@ El workspace es la raíz de este repositorio:
 - `tests/`: contratos estáticos de instalación, runtime y seguridad; tests Rust
   junto al código.
 - `target/`, `build/`: salidas generadas, fuera de Git.
-- `releases/v*/`: instaladores, hashes y evidencia por versión; no se sobrescriben.
+- `releases/v*/`: sólo la última versión validada conserva MSI, Burn y `SHA256SUMS.txt`; las anteriores conservan únicamente Markdown. No se sobrescriben artefactos de la misma versión ni se reescribe el historial Git/LFS.
+- Tras las pruebas y notas de release, `installer/scripts/verify.ps1 -PublishRelease` prepara los artefactos nuevos y retira los no-Markdown de releases anteriores. La publicación en Hugging Face utiliza la WSL autenticada del usuario host.
 
 La asignación de agentes y reglas de coordinación viven en `.AGENTS/`, no en
 planes históricos duplicados aquí. En esta migración solo el coordinador ejecuta

@@ -2,6 +2,7 @@ mod ca;
 mod cleanup;
 mod control_pipe;
 mod dedicated_account;
+mod github;
 mod host_access;
 mod linux_node;
 mod provisioning;
@@ -14,6 +15,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let args = std::env::args_os().skip(1).collect::<Vec<_>>();
         if args.as_slice() == [std::ffi::OsStr::new("--cleanup")] {
             return cleanup::run();
+        }
+        if args.as_slice() == [std::ffi::OsStr::new("--diagnose-compute")] {
+            return linux_node::diagnose_compute().map_err(|error| error.into());
         }
         if !args.is_empty() {
             return Err("invalid host-agent command".into());
@@ -101,12 +105,12 @@ mod service {
                 // soon as the account credential appears races Provision's
                 // required .wslconfig copy and first distro import.
                 let enrolled = crate::state::load()
-                    // A stopped runtime retains its address in the durable
-                    // checkpoint. Only NodeReady is permitted to hold the
-                    // keepalive client open, otherwise it would immediately
-                    // restart a runtime the operator intentionally stopped.
+                    // A failed readiness check must not repeatedly idle an
+                    // enrolled distro during recovery. An explicit runtime
+                    // stop still releases it, even though its address persists.
                     .map(|progress| {
-                        progress.state == NodeState::NodeReady
+                        progress.node_private_ip.is_some()
+                            && progress.state != NodeState::RuntimeStopped
                             && !crate::linux_node::runtime_stop_requested()
                     })
                     .unwrap_or(false);

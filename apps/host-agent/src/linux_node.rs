@@ -523,6 +523,21 @@ pub fn reconcile_ingress() -> io::Result<()> {
     let node_root = payload_dir();
     validate_payload(&node_root)?;
     materialize_payload(&node_root)?;
+    // The external installer owns shared DNS/CA and workload-adapter upgrades.
+    // Retry must not publish new gateway routes over stale DNS or script copies.
+    let access = run_wsl(
+        "/opt/gnx/payload/node/install.run",
+        &[
+            "reconcile",
+            "--payload-dir",
+            "/opt/gnx/payload/node",
+            "--state-dir",
+            &path_arg(&crate::state::state_dir()),
+        ],
+    )?;
+    if !access.status.success() {
+        return Err(runtime_error(&access));
+    }
     for (source, destination, code) in [
         (
             "/opt/gnx/payload/node/network/ingress.nft",
@@ -569,10 +584,27 @@ pub fn reconcile_ingress() -> io::Result<()> {
     if !start.status.success() {
         return Err(io::Error::other("INGRESS_START_FAILED"));
     }
-    // A target restart does not restart its already-active dependencies.
-    // Restart compute explicitly so a changed TLS hook/Quadlet is applied,
-    // then let Quadlet's Notify=healthy wait for its bounded healthcheck.
-    let compute = run_wsl("/usr/bin/systemctl", &["restart", "compute.service"])?;
+    let compute_changed = !run_wsl(
+        "/usr/bin/cmp",
+        &[
+            "-s",
+            "/etc/containers/systemd/compute.container",
+            "/opt/gnx/payload/node/services/compute.container",
+        ],
+    )?
+    .status
+    .success();
+    let network = run_wsl(
+        "/bin/bash",
+        &["/opt/gnx/payload/node/compute/install-network.run"],
+    )?;
+    if !network.status.success() {
+        return Err(io::Error::other("COMPUTE_NETWORK_INSTALL_FAILED"));
+    }
+    // Apply changed Quadlets, but do not recreate an unchanged PVE container
+    // on every retry. Native Notify=healthy still gates a cold start.
+    let compute_action = if compute_changed { "restart" } else { "start" };
+    let compute = run_wsl("/usr/bin/systemctl", &[compute_action, "compute.service"])?;
     if !compute.status.success() {
         return Err(io::Error::other("COMPUTE_RESTART_FAILED"));
     }
@@ -598,6 +630,83 @@ pub fn wsl_nat_ipv4() -> io::Result<std::net::Ipv4Addr> {
         .split_whitespace()
         .find_map(|value| validate_wsl_nat_ipv4(value).ok())
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "WSL_NAT_IPV4_UNAVAILABLE"))
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WorkloadStatus {
+    pub workload: String,
+    pub state: String,
+    pub service: String,
+    pub version: String,
+}
+
+#[cfg(windows)]
+fn parse_workload_status(output: &std::process::Output) -> io::Result<WorkloadStatus> {
+    if !output.status.success() {
+        return Err(runtime_error(output));
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str::<WorkloadStatus>(line).ok())
+        .filter(|status| status.workload == "rustfs")
+        .ok_or_else(|| io::Error::other("WORKLOAD_STATUS_INVALID"))
+}
+
+#[cfg(windows)]
+pub fn workload_status() -> io::Result<WorkloadStatus> {
+    let available = run_wsl("/usr/bin/test", &["-x", "/var/lib/gnx-node/lxc.run"])?;
+    if !available.status.success() {
+        return Ok(WorkloadStatus {
+            workload: "rustfs".into(),
+            state: "off".into(),
+            service: "available".into(),
+            version: "1.0.0-gnx.1".into(),
+        });
+    }
+    parse_workload_status(&run_wsl(
+        "/var/lib/gnx-node/lxc.run",
+        &["status", "rustfs"],
+    )?)
+}
+
+#[cfg(not(windows))]
+pub fn workload_status() -> io::Result<WorkloadStatus> {
+    Ok(WorkloadStatus {
+        workload: "rustfs".into(),
+        state: "off".into(),
+        service: "available".into(),
+        version: "1.0.0-gnx.1".into(),
+    })
+}
+
+#[cfg(windows)]
+pub fn control_workload(state_dir: &Path, start: bool) -> io::Result<WorkloadStatus> {
+    ensure_distro()?;
+    let refresh = run_wsl(
+        "/usr/bin/install",
+        &[
+            "-m",
+            "0755",
+            "/opt/gnx/payload/node/compute/lxc.run",
+            "/var/lib/gnx-node/lxc.run",
+        ],
+    )?;
+    if !refresh.status.success() {
+        install_with_secrets(state_dir, None, None)?;
+    }
+    let action = if start { "start" } else { "shutdown" };
+    parse_workload_status(&run_wsl("/var/lib/gnx-node/lxc.run", &[action, "rustfs"])?)
+}
+
+#[cfg(not(windows))]
+pub fn control_workload(_state_dir: &Path, start: bool) -> io::Result<WorkloadStatus> {
+    Ok(WorkloadStatus {
+        workload: "rustfs".into(),
+        state: if start { "running" } else { "off" }.into(),
+        service: if start { "healthy" } else { "stopped" }.into(),
+        version: "1.0.0-gnx.1".into(),
+    })
 }
 
 #[cfg(windows)]
@@ -679,6 +788,8 @@ pub fn runtime_checks(state_dir: &Path) -> io::Result<Vec<crate::state::RuntimeC
         "compute",
         "compute_gateway_https",
         "compute_https",
+        "dns_rustfs",
+        "rustfs_gateway_https",
     ];
     let output = run_wsl(
         "/opt/gnx/payload/node/verify.run",
@@ -755,6 +866,93 @@ fn is_reparse_point(path: &Path) -> bool {
         .collect::<Vec<_>>();
     let attributes = unsafe { GetFileAttributesW(wide.as_ptr()) };
     attributes != INVALID_FILE_ATTRIBUTES && attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(windows)]
+fn compute_diagnostic() -> io::Result<String> {
+    use std::fmt::Write as _;
+    ensure_distro()?;
+    let mut report = String::new();
+    for (label, program, args) in [
+        (
+            "unit",
+            "/usr/bin/systemctl",
+            vec!["status", "compute.service", "--no-pager", "--lines=30"],
+        ),
+        (
+            "container",
+            "/usr/bin/podman",
+            vec![
+                "inspect",
+                "--format",
+                "{{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} error={{.State.Error}}",
+                "gnx-compute",
+            ],
+        ),
+        (
+            "pve",
+            "/usr/bin/podman",
+            vec![
+                "exec",
+                "gnx-compute",
+                "systemctl",
+                "status",
+                "pve-cluster.service",
+                "pveproxy.service",
+                "--no-pager",
+                "--lines=20",
+            ],
+        ),
+        (
+            "kernel-firewall",
+            "/usr/bin/podman",
+            vec!["exec", "gnx-compute", "/bin/bash", "-c", "pve-firewall status; ebtables --version; ip6tables --version; ip6tables-restore --test -T filter -n < /var/lib/pve-firewall/ip6cmdlist; journalctl -u pve-firewall --no-pager -n 5"],
+        ),
+        (
+            "pve-network",
+            "/usr/bin/podman",
+            vec!["exec", "gnx-compute", "/bin/bash", "-c", "timeout 15 pct exec 100 -- /bin/bash -c 'cat /etc/network/interfaces; cat /etc/systemd/network/*.network; networkctl status eth0 --no-pager; journalctl -u systemd-networkd --no-pager -n 15'; journalctl -u dnsmasq --no-pager -n 15; iptables -t nat -S; iptables -S INPUT; systemctl status gnx-lxc-network pve-firewall --no-pager --lines=8; journalctl -u pve-firewall --no-pager -n 5"],
+        ),
+        (
+            "templates",
+            "/usr/bin/podman",
+            vec!["exec", "gnx-compute", "/usr/bin/pveam", "available", "--section", "system"],
+        ),
+        (
+            "storage",
+            "/usr/bin/podman",
+            vec!["exec", "gnx-compute", "/usr/sbin/pvesm", "status"],
+        ),
+        (
+            "rustfs",
+            "/opt/gnx/payload/node/compute/lxc.run",
+            vec!["diagnose", "rustfs"],
+        ),
+    ] {
+        let mut bounded_args = vec!["--kill-after=5", "25", program];
+        bounded_args.extend(args);
+        let output = run_wsl("/usr/bin/timeout", &bounded_args)?;
+        let _ = writeln!(report, "--- {label} (exit={}) ---", output.status);
+
+        let combined = [output.stdout, output.stderr].concat();
+        let text = String::from_utf8_lossy(&combined);
+        for line in text.lines().take(120) {
+            let _ = writeln!(report, "{}", line.chars().take(500).collect::<String>());
+        }
+    }
+    Ok(report)
+}
+
+#[cfg(windows)]
+pub fn diagnose_compute() -> io::Result<()> {
+    print!("{}", compute_diagnostic()?);
+    Ok(())
+}
+
+#[cfg(windows)]
+pub fn diagnose_compute_file(state_dir: &Path) -> io::Result<()> {
+    let report = compute_diagnostic()?;
+    std::fs::write(state_dir.join("compute-diagnostic.txt"), report)
 }
 
 #[cfg(windows)]

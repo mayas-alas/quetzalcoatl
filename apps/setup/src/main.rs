@@ -55,11 +55,20 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(&'static str, b
         ["help" | "--help" | "-h"] => "help",
         ["version" | "--version" | "-v"] => "version",
         ["status"] => "status",
+        ["connect"] | ["actions", "connect"] => "github-connect",
+        ["start"] | ["actions", "start"] => "github-start",
+        ["stop"] | ["actions", "stop"] => "github-stop",
+        ["actions", "status"] | ["github", "status"] => "github-status",
         ["provision"] | ["password"] | ["set", "password"] => "password",
         ["join"] => "join",
         ["retry"] => "retry",
         ["runtime", "stop", "--confirm"] | ["shutdown", "--confirm"] => "runtime-stop",
         ["runtime", "start"] => "runtime-start",
+        ["workload", "rustfs", "start"] => "rustfs-start",
+        ["workload", "rustfs", "stop", "--confirm"] => "rustfs-stop",
+        ["diagnose", "compute"] => "diagnose-compute",
+        ["gnx://workloads/rustfs/start"] => "rustfs-start-uri",
+        ["gnx://workloads/rustfs/stop"] => "rustfs-stop-uri",
         ["cancel"] => "cancel",
         _ => {
             return Err(
@@ -75,7 +84,7 @@ fn run(command: &str) -> Result<()> {
         "help" => {
             println!("GnX Node Setup {}", env!("CARGO_PKG_VERSION"));
             println!(
-                "Usage: gnx [setup|status|set password|join|retry|runtime stop --confirm|runtime start|cancel|help|version] [--pause]"
+                "Usage: gnx [setup|status|connect|start|stop|actions status|set password|join|retry|runtime stop --confirm|runtime start|workload rustfs start|workload rustfs stop --confirm|cancel|help|version] [--pause]"
             );
             println!("Run in an Administrator terminal. No command: guided initial setup.");
             println!(
@@ -85,13 +94,25 @@ fn run(command: &str) -> Result<()> {
                 "set password: securely set or rotate the Proxmox root password with hidden prompts."
             );
             println!(
-                "status: read-only; retry: reconcile without credentials; runtime stop --confirm (or shutdown --confirm): stop only GnX WSL and free its RAM."
+                "status reads the local node snapshot without network calls; actions status/connect/start/stop use the native GitHub Actions integration."
             );
             println!("Existing ready nodes are preserved. Daily access: https://app.gnx");
         }
         "version" => println!("gnx {}", env!("CARGO_PKG_VERSION")),
         "status" => {
-            finish(send(&request(Operation::GetProgress))?)?;
+            print_progress(&get_progress()?);
+        }
+        "github-connect" => {
+            finish(connect_github()?)?;
+        }
+        "github-start" => {
+            finish(send(&request(Operation::Start))?)?;
+        }
+        "github-stop" => {
+            finish(send(&request(Operation::Stop))?)?;
+        }
+        "github-status" => {
+            finish(send(&request(Operation::Status))?)?;
         }
         "retry" => {
             finish(send(&request(Operation::Retry))?)?;
@@ -104,6 +125,36 @@ fn run(command: &str) -> Result<()> {
         }
         "runtime-start" => {
             finish(send(&request(Operation::StartRuntime))?)?;
+        }
+        "rustfs-start" => {
+            finish(send(&workload_request(Operation::StartWorkload))?)?;
+        }
+        "rustfs-stop" => {
+            finish(send(&workload_request(Operation::StopWorkload))?)?;
+        }
+        "diagnose-compute" => {
+            finish(send(&request(Operation::DiagnoseCompute))?)?;
+        }
+        "rustfs-start-uri" | "rustfs-stop-uri" => {
+            let starting = command == "rustfs-start-uri";
+            let verb = if starting { "start" } else { "stop" };
+            print!("Confirm {verb} RustFS? [y/N]: ");
+            io::stdout().flush()?;
+            let mut answer = String::new();
+            io::stdin().read_line(&mut answer)?;
+            if !matches!(
+                answer.trim().to_ascii_lowercase().as_str(),
+                "y" | "yes" | "s" | "si" | "sí"
+            ) {
+                return Err("operation cancelled; no change was sent".into());
+            }
+            let operation = if starting {
+                Operation::StartWorkload
+            } else {
+                Operation::StopWorkload
+            };
+            finish(send(&workload_request(operation))?)?;
+            println!("You may return to app.gnx; its confirmed state will refresh automatically.");
         }
         "password" => {
             provision()?;
@@ -124,7 +175,15 @@ fn request(operation: Operation) -> Request {
         tailscale_auth_key: None,
         proxmox_password: None,
         secret_file: None,
+        github: None,
+        workload: None,
     }
+}
+
+fn workload_request(operation: Operation) -> Request {
+    let mut request = request(operation);
+    request.workload = Some("rustfs".into());
+    request
 }
 
 fn has_enrollment(progress: &Progress) -> bool {
@@ -225,6 +284,20 @@ fn provision() -> Result<Progress> {
     } else {
         Ok(progress)
     }
+}
+
+fn connect_github() -> Result<Response> {
+    require_terminal()?;
+    let key = prompt_secret("Tailscale auth key (tskey-auth-*): ")?;
+    if !key.starts_with("tskey-auth-")
+        || key.len() <= "tskey-auth-".len()
+        || key.len() > 512
+        || key.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return Err("invalid Tailscale key; nothing was sent".into());
+    }
+    println!("Connecting GitHub Actions and securely updating the reusable secret...");
+    send_secrets(&request(Operation::Connect), Some(&key), None)
 }
 
 fn join_mesh() -> Result<Progress> {
@@ -336,6 +409,15 @@ fn print_progress(progress: &Progress) {
                 .map(|v| format!(" ({v})"))
                 .unwrap_or_default()
         );
+    }
+    if let Some(github) = &progress.github {
+        println!("GitHub Actions: {:?}", github.connection);
+        if let (Some(uri), Some(code)) = (&github.verification_uri, &github.user_code) {
+            println!("Authorize at {uri} with code {code}, then run gnx connect again.");
+        }
+        if let Some(run) = github.run_id {
+            println!("Workflow run {run}: {}{}", github.run_state.as_deref().unwrap_or("unknown"), github.conclusion.as_deref().map(|value| format!(" ({value})")).unwrap_or_default());
+        }
     }
     if progress.state == NodeState::NodeReady {
         println!("Node already configured; credentials preserved.");
@@ -452,6 +534,7 @@ mod tests {
             pihole_ip: None,
             required_actions: vec![],
             private_ca_certificate: None,
+            github: None,
         }
     }
     #[test]

@@ -9,6 +9,7 @@ Requires=mesh.service
 [Container]
 Image=docker.io/dockurr/proxmox@sha256:135292c3d3cbc8061ad6c70f1097f213d4de20275d5a1e679de580a254f1018c
 ContainerName=gnx-compute
+DNS=100.100.100.100
 PublishPort=127.0.0.1:8006:8006
 AddDevice=/dev/kvm
 AddDevice=/dev/fuse
@@ -23,7 +24,14 @@ Volume=/var/lib/gnx-node/compute:/var/lib/vz:Z
 Volume=/var/lib/gnx-node/compute-config:/var/lib/pve-cluster:Z
 Volume=/var/lib/gnx-node/compute-config/hostname:/etc/hostname:ro,Z
 Volume=/var/lib/gnx-node/compute-systemd/pveproxy.service.d:/etc/systemd/system/pveproxy.service.d:ro,Z
+Volume=/var/lib/gnx-node/compute-systemd/pve-firewall.service.d:/etc/systemd/system/pve-firewall.service.d:ro,Z
+Volume=/var/lib/gnx-node/compute-systemd/pve-guests.service.d:/etc/systemd/system/pve-guests.service.d:ro,Z
 Volume=/var/lib/gnx-node/compute-hook/install-tls.sh:/usr/local/libexec/gnx-install-tls.sh:ro,Z
+# The pinned Debian PVE image has libnftables but omits its CLI; reuse the
+# host's required native nft tool instead of installing packages at guest boot.
+Volume=/usr/sbin/nft:/usr/sbin/nft:ro
+Volume=/var/lib/gnx-node/compute-network:/etc/gnx/network:ro,Z
+Volume=/var/lib/gnx-node/compute-network/gnx-lxc-network.service:/etc/systemd/system/gnx-lxc-network.service:ro,Z
 Volume=/var/lib/gnx-node/ca:/etc/gnx/ca:ro,Z
 EnvironmentFile=/var/lib/gnx-node/secrets/compute.env
 [Service]

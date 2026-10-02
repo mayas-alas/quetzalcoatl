@@ -48,7 +48,7 @@ Copy-Item (Join-Path $root "apps\web-app\*") $web -Recurse -Force
 # Linux consumes shell scripts, Quadlets, nftables, Caddy and web assets from
 # this staged tree. Normalize before hashing so Windows checkout settings can
 # never inject CRLF into parsers or systemd units.
-Get-ChildItem $node -File -Recurse | ForEach-Object {
+Get-ChildItem $node -File -Recurse | Where-Object { $_.Extension -notin @('.gz', '.tar', '.zst', '.deb') } | ForEach-Object {
     $text = [IO.File]::ReadAllText($_.FullName)
     $normalized = $text.Replace("`r`n", "`n").Replace("`r", "`n")
     [IO.File]::WriteAllText($_.FullName, $normalized, [Text.UTF8Encoding]::new($false))

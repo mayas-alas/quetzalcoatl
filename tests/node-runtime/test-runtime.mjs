@@ -25,10 +25,14 @@ for (const service of ['dns', 'gateway', 'compute']) {
 }
 assert.match(await read('services/gateway.container'), /^Requires=mesh\.service dns\.service$/m);
 
+const setupCli = await readFile(join(root, 'apps/setup/src/main.rs'), 'utf8');
+assert.match(setupCli, /"status" => \{\s*print_progress\(&get_progress\(\)\?\)/);
+assert.match(setupCli, /"github-status" => \{\s*finish\(send\(&request\(Operation::Status\)\)/);
 const mesh = await read('services/mesh.container');
 assert.match(mesh, /^AddDevice=\/dev\/net\/tun$/m);
 assert.match(mesh, /^AddCapability=NET_ADMIN$/m);
 assert.match(mesh, /^Environment=TS_USERSPACE=false$/m);
+assert.match(mesh, /^Environment=TS_ACCEPT_DNS=true$/m, 'native Tailscale DNS must resolve public names');
 const dns = await read('services/dns.container');
 assert.match(dns, /^Environment=FTLCONF_dns_interface=tailscale0$/m);
 assert.match(dns, /^Environment=FTLCONF_dns_port=5353$/m);
@@ -58,6 +62,10 @@ assert.match(await read('install.run'), /modules-load\.d\/gnx-node-kvm\.conf/);
 assert.match(await read('verify.run'), /podman exec gnx-mesh tailscale status --json/);
 assert.match(await read('verify.run'), /BackendState.*Running/);
 const compute = await read('services/compute.container');
+assert.match(compute, /^DNS=100\.100\.100\.100$/m, 'compute must not inherit host/router DNS');
+const networkInstall = await read('compute/install-network.run');
+assert.match(networkInstall, /services\/mesh\.container.*\/etc\/containers\/systemd\/mesh\.container/);
+assert.match(networkInstall, /podman exec gnx-mesh tailscale set --accept-dns=true/);
 assert.match(compute, /^AddDevice=\/dev\/kvm$/m);
 assert.match(compute, /^AddDevice=\/dev\/fuse$/m);
 assert.match(compute, /^HealthCmd=.*--cacert \/etc\/gnx\/ca\/backend-ca\.pem.*https:\/\/compute\.gnx:8006\/$/m);
@@ -100,7 +108,9 @@ assert.match(routes, /tls_trust_pool file/);
 assert.doesNotMatch(routes, /tls_insecure_skip_verify/);
 assert.match(routes, /protocols h1 h2/);
 assert.doesNotMatch(routes, /protocols[^\n]*h3/);
-assert.equal((routes.match(/Alt-Svc "clear"/g) ?? []).length, 2);
+assert.equal((routes.match(/Alt-Svc "clear"/g) ?? []).length, 3);
+assert.match(routes, /https:\/\/rustfs\.gnx/);
+assert.match(routes, /https:\/\/rustfs\.mesh\.gnx:443/);
 
 const ingress = await read('network/ingress.nft');
 assert.match(ingress, /tailscale0/);
@@ -133,7 +143,7 @@ assert.match(linuxNode, /"--compute-secret-file"/);
 assert.match(linuxNode, /install_with_secrets\(/);
 assert.match(linuxNode, /pub fn reconcile_ingress[\s\S]*materialize_payload\(&node_root\)\?[\s\S]*\/opt\/gnx\/payload\/node\/web-app\/\.[\s\S]*\/var\/lib\/gnx-node\/web-app\/[\s\S]*nft[\s\S]*-f[\s\S]*\/var\/lib\/gnx-node\/ingress\.nft/);
 assert.match(linuxNode, /pub fn runtime_checks[\s\S]*mesh_authenticated[\s\S]*compute_gateway_https[\s\S]*compute_https/);
-assert.match(linuxNode, /reconcile_ingress[\s\S]*restart", "compute\.service[\s\S]*start", "platform\.target/);
+assert.match(linuxNode, /reconcile_ingress[\s\S]*compute_changed[\s\S]*compute_action = if compute_changed \{ "restart" \} else \{ "start" \}[\s\S]*compute_action, "compute\.service[\s\S]*start", "platform\.target/);
 const provisioning = await readFile(join(root, 'apps', 'host-agent', 'src', 'provisioning.rs'), 'utf8');
 assert.match(provisioning, /linux_node::reconcile_ingress\(\)[\s\S]*linux_node::verify\(&state_dir\)[\s\S]*linux_node::private_ip\(\)[\s\S]*reconcile_host_access\(&state_dir\)\?/);
 assert.match(provisioning, /host_access::reconcile\(&state_dir\.join\("ca\/private-ca\.cert\.pem"\)\)/);
@@ -142,6 +152,7 @@ assert.match(provisioning, /Local Windows CA trust and loopback access could not
 assert.ok(provisioning.indexOf('reconcile_host_access(&state_dir)?;') < provisioning.indexOf('mark_ready(p, ip);'), 'local host access must publish before NODE_READY');
 const hostMain = await readFile(join(root, 'apps', 'host-agent', 'src', 'main.rs'), 'utf8');
 assert.match(hostMain, /state::refresh_app_status\(\)/);
+assert.match(hostMain, /progress\.node_private_ip\.is_some\(\)[\s\S]*progress\.state != NodeState::RuntimeStopped[\s\S]*!crate::linux_node::runtime_stop_requested\(\)/);
 assert.match(provisioning, /stage_runtime_file\(&path, "TS_AUTHKEY", &key\)/);
 assert.match(provisioning, /stage_runtime_file\(&compute_path, "PROXMOX_PASSWORD", password\)/);
 const ca = await readFile(join(root, 'apps', 'host-agent', 'src', 'ca.rs'), 'utf8');

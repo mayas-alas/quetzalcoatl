@@ -1,0 +1,24 @@
+# The sole underlay principal is the isolated Tailscale daemon UID.
+# No established-state exemption on the underlay: existing direct sockets must
+# not survive reconciliation. Root administrators remain a trusted boundary.
+table inet gnx_workload_mesh {
+    chain output {
+        type filter hook output priority -150; policy drop;
+        oifname "lo" accept
+        oifname "tailscale0" accept
+        # DHCP is transport configuration, not application underlay egress.
+        oifname "eth0" udp sport 68 udp dport 67 accept
+        oifname "eth0" meta skuid 65532 accept
+    }
+    chain forward {
+        type filter hook forward priority -150; policy drop;
+    }
+    chain input {
+        type filter hook input priority -150; policy drop;
+        iifname "lo" accept
+        iifname "tailscale0" accept
+        iifname "eth0" udp sport 67 udp dport 68 accept
+        iifname "eth0" ct state established,related accept
+        iifname "eth0" udp dport 41641 accept
+    }
+}

@@ -123,6 +123,7 @@ struct AppStatus<'a> {
     checks: Vec<AppCheck>,
     #[serde(skip_serializing_if = "Option::is_none")]
     runtime_checks: Option<&'a [RuntimeCheck]>,
+    workloads: Vec<crate::linux_node::WorkloadStatus>,
 }
 
 #[derive(Serialize)]
@@ -154,6 +155,13 @@ fn write_app_status(
         percent: progress.percent.unwrap_or(0).min(100),
         checks: app_checks(progress, runtime),
         runtime_checks: runtime,
+        workloads: if progress.state == NodeState::NodeReady
+            && !crate::linux_node::runtime_stop_requested()
+        {
+            crate::linux_node::workload_status().into_iter().collect()
+        } else {
+            Vec::new()
+        },
     };
     let tmp = dir.join(format!("{APP_STATUS_FILE}.tmp"));
     serde_json::to_writer(fs::File::create(&tmp)?, &status).map_err(io::Error::other)?;
@@ -251,7 +259,27 @@ fn sanitize(progress: &Progress) -> Progress {
         action.target = sanitize_text(&action.target);
         action.value = action.value.take().map(|value| sanitize_text(&value));
     }
+    if let Some(github) = &mut safe.github {
+        github.auth_method = github.auth_method.take().map(|value| sanitize_text(&value));
+        github.repository = github.repository.take().map(|value| sanitize_text(&value));
+        github.workflow = github.workflow.take().map(|value| sanitize_text(&value));
+        github.run_state = github.run_state.take().map(|value| sanitize_state(&value));
+        github.conclusion = github.conclusion.take().map(|value| sanitize_state(&value));
+        github.verification_uri = github.verification_uri.take().map(|value| {
+            if value == "https://github.com/login/device" { value } else { "https://github.com/login/device".into() }
+        });
+        github.user_code = github.user_code.take().map(|value| sanitize_code(&value));
+        github.message = github.message.take().map(|value| sanitize_text(&value));
+    }
     safe
+}
+
+fn sanitize_state(value: &str) -> String {
+    value.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').take(32).collect()
+}
+
+fn sanitize_code(value: &str) -> String {
+    value.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').take(32).collect()
 }
 
 fn sanitize_text(value: &str) -> String {
@@ -308,6 +336,7 @@ pub fn initial() -> Progress {
         pihole_ip: None,
         required_actions: Vec::new(),
         private_ca_certificate: None,
+        github: None,
     }
 }
 #[cfg(test)]

@@ -6,7 +6,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
 
-usage() { printf '%s\n' 'usage: install.run check|install --payload-dir DIR --state-dir DIR [--mesh-secret-file FILE] [--compute-secret-file FILE]'; }
+usage() { printf '%s\n' 'usage: install.run check|install|reconcile --payload-dir DIR --state-dir DIR [--mesh-secret-file FILE] [--compute-secret-file FILE]'; }
 die() { printf '{"event":"error","code":"%s"}\n' "$1" >&2; exit 1; }
 emit() { printf '{"event":"%s"}\n' "$1"; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "MISSING_${1^^}"; }
@@ -20,7 +20,7 @@ podman_supported() {
 require_supported_podman() { podman_supported || die PODMAN_VERSION_UNSUPPORTED; }
 
 mode="${1:-}"
-[[ "$mode" == check || "$mode" == install ]] || { usage >&2; exit 64; }
+[[ "$mode" == check || "$mode" == install || "$mode" == reconcile ]] || { usage >&2; exit 64; }
 shift
 payload_dir=""
 state_dir=""
@@ -37,11 +37,15 @@ while (($#)); do
   esac
 done
 [[ -n "$payload_dir" && -n "$state_dir" ]] || { usage >&2; exit 64; }
+if [[ "$mode" == reconcile ]]; then
+  [[ -z "$mesh_secret_file" && -z "$compute_secret_file" ]] || die INVALID_ARGUMENT
+fi
 [[ -d "$payload_dir/services" && -d "$payload_dir/gateway" && -d "$payload_dir/network" ]] || die PAYLOAD_INVALID
 for unit in mesh dns gateway compute; do [[ -f "$payload_dir/services/$unit.container" ]] || die PAYLOAD_INVALID; done
 [[ -f "$payload_dir/services/platform.target" && -f "$payload_dir/services/gnx-ingress.service" && -f "$payload_dir/verify.run" ]] || die PAYLOAD_INVALID
 [[ -f "$payload_dir/gateway/routes.conf" && -f "$payload_dir/network/ingress.nft" ]] || die PAYLOAD_INVALID
-[[ -f "$payload_dir/compute/install-tls.sh" ]] || die PAYLOAD_INVALID
+[[ -f "$payload_dir/compute/install-tls.sh" && -f "$payload_dir/compute/lxc.run" ]] || die PAYLOAD_INVALID
+[[ -f "$payload_dir/workloads/rustfs/Containerfile" && -f "$payload_dir/workloads/rustfs/rustfs.container" && -f "$payload_dir/workloads/rustfs/install.run" ]] || die PAYLOAD_INVALID
 [[ -d "$payload_dir/web-app" ]] || die WEB_APP_MISSING
 
 runtime_dir=/var/lib/gnx-node
@@ -127,8 +131,14 @@ write_private_dns() {
   # Pi-hole's BIND mode uses FTLCONF_dns_interface=tailscale0 and adds
   # loopback itself. Keep this file to records only; duplicate interface or
   # listen-address directives make FTL also bind WSL's reserved DNS tunnel.
-  printf 'address=/app.gnx/%s\naddress=/compute.gnx/%s\n' "$ip" "$ip" > "$dnsmasq_dir/02-gnx.conf"
+  printf 'address=/app.gnx/%s\naddress=/compute.gnx/%s\naddress=/rustfs.gnx/%s\n' "$ip" "$ip" "$ip" > "$dnsmasq_dir/02-gnx.conf"
   chmod 0644 "$dnsmasq_dir/02-gnx.conf"
+  # Upgrade the previous direct-dashboard record without changing its enrolled
+  # sidecar address. Keep rustfs.gnx owned by the gateway on every Retry.
+  if [[ -f "$dnsmasq_dir/03-rustfs.conf" ]]; then
+    sed -i 's@address=/rustfs.gnx/@address=/rustfs.mesh.gnx/@' "$dnsmasq_dir/03-rustfs.conf"
+    chmod 0644 "$dnsmasq_dir/03-rustfs.conf"
+  fi
 }
 
 wait_for_mesh_auth() {
@@ -276,6 +286,9 @@ generate_ca_material() {
     make_ca gateway-ca '/CN=GnX Node Private Gateway CA'
   fi
   make_leaf gateway-ca gateway '/CN=GnX Node Gateway' 'DNS:app.gnx,DNS:compute.gnx'
+  # Caddy must be able to load its fixed RustFS route before any guest exists.
+  # The workload adapter copies this same private-CA leaf into the guest.
+  make_leaf gateway-ca rustfs '/CN=rustfs.gnx' 'DNS:rustfs.gnx'
   make_ca backend-ca '/CN=GnX Node Private Backend CA'
   make_leaf backend-ca backend '/CN=GnX Node Compute Backend' 'DNS:compute.gnx'
   openssl verify -CAfile "$ca_dir/gateway-ca.pem" "$ca_dir/gateway-cert.pem" >/dev/null 2>&1 || die GATEWAY_CA_INVALID
@@ -295,6 +308,17 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
+if [[ "$mode" == reconcile ]]; then
+  # Retry applies the same CA/DNS contracts as install, without re-enrolling
+  # mesh, reinstalling dependencies, or recreating an unchanged compute guest.
+  mesh_authenticated || die MESH_AUTHENTICATION_FAILED
+  generate_ca_material
+  configure_private_dns
+  install -m 0755 "$payload_dir/compute/lxc.run" "$runtime_dir/lxc.run"
+  systemctl restart dns.service >/dev/null 2>&1 || die DNS_START_FAILED
+  emit reconciled
+  exit 0
+fi
 install_dependencies
 load_kvm
 install -m 0600 /dev/null /run/gnx-node/mesh.env
@@ -317,14 +341,13 @@ write_compute_hostname
 generate_ca_material
 install -d -m 0755 "$runtime_dir/web-app"
 install -m 0755 "$payload_dir/compute/install-tls.sh" "$compute_hook_dir/install-tls.sh"
-cat > "$compute_systemd_dir/pveproxy.service.d/gnx.conf" <<'EOF'
-[Unit]
-After=pve-cluster.service
-Requires=pve-cluster.service
-[Service]
-ExecStartPre=/usr/local/libexec/gnx-install-tls.sh
-EOF
-chmod 0644 "$compute_systemd_dir/pveproxy.service.d/gnx.conf"
+install -m 0755 "$payload_dir/compute/lxc.run" "$runtime_dir/lxc.run"
+rm -rf -- "$runtime_dir/workloads/rustfs"
+install -d -m 0755 "$runtime_dir/workloads/rustfs"
+cp -a "$payload_dir/workloads/rustfs/." "$runtime_dir/workloads/rustfs/"
+chmod 0755 "$runtime_dir/workloads/rustfs/install.run"
+chmod 0644 "$runtime_dir/workloads/rustfs/Containerfile" "$runtime_dir/workloads/rustfs/rustfs.container"
+bash "$payload_dir/compute/install-network.run"
 
 for unit in mesh dns gateway compute; do install -m 0644 "$payload_dir/services/$unit.container" "/etc/containers/systemd/$unit.container"; done
 install -m 0644 "$payload_dir/services/platform.target" /etc/systemd/system/platform.target

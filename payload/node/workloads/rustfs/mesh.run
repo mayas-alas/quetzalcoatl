@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Fixed guest-local operations; no shell, arbitrary paths, or arbitrary peers.
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 077
+fail() { printf '{"event":"error","code":"%s"}\n' "$1" >&2; exit 1; }
+[[ $(id -u) == 0 ]] || fail ROOT_REQUIRED
+[[ $# -ge 1 && $# -le 2 ]] || fail INVALID_ARGUMENT
+mesh() { podman exec gnx-workload-mesh tailscale --socket=/var/lib/tailscale/tailscaled.sock "$@"; }
+case "$1" in
+  guard)
+    [[ $# == 1 ]] || fail INVALID_ARGUMENT
+    command -v nft >/dev/null || fail OFFLINE_NFT_REQUIRED
+    # Flush/repopulate only our table in a single atomic nft transaction.
+    { if nft list table inet gnx_workload_mesh >/dev/null 2>&1; then
+        printf 'delete table inet gnx_workload_mesh\n'
+      fi
+      /usr/bin/cat /opt/gnx/workloads/rustfs/mesh.nft
+    } | nft -f - || fail MESH_GUARD_FAILED
+    ;;
+  enroll)
+    [[ $# == 1 ]] || fail INVALID_ARGUMENT
+    key=/var/lib/gnx/mesh/enrollment.key
+    [[ -f "$key" && ! -L "$key" ]] || fail MESH_CREDENTIAL_REQUIRED
+    [[ $(stat -c %a "$key") == 600 && $(stat -c %h "$key") == 1 ]] || fail MESH_CREDENTIAL_PERMISSIONS
+    owner=$(stat -c %u "$key")
+    [[ "$owner" == 0 || "$owner" == 65532 ]] || fail MESH_CREDENTIAL_OWNER
+    trap 'rm -f -- "$key"' EXIT
+    # The CLI runs as the sidecar UID and reads the file inside its fixed mount.
+    chown --no-dereference 65532:65532 "$key" || fail MESH_CREDENTIAL_PERMISSIONS
+    # The credential stays in a protected mounted file, never argv/env/logs.
+    mesh up --auth-key=file:/var/lib/tailscale/enrollment.key --hostname=gnx-rustfs --timeout=60s --accept-dns=true --accept-routes=false --ssh=false >/dev/null 2>&1 || fail MESH_ENROLL_FAILED
+    ;;
+  select)
+    [[ $# == 2 && "$2" =~ ^[1-9][0-9]{0,19}$ ]] || fail INVALID_RUN_ID
+    peer="gnx-exit-$2"
+    ip=$(mesh status --json | jq -er --arg peer "$peer" '
+      [.Peer[] | select(.HostName == $peer and .Online == true and .ExitNodeOption == true)]
+      | if length == 1 then .[0].TailscaleIPs[0] else error("EXIT_NODE_UNAVAILABLE") end') || fail EXIT_NODE_UNAVAILABLE
+    [[ "$ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail EXIT_NODE_ADDRESS_INVALID
+    mesh set --exit-node="$ip" --exit-node-allow-lan-access=false >/dev/null 2>&1 || fail EXIT_NODE_SELECTION_FAILED
+    ;;
+  https)
+    [[ $# == 1 ]] || fail INVALID_ARGUMENT
+    mesh status --json | jq -e '.BackendState == "Running"' >/dev/null || fail MESH_NOT_READY
+    curl --proto '=https' --fail --silent --show-error --max-time 5 \
+      --cacert /var/lib/gnx/rustfs/tls/ca.crt --resolve rustfs.gnx:443:127.0.0.1 \
+      https://rustfs.gnx/rustfs/console/ >/dev/null || fail CONSOLE_HTTPS_NOT_READY
+    printf '%s\n' '{"event":"configured","dashboard_transport":"private_ca_https","hostname":"rustfs.gnx"}'
+    ;;
+  status)
+    [[ $# == 1 ]] || fail INVALID_ARGUMENT
+    mesh status --json | jq -e '{mesh:(.BackendState == "Running"),exit_node_online:(.ExitNodeStatus.Online // false)}' || fail MESH_STATUS_FAILED
+    ;;
+  verify)
+    [[ $# == 1 ]] || fail INVALID_ARGUMENT
+    nft list table inet gnx_workload_mesh >/dev/null || fail MESH_GUARD_MISSING
+    mesh status --json | jq -e '.BackendState == "Running" and .ExitNodeStatus.Online == true' >/dev/null || fail EXIT_NODE_OFFLINE
+    # A successful request here belongs to the guest, not the runner.
+    curl --proto '=https' --tlsv1.2 --fail --silent --show-error --max-time 15 https://example.com/ >/dev/null || fail GUEST_EGRESS_FAILED
+    printf '%s\n' '{"event":"verified","guest_egress":"mesh"}'
+    ;;
+  *) fail ACTION_NOT_ALLOWED ;;
+esac

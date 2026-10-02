@@ -1,0 +1,14 @@
+# GnX LXC transport. Application egress remains enforced by mesh.nft.
+[Match]
+Name=eth0
+
+[Network]
+DHCP=ipv4
+IPv6AcceptRA=no
+LinkLocalAddressing=no
+
+[DHCPv4]
+UseDNS=no
+UseHostname=no
+UseRoutes=yes
+UseMTU=yes

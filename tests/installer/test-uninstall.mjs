@@ -16,8 +16,11 @@ const [product, bundle, wixproj, buildScript, readme] = await Promise.all([
   read('installer/README.md'),
 ]);
 
-assert.match(product, /Version="0\.1\.21\.0"/);
-assert.match(bundle, /Version="0\.1\.21\.0"/);
+const cargo = await read('Cargo.toml');
+const version = cargo.match(/^version\s*=\s*"(\d+\.\d+\.\d+)"/m)?.[1];
+assert.ok(version, 'workspace release version must be defined');
+assert.ok(product.includes(`Version="${version}.0"`), 'MSI must match workspace release');
+assert.ok(bundle.includes(`Version="${version}.0"`), 'Burn must match workspace release');
 assert.match(product, /UpgradeCode="5EAA2C0C-1E4C-4E4D-89E5-3D6F1A7E4C11"/);
 assert.match(bundle, /UpgradeCode="DB8BFB10-FA20-4F4F-9B3E-35DBD15A2A1A"/);
 assert.match(bundle, /LaunchTarget="\[ProgramFilesFolder\]GnX Node\\gnx\.exe"/);
@@ -36,6 +39,12 @@ assert.doesNotMatch(wixproj, /SetupUi|apps\\setup\\ui/);
 assert.doesNotMatch(buildScript, /apps\\setup\\ui|Copy-Item.*SetupUi/);
 assert.match(readme, /silent installs do not prompt/i);
 assert.match(readme, /Start-Process -Verb RunAs -Wait/);
+const releaseVerification = await read('installer/scripts/verify.ps1');
+assert.match(releaseVerification, /\[switch\]\$PublishRelease/);
+assert.match(releaseVerification, /MSI version does not match the workspace/);
+assert.match(releaseVerification, /Published artifact is immutable/);
+assert.match(releaseVerification, /\$_.Extension -ne '\.md'/);
+assert.match(releaseVerification, /SHA256SUMS\.txt/);
 
 
 // MSI owns service lifecycle and invokes the fixed host binary for complete

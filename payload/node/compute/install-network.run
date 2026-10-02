@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Shared by initial provisioning and numbered MSI upgrade reconciliation.
+set -Eeuo pipefail
+[[ $(id -u) == 0 ]] || exit 1
+source_dir=/opt/gnx/payload/node
+runtime=/var/lib/gnx-node
+install -d -m 0755 "$runtime/compute-network" "$runtime/compute-systemd/pveproxy.service.d" "$runtime/compute-systemd/pve-firewall.service.d" "$runtime/compute-systemd/pve-guests.service.d" /etc/containers/systemd
+install -m 0755 "$source_dir/compute/network.run" "$runtime/compute-network/network.run"
+install -m 0755 "$source_dir/compute/guest-network.run" "$runtime/compute-network/guest-network.run"
+install -m 0644 "$source_dir/compute/eth0.network" "$runtime/compute-network/eth0.network"
+install -m 0644 "$source_dir/compute/gnx-lxc-network.service" "$runtime/compute-network/gnx-lxc-network.service"
+install -m 0644 "$source_dir/compute/pveproxy-gnx.conf" "$runtime/compute-systemd/pveproxy.service.d/gnx.conf"
+install -m 0644 "$source_dir/compute/pve-firewall-gnx.conf" "$runtime/compute-systemd/pve-firewall.service.d/gnx.conf"
+install -m 0644 "$source_dir/compute/pve-guests-gnx.conf" "$runtime/compute-systemd/pve-guests.service.d/gnx.conf"
+install -m 0644 "$source_dir/services/compute.container" /etc/containers/systemd/compute.container
+install -m 0644 "$source_dir/services/mesh.container" /etc/containers/systemd/mesh.container
+systemctl daemon-reload
+# Apply DNS preferences to the enrolled daemon without replacing its identity.
+if podman container exists gnx-mesh; then
+  podman exec gnx-mesh tailscale set --accept-dns=true >/dev/null
+fi

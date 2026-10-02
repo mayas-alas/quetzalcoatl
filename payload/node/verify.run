@@ -45,6 +45,16 @@ dns_ip=""
 if command -v podman >/dev/null 2>&1; then dns_ip=$(podman exec gnx-mesh tailscale ip -4 2>/dev/null | tr -d '\r' | awk 'NF { print $1; exit }' || true); fi
 if valid_ipv4 "$dns_ip" && command -v dig >/dev/null 2>&1 && [[ "$(dig +short +time=2 +tries=1 @"$dns_ip" app.gnx A 2>/dev/null | head -n1)" == "$dns_ip" ]]; then check dns_app pass; else check dns_app fail; fi
 if valid_ipv4 "$dns_ip" && command -v dig >/dev/null 2>&1 && [[ "$(dig +short +time=2 +tries=1 @"$dns_ip" compute.gnx A 2>/dev/null | head -n1)" == "$dns_ip" ]]; then check dns_compute pass; else check dns_compute fail; fi
+if valid_ipv4 "$dns_ip" && command -v dig >/dev/null 2>&1 && [[ "$(dig +short +time=2 +tries=1 @"$dns_ip" rustfs.gnx A 2>/dev/null | head -n1)" == "$dns_ip" ]]; then check dns_rustfs pass; else check dns_rustfs fail; fi
+# A running workload is not ready merely because its in-guest healthcheck passes.
+# The adapter also validates the private-CA HTTPS path through Caddy.
+if workload_status=$("$runtime_dir/lxc.run" status rustfs 2>/dev/null); then
+  if python3 -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin)["state"] == "running" else 1)' <<<"$workload_status"; then
+    if python3 -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin)["service"] == "healthy" else 1)' <<<"$workload_status"; then check rustfs_gateway_https pass; else check rustfs_gateway_https fail; fi
+  fi
+else
+  check rustfs_gateway_https fail
+fi
 # Gateway CA validates public hostnames at :443; backend CA validates only
 # the internal Proxmox endpoint at :8006. No insecure TLS fallback is allowed.
 if command -v curl >/dev/null 2>&1 && [[ -r "$gateway_ca" ]] && curl --fail --silent --show-error --connect-timeout 3 --max-time 5 --cacert "$gateway_ca" --resolve app.gnx:443:127.0.0.1 https://app.gnx/ >/dev/null 2>&1; then check app_https pass; else check app_https fail; fi

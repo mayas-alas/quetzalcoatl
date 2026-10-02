@@ -52,9 +52,12 @@ fn is_gnx_hosts_line(line: &str) -> bool {
         .map(|name| name.to_ascii_lowercase())
         .collect::<Vec<_>>();
     line.to_ascii_lowercase().contains("# gnx node")
-        || names
-            .iter()
-            .any(|name| matches!(name.as_str(), "app.gnx" | "compute.gnx" | "agents.gnx"))
+        || names.iter().any(|name| {
+            matches!(
+                name.as_str(),
+                "app.gnx" | "compute.gnx" | "rustfs.gnx" | "agents.gnx"
+            )
+        })
 }
 
 #[cfg(windows)]

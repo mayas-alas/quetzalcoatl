@@ -1,7 +1,8 @@
 param(
     [Alias("Artifact")]
     [string]$MsiArtifact = (Join-Path $PSScriptRoot "..\..\build\installer\GnxNode.msi"),
-    [string]$BurnArtifact = (Join-Path $PSScriptRoot "..\..\build\installer\GnxNodeSetup.exe")
+    [string]$BurnArtifact = (Join-Path $PSScriptRoot "..\..\build\installer\GnxNodeSetup.exe"),
+    [switch]$PublishRelease
 )
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path
@@ -29,5 +30,36 @@ function Assert-Artifact([string]$Path, [string]$Label) {
     }
 }
 
-Assert-Artifact $MsiArtifact "MSI"
-Assert-Artifact $BurnArtifact "Burn"
+$artifacts = @(Assert-Artifact $MsiArtifact "MSI"; Assert-Artifact $BurnArtifact "Burn")
+$artifacts
+if ($PublishRelease) {
+    $cargo = Get-Content (Join-Path $root 'Cargo.toml') -Raw
+    if ($cargo -notmatch '(?m)^version = "(\d+\.\d+\.\d+)"') { throw 'Workspace version unavailable' }
+    $version = $Matches[1]
+    $releases = Join-Path $root 'releases'
+    $latest = Join-Path $releases "v$version"
+    if (!(Test-Path (Join-Path $latest 'RELEASE_NOTES.md'))) { throw 'Write the validated release notes before publishing' }
+    # Promote only the MSI built for this workspace version, not stale output.
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $database = $installer.OpenDatabase((Resolve-Path $MsiArtifact).Path, 0)
+    $view = $database.OpenView("SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = 'ProductVersion'")
+    $view.Execute()
+    if ($view.Fetch().StringData(1) -ne "$version.0") { throw 'MSI version does not match the workspace' }
+    $view.Close()
+    $sums = @()
+    foreach ($artifact in $artifacts) {
+        $name = Split-Path $artifact.Path -Leaf
+        $destination = Join-Path $latest $name
+        if (Test-Path $destination) {
+            if ((Get-FileHash $destination -Algorithm SHA256).Hash -ne $artifact.SHA256) { throw "Published artifact is immutable: $destination" }
+        } else { Copy-Item -LiteralPath $artifact.Path -Destination $destination }
+        $sums += "$($artifact.SHA256.ToLowerInvariant())  $name"
+    }
+    [IO.File]::WriteAllText((Join-Path $latest 'SHA256SUMS.txt'), ($sums -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+    # Retain history as Markdown only. Binary installers and checksums belong
+    # exclusively to the current release; no Git/LFS history is rewritten.
+    Get-ChildItem $releases -Directory | Where-Object { $_.Name -ne "v$version" } | ForEach-Object {
+        Get-ChildItem $_.FullName -File -Recurse | Where-Object { $_.Extension -ne '.md' } | Remove-Item -Force
+    }
+    Write-Output "Release prepared: $latest (historical releases: Markdown only)"
+}

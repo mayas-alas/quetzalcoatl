@@ -113,7 +113,7 @@ fn reconcile_hosts() -> io::Result<()> {
     let current = std::fs::read_to_string(path).unwrap_or_default();
     let cleaned = filter_hosts(&current);
     let block =
-        format!("{HOSTS_BEGIN}\r\n127.0.0.1 app.gnx\r\n127.0.0.1 compute.gnx\r\n{HOSTS_END}\r\n");
+        format!("{HOSTS_BEGIN}\r\n127.0.0.1 app.gnx\r\n127.0.0.1 compute.gnx\r\n127.0.0.1 rustfs.gnx\r\n{HOSTS_END}\r\n");
     let next = if cleaned.trim().is_empty() {
         block
     } else {
@@ -172,7 +172,9 @@ fn filter_hosts(input: &str) -> String {
 fn hosts_line_mentions_product_name(line: &str) -> bool {
     let body = line.split('#').next().unwrap_or_default();
     body.split_whitespace().skip(1).any(|name| {
-        name.eq_ignore_ascii_case("app.gnx") || name.eq_ignore_ascii_case("compute.gnx")
+        name.eq_ignore_ascii_case("app.gnx")
+            || name.eq_ignore_ascii_case("compute.gnx")
+            || name.eq_ignore_ascii_case("rustfs.gnx")
     })
 }
 

@@ -27,6 +27,24 @@ the public certificate into local Windows trust, and publishes loopback-only hos
 access before reporting ready. It reports the public certificate path plus explicit
 Split DNS and CA-trust actions only for external tailnet clients. The named pipe remains the sole secret boundary; credentials are never sent through the PWA.
 
+## Release publication and retention
+
+After live installed-host validation, write `releases/v<VERSION>/RELEASE_NOTES.md`
+and run:
+
+```powershell
+./installer/scripts/verify.ps1 -PublishRelease
+```
+
+This verifies the sealed input and MSI version, copies the current MSI/Burn,
+writes their SHA-256 manifest, and removes all non-Markdown files from older
+release directories. Only the latest release has downloadable artifacts;
+historical notes remain. Published artifacts of the same version are immutable.
+Upload the reviewed source and current release using the host user's authenticated
+WSL/Hugging Face account, never the dedicated runtime identity. Do not upload
+`build/`, `target/`, installer intermediates, private state or credentials, and
+do not rewrite Git/LFS history.
+
 ## Managed runtime stop and start
 
 To release RAM while preserving the GnX enrollment, state, credentials, and WSL image, run from an elevated terminal:

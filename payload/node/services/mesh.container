@@ -1,6 +1,6 @@
 # Capacidad: mesh
 # Implementación aprobada para este release: Tailscale
-# Requisitos: /dev/net/tun y clave efímera consumida por el agente
+# Requisitos: /dev/net/tun e inscripción protegida; conservar la identidad
 [Unit]
 Description=GnX private mesh capability
 Wants=network-online.target
@@ -16,7 +16,8 @@ AddCapability=NET_RAW
 Volume=/var/lib/gnx-node/mesh:/var/lib/tailscale:Z
 Environment=TS_STATE_DIR=/var/lib/tailscale
 Environment=TS_USERSPACE=false
-Environment=TS_ACCEPT_DNS=false
+# Enable the native resolver at 100.100.100.100; no inherited DNS in PVE.
+Environment=TS_ACCEPT_DNS=true
 EnvironmentFile=/run/gnx-node/mesh.env
 [Service]
 Restart=always
