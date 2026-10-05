@@ -66,6 +66,11 @@ assert.match(compute, /^DNS=100\.100\.100\.100$/m, 'compute must not inherit hos
 const networkInstall = await read('compute/install-network.run');
 assert.match(networkInstall, /services\/mesh\.container.*\/etc\/containers\/systemd\/mesh\.container/);
 assert.match(networkInstall, /podman exec gnx-mesh tailscale set --accept-dns=true/);
+assert.match(networkInstall, /podman image exists "\$image"/);
+assert.match(networkInstall, /podman pull --quiet "\$image"/);
+assert.match(networkInstall, /for attempt in 1 2 3/);
+assert.doesNotMatch(networkInstall, /podman pull[^\n]*--retry/);
+assert.ok(networkInstall.indexOf('podman pull') < networkInstall.indexOf('install -m 0644 "$source_dir/services/compute.container"'), 'fetch must precede installed Quadlet replacement');
 assert.match(compute, /^AddDevice=\/dev\/kvm$/m);
 assert.match(compute, /^AddDevice=\/dev\/fuse$/m);
 assert.match(compute, /^HealthCmd=.*--cacert \/etc\/gnx\/ca\/backend-ca\.pem.*https:\/\/compute\.gnx:8006\/$/m);

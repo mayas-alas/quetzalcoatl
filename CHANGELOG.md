@@ -4,6 +4,12 @@ Los cambios pendientes no equivalen a una release publicada. Cada release conser
 
 ## [Unreleased]
 
+Sin cambios pendientes.
+
+## [0.1.54] — 2026-10-05
+
+[Notas y límites de validación](releases/v0.1.54/RELEASE_NOTES.md) · [Hashes](releases/v0.1.54/SHA256SUMS.txt).
+
 ### Changed
 - Compute consume `ghcr.io/mayas-alas/tailnet-proxmox:9.2.21-gnx.1` fijado por digest en el Quadlet; `Pull=missing` deja la descarga/almacén en Podman, sin credenciales nuevas.
 - Imagen mantenida en [tailnet-proxmox](https://github.com/mayas-alas/tailnet-proxmox), actualizada desde `dockur/proxmox` (`5fccb4a7`): único cambio funcional del Dockerfile, quitar la instalación de `pve-fake-subscription`. Scripts upstream sin reglas antiguas personalizadas.
@@ -12,12 +18,15 @@ Los cambios pendientes no equivalen a una release publicada. Cada release conser
 ### Removed
 - Containerfile, código upstream vendorizado, builders, promoción e importer de imágenes del workspace Quetzalcoatl. No se añade Skopeo al nodo ni un downloader HTTP de OCI.
 
-### Pending
-- Publicar un instalador nuevo y validar el upgrade con VMs/LXC existentes. v0.1.53 y el Proxmox instalado no se han reemplazado; los smoke tests aislados no prueban migración de datos.
+- Install/Retry descarga primero la imagen fijada por digest y solo después reemplaza el Quadlet; retries compatibles con Podman 4.9.
+- Instalador v0.1.54 compilado/verificado. Binarios en `gnx-labs-mx/gnx-node-releases` (Hugging Face); el Space conserva fuente, notas, hashes y enlace sin duplicar ~310 MB por versión.
+
+### Límites de aceptación
+- Upgrade sobre VMs/LXC existentes y alta en host limpio pendientes; no se modifica el host activo. Los smoke tests aislados no prueban migración de datos.
 
 ## [0.1.53] — 2026-10-05
 
-[Notas y límites de validación](releases/v0.1.53/RELEASE_NOTES.md) · [Hashes](releases/v0.1.53/SHA256SUMS.txt).
+[Notas y límites de validación](docs/releases/v0.1.53/RELEASE_NOTES.md). Instalador anterior retirado del árbol actual; historial Git/LFS preservado.
 
 ### Changed
 - GitHub en la PWA: una operación directa con token clásico (`repo`, `workflow`), confirmación, creación de repositorio privado y carga del YAML elegido. Sin puente Windows, UAC, OAuth ni controles de ejecución de Actions.

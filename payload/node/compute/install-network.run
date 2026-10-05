@@ -4,6 +4,18 @@ set -Eeuo pipefail
 [[ $(id -u) == 0 ]] || exit 1
 source_dir=/opt/gnx/payload/node
 runtime=/var/lib/gnx-node
+# Acquire the pinned release before changing the installed Quadlet. A failed
+# registry download must not stop the previous compute during an upgrade.
+image=$(sed -n 's/^Image=//p' "$source_dir/services/compute.container")
+[[ "$image" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] || exit 1
+if ! podman image exists "$image"; then
+  # Keep compatibility with the supported Podman 4.9 (no pull --retry flag).
+  for attempt in 1 2 3; do
+    podman pull --quiet "$image" >/dev/null 2>&1 && break
+    sleep 2
+  done
+  podman image exists "$image" || { printf '%s\n' '{"event":"error","code":"COMPUTE_IMAGE_PULL_FAILED"}' >&2; exit 1; }
+fi
 install -d -m 0755 "$runtime/compute-network" "$runtime/compute-systemd/pveproxy.service.d" "$runtime/compute-systemd/pve-firewall.service.d" "$runtime/compute-systemd/pve-guests.service.d" /etc/containers/systemd
 install -m 0755 "$source_dir/compute/network.run" "$runtime/compute-network/network.run"
 install -m 0755 "$source_dir/compute/guest-network.run" "$runtime/compute-network/guest-network.run"

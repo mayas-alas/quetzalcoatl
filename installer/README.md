@@ -40,14 +40,17 @@ This verifies the sealed input and MSI version, copies the current MSI/Burn,
 writes their SHA-256 manifest, archives older Markdown under `docs/releases/`,
 and removes older release directories. Only the latest release remains under
 `releases/`; `CHANGELOG.md` indexes historical notes. Published artifacts of the same version are immutable.
-Upload the reviewed source and current release using the host user's authenticated
-WSL/Hugging Face account, never the dedicated runtime identity. Do not upload
-`build/`, `target/`, installer intermediates, private state or credentials, and
-do not rewrite Git/LFS history. On a quota-limited remote, use
-`./installer/scripts/verify.ps1 -PublishRelease -BundleOnly` before the first
-publication of the new version: both outputs are verified, but only Burn and its
-hash are published. Burn embeds the exact MSI, so this is a complete installer,
-not an incomplete upload.
+Publish the verified Burn (with its exact embedded MSI), SHA256SUMS and release
+notes in `gnx-labs-mx/gnx-node-releases` (Hugging Face dataset/artifact repository).
+The quota-limited Quetzalcoatl Space retains source, notes, hashes and the download
+link pinned to that artifact commit; installer binaries are ignored by source Git.
+Use the host user's authenticated WSL/Hugging Face account, never the dedicated
+runtime identity. Do not upload `build/`, `target/`, intermediates, private state
+or credentials, and do not rewrite Git/LFS history. Use
+`./installer/scripts/verify.ps1 -PublishRelease -BundleOnly`: both outputs are
+verified and the generated local release contains only the complete Burn bundle
+and its hash, not a duplicate MSI. Upload the artifact before updating the Space;
+check the remote SHA-256 and size and link the immutable revision in the notes.
 
 ## Managed runtime stop and start
 

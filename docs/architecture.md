@@ -200,7 +200,7 @@ El workspace es la raíz de este repositorio:
 - `tests/`: contratos estáticos de instalación, runtime y seguridad; tests Rust
   junto al código.
 - `target/`, `build/`: salidas generadas, fuera de Git.
-- `releases/v*/`: sólo la última versión validada conserva MSI, Burn y `SHA256SUMS.txt`; las anteriores conservan únicamente Markdown en `docs/releases/`. `CHANGELOG.md` indexa cambios y notas históricas. No se sobrescriben artefactos de la misma versión ni se reescribe el historial Git/LFS.
+- `releases/v*/`: sólo la última versión conserva notas, `SHA256SUMS.txt` y enlace al instalador verificado. Burn (con MSI embebido) se publica en el repositorio de artefactos Hugging Face `gnx-labs-mx/gnx-node-releases`; no se duplica en el Space limitado a 1 GB ni se versiona en el Git de fuente. Las anteriores conservan Markdown en `docs/releases/`. `CHANGELOG.md` indexa cambios y notas históricas. No se sobrescriben artefactos ni se reescribe el historial Git/LFS.
 - Tras las pruebas y notas de release, `installer/scripts/verify.ps1 -PublishRelease` prepara los artefactos nuevos y archiva el Markdown anterior en `docs/releases/` y retira sus directorios de `releases/`. La publicación en Hugging Face utiliza la WSL autenticada del usuario host.
 
 La asignación de agentes y reglas de coordinación viven en `.AGENTS/`, no en

@@ -1,9 +1,10 @@
 /build/
 /target/
 *.msi
-# Published installer artifacts are intentionally kept in Hugging Face releases.
+*.exe
+# Installers are published in the Hugging Face artifact repository, not the Space.
+# Release Markdown and hashes stay versioned here.
 !releases/
-!releases/**/*.msi
 *.wixpdb
 *.wixobj
 *.log
