@@ -24,6 +24,18 @@ $actualRootfsDigest = (Get-FileHash -LiteralPath $rootfsArtifact -Algorithm SHA2
 if ($actualRootfsDigest -ne $manifestDigest) {
     throw "Sealed WSL rootfs digest mismatch: expected $manifestDigest, got $actualRootfsDigest"
 }
+# Build-time sealed input only: no registry/OCI download path is added to the product.
+$offlineDir = Join-Path $root 'payload\node\workloads\rustfs'
+$offlineArtifact = Join-Path $offlineDir 'offline.tar.gz'
+$offlineManifest = (Get-Content (Join-Path $offlineDir 'offline.sha256') -Raw).Trim()
+if ($offlineManifest -notmatch '^([0-9a-f]{64})  offline\.tar\.gz$') { throw 'Invalid workload input manifest' }
+$offlineDigest = $Matches[1]
+if (!(Test-Path $offlineArtifact)) {
+    $offlineUrl = (Get-Content (Join-Path $offlineDir 'offline.url') -Raw).Trim()
+    if ($offlineUrl -notmatch '^https://huggingface\.co/datasets/gnx-labs-mx/gnx-node-releases/resolve/[0-9a-f]{40}/build-inputs/v[0-9.]+/offline\.tar\.gz$') { throw 'Invalid sealed input URL' }
+    Invoke-WebRequest -UseBasicParsing -Uri $offlineUrl -OutFile $offlineArtifact
+}
+if ((Get-FileHash $offlineArtifact -Algorithm SHA256).Hash.ToLowerInvariant() -ne $offlineDigest) { throw 'Sealed workload input digest mismatch' }
 New-Item -ItemType Directory -Force $out | Out-Null
 $msi = Join-Path $out "GnxNode.msi"
 $localizedMsi = Join-Path $out "en-us\GnxNode.msi"

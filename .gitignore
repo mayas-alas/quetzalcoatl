@@ -1,5 +1,7 @@
 /build/
 /target/
+# Sealed workload input is versioned in the artifact dataset, not duplicated in Space LFS.
+/payload/node/workloads/rustfs/offline.tar.gz
 *.msi
 *.exe
 # Release notes/hashes are source; verified binaries are explicitly uploaded.
