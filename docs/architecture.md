@@ -159,26 +159,22 @@ El puerto interno `8006` no se publica directamente a LAN/tailnet. No se abre
 DNS público ni puertos del router. Un apagado global de WSL/reinicio del host
 requiere consentimiento; no se usa para validar una actualización por sorpresa.
 
-## Repositorio OCI de compute — candidato pendiente
+## Imagen OCI de compute
 
-`payload/node/compute/image/` conserva Containerfile, preparación externa, runtime
-upstream versionado y su licencia. No se heredan capas de la imagen Proxmox que
-instalaba un paquete de suscripción falso: el rebuild parte de Debian por digest.
-`installer/scripts/build-compute.sh` construye con Podman y sella/exporta con
-Skopeo. El digest promovible es el manifest OCI exportado, no el image ID ni un
-hash anterior a la compresión. `promote-compute.py` valida hash/manifest y publica
-explícitamente `oci-archive:` → `docker://` con TLS y digest preservados.
+La imagen pertenece a `https://github.com/mayas-alas/tailnet-proxmox`, no al
+workspace del producto. Ese repo actualiza `dockur/proxmox`, retira únicamente la
+instalación de `pve-fake-subscription` de su Dockerfile y conserva los scripts
+upstream sin personalizaciones antiguas. Su CI verifica el cambio mínimo, ausencia
+del paquete, boot de Proxmox y KVM antes de publicar el OCI exacto con Skopeo en
+`ghcr.io/mayas-alas/tailnet-proxmox`, preservando y verificando el manifest digest.
 
-El candidato aún no tiene registry autorizado: no está desplegado ni sustituye
-la imagen del release vigente. El registro de promoción se produce bajo `build/`
-y necesita revisión antes de modificar payload/Quadlet. El importer preparado
-usa Skopeo `docker://repo@sha256` → `containers-storage:` del nodo y exige un
-registro promovido concordante con `Image=` y `Pull=never`. No usa un HTTP downloader
-para archivos OCI. No se comparte el almacén/auth del builder con la identidad
-Windows/WSL dedicada. El código actual de install/Retry no activa este candidato;
-la siguiente integración debe adquirir/verificar la imagen antes de reiniciar
-compute y validar preservación de VMs/LXC, CA, secretos y gateway. Detalles y límites:
-`payload/node/compute/image/README.md`.
+Quetzalcoatl solo consume `Image=ghcr.io/mayas-alas/tailnet-proxmox@sha256:…` en
+`payload/node/services/compute.container`. Podman/Quadlet gestiona la descarga y
+el almacén de la identidad dedicada; no se incorpora un Containerfile, builder,
+importer HTTP ni credenciales del usuario host. Las reglas de red, CA, secretos,
+volúmenes, KVM y LXC del producto siguen siendo payload externo. Un digest nuevo
+puede recrear el contenedor compute: la aceptación con VMs/LXC existentes exige
+un upgrade explícito y no se deduce del smoke test aislado de la imagen.
 
 ## Actualización, retirada y organización
 

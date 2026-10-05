@@ -7,7 +7,9 @@ Description=GnX compute capability
 After=mesh.service
 Requires=mesh.service
 [Container]
-Image=docker.io/dockurr/proxmox@sha256:135292c3d3cbc8061ad6c70f1097f213d4de20275d5a1e679de580a254f1018c
+# Source/build: github.com/mayas-alas/tailnet-proxmox (9.2.21-gnx.1).
+Image=ghcr.io/mayas-alas/tailnet-proxmox@sha256:bc48f533f0daddb045128caf052b6b0a15d045cde7106f60ed3d906798adc0b9
+Pull=missing
 ContainerName=gnx-compute
 DNS=100.100.100.100
 PublishPort=127.0.0.1:8006:8006

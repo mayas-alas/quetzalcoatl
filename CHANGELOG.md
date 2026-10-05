@@ -4,16 +4,16 @@ Los cambios pendientes no equivalen a una release publicada. Cada release conser
 
 ## [Unreleased]
 
-### Added
-- Candidato Proxmox propio reconstruido desde Debian, sin instalar `pve-fake-subscription`; runtime upstream versionado y licencia MIT conservada.
-- Pipeline externo Podman/Skopeo: build, inventario, OCI exportado, inspección y copia con digest preservado; promoción explícita al repositorio OCI e importer para el almacén del nodo.
+### Changed
+- Compute consume `ghcr.io/mayas-alas/tailnet-proxmox:9.2.21-gnx.1` fijado por digest en el Quadlet; `Pull=missing` deja la descarga/almacén en Podman, sin credenciales nuevas.
+- Imagen mantenida en [tailnet-proxmox](https://github.com/mayas-alas/tailnet-proxmox), actualizada desde `dockur/proxmox` (`5fccb4a7`): único cambio funcional del Dockerfile, quitar la instalación de `pve-fake-subscription`. Scripts upstream sin reglas antiguas personalizadas.
+- CI de imagen [37352060719](https://github.com/mayas-alas/tailnet-proxmox/actions/runs/37352060719): build amd64, ausencia del paquete, boot de Proxmox, pveproxy/pvedaemon/pvestatd, HTTPS y KVM aprobados antes de publicación con Skopeo. Digest remoto verificado y lectura anónima confirmada.
 
-### Security
-- Se descarta el canal de descarga HTTP de archivos OCI desde el runtime. Sin credenciales en argv/env, TLS desactivado ni referencias de producción sin digest.
+### Removed
+- Containerfile, código upstream vendorizado, builders, promoción e importer de imágenes del workspace Quetzalcoatl. No se añade Skopeo al nodo ni un downloader HTTP de OCI.
 
 ### Pending
-- Configurar el registry/namespace autorizado y publicar el candidato; no se inventa un destino ni se cambia el Quadlet antes de verificar la referencia remota.
-- Integrar la adquisición antes del arranque/Retry, añadir Skopeo al nodo, publicar un instalador nuevo y validar upgrade live con VMs/LXC. v0.1.53 y compute en ejecución permanecen intactos.
+- Publicar un instalador nuevo y validar el upgrade con VMs/LXC existentes. v0.1.53 y el Proxmox instalado no se han reemplazado; los smoke tests aislados no prueban migración de datos.
 
 ## [0.1.53] — 2026-10-05
 
