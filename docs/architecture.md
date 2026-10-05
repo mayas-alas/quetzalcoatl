@@ -83,8 +83,14 @@ flowchart LR
   `Cancel`. No shell arbitrario, API HTTP localhost ni operación `Deprovision`.
 - La CLI verifica el proceso servidor contra `gnx-host-agent.exe` instalado
   junto a ella. El agente limita frames, valida versión, replay y transición.
-- La PWA no abre pipes, no controla Windows/WSL, no recoge credenciales y no
-  almacena sesiones. Su Service Worker cachea solo assets, nunca `status.json`
+- La PWA no abre pipes ni recoge credenciales del nodo. GitHub tiene una sola
+  operación directa contra `api.github.com`: token clásico en memoria, comprobación
+  de scopes `repo`/`workflow`, creación de repositorio privado e instalación del YAML
+  elegido con consentimiento explícito. No usa protocolo nativo/UAC para GitHub,
+  no importa `gh`, no inicia OAuth y no almacena sesiones. El YAML se proporciona
+  como configuración; no se incrusta en JavaScript. Los secrets y la ejecución de
+  Actions se administran en GitHub. La integración nativa previa permanece en la
+  CLI por compatibilidad, pero no participa en este flujo de la PWA. Su Service Worker cachea solo assets, nunca `status.json`
   ni respuestas de compute.
 - No se adoptan cuentas o distros ajenas. Se conserva el aislamiento del perfil
   y la credencial Windows protegida con DPAPI para el transporte existente.
@@ -177,8 +183,8 @@ El workspace es la raíz de este repositorio:
 - `tests/`: contratos estáticos de instalación, runtime y seguridad; tests Rust
   junto al código.
 - `target/`, `build/`: salidas generadas, fuera de Git.
-- `releases/v*/`: sólo la última versión validada conserva MSI, Burn y `SHA256SUMS.txt`; las anteriores conservan únicamente Markdown. No se sobrescriben artefactos de la misma versión ni se reescribe el historial Git/LFS.
-- Tras las pruebas y notas de release, `installer/scripts/verify.ps1 -PublishRelease` prepara los artefactos nuevos y retira los no-Markdown de releases anteriores. La publicación en Hugging Face utiliza la WSL autenticada del usuario host.
+- `releases/v*/`: sólo la última versión validada conserva MSI, Burn y `SHA256SUMS.txt`; las anteriores conservan únicamente Markdown en `docs/releases/`. `CHANGELOG.md` indexa cambios y notas históricas. No se sobrescriben artefactos de la misma versión ni se reescribe el historial Git/LFS.
+- Tras las pruebas y notas de release, `installer/scripts/verify.ps1 -PublishRelease` prepara los artefactos nuevos y archiva el Markdown anterior en `docs/releases/` y retira sus directorios de `releases/`. La publicación en Hugging Face utiliza la WSL autenticada del usuario host.
 
 La asignación de agentes y reglas de coordinación viven en `.AGENTS/`, no en
 planes históricos duplicados aquí. En esta migración solo el coordinador ejecuta

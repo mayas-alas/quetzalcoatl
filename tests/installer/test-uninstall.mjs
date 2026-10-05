@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,7 +43,12 @@ const releaseVerification = await read('installer/scripts/verify.ps1');
 assert.match(releaseVerification, /\[switch\]\$PublishRelease/);
 assert.match(releaseVerification, /MSI version does not match the workspace/);
 assert.match(releaseVerification, /Published artifact is immutable/);
-assert.match(releaseVerification, /\$_.Extension -ne '\.md'/);
+assert.match(releaseVerification, /\$_.Extension -eq '\.md'/);
+assert.match(releaseVerification, /docs\\releases/);
+assert.match(releaseVerification, /Historical note conflict/);
+assert.match(releaseVerification, /Remove-Item -LiteralPath \$old.FullName -Recurse -Force/);
+assert.deepEqual(await readdir(join(root, 'releases')), [`v${version}`]);
+assert.match(await read('CHANGELOG.md'), /## \[Unreleased\]/);
 assert.match(releaseVerification, /SHA256SUMS\.txt/);
 
 

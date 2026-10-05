@@ -56,10 +56,22 @@ if ($PublishRelease) {
         $sums += "$($artifact.SHA256.ToLowerInvariant())  $name"
     }
     [IO.File]::WriteAllText((Join-Path $latest 'SHA256SUMS.txt'), ($sums -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
-    # Retain history as Markdown only. Binary installers and checksums belong
-    # exclusively to the current release; no Git/LFS history is rewritten.
+    # Archive notes outside releases; retain only the latest immutable artifacts.
+    # Never rewrite Git/LFS history or replace an existing historical note.
+    $history = Join-Path $root 'docs\releases'
     Get-ChildItem $releases -Directory | Where-Object { $_.Name -ne "v$version" } | ForEach-Object {
-        Get-ChildItem $_.FullName -File -Recurse | Where-Object { $_.Extension -ne '.md' } | Remove-Item -Force
+        $old = $_
+        Get-ChildItem $old.FullName -File -Recurse | Where-Object { $_.Extension -eq '.md' } | ForEach-Object {
+            $relative = $_.FullName.Substring($old.FullName.Length + 1)
+            $destination = Join-Path (Join-Path $history $old.Name) $relative
+            if (Test-Path $destination) {
+                if ((Get-FileHash $_.FullName).Hash -ne (Get-FileHash $destination).Hash) { throw "Historical note conflict: $destination" }
+            } else {
+                New-Item -ItemType Directory -Force (Split-Path $destination -Parent) | Out-Null
+                Copy-Item -LiteralPath $_.FullName -Destination $destination
+            }
+        }
+        Remove-Item -LiteralPath $old.FullName -Recurse -Force
     }
-    Write-Output "Release prepared: $latest (historical releases: Markdown only)"
+    Write-Output "Release prepared: $latest (historical Markdown: docs/releases)"
 }

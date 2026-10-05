@@ -1,4 +1,4 @@
-// PWA de estado y acceso, sin APIs administrativas.
+// Estado del nodo y configuración GitHub directa, sin control Windows para GitHub.
 const isTrustedAppOrigin = window.location.protocol === 'https:' && window.location.hostname === 'app.gnx';
 const statusTitle = document.querySelector('#status-title');
 const statusMessage = document.querySelector('#status-message');
@@ -14,46 +14,11 @@ const rustfsVersion = document.querySelector('#rustfs-version');
 const rustfsState = document.querySelector('#rustfs-state');
 const rustfsToggle = document.querySelector('#rustfs-toggle');
 const rustfsLink = document.querySelector('#rustfs-link');
-const githubDot = document.querySelector('#github-dot');
+const githubForm = document.querySelector('#github-config');
 const githubState = document.querySelector('#github-state');
-const githubDetail = document.querySelector('#github-detail');
-const githubActionsStatus = document.querySelector('#github-actions-status');
-const githubConnect = document.querySelector('#github-connect');
-const githubStart = document.querySelector('#github-start');
-const githubStop = document.querySelector('#github-stop');
 
 const checkLabels = { pass: 'Correcto', pending: 'Pendiente', attention: 'Requiere atención' };
-const githubStateLabels = {
-  disconnected: 'GitHub no conectado',
-  ready: 'GitHub listo',
-  starting: 'Iniciando exit node…',
-  running: 'Exit node activo',
-  stopping: 'Deteniendo exit node…',
-  error: 'Error del exit node',
-};
-const githubStateClasses = {
-  disconnected: 'pending',
-  ready: 'pass',
-  starting: 'pending',
-  running: 'pass',
-  stopping: 'pending',
-  error: 'attention',
-};
-const githubActionLabels = {
-  connect: 'Conectar GitHub',
-  github: 'Conectar GitHub',
-  start: 'Iniciar 5 h',
-  start_5h: 'Iniciar 5 h',
-  start5h: 'Iniciar 5 h',
-  connect_github: 'Conectar GitHub',
-  github_connect: 'Conectar GitHub',
-  stop: 'Detener',
-};
-const githubLinks = Object.freeze({
-  connect: 'gnx://github/connect',
-  start: 'gnx://github/start-5h',
-  stop: 'gnx://github/stop',
-});
+
 
 // Status is service-provided data. Keep it bounded, text-only, and never use it as markup.
 function safeText(value, fallback = '') {
@@ -64,102 +29,65 @@ function safeText(value, fallback = '') {
     .replace(/\s+/g, ' ').trim().slice(0, 240);
 }
 
-function stateKey(value) {
-  const key = safeText(value).toLowerCase().replace(/[\s-]+/g, '_');
-  if (['disconnected', 'not_connected', 'unconnected', 'none'].includes(key)) return 'disconnected';
-  if (['ready', 'connected', 'available'].includes(key)) return 'ready';
-  if (['starting', 'pending', 'provisioning', 'queued'].includes(key)) return 'starting';
-  if (['running', 'active'].includes(key)) return 'running';
-  if (['stopping', 'stopped_pending', 'terminating'].includes(key)) return 'stopping';
-  if (['error', 'failed', 'failure'].includes(key)) return 'error';
-  return 'disconnected';
-}
-
-function sourceState(source) {
-  if (typeof source === 'string') return source;
-  if (!source || typeof source !== 'object') return '';
-  return source.state || source.status || source.phase || '';
-}
-
-function sourceMessage(source) {
-  if (!source || typeof source !== 'object') return '';
-  return safeText(source.message || source.detail || source.error_message || source.error);
-}
-
-function githubStatusSource(status) {
-  if (!status || typeof status !== 'object') return { state: 'disconnected' };
-  const integrations = status.integrations && typeof status.integrations === 'object' ? status.integrations : {};
-  const actions = status.actions && typeof status.actions === 'object' && !Array.isArray(status.actions)
-    ? status.actions
-    : {};
-  const actionList = Array.isArray(status.actions) ? status.actions : [];
-  const githubAction = actionList.find(item => {
-    const name = safeText(item?.action || item?.name || item?.id).toLowerCase();
-    return name.includes('github') || name.includes('exit');
-  });
-  const namedAction = Object.entries(actions).find(([name]) => {
-    const key = safeText(name).toLowerCase();
-    return key.includes('github') || key.includes('exit');
-  });
-  return status.github_exit_node || status.githubExitNode || status.exit_node || status.exitNode
-    || integrations.github_exit_node || integrations.github || actions.github_exit_node || actions.github
-    || (actions.state || actions.status ? actions : null) || githubAction || namedAction?.[1]
-    || { state: 'disconnected' };
-}
-
-function actionEntries(source, status) {
-  const actions = source && typeof source === 'object' ? source.actions : null;
-  const statusActions = status && typeof status === 'object' ? status.actions : null;
-  if (Array.isArray(actions)) return actions.map((item, index) => [String(index), item]);
-  if (actions && typeof actions === 'object') return Object.entries(actions);
-  if (Array.isArray(statusActions)) {
-    return statusActions
-      .filter(item => item && typeof item === 'object')
-      .map((item, index) => [item.action || item.name || String(index), item]);
+// The token lives only in this operation: no persistence, native bridge or OAuth.
+async function configureGithub(event) {
+  event.preventDefault();
+  if (!isTrustedAppOrigin || !githubForm.reportValidity()) return;
+  const fields = githubForm.elements;
+  const button = fields.namedItem('submit');
+  if (button.disabled) return;
+  let token = fields.namedItem('key').value.trim();
+  fields.namedItem('key').value = '';
+  button.disabled = true;
+  let repositoryCreated = false;
+  let repositoryPath = '';
+  try {
+    const name = fields.namedItem('repository').value.trim();
+    const file = fields.namedItem('workflow').files[0];
+    if (!/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]{0,99}$/.test(name)
+        || !file || !/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*\.ya?ml$/.test(file.name)
+        || file.size === 0 || file.size > 262144) throw new Error('Configuración inválida.');
+    const content = btoa(Array.from(new Uint8Array(await file.arrayBuffer()), byte => String.fromCharCode(byte)).join(''));
+    const api = async (path, method = 'GET', body) => {
+      const response = await fetch(`https://api.github.com${path}`, {
+        method, cache: 'no-store', credentials: 'omit', redirect: 'error',
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      // Never echo API bodies: they may contain private account data.
+      if (!response.ok) throw new Error(`GitHub HTTP ${response.status}.`);
+      return response;
+    };
+    githubState.textContent = 'Comprobando permisos…';
+    const identity = await api('/user');
+    const scopes = (identity.headers.get('x-oauth-scopes') || '').split(',').map(scope => scope.trim());
+    if (!scopes.includes('repo') || !scopes.includes('workflow')) {
+      throw new Error('Se requiere un token clásico con permisos repo y workflow.');
+    }
+    // Only create a new private repository; never overwrite an existing workflow.
+    const response = await api('/user/repos', 'POST', { name, private: true, auto_init: true });
+    const repository = await response.json();
+    repositoryCreated = true;
+    if (!/^[a-zA-Z0-9_-]+$/.test(repository.owner?.login || '') || repository.name !== name
+        || repository.private !== true || typeof repository.default_branch !== 'string') {
+      throw new Error('Respuesta de repositorio inválida.');
+    }
+    repositoryPath = `/repos/${repository.owner.login}/${name}`;
+    await api(`${repositoryPath}/contents/.github/workflows/${encodeURIComponent(file.name)}`, 'PUT', {
+      message: 'Configure GitHub Actions', content, branch: repository.default_branch,
+    });
+    githubState.textContent = `Repositorio privado ${repository.owner.login}/${name} configurado. Añade los secrets requeridos en GitHub antes de ejecutar Actions.`;
+  } catch (error) {
+    githubState.textContent = `${repositoryCreated ? 'Repositorio creado; falta instalar el workflow. Revisa el repositorio en GitHub. ' : ''}${safeText(error.message, 'No se pudo configurar GitHub.')}`;
+  } finally {
+    token = '';
+    fields.namedItem('key').value = '';
+    button.disabled = false;
   }
-  if (statusActions && typeof statusActions === 'object') return Object.entries(statusActions);
-  return [];
 }
 
-function renderGithubActions(source, status) {
-  const entries = actionEntries(source, status).slice(0, 8);
-  if (!entries.length) {
-    githubActionsStatus.hidden = true;
-    githubActionsStatus.replaceChildren();
-    return;
-  }
-  githubActionsStatus.hidden = false;
-  githubActionsStatus.replaceChildren(...entries.map(([name, value]) => {
-    const item = document.createElement('li');
-    const key = safeText(name, 'acción').toLowerCase().replace(/[\s-]+/g, '_');
-    const label = githubActionLabels[key] || safeText(name, 'Acción');
-    const state = stateKey(sourceState(value));
-    item.className = `action-status-item ${githubStateClasses[state]}`;
-    const detail = sourceMessage(value);
-    item.textContent = `${label}: ${githubStateLabels[state]}${detail ? ` — ${detail}` : ''}`;
-    return item;
-  }));
-}
-
-function renderGithub(status) {
-  const source = githubStatusSource(status);
-  const state = stateKey(sourceState(source));
-  const detail = sourceMessage(source);
-  githubDot.className = `dot ${githubStateClasses[state]}`;
-  githubState.textContent = githubStateLabels[state];
-  githubDetail.textContent = detail || (state === 'disconnected'
-    ? 'Conecta una cuenta de GitHub para habilitar una sesión de 5 horas.'
-    : state === 'error'
-      ? 'Revisa el servicio Windows e inténtalo de nuevo.'
-      : 'El servicio Windows confirma cada acción antes de actuar.');
-  githubConnect.hidden = !['disconnected', 'error'].includes(state);
-  githubStart.hidden = state !== 'ready';
-  githubStop.hidden = !['starting', 'running'].includes(state);
-  githubConnect.href = githubLinks.connect;
-  githubStart.href = githubLinks.start;
-  githubStop.href = githubLinks.stop;
-  renderGithubActions(source, status);
-}
+if (isTrustedAppOrigin) githubForm.addEventListener('submit', configureGithub);
 
 function renderStatus(status) {
   const safeStatus = status && typeof status === 'object' ? status : {};
@@ -204,7 +132,7 @@ function renderStatus(status) {
   rustfsToggle.setAttribute('aria-checked', String(running));
   rustfsToggle.setAttribute('aria-label', `${running ? 'Apagar' : 'Encender'} RustFS`);
   rustfsToggle.classList.toggle('on', running);
-  renderGithub(safeStatus);
+
 }
 
 async function refreshStatus() {
@@ -215,7 +143,7 @@ async function refreshStatus() {
   } catch (_) {
     statusTitle.textContent = 'Estado no disponible';
     statusMessage.textContent = 'No se pudo leer el último estado confirmado del nodo.';
-    renderGithub({ github_exit_node: { state: 'error', message: 'No se pudo leer el estado confirmado.' } });
+
   }
 }
 

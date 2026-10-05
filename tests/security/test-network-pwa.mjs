@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = async relative => readFile(join(root, relative), 'utf8');
@@ -43,7 +44,7 @@ for (const rule of acceptRules.filter(rule => !rule.includes('ct state'))) {
 const webFiles = ['index.html', 'app.js', 'sw.js', 'manifest.webmanifest'];
 const web = await Promise.all(webFiles.map(file => read(`apps/web-app/${file}`)));
 const webText = web.join('\n');
-assert.doesNotMatch(webText, /127\.0\.0\.1|localhost|pipe|localStorage|sessionStorage|Authorization/i);
+assert.doesNotMatch(webText, /127\.0\.0\.1|localhost|pipe|localStorage|sessionStorage/i);
 assert.match(web[0], /Content-Security-Policy/);
 assert.match(web[1], /protocol === 'https:'/);
 assert.match(web[1], /hostname === 'app\.gnx'/);
@@ -60,10 +61,17 @@ assert.match(web[3], /"scope":"\.\/"/);
 
 const app = web[1];
 assert.doesNotMatch(app, /JoinMesh|tailscale_auth_key|proxmox_password|onboarding/i);
-assert.doesNotMatch(web[0], /<input|<form|credential|password|secret/i);
+assert.match(web[0], /connect-src 'self' https:\/\/api\.github\.com/);
+assert.match(routes, /connect-src 'self' https:\/\/api\.github\.com/);
+assert.match(web[0], /name="key" type="password"/);
+assert.match(web[0], /name="confirm" type="checkbox" required/);
+assert.doesNotMatch(webText, /gnx:\/\/github|github-start|github-stop|github-actions-status|renderGithub/);
+assert.match(app, /credentials: 'omit', redirect: 'error'/);
+assert.match(app, /scopes\.includes\('repo'\).*scopes\.includes\('workflow'\)/);
+assert.match(app, /private: true, auto_init: true/);
 const nativeLinks = webText.match(/gnx:\/\/[^'"\s]+/g) ?? [];
 assert.ok(nativeLinks.length > 0);
-for (const link of nativeLinks) assert.match(link, /^gnx:\/\/(?:workloads\/rustfs\/(?:start|stop)|github\/(?:connect|start-5h|stop))$/);
+for (const link of nativeLinks) assert.match(link, /^gnx:\/\/workloads\/rustfs\/(?:start|stop)$/);
 assert.match(await read('payload/node/install.run'), /--compute-secret-file/);
 assert.match(await read('payload/node/install.run'), /PROXMOX_PASSWORD/);
 const compute = await read('payload/node/services/compute.container');
@@ -77,4 +85,53 @@ assert.match(runtimeInstall, /mesh.*pending/);
 assert.match(runtimeInstall, /private-ca\.cert\.pem/);
 assert.match(runtimeInstall, /private-ca\.key\.pem/);
 
-console.log('network/PWA static checks passed; live tailnet checks remain operator-gated');
+// Exercise the actual frontend in memory: no fixtures or temporary files.
+async function githubCase({ scopes = 'repo, workflow', failure = 0, trusted = true, valid = true } = {}) {
+  const calls = [];
+  const controls = {
+    key: { value: 'test-only-key' }, repository: { value: 'example' }, submit: { disabled: false },
+    workflow: { files: [{ name: 'reviewed.yml', size: 10, arrayBuffer: async () => new TextEncoder().encode('name: test').buffer }] },
+  };
+  const state = { textContent: '' };
+  const form = { elements: { namedItem: name => controls[name] }, reportValidity: () => valid, addEventListener() {} };
+  const context = vm.createContext({
+    document: { querySelector: selector => selector === '#github-config' ? form : selector === '#github-state' ? state : {} },
+    window: { location: { protocol: 'https:', hostname: trusted ? 'app.gnx' : 'untrusted.example' }, setInterval() {} },
+    navigator: {}, Uint8Array, btoa: value => Buffer.from(value, 'binary').toString('base64'),
+    fetch: async (url, options) => {
+      if (url === './status.json') return { ok: false };
+      calls.push({ url, options });
+      const step = calls.length;
+      return { ok: step !== failure, status: step === failure ? 403 : 200,
+        headers: { get: () => scopes },
+        json: async () => ({ owner: { login: 'operator' }, name: 'example', private: true, default_branch: 'main' }) };
+    },
+  });
+  vm.runInContext(app, context);
+  await vm.runInContext('configureGithub({ preventDefault() {} })', context);
+  assert.equal(controls.submit.disabled, false);
+  if (trusted && valid) assert.equal(controls.key.value, '');
+  for (const { url, options } of calls) {
+    assert.ok(url.startsWith('https://api.github.com/'));
+    assert.equal(options.redirect, 'error');
+    assert.equal(options.credentials, 'omit');
+    assert.equal(options.headers.Authorization, 'Bearer test-only-key');
+    assert.ok(!url.includes('test-only-key'));
+  }
+  assert.ok(!state.textContent.includes('test-only-key'));
+  return { calls, message: state.textContent };
+}
+const configured = await githubCase();
+assert.deepEqual(configured.calls.map(call => call.options.method), ['GET', 'POST', 'PUT']);
+assert.equal(configured.calls[2].url, 'https://api.github.com/repos/operator/example/contents/.github/workflows/reviewed.yml');
+assert.equal(JSON.parse(configured.calls[1].options.body).private, true);
+assert.equal(Buffer.from(JSON.parse(configured.calls[2].options.body).content, 'base64').toString(), 'name: test');
+assert.match(configured.message, /configurado/);
+assert.equal((await githubCase({ scopes: 'repo' })).calls.length, 1);
+assert.equal((await githubCase({ scopes: '' })).calls.length, 1);
+assert.equal((await githubCase({ failure: 1 })).calls.length, 1);
+assert.equal((await githubCase({ failure: 2 })).calls.length, 2);
+assert.match((await githubCase({ failure: 3 })).message, /Repositorio creado; falta instalar/);
+assert.equal((await githubCase({ trusted: false })).calls.length, 0);
+assert.equal((await githubCase({ valid: false })).calls.length, 0);
+console.log('network/PWA static and in-memory GitHub checks passed; live checks remain operator-gated');
