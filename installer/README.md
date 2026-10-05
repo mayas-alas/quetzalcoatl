@@ -43,7 +43,11 @@ and removes older release directories. Only the latest release remains under
 Upload the reviewed source and current release using the host user's authenticated
 WSL/Hugging Face account, never the dedicated runtime identity. Do not upload
 `build/`, `target/`, installer intermediates, private state or credentials, and
-do not rewrite Git/LFS history.
+do not rewrite Git/LFS history. On a quota-limited remote, use
+`./installer/scripts/verify.ps1 -PublishRelease -BundleOnly` before the first
+publication of the new version: both outputs are verified, but only Burn and its
+hash are published. Burn embeds the exact MSI, so this is a complete installer,
+not an incomplete upload.
 
 ## Managed runtime stop and start
 

@@ -2,7 +2,8 @@ param(
     [Alias("Artifact")]
     [string]$MsiArtifact = (Join-Path $PSScriptRoot "..\..\build\installer\GnxNode.msi"),
     [string]$BurnArtifact = (Join-Path $PSScriptRoot "..\..\build\installer\GnxNodeSetup.exe"),
-    [switch]$PublishRelease
+    [switch]$PublishRelease,
+    [switch]$BundleOnly
 )
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path
@@ -47,7 +48,11 @@ if ($PublishRelease) {
     if ($view.Fetch().StringData(1) -ne "$version.0") { throw 'MSI version does not match the workspace' }
     $view.Close()
     $sums = @()
-    foreach ($artifact in $artifacts) {
+    # Burn embeds this exact MSI. Bundle-only publication avoids storing the
+    # same payload twice on quota-limited remotes; both build outputs are verified.
+    if ($BundleOnly -and (Test-Path (Join-Path $latest 'GnxNode.msi'))) { throw 'BundleOnly requires a new release without a separately published MSI; do not rewrite published artifacts' }
+    $publishedArtifacts = if ($BundleOnly) { @($artifacts | Where-Object { $_.Artifact -eq 'Burn' }) } else { $artifacts }
+    foreach ($artifact in $publishedArtifacts) {
         $name = Split-Path $artifact.Path -Leaf
         $destination = Join-Path $latest $name
         if (Test-Path $destination) {

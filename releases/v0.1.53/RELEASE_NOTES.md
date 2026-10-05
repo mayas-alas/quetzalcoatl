@@ -25,5 +25,5 @@ No se afirma instalación/upgrade live de esta versión, creación real de un re
 
 ## Downloads
 
-`GnxNodeSetup.exe` para instalación normal; `GnxNode.msi` para MSI directo.
-Verificar ambos contra `SHA256SUMS.txt`. La versión 0.1.53 actualiza 0.1.52 sin cambiar los UpgradeCodes; conserva identidad, distro, CA y datos según el contrato de upgrade.
+Descarga `GnxNodeSetup.exe` y verifica contra `SHA256SUMS.txt`.
+El bundle incluye el MSI exacto construido y verificado; no se publica una copia MSI separada para respetar la cuota de 1 GB de Hugging Face sin purgar el historial. Ambos outputs se producen con el build canónico; publicación: `installer/scripts/verify.ps1 -PublishRelease -BundleOnly`. La versión 0.1.53 actualiza 0.1.52 sin cambiar los UpgradeCodes; conserva identidad, distro, CA y datos según el contrato de upgrade.

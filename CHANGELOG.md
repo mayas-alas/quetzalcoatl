@@ -14,6 +14,9 @@ Sin cambios pendientes.
 - GitHub en la PWA: una operación directa con token clásico (`repo`, `workflow`), confirmación, creación de repositorio privado y carga del YAML elegido. Sin puente Windows, UAC, OAuth ni controles de ejecución de Actions.
 - `releases/` conserva únicamente la última release validada. Las notas Markdown históricas se archivan en `docs/releases/`.
 
+### Changed — distribución
+- La publicación v0.1.53 entrega Burn con el MSI embebido y hashes; no duplica el MSI separado, para respetar la cuota de 1 GB de Hugging Face sin purgar historial. El build y la verificación siguen comprobando ambos outputs.
+
 ### Changed — licencia
 - AGPLv3 únicamente (`AGPL-3.0-only`), texto completo en `LICENSE`, metadata del workspace y Hugging Face, archivo incluido en MSI y enlace en Burn. Las dependencias conservan sus licencias originales.
 
