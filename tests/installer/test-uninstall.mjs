@@ -50,6 +50,14 @@ assert.match(releaseVerification, /Remove-Item -LiteralPath \$old.FullName -Recu
 assert.deepEqual(await readdir(join(root, 'releases')), [`v${version}`]);
 assert.match(await read('CHANGELOG.md'), /## \[Unreleased\]/);
 assert.match(releaseVerification, /SHA256SUMS\.txt/);
+assert.match(cargo, /license = "AGPL-3\.0-only"/);
+assert.match(await read('LICENSE'), /GNU AFFERO GENERAL PUBLIC LICENSE/);
+assert.match(product, /File Id="LicenseFile"[^>]*Name="LICENSE"/);
+assert.match(bundle, /LicenseUrl="https:\/\/huggingface\.co\/spaces\/gnx-labs-mx\/quetzalcoatl\/blob\/main\/LICENSE"/);
+assert.match(await read('README.md'), /license: agpl-3\.0/);
+for (const manifest of ['apps/setup/Cargo.toml', 'apps/host-agent/Cargo.toml', 'crates/control-protocol/Cargo.toml']) {
+  assert.match(await read(manifest), /license\.workspace = true/);
+}
 
 
 // MSI owns service lifecycle and invokes the fixed host binary for complete

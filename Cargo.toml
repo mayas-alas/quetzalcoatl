@@ -3,9 +3,9 @@ resolver = "2"
 members = ["crates/control-protocol", "apps/host-agent", "apps/setup"]
 
 [workspace.package]
-version = "0.1.52"
+version = "0.1.53"
 edition = "2021"
-license = "MIT"
+license = "AGPL-3.0-only"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

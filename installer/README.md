@@ -37,9 +37,9 @@ and run:
 ```
 
 This verifies the sealed input and MSI version, copies the current MSI/Burn,
-writes their SHA-256 manifest, and removes all non-Markdown files from older
-release directories. Only the latest release has downloadable artifacts;
-historical notes remain. Published artifacts of the same version are immutable.
+writes their SHA-256 manifest, archives older Markdown under `docs/releases/`,
+and removes older release directories. Only the latest release remains under
+`releases/`; `CHANGELOG.md` indexes historical notes. Published artifacts of the same version are immutable.
 Upload the reviewed source and current release using the host user's authenticated
 WSL/Hugging Face account, never the dedicated runtime identity. Do not upload
 `build/`, `target/`, installer intermediates, private state or credentials, and

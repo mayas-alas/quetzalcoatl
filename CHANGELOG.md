@@ -4,9 +4,18 @@ Los cambios pendientes no equivalen a una release publicada. Cada release conser
 
 ## [Unreleased]
 
+Sin cambios pendientes.
+
+## [0.1.53] — 2026-10-05
+
+[Notas y límites de validación](releases/v0.1.53/RELEASE_NOTES.md) · [Hashes](releases/v0.1.53/SHA256SUMS.txt).
+
 ### Changed
 - GitHub en la PWA: una operación directa con token clásico (`repo`, `workflow`), confirmación, creación de repositorio privado y carga del YAML elegido. Sin puente Windows, UAC, OAuth ni controles de ejecución de Actions.
 - `releases/` conserva únicamente la última release validada. Las notas Markdown históricas se archivan en `docs/releases/`.
+
+### Changed — licencia
+- AGPLv3 únicamente (`AGPL-3.0-only`), texto completo en `LICENSE`, metadata del workspace y Hugging Face, archivo incluido en MSI y enlace en Burn. Las dependencias conservan sus licencias originales.
 
 ### Security
 - Token GitHub solo en memoria durante la operación; sin persistencia, logs, URLs ni caché. Peticiones exclusivamente a `https://api.github.com`, sin redirecciones ni cookies.
@@ -14,8 +23,8 @@ Los cambios pendientes no equivalen a una release publicada. Cada release conser
 
 ## [0.1.52]
 
-- [Notas y validación](releases/v0.1.52/RELEASE_NOTES.md).
-- [Hashes de instaladores](releases/v0.1.52/SHA256SUMS.txt).
+- [Notas y validación](docs/releases/v0.1.52/RELEASE_NOTES.md).
+- Instaladores retirados del árbol actual; no se modifica el historial Git/LFS.
 
 ## Histórico
 

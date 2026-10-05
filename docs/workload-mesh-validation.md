@@ -21,7 +21,7 @@ Running workload health now requires the actual Caddy HTTPS path, not only its
 in-guest healthcheck. 62 Rust tests and all static contracts pass.
 
 Phone login and exit-node Internet acceptance remain separate. Download and
-retention details are in `releases/v0.1.52/RELEASE_NOTES.md`.
+retention details are in `docs/releases/v0.1.52/RELEASE_NOTES.md`.
 
 ## Historical pre-gateway checkpoint
 
