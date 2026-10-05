@@ -4,7 +4,16 @@ Los cambios pendientes no equivalen a una release publicada. Cada release conser
 
 ## [Unreleased]
 
-Sin cambios pendientes.
+### Added
+- Candidato Proxmox propio reconstruido desde Debian, sin instalar `pve-fake-subscription`; runtime upstream versionado y licencia MIT conservada.
+- Pipeline externo Podman/Skopeo: build, inventario, OCI exportado, inspección y copia con digest preservado; promoción explícita al repositorio OCI e importer para el almacén del nodo.
+
+### Security
+- Se descarta el canal de descarga HTTP de archivos OCI desde el runtime. Sin credenciales en argv/env, TLS desactivado ni referencias de producción sin digest.
+
+### Pending
+- Configurar el registry/namespace autorizado y publicar el candidato; no se inventa un destino ni se cambia el Quadlet antes de verificar la referencia remota.
+- Integrar la adquisición antes del arranque/Retry, añadir Skopeo al nodo, publicar un instalador nuevo y validar upgrade live con VMs/LXC. v0.1.53 y compute en ejecución permanecen intactos.
 
 ## [0.1.53] — 2026-10-05
 

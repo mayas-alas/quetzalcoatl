@@ -77,6 +77,33 @@ assert.match(compute, /^TimeoutStopSec=2min$/m);
 assert.doesNotMatch(compute, /^Network=host$/m);
 assert.match(compute, /^PublishPort=127\.0\.0\.1:8006:8006$/m, 'compute must expose 8006 only on loopback');
 assert.match(compute, /Image=.*(?:proxmox|dockurr).*@sha256:/i);
+// New image remains a candidate until an authorized OCI repository is verified.
+const recipe = await read('compute/image/Containerfile');
+const prepare = await read('compute/image/prepare.run');
+const promotion = await readFile(join(root, 'installer/scripts/promote-compute.py'), 'utf8');
+const builder = await readFile(join(root, 'installer/scripts/build-compute.sh'), 'utf8');
+const acquire = await read('compute/import-image.run');
+const candidate = JSON.parse(await read('compute/image/release.json'));
+assert.match(recipe, /^FROM .*debian@sha256:[0-9a-f]{64}$/m);
+assert.doesNotMatch(recipe, /^FROM .*dockurr\/proxmox/m);
+assert.doesNotMatch(recipe + prepare, /Jamesits|sub\.deb|apt-get[^\n]*pve-fake-subscription|wget[^\n]*subscription/);
+assert.match(prepare, /dpkg-query.*pve-fake-subscription/);
+assert.match(recipe, /COPY UPSTREAM_LICENSE\.md/);
+assert.match(await read('compute/image/UPSTREAM_LICENSE.md'), /MIT License/);
+assert.match(builder, /skopeo copy --preserve-digests/);
+assert.doesNotMatch(builder, /podman load/);
+assert.match(promotion, /--preserve-digests/);
+assert.match(promotion, /--dest-tls-verify=true/);
+assert.match(promotion, /Immutable registry release tag/);
+assert.match(acquire, /config\["status"\] == "promoted"/);
+assert.match(acquire, /Pull=never/);
+assert.match(acquire, /skopeo copy --retry-times 3 --preserve-digests --src-tls-verify=true/);
+assert.doesNotMatch(acquire, /curl|wget|podman load|archive_url|huggingface\.co/);
+assert.match(candidate.manifest_digest, /^sha256:[0-9a-f]{64}$/);
+if (candidate.status === 'candidate') {
+  assert.ok(candidate.registry_repository === null || typeof candidate.registry_repository === 'string');
+  assert.doesNotMatch(compute, /localhost\/gnx\/proxmox/, 'do not activate an unpublished candidate');
+}
 assert.match(compute, /\/var\/lib\/gnx-node\/compute:\/var\/lib\/vz/);
 assert.match(compute, /\/var\/lib\/gnx-node\/compute-config:\/var\/lib\/pve-cluster/);
 assert.match(compute, /gnx-install-tls\.sh/);

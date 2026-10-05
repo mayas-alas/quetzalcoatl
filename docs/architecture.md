@@ -159,6 +159,27 @@ El puerto interno `8006` no se publica directamente a LAN/tailnet. No se abre
 DNS público ni puertos del router. Un apagado global de WSL/reinicio del host
 requiere consentimiento; no se usa para validar una actualización por sorpresa.
 
+## Repositorio OCI de compute — candidato pendiente
+
+`payload/node/compute/image/` conserva Containerfile, preparación externa, runtime
+upstream versionado y su licencia. No se heredan capas de la imagen Proxmox que
+instalaba un paquete de suscripción falso: el rebuild parte de Debian por digest.
+`installer/scripts/build-compute.sh` construye con Podman y sella/exporta con
+Skopeo. El digest promovible es el manifest OCI exportado, no el image ID ni un
+hash anterior a la compresión. `promote-compute.py` valida hash/manifest y publica
+explícitamente `oci-archive:` → `docker://` con TLS y digest preservados.
+
+El candidato aún no tiene registry autorizado: no está desplegado ni sustituye
+la imagen del release vigente. El registro de promoción se produce bajo `build/`
+y necesita revisión antes de modificar payload/Quadlet. El importer preparado
+usa Skopeo `docker://repo@sha256` → `containers-storage:` del nodo y exige un
+registro promovido concordante con `Image=` y `Pull=never`. No usa un HTTP downloader
+para archivos OCI. No se comparte el almacén/auth del builder con la identidad
+Windows/WSL dedicada. El código actual de install/Retry no activa este candidato;
+la siguiente integración debe adquirir/verificar la imagen antes de reiniciar
+compute y validar preservación de VMs/LXC, CA, secretos y gateway. Detalles y límites:
+`payload/node/compute/image/README.md`.
+
 ## Actualización, retirada y organización
 
 MSI/Burn mantienen UpgradeCodes estables y versiones crecientes. Cada versión nueva activa MajorUpgrade; ejecutar exactamente la misma versión es Repair, no se presenta como release nueva. Burn es la única entrada visible en Aplicaciones instaladas y oculta su MSI encadenado. La actualización conserva identidad, distro, datos, CA y credenciales. El MSI elimina los archivos

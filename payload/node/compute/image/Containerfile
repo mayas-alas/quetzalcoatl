@@ -1,0 +1,28 @@
+# GnX rebuild of dockur/proxmox e18ddeb8461b09a2c2e8a9d64ada1272c1442109.
+# This is the runtime source of the shipped 9.2.10 image, not a new runtime design.
+# Upstream source is MIT: UPSTREAM_LICENSE.md. Product changes: AGPL-3.0-only.
+# Never inherit the upstream Proxmox image: unwanted packages exist in its layers.
+FROM --platform=linux/amd64 docker.io/library/debian@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+ARG VERSION_ARG="9.2.10-gnx.1"
+ARG DEBCONF_NOWARNINGS="yes"
+ARG DEBIAN_FRONTEND="noninteractive"
+ARG DEBCONF_NONINTERACTIVE_SEEN="true"
+LABEL org.opencontainers.image.source="https://huggingface.co/spaces/gnx-labs-mx/quetzalcoatl" \
+      org.gnx.compute.upstream-revision="e18ddeb8461b09a2c2e8a9d64ada1272c1442109" \
+      org.gnx.compute.release="${VERSION_ARG}"
+COPY proxmox-archive-keyring.gpg /usr/share/keyrings/proxmox-archive-keyring.gpg
+COPY prepare.run /usr/local/libexec/gnx-build-proxmox
+RUN ["/bin/bash", "/usr/local/libexec/gnx-build-proxmox"]
+WORKDIR /usr/local/bin
+COPY src/ /usr/local/bin/
+COPY UPSTREAM_LICENSE.md /usr/share/doc/gnx-compute/UPSTREAM_LICENSE.md
+RUN chmod 0755 /usr/local/bin/entrypoint.sh /usr/local/bin/network.sh
+ENV PASSWORD="root"
+EXPOSE 8006
+VOLUME /var/lib/vz
+VOLUME /var/lib/pve-cluster
+STOPSIGNAL SIGRTMIN+3
+# The product Quadlet owns the CA-validated healthcheck; no TLS bypass here.
+HEALTHCHECK NONE
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/sbin/init", "--log-target=console", "--log-level=notice"]
