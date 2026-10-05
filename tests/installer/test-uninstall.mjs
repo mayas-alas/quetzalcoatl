@@ -30,7 +30,7 @@ assert.match(product, /RegistryValue[^>]*Root="HKLM"[^>]*Key="SOFTWARE\\GnX\\Nod
 assert.match(product, /RemoveFolderEx[^>]*Id="RemoveLegacyWebViewData"[^>]*On="install"/);
 assert.match(product, /LEGACYWEBVIEWCACHE[^>]*gnx-setup\.exe\.WebView2/);
 assert.match(product, /Environment[^>]*Id="GnxCliHostPath"[^>]*Name="PATH"[^>]*Value="\[INSTALLFOLDER\]"[^>]*Part="last"[^>]*Action="set"[^>]*System="yes"/);
-assert.match(bundle, /LaunchArguments="--pause"/);
+assert.match(bundle, /LaunchArguments="setup --pause"/);
 assert.doesNotMatch(bundle, /WebView2|RegistrySearch|EdgeUpdate/i);
 assert.doesNotMatch(await read('installer/bundle/Bundle.wixproj'), /WixToolset\.Util/i);
 assert.match(wixproj, /target\\release\\gnx\.exe/);

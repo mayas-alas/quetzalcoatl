@@ -662,7 +662,7 @@ pub(crate) fn run_wsl_as_windows_identity(
     let stderr_handle = stderr_read as usize;
     let stdout_thread = std::thread::spawn(move || read_pipe(stdout_handle as HANDLE));
     let stderr_thread = std::thread::spawn(move || read_pipe(stderr_handle as HANDLE));
-    let result = unsafe { WaitForSingleObject(process.hProcess, 300_000) };
+    let result = unsafe { WaitForSingleObject(process.hProcess, 900_000) };
     let timed_out = result == WAIT_TIMEOUT;
     if timed_out {
         unsafe { TerminateProcess(process.hProcess, 1) };

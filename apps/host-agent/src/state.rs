@@ -140,11 +140,29 @@ pub(crate) struct RuntimeCheck {
     pub(crate) result: String,
 }
 
+/// A desired/applied mismatch is not lost enrollment or a healthy new release.
+pub fn update_projection(progress: &Progress, pending: bool) -> Progress {
+    let mut projected = progress.clone();
+    if pending && (progress.state == NodeState::NodeReady
+        || (progress.state == NodeState::Blocked && progress.node_private_ip.is_some()
+            && matches!(progress.phase.as_str(), "mesh" | "compute"))) {
+        projected.state = NodeState::Blocked;
+        projected.phase = "compute".into();
+        projected.error_code = Some("RUNTIME_UPDATE_PENDING".into());
+        projected.retryable = true;
+        projected.message = "Installed runtime update pending. Run gnx upgrade --confirm during a maintenance window; compute/VMs/LXC may restart. Credentials are preserved.".into();
+    }
+    projected
+}
+
 fn write_app_status(
     dir: &std::path::Path,
     progress: &Progress,
     runtime: Option<&[RuntimeCheck]>,
 ) -> io::Result<()> {
+    let projected = update_projection(progress, runtime.is_some_and(|checks|
+        checks.iter().any(|check| check.name == "payload_current" && check.result == "fail")));
+    let progress = &projected;
     let status = AppStatus {
         version: 1,
         sequence: progress.sequence,
@@ -220,11 +238,11 @@ fn app_checks(progress: &Progress, runtime: Option<&[RuntimeCheck]>) -> Vec<AppC
     }
     if let Some(runtime) = runtime {
         for (index, names) in [
-            ["platform_target", "tun", "fuse", "kvm"].as_slice(),
+            ["platform_target", "tun", "fuse", "kvm", "payload_current"].as_slice(),
             ["podman"].as_slice(),
             ["mesh", "mesh_authenticated"].as_slice(),
             ["gateway", "app_https"].as_slice(),
-            ["compute", "compute_gateway_https", "compute_https"].as_slice(),
+            ["compute", "compute_gateway_https", "compute_https", "compute_release", "payload_current"].as_slice(),
         ]
         .iter()
         .enumerate()
@@ -344,6 +362,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pending_update_is_read_only_and_preserves_enrollment() {
+        let mut old = initial();
+        old.state = NodeState::NodeReady;
+        old.node_private_ip = Some("100.64.0.1".into());
+        let pending = update_projection(&old, true);
+        assert_eq!(old.state, NodeState::NodeReady);
+        assert_eq!(pending.sequence, old.sequence);
+        assert_eq!(pending.request_id, old.request_id);
+        assert_eq!(pending.node_private_ip, old.node_private_ip);
+        assert_eq!(pending.error_code.as_deref(), Some("RUNTIME_UPDATE_PENDING"));
+        assert_eq!(pending.state, NodeState::Blocked);
+        assert_eq!(update_projection(&old, false), old);
+        old.state = NodeState::Blocked;
+        old.phase = "mesh".into();
+        assert_eq!(update_projection(&old, true).error_code.as_deref(), Some("RUNTIME_UPDATE_PENDING"));
+        old.state = NodeState::RuntimeStopped;
+        assert_eq!(update_projection(&old, true), old);
+    }
+
+    #[test]
     fn state_defaults_to_new() {
         assert_eq!(initial().state, NodeState::New);
     }
@@ -382,6 +420,14 @@ mod tests {
         let mut progress = initial();
         progress.state = NodeState::NodeReady;
         let runtime = vec![
+            RuntimeCheck {
+                name: "payload_current".into(),
+                result: "pass".into(),
+            },
+            RuntimeCheck {
+                name: "compute_release".into(),
+                result: "fail".into(),
+            },
             RuntimeCheck {
                 name: "platform_target".into(),
                 result: "pass".into(),

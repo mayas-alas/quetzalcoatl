@@ -162,10 +162,13 @@ requiere consentimiento; no se usa para validar una actualización por sorpresa.
 ## Imagen OCI de compute
 
 La imagen pertenece a `https://github.com/mayas-alas/tailnet-proxmox`, no al
-workspace del producto. Ese repo actualiza `dockur/proxmox`, retira únicamente la
-instalación de `pve-fake-subscription` de su Dockerfile y conserva los scripts
-upstream sin personalizaciones antiguas. Su CI verifica el cambio mínimo, ausencia
-del paquete, boot de Proxmox y KVM antes de publicar el OCI exacto con Skopeo en
+workspace del producto. Ese repo actualiza `dockur/proxmox` y retira dos mecanismos:
+la instalación de `pve-fake-subscription` y `blockLicense()`/su llamada, que
+redirigía `shop.maurer-it.com` a loopback en el contenedor independientemente del
+paquete. No añade activación falsa ni nag bypass. Repos apt no-subscription,
+adaptaciones necesarias de contenedor y NAT upstream no son licencias falsas.
+Su CI verifica el parche acotado, ausencia del paquete/caché falsa/bloqueo hosts,
+boot de Proxmox y KVM antes de publicar el OCI exacto con Skopeo en
 `ghcr.io/mayas-alas/tailnet-proxmox`, preservando y verificando el manifest digest.
 
 Quetzalcoatl solo consume `Image=ghcr.io/mayas-alas/tailnet-proxmox@sha256:…` en
@@ -175,6 +178,15 @@ importer HTTP ni credenciales del usuario host. Las reglas de red, CA, secretos,
 volúmenes, KVM y LXC del producto siguen siendo payload externo. Un digest nuevo
 puede recrear el contenedor compute: la aceptación con VMs/LXC existentes exige
 un upgrade explícito y no se deduce del smoke test aislado de la imagen.
+
+MSI sólo instala el payload Windows. El snapshot read-only compara su marker con
+la WSL y comprueba el release activo: un desfase es `RUNTIME_UPDATE_PENDING`, no
+`NODE_READY`. Setup pide confirmación; `gnx upgrade --confirm` aplica sin re-enroll.
+El lifecycle externo `compute/reconcile.run` descarga antes de sustituir Quadlet,
+compara la identidad real del contenedor con la imagen fijada y valida paquete y
+hosts. Un receipt de configuración sólo se escribe tras activación correcta;
+fallos posteriores a copiar Quadlet no hacen que el Retry adopte el contenedor
+viejo. Rust orquesta el script, no contiene referencias OCI ni reglas runtime.
 
 ## Actualización, retirada y organización
 
@@ -200,7 +212,7 @@ El workspace es la raíz de este repositorio:
 - `tests/`: contratos estáticos de instalación, runtime y seguridad; tests Rust
   junto al código.
 - `target/`, `build/`: salidas generadas, fuera de Git.
-- `releases/v*/`: sólo la última versión conserva notas, `SHA256SUMS.txt` y enlace al instalador verificado. Burn (con MSI embebido) se publica en el repositorio de artefactos Hugging Face `gnx-labs-mx/gnx-node-releases`; no se duplica en el Space limitado a 1 GB ni se versiona en el Git de fuente. Las anteriores conservan Markdown en `docs/releases/`. `CHANGELOG.md` indexa cambios y notas históricas. No se sobrescriben artefactos ni se reescribe el historial Git/LFS.
+- `releases/v*/`: sólo la última versión conserva notas, `SHA256SUMS.txt` y enlace al instalador verificado. Burn (con MSI embebido) se publica en esa misma carpeta del Space Hugging Face, con cuota comprobada; no se duplica el MSI ni se purga historial. El repo de artefactos conserva la revisión legacy v0.1.54. Las anteriores conservan Markdown en `docs/releases/`. `CHANGELOG.md` indexa cambios y notas históricas. No se sobrescriben artefactos ni se reescribe el historial Git/LFS.
 - Tras las pruebas y notas de release, `installer/scripts/verify.ps1 -PublishRelease` prepara los artefactos nuevos y archiva el Markdown anterior en `docs/releases/` y retira sus directorios de `releases/`. La publicación en Hugging Face utiliza la WSL autenticada del usuario host.
 
 La asignación de agentes y reglas de coordinación viven en `.AGENTS/`, no en

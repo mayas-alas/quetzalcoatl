@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
-  <Bundle Name="GnX Node" Manufacturer="GnX" Version="0.1.54.0"
+  <Bundle Name="GnX Node" Manufacturer="GnX" Version="0.1.56.0"
           UpgradeCode="DB8BFB10-FA20-4F4F-9B3E-35DBD15A2A1A"
           Compressed="yes">
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense"
         LicenseUrl="https://huggingface.co/spaces/gnx-labs-mx/quetzalcoatl/blob/main/LICENSE" SuppressOptionsUI="yes"
         LaunchTarget="[ProgramFilesFolder]GnX Node\gnx.exe"
-        LaunchArguments="--pause"
+        LaunchArguments="setup --pause"
         LaunchTargetElevatedId="GnxSetupElevated" />
     </BootstrapperApplication>
     <ApprovedExeForElevation Id="GnxSetupElevated" Key="SOFTWARE\GnX\Node" Value="SetupPath" Bitness="always32" />

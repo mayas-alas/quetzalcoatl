@@ -412,8 +412,11 @@ fi
 if mesh_authenticated; then
   configure_private_dns
   systemctl enable platform.target >/dev/null 2>&1 || die PLATFORM_ENABLE_FAILED
+  compute_args=(apply)
+  [[ -z "$compute_secret_file" ]] || compute_args+=(--restart)
+  bash "$payload_dir/compute/reconcile.run" "${compute_args[@]}" || die COMPUTE_APPLY_FAILED
   if systemctl is-active --quiet platform.target; then
-    systemctl restart dns.service gateway.service compute.service >/dev/null 2>&1 || die PLATFORM_RESTART_FAILED
+    systemctl restart dns.service gateway.service >/dev/null 2>&1 || die PLATFORM_RESTART_FAILED
   else
     systemctl start platform.target >/dev/null 2>&1 || die PLATFORM_START_FAILED
   fi

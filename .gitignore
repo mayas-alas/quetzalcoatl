@@ -2,9 +2,9 @@
 /target/
 *.msi
 *.exe
-# Installers are published in the Hugging Face artifact repository, not the Space.
-# Release Markdown and hashes stay versioned here.
+# Only the latest verified complete installer is published in the Space.
 !releases/
+!releases/**/*.exe
 *.wixpdb
 *.wixobj
 *.log

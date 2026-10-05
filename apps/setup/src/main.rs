@@ -13,6 +13,7 @@ enum Action {
     Password,
     MeshKey,
     Retry,
+    Upgrade,
     Stop,
 }
 
@@ -62,6 +63,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(&'static str, b
         ["provision"] | ["password"] | ["set", "password"] => "password",
         ["join"] => "join",
         ["retry"] => "retry",
+        ["upgrade", "--confirm"] => "upgrade",
         ["runtime", "stop", "--confirm"] | ["shutdown", "--confirm"] => "runtime-stop",
         ["runtime", "start"] => "runtime-start",
         ["workload", "rustfs", "start"] => "rustfs-start",
@@ -84,7 +86,7 @@ fn run(command: &str) -> Result<()> {
         "help" => {
             println!("GnX Node Setup {}", env!("CARGO_PKG_VERSION"));
             println!(
-                "Usage: gnx [setup|status|connect|start|stop|actions status|set password|join|retry|runtime stop --confirm|runtime start|workload rustfs start|workload rustfs stop --confirm|cancel|help|version] [--pause]"
+                "Usage: gnx [setup|status|connect|start|stop|actions status|set password|join|retry|upgrade --confirm|runtime stop --confirm|runtime start|workload rustfs start|workload rustfs stop --confirm|cancel|help|version] [--pause]"
             );
             println!("Run in an Administrator terminal. No command: guided initial setup.");
             println!(
@@ -94,7 +96,7 @@ fn run(command: &str) -> Result<()> {
                 "set password: securely set or rotate the Proxmox root password with hidden prompts."
             );
             println!(
-                "status reads the local node snapshot without network calls; actions status/connect/start/stop use the native GitHub Actions integration."
+                "status reads the node checkpoint and desired/applied runtime state without registry calls or mutations; actions status/connect/start/stop use the native GitHub Actions integration."
             );
             println!("Existing ready nodes are preserved. Daily access: https://app.gnx");
         }
@@ -114,7 +116,16 @@ fn run(command: &str) -> Result<()> {
         "github-status" => {
             finish(send(&request(Operation::Status))?)?;
         }
+        "upgrade" => {
+            println!("Applying installed runtime update; compute and VMs/LXC may restart...");
+            finish(send(&request(Operation::Retry))?)?;
+        }
         "retry" => {
+            let current = get_progress()?;
+            if current.error_code.as_deref() == Some("RUNTIME_UPDATE_PENDING") {
+                print_progress(&current);
+                return Err("runtime update requires gnx upgrade --confirm during a maintenance window".into());
+            }
             finish(send(&request(Operation::Retry))?)?;
         }
         "cancel" => {
@@ -191,10 +202,13 @@ fn has_enrollment(progress: &Progress) -> bool {
 }
 
 fn next_action(progress: &Progress) -> Action {
-    if progress.state == NodeState::NodeReady
-        || progress.requires_restart
-        || progress.state == NodeState::RebootRequired
-    {
+    if progress.requires_restart || progress.state == NodeState::RebootRequired {
+        return Action::Stop;
+    }
+    if progress.error_code.as_deref() == Some("RUNTIME_UPDATE_PENDING") {
+        return Action::Upgrade;
+    }
+    if progress.state == NodeState::NodeReady {
         return Action::Stop;
     }
     // A verifier failure is not evidence that existing credentials are missing.
@@ -239,6 +253,18 @@ fn interactive() -> Result<()> {
         Action::Retry => {
             finish(send(&request(Operation::Retry))?)?;
         }
+        Action::Upgrade => {
+            require_terminal()?;
+            print!("Apply installed update? Compute and VMs/LXC may restart. [y/N]: ");
+            io::stdout().flush()?;
+            let mut answer = String::new();
+            io::stdin().read_line(&mut answer)?;
+            if matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes" | "s" | "si" | "sí") {
+                finish(send(&request(Operation::Retry))?)?;
+            } else {
+                println!("Update remains pending; runtime was not changed.");
+            }
+        }
         Action::Stop => {
             check_error(&current)?;
         }
@@ -264,6 +290,9 @@ fn provision() -> Result<Progress> {
         );
     }
     require_terminal()?;
+    if updating_existing {
+        println!("Password rotation recreates compute; VMs/LXC may restart. Use a maintenance window.");
+    }
     let password = prompt_secret("Proxmox password: ")?;
     if password.is_empty() || password.len() > 1024 || password.chars().any(char::is_control) {
         return Err("invalid Proxmox password; nothing was sent".into());
@@ -551,6 +580,13 @@ mod tests {
             next_action(&progress(NodeState::RuntimeReady, None)),
             Action::MeshKey
         );
+    }
+    #[test]
+    fn pending_upgrade_never_rekeys_or_silently_restarts() {
+        let p = progress(NodeState::Blocked, Some("RUNTIME_UPDATE_PENDING"));
+        assert_eq!(next_action(&p), Action::Upgrade);
+        assert_eq!(parse_args(["upgrade".into(), "--confirm".into()]).unwrap(), ("upgrade", false));
+        assert!(parse_args(["upgrade".into()]).is_err());
     }
     #[test]
     fn ready_preserves_even_with_stale_missing_error() {

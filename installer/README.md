@@ -41,16 +41,17 @@ writes their SHA-256 manifest, archives older Markdown under `docs/releases/`,
 and removes older release directories. Only the latest release remains under
 `releases/`; `CHANGELOG.md` indexes historical notes. Published artifacts of the same version are immutable.
 Publish the verified Burn (with its exact embedded MSI), SHA256SUMS and release
-notes in `gnx-labs-mx/gnx-node-releases` (Hugging Face dataset/artifact repository).
-The quota-limited Quetzalcoatl Space retains source, notes, hashes and the download
-link pinned to that artifact commit; installer binaries are ignored by source Git.
+notes in the Quetzalcoatl Hugging Face Space under the latest `releases/v*/`.
+Check quota first, never purge history automatically. v0.1.54 remains available
+at its immutable legacy `gnx-labs-mx/gnx-node-releases` artifact revision.
 Use the host user's authenticated WSL/Hugging Face account, never the dedicated
 runtime identity. Do not upload `build/`, `target/`, intermediates, private state
 or credentials, and do not rewrite Git/LFS history. Use
 `./installer/scripts/verify.ps1 -PublishRelease -BundleOnly`: both outputs are
 verified and the generated local release contains only the complete Burn bundle
 and its hash, not a duplicate MSI. Upload the artifact before updating the Space;
-check the remote SHA-256 and size and link the immutable revision in the notes.
+check the remote SHA-256 and size. The same Space revision contains source,
+notes, hashes and the installer; the previous release directory is removed.
 
 ## Managed runtime stop and start
 
@@ -107,7 +108,21 @@ managed `gnxnodesvc` identity, state, CA, credentials, and runtime data. The old
 MSI receives `UPGRADINGPRODUCTCODE`, and the new MSI receives
 `WIX_UPGRADE_DETECTED`; both conditions explicitly suppress destructive cleanup.
 The host verifies and refreshes the sealed payload and imports only when no managed
-distro exists. In contrast, uninstall followed by reinstall intentionally starts clean.
+distro exists. MSI installation alone does not apply a compute update. Open the
+bundle's elevated Setup at completion: a desired/applied mismatch is reported as
+`RUNTIME_UPDATE_PENDING` and requires maintenance confirmation. For automation,
+run `gnx upgrade --confirm` from an elevated terminal. Plain `gnx retry` refuses a
+pending upgrade, and status never pulls images or restarts guests. Silent installs
+do not launch Setup or silently restart compute.
+
+Apply downloads the pinned release first, verifies the running image identity,
+package absence and absence of license-server hosts overrides, then acknowledges
+compute-affecting configuration only after activation. A failed restart remains
+pending; an identical Quadlet or cached image cannot hide an old live container.
+KVM, CA-validated HTTPS, gateway and workload checks remain required before
+`NODE_READY`. Password rotation explicitly recreates compute to read its protected
+EnvironmentFile; enrollment is not reset. In contrast, uninstall followed by
+reinstall intentionally starts clean.
 
 The WSL image contract is a sealed `payload/host/gnx-node-rootfs.tar` paired
 with `payload/host/gnx-node-rootfs.tar.sha256` containing

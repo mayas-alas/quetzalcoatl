@@ -7,6 +7,15 @@ pub fn execute(req: &Request, current: &Progress) -> Progress {
     // GetProgress is a read-only snapshot. It must not advance sequence,
     // replace the last request, clear diagnostics, or create a journal entry.
     if req.operation == Operation::GetProgress {
+        #[cfg(windows)]
+        if (current.state == NodeState::NodeReady
+            || (current.state == NodeState::Blocked && matches!(current.phase.as_str(), "mesh" | "compute")))
+            && current.node_private_ip.is_some() && !crate::linux_node::runtime_stop_requested()
+        {
+            // Read-only comparison; do not apply an update from a status request.
+            return crate::state::update_projection(current,
+                crate::linux_node::runtime_update_pending().unwrap_or(true));
+        }
         return current.clone();
     }
     let mut p = handle(req, current);
@@ -141,7 +150,8 @@ pub fn execute(req: &Request, current: &Progress) -> Progress {
         if matches!(req.operation, Operation::Retry)
             && (current.state == NodeState::NodeReady
                 || current.state == NodeState::MeshPending
-                || (current.state == NodeState::Blocked && current.phase == "mesh"))
+                || (current.state == NodeState::Blocked
+                    && (current.phase == "mesh" || (current.phase == "compute" && current.node_private_ip.is_some()))))
         {
             let state_dir = crate::state::state_dir();
             let readiness = crate::linux_node::reconcile_ingress()

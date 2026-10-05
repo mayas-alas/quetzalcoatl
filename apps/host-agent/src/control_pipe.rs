@@ -42,15 +42,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             if line.len() <= gnx_control_protocol::MAX_FRAME_BYTES {
                 if let Ok(req) = Request::from_frame(line.as_bytes()) {
-                    p = provisioning::execute(&req, &p);
+                    let progress = provisioning::execute(&req, &p);
                     if req.operation != gnx_control_protocol::Operation::GetProgress {
+                        p = progress.clone();
                         state::save(&p)?;
                     }
                     let r = Response {
                         version: PROTOCOL_VERSION,
                         request_id: req.request_id,
-                        operation_id: p.operation_id,
-                        progress: p.clone(),
+                        operation_id: progress.operation_id,
+                        progress,
                     };
                     serde_json::to_writer(&mut out, &r)?;
                     out.write_all(b"\n")?;
@@ -273,15 +274,16 @@ fn serve_client_frame(
 ) -> io::Result<()> {
     use windows_sys::Win32::Storage::FileSystem::{FlushFileBuffers, WriteFile};
     if let Ok(req) = Request::from_frame(frame) {
-        *current = provisioning::execute(&req, current);
+        let progress = provisioning::execute(&req, current);
         if req.operation != gnx_control_protocol::Operation::GetProgress {
+            *current = progress.clone();
             state::save(current)?;
         }
         let mut output = serde_json::to_vec(&Response {
             version: PROTOCOL_VERSION,
             request_id: req.request_id,
-            operation_id: current.operation_id,
-            progress: current.clone(),
+            operation_id: progress.operation_id,
+            progress,
         })
         .map_err(io::Error::other)?;
         output.push(b'\n');

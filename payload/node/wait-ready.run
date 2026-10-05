@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Readiness after activation is asynchronous (LXC DHCP/mesh/gateway warming).
+# Recheck the canonical verifier; never restart/re-enroll to make it pass.
+set -Eeuo pipefail
+deadline=$((SECONDS + 300))
+output=""
+while true; do
+  if output=$(bash /opt/gnx/payload/node/verify.run "$@" 2>/dev/null); then
+    printf '%s\n' "$output"
+    exit 0
+  fi
+  ((SECONDS < deadline)) || break
+  sleep 2
+done
+printf '%s\n' "$output"
+printf '%s\n' '{"event":"error","code":"VERIFY_TIMEOUT"}' >&2
+exit 1

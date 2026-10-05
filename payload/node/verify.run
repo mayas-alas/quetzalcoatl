@@ -35,6 +35,7 @@ for unit in mesh dns gateway compute; do
   if [[ -r "/etc/containers/systemd/$unit.container" ]]; then image_ref=$(sed -n 's/^Image=//p' "/etc/containers/systemd/$unit.container"); fi
   if command -v podman >/dev/null 2>&1 && [[ "$image_ref" =~ @sha256:[0-9a-f]{64}$ ]] && podman image exists "$image_ref" >/dev/null 2>&1; then check "image_$unit" pass; else check "image_$unit" fail; fi
 done
+if bash /opt/gnx/payload/node/compute/reconcile.run check >/dev/null 2>&1; then check compute_release pass; else check compute_release fail; fi
 runtime_dir=/var/lib/gnx-node
 gateway_ca="$runtime_dir/ca/gateway-ca.pem"
 backend_ca="$runtime_dir/ca/backend-ca.pem"

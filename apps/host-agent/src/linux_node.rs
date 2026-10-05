@@ -336,10 +336,10 @@ pub fn start_runtime() -> io::Result<()> {
             "start",
             "gnx-ingress.service",
             "mesh.service",
-            "platform.target",
         ],
     )?;
     if output.status.success() {
+        reconcile_ingress()?;
         RUNTIME_STOP_REQUESTED.store(false, Ordering::Release);
         Ok(())
     } else {
@@ -518,6 +518,20 @@ pub fn install_with_secrets(
     Ok(RuntimeResult::Installed)
 }
 
+/// Read-only desired/applied probe; never materialize payload or restart guests.
+#[cfg(windows)]
+pub fn runtime_update_pending() -> io::Result<bool> {
+    let marker = path_arg(&payload_dir().join(".gnx-payload.sha256"));
+    let same = run_wsl("/usr/bin/cmp", &["-s", &marker, PAYLOAD_MARKER_PATH])?;
+    if !same.status.success() {
+        return Ok(true);
+    }
+    Ok(!run_wsl(
+        "/bin/bash",
+        &["/opt/gnx/payload/node/compute/reconcile.run", "check"],
+    )?.status.success())
+}
+
 #[cfg(windows)]
 pub fn reconcile_ingress() -> io::Result<()> {
     let node_root = payload_dir();
@@ -584,29 +598,14 @@ pub fn reconcile_ingress() -> io::Result<()> {
     if !start.status.success() {
         return Err(io::Error::other("INGRESS_START_FAILED"));
     }
-    let compute_changed = !run_wsl(
-        "/usr/bin/cmp",
-        &[
-            "-s",
-            "/etc/containers/systemd/compute.container",
-            "/opt/gnx/payload/node/services/compute.container",
-        ],
-    )?
-    .status
-    .success();
-    let network = run_wsl(
+    // The external lifecycle checks applied configuration AND the live image.
+    // It acknowledges success only after activation and package verification.
+    let compute = run_wsl(
         "/bin/bash",
-        &["/opt/gnx/payload/node/compute/install-network.run"],
+        &["/opt/gnx/payload/node/compute/reconcile.run", "apply"],
     )?;
-    if !network.status.success() {
-        return Err(io::Error::other("COMPUTE_NETWORK_INSTALL_FAILED"));
-    }
-    // Apply changed Quadlets, but do not recreate an unchanged PVE container
-    // on every retry. Native Notify=healthy still gates a cold start.
-    let compute_action = if compute_changed { "restart" } else { "start" };
-    let compute = run_wsl("/usr/bin/systemctl", &[compute_action, "compute.service"])?;
     if !compute.status.success() {
-        return Err(io::Error::other("COMPUTE_RESTART_FAILED"));
+        return Err(runtime_error(&compute));
     }
     let gateway = run_wsl("/usr/bin/systemctl", &["restart", "gateway.service"])?;
     if !gateway.status.success() {
@@ -761,9 +760,12 @@ fn validate_wsl_nat_ipv4(value: &str) -> io::Result<std::net::Ipv4Addr> {
 
 #[cfg(windows)]
 pub fn verify(state_dir: &Path) -> io::Result<RuntimeResult> {
+    if runtime_update_pending()? {
+        return Err(io::Error::other("RUNTIME_UPDATE_PENDING"));
+    }
     let output = run_wsl(
-        "/opt/gnx/payload/node/verify.run",
-        &["--state-dir", &path_arg(state_dir)],
+        "/bin/bash",
+        &["/opt/gnx/payload/node/wait-ready.run", "--state-dir", &path_arg(state_dir)],
     )?;
     if !output.status.success() {
         return Err(runtime_error(&output));
@@ -775,7 +777,14 @@ pub fn verify(state_dir: &Path) -> io::Result<RuntimeResult> {
 /// verifier. Raw output is intentionally not retained or sent to the browser.
 #[cfg(windows)]
 pub fn runtime_checks(state_dir: &Path) -> io::Result<Vec<crate::state::RuntimeCheck>> {
+    if runtime_update_pending()? {
+        return Ok(vec![crate::state::RuntimeCheck {
+            name: "payload_current".into(),
+            result: "fail".into(),
+        }]);
+    }
     const ALLOWED: &[&str] = &[
+        "compute_release",
         "podman",
         "tun",
         "fuse",
@@ -795,7 +804,7 @@ pub fn runtime_checks(state_dir: &Path) -> io::Result<Vec<crate::state::RuntimeC
         "/opt/gnx/payload/node/verify.run",
         &["--state-dir", &path_arg(state_dir)],
     )?;
-    let checks = String::from_utf8_lossy(&output.stdout)
+    let mut checks = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
         .filter_map(|line| {
@@ -812,6 +821,7 @@ pub fn runtime_checks(state_dir: &Path) -> io::Result<Vec<crate::state::RuntimeC
     if checks.is_empty() {
         Err(io::Error::other("RUNTIME_CHECKS_UNAVAILABLE"))
     } else {
+        checks.push(crate::state::RuntimeCheck { name: "payload_current".into(), result: "pass".into() });
         Ok(checks)
     }
 }
@@ -871,9 +881,24 @@ fn is_reparse_point(path: &Path) -> bool {
 #[cfg(windows)]
 fn compute_diagnostic() -> io::Result<String> {
     use std::fmt::Write as _;
-    ensure_distro()?;
+    // Diagnostics must not materialize the installed payload or change runtime.
     let mut report = String::new();
     for (label, program, args) in [
+        (
+            "release",
+            "/usr/bin/podman",
+            vec!["inspect", "--format", "{{.ImageName}} digest={{.ImageDigest}}", "gnx-compute"],
+        ),
+        (
+            "subscription-package",
+            "/usr/bin/podman",
+            vec!["exec", "gnx-compute", "/usr/bin/dpkg-query", "-W", "pve-fake-subscription", "pve-manager"],
+        ),
+        (
+            "license-hosts",
+            "/usr/bin/podman",
+            vec!["exec", "gnx-compute", "/usr/bin/grep", "-F", "shop.maurer-it.com", "/etc/hosts"],
+        ),
         (
             "unit",
             "/usr/bin/systemctl",

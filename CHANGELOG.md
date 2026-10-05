@@ -6,9 +6,26 @@ Los cambios pendientes no equivalen a una release publicada. Cada release conser
 
 Sin cambios pendientes.
 
+## [0.1.56] — 2026-10-05
+
+[Notas y validación](releases/v0.1.56/RELEASE_NOTES.md) · [Hashes](releases/v0.1.56/SHA256SUMS.txt).
+
+### Fixed
+- MSI instalado ya no se confunde con runtime aplicado: snapshot/PWA reportan `RUNTIME_UPDATE_PENDING`; Setup pide confirmación y `gnx upgrade --confirm` aplica conservando enrolamiento.
+- Lifecycle externo compara imagen activa y configuración reconocida, no sólo caché/Quadlet. Descarga previa al reemplazo y receipt sólo tras activación verificada; Retry no adopta un contenedor viejo tras un fallo.
+- Readiness exige release correcto, ausencia del paquete falso y del bloqueo de licencias, además de KVM/HTTPS/workloads. Runner WSL 15 minutos; diagnóstico sin materialización ni cambios.
+- Password rotation sigue recreando compute para consumir su EnvironmentFile protegido.
+- La aceptación tras activar espera hasta 5 minutos al verificador canónico para el warm-up de DHCP/mesh/gateway del LXC, sin reiniciar ni re-enrollar por un transitorio. El candidato local v0.1.55 detectó esta carrera y no se publicó.
+
+### Removed
+- `blockLicense()` upstream y su llamada, que añadían overrides de `shop.maurer-it.com` independientemente del `.deb`. Imagen `9.2.21-gnx.2`, publicada/probada en GitHub CI 37360545004; sin builder/OCI importer en el producto.
+
+### Distribución
+- Bundle completo y hashes en la carpeta última release del Space Hugging Face; no duplicación del MSI ni purga de historial. Los inputs sellados del build se conservan para reproducibilidad.
+
 ## [0.1.54] — 2026-10-05
 
-[Notas y límites de validación](releases/v0.1.54/RELEASE_NOTES.md) · [Hashes](releases/v0.1.54/SHA256SUMS.txt).
+[Notas y límites de validación](docs/releases/v0.1.54/RELEASE_NOTES.md). Historial preservado; carpeta anterior retirada del árbol actual.
 
 ### Changed
 - Compute consume `ghcr.io/mayas-alas/tailnet-proxmox:9.2.21-gnx.1` fijado por digest en el Quadlet; `Pull=missing` deja la descarga/almacén en Podman, sin credenciales nuevas.
