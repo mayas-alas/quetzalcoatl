@@ -191,4 +191,7 @@ assert.ok(install.indexOf('flock -n 9') < install.indexOf('install -m 0600 /dev/
 assert.match(verify, /tailscale_ip/);
 assert.match(verify, /pihole_ip/);
 assert.match(verify, /next_actions/);
+const pendingProbe = linuxNode.slice(linuxNode.indexOf('pub fn runtime_update_pending()'), linuxNode.indexOf('pub fn reconcile_ingress()'));
+assert.ok(pendingProbe.indexOf('"--running".into()') < pendingProbe.indexOf('run_wsl("/usr/bin/cmp"'));
+assert.ok(pendingProbe.includes('if !running.status.success()') && pendingProbe.includes('return Ok(true)'));
 console.log('node-runtime static checks passed');

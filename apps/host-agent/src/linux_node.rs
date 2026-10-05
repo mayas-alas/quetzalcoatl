@@ -386,6 +386,12 @@ fn decode_wsl_text(bytes: &[u8]) -> String {
     }
 }
 
+#[cfg(any(windows, test))]
+fn wsl_listing_contains_distro(bytes: &[u8]) -> bool {
+    decode_wsl_text(bytes).lines()
+        .any(|line| line.trim().trim_start_matches('*').trim() == DISTRO_NAME)
+}
+
 #[cfg(windows)]
 fn distro_is_registered() -> io::Result<bool> {
     let output =
@@ -521,6 +527,14 @@ pub fn install_with_secrets(
 /// Read-only desired/applied probe; never materialize payload or restart guests.
 #[cfg(windows)]
 pub fn runtime_update_pending() -> io::Result<bool> {
+    // Executing inside a stopped distro boots systemd/guests. Listing is the
+    // non-launching boundary; a stopped runtime requires explicit application.
+    let running = crate::dedicated_account::run_wsl_as_windows_identity(
+        &["--list".into(), "--running".into(), "--quiet".into()],
+    )?;
+    if !running.status.success() || !wsl_listing_contains_distro(&running.stdout) {
+        return Ok(true);
+    }
     let marker = path_arg(&payload_dir().join(".gnx-payload.sha256"));
     let same = run_wsl("/usr/bin/cmp", &["-s", &marker, PAYLOAD_MARKER_PATH])?;
     if !same.status.success() {
@@ -1020,6 +1034,16 @@ mod tests {
         );
         assert_eq!(windows_path_to_wsl(r"D:/staged/env"), "/mnt/d/staged/env");
         assert_eq!(windows_path_to_wsl("/var/lib/gnx"), "/var/lib/gnx");
+    }
+
+    #[test]
+    fn running_listing_never_matches_stopped_or_other_distro() {
+        for text in ["", "GnX-SlimFit\n", "No running distributions.\n", "gnx-node-other\n"] {
+            assert!(!wsl_listing_contains_distro(text.as_bytes()));
+        }
+        assert!(wsl_listing_contains_distro(b"gnx-node\n"));
+        let utf16: Vec<u8> = "gnx-node\r\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        assert!(wsl_listing_contains_distro(&utf16));
     }
 
     #[test]

@@ -6,9 +6,16 @@ Los cambios pendientes no equivalen a una release publicada. Cada release conser
 
 Sin cambios pendientes.
 
+## [0.1.57] — 2026-10-05
+
+[Notas y validación](releases/v0.1.57/RELEASE_NOTES.md) · [Hashes](releases/v0.1.57/SHA256SUMS.txt).
+
+- Status no entra en un distro manualmente detenido: primero inspecciona `wsl --list --running` bajo la identidad dedicada y proyecta reconciliación pendiente. Así no arranca compute por consultar el checkpoint.
+- Misma imagen limpia `9.2.21-gnx.2`; no necesita recreación al aplicar este cambio sólo de host.
+
 ## [0.1.56] — 2026-10-05
 
-[Notas y validación](releases/v0.1.56/RELEASE_NOTES.md) · [Hashes](releases/v0.1.56/SHA256SUMS.txt).
+[Notas históricas](docs/releases/v0.1.56/RELEASE_NOTES.md).
 
 ### Fixed
 - MSI instalado ya no se confunde con runtime aplicado: snapshot/PWA reportan `RUNTIME_UPDATE_PENDING`; Setup pide confirmación y `gnx upgrade --confirm` aplica conservando enrolamiento.

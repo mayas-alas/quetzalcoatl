@@ -18,4 +18,4 @@ conservan sus respectivas licencias y avisos.
 
 ## Releases
 
-[Changelog](CHANGELOG.md) · [Últimos instaladores](releases/v0.1.56/RELEASE_NOTES.md)
+[Changelog](CHANGELOG.md) · [Últimos instaladores](releases/v0.1.57/RELEASE_NOTES.md)
