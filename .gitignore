@@ -2,9 +2,8 @@
 /target/
 *.msi
 *.exe
-# Only the latest verified complete installer is published in the Space.
-!releases/
-!releases/**/*.exe
+# Release notes/hashes are source; verified binaries are explicitly uploaded.
+# Prefer Space when quota allows; otherwise use the existing artifact dataset.
 *.wixpdb
 *.wixobj
 *.log

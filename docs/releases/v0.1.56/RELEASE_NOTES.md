@@ -26,7 +26,7 @@ No se afirma alta en un host limpio ni upgrade con VMs QEMU existentes: el host 
 
 ## Instalación y descarga
 
-[Descargar GnxNodeSetup.exe](https://huggingface.co/spaces/gnx-labs-mx/quetzalcoatl/resolve/main/releases/v0.1.56/GnxNodeSetup.exe). Burn contiene el MSI exacto verificado; no se duplica el MSI separado. Comprobar `SHA256SUMS.txt`.
+[Descargar GnxNodeSetup.exe](https://huggingface.co/spaces/gnx-labs-mx/quetzalcoatl/resolve/6ce644f2ce565fa9281abe3ed0230cdbe17db077/releases/v0.1.56/GnxNodeSetup.exe). Burn contiene el MSI exacto verificado; no se duplica el MSI separado. Comprobar `SHA256SUMS.txt`.
 
 Instalar, abrir Setup elevado al final del bundle y confirmar el update. En instalación silenciosa, ejecutar después `gnx upgrade --confirm` en terminal elevada. Compute/VMs/LXC pueden reiniciarse durante la aplicación; usar mantenimiento. Los aliases `host.containers.internal`/`host.docker.internal` son normales de Podman, no bloqueo de licencias.
 
