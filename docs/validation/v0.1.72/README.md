@@ -8,6 +8,10 @@
 - Burn instalado **exit 0**; `gnx version` = **0.1.72**.
 - `gnx upgrade --confirm` elevado concluyó **NodeReady**, seguido de `gnx status`
   correcto. No se parcheó el payload después de construir este candidato.
+- Firefox volvió a mostrar la PWA instalada bajo la sesión personal real:
+  **Nodo operativo / 100%**, RustFS/Pocket/NetBird operativos y botón de logout.
+  Esto prueba acceso autenticado después del upgrade; no se afirma una nueva
+  aceptación de logout/replay/revocación personal.
 - [runtime-checks.jsonl](runtime-checks.jsonl): **53 checks canónicos pass +
   `payload_current` pass**, 54 registros. Incluyen PWA anónima/CSRF/HTTPS,
   sesiones, servicios privados, OIDC, Management/Signal gRPC, relay y STUN.
@@ -61,3 +65,11 @@ pública íntegra, validada por streaming SHA-256/tamaño, sin MSI duplicado.
 Ver [artefacto](../../../releases/v0.1.72/ARTIFACT.md). Fuente, notas y hashes se
 publican como snapshot comprometido en el Space, con revisión padre explícita;
 no se reescribe historia ni se purgan objetos históricos.
+
+El rootfs histórico del Space devolvía 403 tras la limpieza de almacenamiento.
+Se restauró **el mismo contenido sellado**, sin cambiar su digest ni reescribir
+historia: primero se verificó un input inmutable en el dataset, luego se copió
+server-side al mismo path del Space y se comprobó su descarga pública completa.
+SHA-256: `5215c762cd1562b9b6836b01f6e1a2207cee7bae0ee334e50316af72b9a871af`;
+37,744,448 bytes. [Copia inmutable de recuperación](https://huggingface.co/datasets/gnx-labs-mx/gnx-node-releases/resolve/cb916879214743b5b520b62b333b69347afa0c2e/build-inputs/v0.1.72/gnx-node-rootfs.tar).
+El instalador v0.1.72 no cambió: ya contiene esos mismos bytes offline.
