@@ -36,7 +36,8 @@ saved_model/**/* filter=lfs diff=lfs merge=lfs -text
 
 # Hydrate sealed payload objects on clone; preserve their exact bytes.
 payload/host/gnx-node-rootfs.tar filter=lfs diff=lfs merge=lfs -text
-payload/host/gnx-node-rootfs.tar.sha256 filter=lfs diff=lfs merge=lfs -text
+# Checksums are source text, not binary LFS objects.
+payload/host/gnx-node-rootfs.tar.sha256 -filter -diff -merge text eol=lf
 
 # Workload archive is a sealed dataset build input, never a Space/Git LFS object.
 payload/node/workloads/rustfs/offline.tar.gz -filter -diff -merge -text
