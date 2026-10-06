@@ -23,7 +23,10 @@ SPACE = 'gnx-labs-mx/quetzalcoatl'
 
 
 def git(*args):
-    return subprocess.run(['git', '-C', str(ROOT), *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
+    # DrvFS working files use Windows Git's CRLF policy and non-POSIX mode bits.
+    # Publish HEAD blobs; do not mistake cross-OS stat/EOL differences for edits.
+    return subprocess.run(['git', '-c', 'core.autocrlf=true', '-c', 'core.fileMode=false',
+                           '-C', str(ROOT), *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
 
 
 def hash_file(path):
