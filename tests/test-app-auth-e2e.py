@@ -27,6 +27,8 @@ APP = 'https://test-app.gnx:18443'
 PROXY = 'gnx-validation-app-auth'
 REDIS = 'gnx-validation-app-sessions'
 GROUPS = ['gnx-app-users']
+# Pocket passkey identities need not have a verified mailbox.
+EMAIL_VERIFIED = False
 BAD_NONCE = False
 RUN_ID = secrets.token_hex(12)
 CODES = {}
@@ -102,7 +104,7 @@ class Issuer(BaseHTTPRequestHandler):
             CODES[code] = {**query, 'groups': list(GROUPS)}
             self.send(302, location=APP + '/oauth2/callback?' + urlencode({'code': code, 'state': query['state']}))
         elif parsed.path == '/userinfo':
-            self.send(200, {'sub': 'test-member', 'email': 'test-member@example.test', 'email_verified': True, 'groups': list(GROUPS)})
+            self.send(200, {'sub': 'test-member', 'email': 'test-member@example.test', 'email_verified': EMAIL_VERIFIED, 'groups': list(GROUPS)})
         else:
             self.send(404)
 
@@ -134,7 +136,7 @@ class Issuer(BaseHTTPRequestHandler):
         now = int(time.time())
         claims = {'iss': ISSUER, 'aud': 'gnx-test-client', 'sub': 'test-member',
                   'iat': now, 'exp': now + 300, 'nonce': 'incorrect-test-nonce' if BAD_NONCE else grant['nonce'],
-                  'email': 'test-member@example.test', 'email_verified': True, 'groups': grant['groups']}
+                  'email': 'test-member@example.test', 'email_verified': EMAIL_VERIFIED, 'groups': grant['groups']}
         self.send(200, {'access_token': secrets.token_urlsafe(24), 'id_token': jwt(claims),
                         'token_type': 'Bearer', 'expires_in': 300, 'refresh_token': refresh})
 
@@ -270,6 +272,7 @@ if __name__ == '__main__':
         member = Browser()
         status, headers, body = member.login()
         check('signed_oidc_member_access', status == 200 and body == b'GNX_ISOLATED_PRIVATE_MARKER')
+        check('passkey_identity_with_unverified_email_access', not EMAIL_VERIFIED and status == 200)
         session_name = '__Host-GnX-Session'
         check('session_cookie_present', session_name in member.cookies)
         props = member.cookie_properties[session_name]

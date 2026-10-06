@@ -13,7 +13,7 @@ assert.doesNotMatch(routes, /forward_auth|copy_headers|id_token_hint|token=/);
 const config = read('payload/node/auth/oauth2-proxy.cfg');
 for (const text of ['allowed_groups = ["gnx-app-users"]', 'code_challenge_method = "S256"', 'insecure_oidc_skip_nonce = false',
   'cookie_name = "__Host-GnX-Session"', 'cookie_secure = true', 'cookie_httponly = true', 'cookie_samesite = "lax"',
-  'session_store_type = "redis"', 'pass_access_token = false', 'pass_authorization_header = false', 'request_logging = false']) assert.ok(config.includes(text));
+  'oidc_email_claim = "sub"', 'session_store_type = "redis"', 'pass_access_token = false', 'pass_authorization_header = false', 'request_logging = false']) assert.ok(config.includes(text));
 assert.doesNotMatch(config, /skip_auth|insecure.*= true|cookie_domains|client_secret =/);
 for (const unit of ['app-auth', 'app-sessions']) {
   const text = read(`payload/node/services/${unit}.container`);

@@ -27,6 +27,50 @@ En Windows instalado ya existe confianza de la CA privada y resolución local.
 Otros clientes del tailnet necesitan el split DNS y confiar explícitamente en
 la CA privada. No hay publicación pública/LAN ni una migración a NetBird.
 
+## Identidad de la sesión y error 500
+
+La PWA identifica la sesión por el `sub` firmado e inmutable de Pocket y exige
+`gnx-app-users`. No usa la dirección de correo como identidad o autorización.
+`oidc_email_claim = "sub"` asigna ese identificador al campo interno que OAuth2
+Proxy llama Email; no se envía a la PWA ni a servicios downstream. Firma,
+issuer/audience, PKCE, nonce, CSRF y validación de grupos siguen obligatorios.
+No se habilita `insecure_oidc_allow_unverified_email`.
+
+El candidato v0.1.71 original asumía un correo verificado: Pocket puede emitir
+`email_verified=false` para una cuenta autenticada por passkey, provocando un
+500 al canjear el callback. Véase el [hotfix observado](validation/v0.1.71/pocket-subject-hotfix.md).
+No recargar un callback antiguo: su código es de un solo uso; abrir `https://app.gnx/`
+para iniciar un flujo nuevo después de corregir la configuración.
+
+## Servicios y credenciales del LXC
+
+Desde root **dentro del LXC 100**:
+
+```sh
+systemctl is-active rustfs pocket-id netbird-server netbird-dashboard workload-mesh workload-mesh-guard
+podman ps --format '{{.Names}} {{.Status}}'
+```
+
+Las claves de RustFS están en `/var/lib/gnx/rustfs/rustfs.env` (root, modo 600),
+con los nombres `RUSTFS_ACCESS_KEY` y `RUSTFS_SECRET_KEY`. Su unidad usa
+`EnvironmentFile` para el proceso/contenedor: no exporta esas variables en el
+shell root, WSL exterior ni Windows. Si una operación local requiere cargarlas,
+hacerlo solamente en un subshell root sin tracing ni transcript:
+
+```sh
+( set +x; set -a; . /var/lib/gnx/rustfs/rustfs.env; set +a; # ejecutar aquí el cliente S3 local
+)
+```
+
+No copiar los valores al chat, logs, argv o a la PWA.
+
+OAuth2 Proxy y Valkey están **fuera del LXC**, en el WSL gestionado:
+`app-auth.service` / `gnx-app-auth` y `app-sessions.service` / `gnx-app-sessions`.
+Allí se consultan `journalctl -u app-auth` y `podman logs gnx-app-auth`.
+El logging de requests/auth/standard está desactivado para no registrar datos
+sensibles; el diagnóstico temporal requiere root, debe sanitizarse y restaurar
+`standard_logging=false` al terminar. No publicar callbacks, códigos o tokens.
+
 ## Cerrar sesión
 
 Usar **Cerrar sesión de GnX**. Es una petición POST del mismo origen a `/logout`,
