@@ -142,7 +142,7 @@ Linux incrustados. Se conserva la arquitectura de archivos externos:
 | `payload/node/verify.run` | Verificador canónico, JSONL sanitizado y exit code |
 | `payload/node/services/` | Quadlets por capacidad e imágenes por digest |
 | `payload/node/network/ingress.nft` | Ingreso limitado a loopback y tailnet |
-| `payload/node/gateway/routes.conf` | PWA estática y proxies HTTPS a compute y al sidecar RustFS |
+| `payload/node/gateway/routes.conf` | TLS y proxy a OAuth2 Proxy para toda la PWA; excepciones públicas signed-out/worker de retiro; HTTPS a compute y servicios privados |
 | `apps/web-app/` | Assets estáticos ensamblados dentro del payload Linux |
 
 RustFS conserva su sidecar Tailscale y TLS nativo con la CA privada del nodo.
@@ -152,8 +152,12 @@ CA y nombre `rustfs.gnx` del backend. La política del tailnet debe permitir al
 nodo gateway conectar a los servicios RustFS en TCP 443; no se abre el underlay.
 La salud del workload exige también HTTPS del dashboard a través de Caddy.
 
-Pocket ID, NetBird combined server y su dashboard separado comparten el LXC
-administrado de RustFS, su identidad mesh y el bundle offline. No sustituyen
+Pocket ID, NetBird combined server, dashboard y RustFS comparten el **LXC de
+servicios privados**, su identidad mesh y bundle offline. El árbol fuente es
+`payload/node/workloads/private-services/`. RustFS denomina sólo almacenamiento.
+El tag `gnx-rustfs`, la clave IPC `rustfs`, hostname y rutas guest/runtime
+anteriores se conservan como compatibilidad de ownership; no se recrean ni
+se renombran los datos/identidad del guest existente. No sustituyen
 el transporte Tailscale del nodo. Caddy conserva los nombres públicos privados
 `pocket.gnx`/`netbird.gnx`; los nombres `*.mesh.gnx` son exclusivamente backend.
 Las imágenes nuevas están fijadas al digest **importado del archive offline**,
@@ -185,6 +189,34 @@ El gateway valida la CA de backend de Proxmox; nunca usa TLS inseguro.
 El puerto interno `8006` no se publica directamente a LAN/tailnet. No se abre
 DNS público ni puertos del router. Un apagado global de WSL/reinicio del host
 requiere consentimiento; no se usa para validar una actualización por sorpresa.
+
+## Autenticación de app.gnx — decisión aprobada
+
+**OAuth2 Proxy + Pocket ID**, con Valkey para sesiones de servidor. Alcance para
+agentes: [contrato PWA auth](../.AGENTS/30-pwa-auth.md). No hay migración de red a
+NetBird ni cambio del Named Pipe/control privilegiado.
+
+Caddy termina TLS → OAuth2 Proxy valida OIDC/grupo y sirve los archivos estáticos.
+Toda la PWA, assets y `status.json` requieren sesión de un miembro de
+`gnx-app-users`. Cliente confidencial exclusivo de GnX App, PKCE S256/nonce,
+CA privada y secretos persistentes por archivo, nunca en argv/env/browser JS.
+No se asignan personas al grupo automáticamente. Pocket ID conserva su alta y
+passkey reales. Si falta Pocket/guest activo, se bloquea el acceso; recuperación
+por CLI, no un bypass anónimo ni despertar de guests detenidos.
+
+Logout local elimina la sesión Valkey y cookie mediante POST del mismo origen;
+retorno fijo a `/signed-out`, sin tokens en URLs ni cierre global del IdP.
+Cookie con TTL de 15 minutos, renovable; refresco solicitado cada minuto:
+no prometer revocación
+inmediata por grupo hasta medir el comportamiento del IdP fijado. Valkey no
+persiste sesiones: un reinicio invalida las anteriores.
+
+No se guarda un shell offline autenticado. `sw.js` sólo retira cachés/worker viejo
+(público para actualizarlo aun sin sesión); `/signed-out` es texto público. Son
+excepciones sanitarias, no acceso a la aplicación. Cache-Control no-store en
+respuestas, limpieza de storage/cache al logout y DOM oculto en salida/BFCache.
+Pruebas de disponibilidad no sustituyen aceptación de sesión real, grupo y
+replay post-logout. Documentar honestamente cualquier interacción personal pendiente.
 
 ## Imagen OCI de compute
 

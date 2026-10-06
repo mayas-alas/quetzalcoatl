@@ -2,6 +2,10 @@
 # Read-only access diagnostics. Print statuses, never env/config/credentials.
 set -uo pipefail
 [[ $(id -u) == 0 && $# == 0 ]] || exit 64
+if [[ -f /opt/gnx/payload/node/auth/verify.run ]]; then
+  /usr/bin/python3 /opt/gnx/payload/node/auth/verify.run
+  /usr/bin/timeout 20 /bin/bash /opt/gnx/payload/node/verify.run --state-dir /mnt/c/ProgramData/GnX/Node/state
+fi
 record=/var/lib/gnx-node/dnsmasq.d/03-rustfs.conf
 peer=$(awk -F/ '$2 == "pocket.mesh.gnx" {print $3}' "$record")
 node=$(/usr/bin/podman exec gnx-mesh tailscale ip -4)
@@ -47,3 +51,24 @@ for line in sys.stdin:
  print(json.dumps({"gateway_error":category,"status":entry.get("status")}))
 '
 /usr/bin/systemctl is-active netbird-stun.service
+for unit in app-auth app-sessions; do
+  /usr/bin/systemctl show "$unit.service" -p ActiveState -p SubState -p Result -p ExecMainStatus -p LoadState -p FragmentPath
+  /usr/bin/journalctl -u "$unit.service" --no-pager -n 20 | /usr/bin/python3 -c '
+import sys,json
+for line in sys.stdin:
+ text=line.lower()
+ if any(n in text for n in ["cycle", "dependency", "deadlock", "failed", "not found", "unknown", "permission", "error"]):
+  if any(n in text for n in ["secret", "password", "cookie", "token", "authorization"]):
+   print("app_auth_journal_sensitive_error_redacted")
+  else: print(line.rstrip()[:500])
+'
+  /usr/bin/podman logs --tail 30 "gnx-$unit" 2>&1 | /usr/bin/python3 -c '
+import sys,json,re
+text=sys.stdin.read().lower()
+needles=["invalid configuration", "unknown", "cookie", "redis", "permission denied", "connection refused", "oidc", "nonce", "email", "flag", "unmarshal", "config", "upstream", "certificate", "not found"]
+print(json.dumps({"app_auth_log_categories":[n for n in needles if n in text]}))
+for m in re.finditer(r"(?:unknown (?:field|flag|key)|invalid (?:field|option)|unused keys|invalid keys)[^\\n]{0,160}",text):
+ safe=re.sub(r"[^a-z0-9_ ,:=\\[\\]-]","",m.group())
+ print(json.dumps({"app_auth_config_field":safe}))
+'
+done

@@ -4,13 +4,13 @@
 set -Eeuo pipefail
 [[ $(id -u) == 0 ]] || { echo 'Run as root to use the isolated validation store.' >&2; exit 64; }
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
-bundle="$root/payload/node/workloads/rustfs/offline.tar.gz"
+bundle="$root/payload/node/workloads/private-services/offline.tar.gz"
 engine=(podman --root /var/lib/gnx-build-validation/images --runroot /run/gnx-build-validation --storage-driver vfs)
 for name in pocket-id netbird-server netbird-dashboard; do
   # Docker archive paths in the outer tar need not have the same ./ prefix.
   member=$(tar -tzf "$bundle" | grep -E "^(\./)?$name\.tar$")
   tar -xOzf "$bundle" "$member" | "${engine[@]}" load >/dev/null
-  image=$(awk -F= '$1 == "Image" {print $2}' "$root/payload/node/workloads/rustfs/$name.container")
+  image=$(awk -F= '$1 == "Image" {print $2}' "$root/payload/node/workloads/private-services/$name.container")
   "${engine[@]}" image inspect "localhost/gnx/$name:1.0.0-gnx.1" --format '{{.RepoDigests}}'
   "${engine[@]}" image exists "$image" || { echo "OFFLINE_PIN_MISMATCH: $name" >&2; exit 1; }
   printf 'offline image pin verified: %s\n' "$name"

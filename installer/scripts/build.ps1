@@ -25,7 +25,7 @@ if ($actualRootfsDigest -ne $manifestDigest) {
     throw "Sealed WSL rootfs digest mismatch: expected $manifestDigest, got $actualRootfsDigest"
 }
 # Build-time sealed input only: no registry/OCI download path is added to the product.
-$offlineDir = Join-Path $root 'payload\node\workloads\rustfs'
+$offlineDir = Join-Path $root 'payload\node\workloads\private-services'
 $offlineArtifact = Join-Path $offlineDir 'offline.tar.gz'
 $offlineManifest = (Get-Content (Join-Path $offlineDir 'offline.sha256') -Raw).Trim()
 if ($offlineManifest -notmatch '^([0-9a-f]{64})  offline\.tar\.gz$') { throw 'Invalid workload input manifest' }
@@ -36,6 +36,17 @@ if (!(Test-Path $offlineArtifact)) {
     Invoke-WebRequest -UseBasicParsing -Uri $offlineUrl -OutFile $offlineArtifact
 }
 if ((Get-FileHash $offlineArtifact -Algorithm SHA256).Hash.ToLowerInvariant() -ne $offlineDigest) { throw 'Sealed workload input digest mismatch' }
+$authDir = Join-Path $root 'payload\node\auth'
+$authArtifact = Join-Path $authDir 'offline.tar.gz'
+$authManifest = (Get-Content (Join-Path $authDir 'offline.sha256') -Raw).Trim()
+if ($authManifest -notmatch '^([0-9a-f]{64})  offline\.tar\.gz$') { throw 'Invalid app auth input manifest' }
+$authDigest = $Matches[1]
+if (!(Test-Path $authArtifact)) {
+    $authUrl = (Get-Content (Join-Path $authDir 'offline.url') -Raw).Trim()
+    if ($authUrl -notmatch '^https://huggingface\.co/datasets/gnx-labs-mx/gnx-node-releases/resolve/[0-9a-f]{40}/build-inputs/v[0-9.]+/app-auth/offline\.tar\.gz$') { throw 'Invalid app auth sealed input URL' }
+    Invoke-WebRequest -UseBasicParsing -Uri $authUrl -OutFile $authArtifact
+}
+if ((Get-FileHash $authArtifact -Algorithm SHA256).Hash.ToLowerInvariant() -ne $authDigest) { throw 'Sealed app auth digest mismatch' }
 New-Item -ItemType Directory -Force $out | Out-Null
 $msi = Join-Path $out "GnxNode.msi"
 $localizedMsi = Join-Path $out "en-us\GnxNode.msi"

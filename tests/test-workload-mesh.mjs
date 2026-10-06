@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-const read = name => readFileSync(new URL(`../payload/node/workloads/rustfs/${name}`, import.meta.url), 'utf8');
+const read = name => readFileSync(new URL(`../payload/node/workloads/private-services/${name}`, import.meta.url), 'utf8');
 const nft = read('mesh.nft');
 const mesh = read('workload-mesh.container');
 const guard = read('workload-mesh-guard.service');

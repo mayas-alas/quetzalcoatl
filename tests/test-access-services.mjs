@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
-const base = 'payload/node/workloads/rustfs/';
+const base = 'payload/node/workloads/private-services/';
 for (const name of ['pocket-id', 'netbird-server', 'netbird-dashboard']) {
   const unit = read(`${base}${name}.container`);
   assert.match(unit, /^Image=localhost\/gnx\/[^@]+@sha256:[a-f0-9]{64}$/m);

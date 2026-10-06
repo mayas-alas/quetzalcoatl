@@ -66,7 +66,10 @@ else
 fi
 # Gateway CA validates public hostnames at :443; backend CA validates only
 # the internal Proxmox endpoint at :8006. No insecure TLS fallback is allowed.
-if command -v curl >/dev/null 2>&1 && [[ -r "$gateway_ca" ]] && curl --fail --silent --show-error --connect-timeout 3 --max-time 5 --cacert "$gateway_ca" --resolve app.gnx:443:127.0.0.1 https://app.gnx/ >/dev/null 2>&1; then check app_https pass; else check app_https fail; fi
+if ! python3 /opt/gnx/payload/node/auth/verify.run; then fail=1; fi
+for unit in app-auth app-sessions; do
+  if systemctl is-active --quiet "$unit.service"; then check "${unit//-/_}" pass; else check "${unit//-/_}" fail; fi
+done
 if command -v curl >/dev/null 2>&1 && [[ -r "$gateway_ca" ]] && curl --fail --silent --show-error --connect-timeout 3 --max-time 5 --cacert "$gateway_ca" --resolve compute.gnx:443:127.0.0.1 https://compute.gnx/ >/dev/null 2>&1; then check compute_gateway_https pass; else check compute_gateway_https fail; fi
 if command -v curl >/dev/null 2>&1 && [[ -r "$backend_ca" ]] && curl --fail --silent --show-error --connect-timeout 3 --max-time 5 --cacert "$backend_ca" --resolve compute.gnx:8006:127.0.0.1 https://compute.gnx:8006/ >/dev/null 2>&1; then check compute_https pass; else check compute_https fail; fi
 # Only sanitized addresses leave this process. JSON is parsed through stdin.

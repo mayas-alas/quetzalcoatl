@@ -233,16 +233,16 @@ pub fn execute(req: &Request, current: &Progress) -> Progress {
                     p.state = NodeState::NodeReady;
                     p.phase = "workloads".into();
                     p.message = if status.state == "running" {
-                        "RustFS is running in its managed LXC.".into()
+                        "The shared private-services LXC is running.".into()
                     } else {
-                        "RustFS is stopped; persistent data is retained.".into()
+                        "The private-services LXC is stopped; persistent data is retained. Pocket ID login is unavailable until it starts.".into()
                     };
                     p.percent = Some(100);
                 }
                 Err(error) => {
                     p.state = current.state.clone();
                     p.phase = "workloads".into();
-                    p.message = "The RustFS LXC operation did not complete safely.".into();
+                    p.message = "The private-services LXC operation did not complete safely.".into();
                     p.error_code = Some(classify_error(&error));
                     p.retryable = true;
                 }
@@ -572,13 +572,13 @@ pub fn handle(req: &Request, current: &Progress) -> Progress {
         Operation::StartWorkload => {
             p.state = current.state.clone();
             p.phase = "workloads".into();
-            p.message = "Starting the managed RustFS LXC.".into();
+            p.message = "Starting the managed private-services LXC.".into();
             p
         }
         Operation::StopWorkload => {
             p.state = current.state.clone();
             p.phase = "workloads".into();
-            p.message = "Stopping the managed RustFS LXC cleanly.".into();
+            p.message = "Stopping the managed private-services LXC cleanly, including Pocket ID.".into();
             p
         }
         Operation::DiagnoseCompute => {

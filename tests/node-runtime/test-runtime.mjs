@@ -55,7 +55,8 @@ assert.match(await read('install.run'), /wait_for_runtime_ready/);
 assert.match(await read('install.run'), /for _ in \{1\.\.300\}/);
 assert.doesNotMatch(await read('install.run'), /disable --now platform\.target/);
 assert.match(await read('install.run'), /temporary mesh-auth race/);
-assert.match(await read('install.run'), /--resolve app\.gnx:443:127\.0\.0\.1/);
+assert.match(await read('install.run'), /python3 "\$payload_dir\/auth\/verify.run"/);
+assert.match(await read('auth/verify.run'), /server_hostname='app.gnx'/);
 assert.doesNotMatch(await read('install.run'), /listen-address=/);
 assert.match(await read('install.run'), /address=\/compute\.gnx\/%s/);
 assert.match(await read('install.run'), /modules-load\.d\/gnx-node-kvm\.conf/);
@@ -142,11 +143,12 @@ assert.doesNotMatch(ingress, /iifname "tailscale0" (?:udp|tcp) dport 53 accept/)
 assert.doesNotMatch(ingress, /dport 8006/);
 
 const verify = await read('verify.run');
-for (const check of ['podman', 'tun', 'fuse', 'kvm', 'platform_target', 'mesh_authenticated', 'compute_https', 'app_https', 'compute_gateway_https']) assert.match(verify, new RegExp(`check ${check}`));
+for (const check of ['podman', 'tun', 'fuse', 'kvm', 'platform_target', 'mesh_authenticated', 'compute_https', 'compute_gateway_https']) assert.match(verify, new RegExp(`check ${check}`));
+assert.match(await read('auth/verify.run'), /check\('app_https'/);
 assert.match(verify, /--resolve compute\.gnx:8006:127\.0\.0\.1/);
 assert.match(verify, /gateway-ca\.pem/);
 assert.match(verify, /backend-ca\.pem/);
-assert.match(verify, /https:\/\/app\.gnx\//);
+assert.match(verify, /python3 \/opt\/gnx\/payload\/node\/auth\/verify.run/);
 assert.match(verify, /https:\/\/compute\.gnx\//);
 assert.doesNotMatch(verify, /tls_insecure_skip_verify|curl[^\n]*-k(?:\s|$)/);
 const index = await readFile(join(root, 'apps', 'web-app', 'index.html'), 'utf8');

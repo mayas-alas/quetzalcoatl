@@ -1,0 +1,18 @@
+[Unit]
+Description=GnX ephemeral server-side PWA sessions
+[Container]
+Image=docker.io/valkey/valkey@sha256:85f4400e8cb6370204842b6471d1b18cd5f45d438d44fb23c9d850aa1e603992
+ContainerName=gnx-app-sessions
+Pull=never
+Network=host
+User=10001:10001
+DropCapability=all
+NoNewPrivileges=true
+ReadOnly=true
+Volume=/var/lib/gnx-node/app-auth/sessions.conf:/etc/gnx/sessions.conf:ro,Z
+Exec=valkey-server /etc/gnx/sessions.conf
+[Service]
+Restart=always
+RestartSec=5s
+[Install]
+WantedBy=platform.target

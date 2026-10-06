@@ -1,0 +1,24 @@
+[Unit]
+Description=GnX Pocket ID PWA authentication and group authorization
+After=gateway.service app-sessions.service
+Requires=app-sessions.service
+[Container]
+Image=quay.io/oauth2-proxy/oauth2-proxy@sha256:358849c0da0790380bc562d8a55f4c137eb055ba570d0b951958c1bc769ca12d
+ContainerName=gnx-app-auth
+Pull=never
+Network=host
+User=10001:10001
+DropCapability=all
+NoNewPrivileges=true
+ReadOnly=true
+# Podman 4.9 Quadlet has no AddHost key; use its fixed native argument.
+PodmanArgs=--add-host=pocket.gnx:127.0.0.1
+Volume=/var/lib/gnx-node/app-auth:/etc/gnx/auth:ro,Z
+Volume=/var/lib/gnx-node/web-app:/srv/gnx-web:ro,Z
+Volume=/var/lib/gnx-node/ca/gateway-ca.pem:/etc/gnx/ca/gateway-ca.pem:ro,Z
+Exec=--config=/etc/gnx/auth/oauth2-proxy.cfg
+[Service]
+Restart=always
+RestartSec=5s
+[Install]
+WantedBy=platform.target

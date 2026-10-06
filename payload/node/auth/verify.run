@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""No cookie/token bypass: verify the anonymous boundary over private-CA HTTPS."""
+import http.client
+import json
+import ssl
+import sys
+
+ctx = ssl.create_default_context(cafile='/var/lib/gnx-node/ca/gateway-ca.pem')
+failed = False
+
+
+def check(name, passed):
+    global failed
+    failed |= not passed
+    print(json.dumps({'check': name, 'result': 'pass' if passed else 'fail'}))
+
+
+def request(path, method='GET', headers=None):
+    connection = http.client.HTTPSConnection('127.0.0.1', 443, timeout=8, context=ctx)
+    # Keep SNI/hostname validation for app.gnx while dialing loopback.
+    import socket
+    connection.sock = ctx.wrap_socket(socket.create_connection(('127.0.0.1', 443), timeout=8), server_hostname='app.gnx')
+    connection.request(method, path, headers={'Host': 'app.gnx', **(headers or {})})
+    response = connection.getresponse()
+    data = response.read(1024 * 1024)
+    result = response.status, dict((k.lower(), v) for k, v in response.getheaders()), data
+    connection.close()
+    return result
+
+
+try:
+    protected = ['/', '/index.html', '/app.js', '/styles.css', '/status.json', '/manifest.webmanifest', '/icon.svg']
+    passed = True
+    for path in protected:
+        code, headers, body = request(path, headers={'X-Forwarded-User': 'forged', 'Authorization': 'Bearer forged'})
+        # The proxy may present its sign-in page with HTTP 403 or redirect; never
+        # accept HTTP 200 for anonymous application/status/asset access.
+        passed &= code in (302, 303, 401, 403) and b'"workloads"' not in body and b'github-config' not in body
+    check('app_auth_anonymous_denied', passed)
+    code, headers, body = request('/oauth2/sign_in?rd=%2F')
+    check('app_auth_login_https', code == 302 and headers.get('location', '').startswith('https://pocket.gnx/'))
+    check('app_auth_logout_csrf', request('/logout', 'POST', {'Origin': 'https://evil.example'})[0] == 404
+          and request('/logout')[0] == 404 and request('/oauth2/sign_out?rd=https://evil.example')[0] == 404)
+    code, headers, body = request('/signed-out')
+    check('app_auth_signed_out', code == 200 and 'no-store' in headers.get('cache-control', '')
+          and 'storage' in headers.get('clear-site-data', '') and b'github-config' not in body)
+    code, headers, body = request('/sw.js')
+    check('app_auth_worker_retired', code == 200 and b'registration.unregister' in body and b'cache.addAll' not in body)
+    check('app_https', True)
+except (OSError, ValueError, http.client.HTTPException):
+    check('app_https', False)
+raise SystemExit(1 if failed else 0)

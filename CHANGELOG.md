@@ -4,11 +4,21 @@ Los cambios pendientes no equivalen a una release publicada. Cada release conser
 
 ## [Unreleased]
 
+- Candidato v0.1.71: OAuth2 Proxy/Pocket ID/Valkey protegen la PWA completa,
+  grupos explícitos y logout local con revocación del servidor. Sin migración
+  a NetBird, personas inventadas ni asignación automática de membresías.
+- Máquina compartida denominada servicios privados en árbol/PWA/CLI; conserva
+  claves, tag, datastore y URI `rustfs` como compatibilidad.
+- Podman 4.9 usa `PodmanArgs` para host Pocket; reconciliación actualiza mounts de
+  gateway; retiro del worker no vuelve a registrarse ni genera bucle de recarga.
+- 66 tests Rust, controles de PWA/worker, imágenes offline y OIDC aislado. La
+  aceptación con passkey Pocket personal continúa pendiente; ver [guía](docs/pwa-access.md).
+
 Pendiente aceptación personal con passkey y tráfico entre peers reales; no equivale a fallo de disponibilidad de los servicios.
 
 ## [0.1.67] — 2026-10-05
 
-[Notas y límites](releases/v0.1.67/RELEASE_NOTES.md). [Evidencia del nodo instalado](docs/validation/v0.1.67/README.md).
+[Notas y límites](docs/releases/v0.1.67/RELEASE_NOTES.md). [Evidencia del nodo instalado](docs/validation/v0.1.67/README.md).
 
 - Pocket ID + NetBird combinado + dashboard separados, offline y privados, en el LXC existente.
 - OIDC asociado; gRPC h2c, relay WebSocket y STUN comprobados por el gateway real.

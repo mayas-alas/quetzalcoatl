@@ -20,7 +20,7 @@
 - HTTPS/OIDC/dashboard, Management/Signal gRPC, relay WebSocket y STUN binding: **pass** en el verificador canónico del nodo real.
 - Firefox: PWA con servicios operativos, Pocket ID, NetBird ofreciendo Pocket ID, y redirección real a la pantalla Pocket **Iniciar sesión en GnX NetBird**.
 - 66 tests Rust; 7 tests Python de ACL/protocolo; contratos estáticos; test LXC mock. Import offline aislado de los tres digests validado. Warning LNK4098 observado.
-- [Evidencia y límites](../../docs/validation/v0.1.67/README.md).
+- [Evidencia y límites](../../validation/v0.1.67/README.md).
 
 ## Límites y acción personal
 

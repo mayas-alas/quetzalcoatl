@@ -11,6 +11,7 @@ ContainerName=gnx-gateway
 Network=host
 Volume=/var/lib/gnx-node/routes.conf:/etc/caddy/Caddyfile:ro,Z
 Volume=/var/lib/gnx-node/web-app:/srv/gnx-web:ro,Z
+Volume=/var/lib/gnx-node/auth-public:/srv/gnx-auth-public:ro,Z
 Volume=/var/lib/gnx-node/ca:/etc/gnx/ca:ro,Z
 [Service]
 Restart=always

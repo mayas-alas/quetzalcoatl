@@ -654,6 +654,8 @@ pub fn wsl_nat_ipv4() -> io::Result<std::net::Ipv4Addr> {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WorkloadStatus {
+    // Compatibility key for the shared private-services guest, not its semantic
+    // name. Preserve existing IPC/state ownership and actual RustFS data paths.
     pub workload: String,
     pub state: String,
     pub service: String,
@@ -825,6 +827,13 @@ pub fn runtime_checks(state_dir: &Path) -> io::Result<Vec<crate::state::RuntimeC
         "mesh_authenticated",
         "gateway",
         "app_https",
+        "app_auth",
+        "app_sessions",
+        "app_auth_anonymous_denied",
+        "app_auth_login_https",
+        "app_auth_logout_csrf",
+        "app_auth_signed_out",
+        "app_auth_worker_retired",
         "compute",
         "compute_gateway_https",
         "compute_https",

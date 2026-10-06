@@ -66,11 +66,12 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(&'static str, b
         ["upgrade", "--confirm"] => "upgrade",
         ["runtime", "stop", "--confirm"] | ["shutdown", "--confirm"] => "runtime-stop",
         ["runtime", "start"] => "runtime-start",
-        ["workload", "rustfs", "start"] => "rustfs-start",
-        ["workload", "rustfs", "stop", "--confirm"] => "rustfs-stop",
+        // Keep the legacy aliases, but name the shared machine correctly.
+        ["workload", "private-services" | "rustfs", "start"] => "rustfs-start",
+        ["workload", "private-services" | "rustfs", "stop", "--confirm"] => "rustfs-stop",
         ["diagnose", "compute"] => "diagnose-compute",
-        ["gnx://workloads/rustfs/start"] => "rustfs-start-uri",
-        ["gnx://workloads/rustfs/stop"] => "rustfs-stop-uri",
+        ["gnx://workloads/private-services/start" | "gnx://workloads/rustfs/start"] => "rustfs-start-uri",
+        ["gnx://workloads/private-services/stop" | "gnx://workloads/rustfs/stop"] => "rustfs-stop-uri",
         ["cancel"] => "cancel",
         _ => {
             return Err(
@@ -86,7 +87,7 @@ fn run(command: &str) -> Result<()> {
         "help" => {
             println!("GnX Node Setup {}", env!("CARGO_PKG_VERSION"));
             println!(
-                "Usage: gnx [setup|status|connect|start|stop|actions status|set password|join|retry|upgrade --confirm|runtime stop --confirm|runtime start|workload rustfs start|workload rustfs stop --confirm|cancel|help|version] [--pause]"
+                "Usage: gnx [setup|status|connect|start|stop|actions status|set password|join|retry|upgrade --confirm|runtime stop --confirm|runtime start|workload private-services start|workload private-services stop --confirm|cancel|help|version] [--pause]"
             );
             println!("Run in an Administrator terminal. No command: guided initial setup.");
             println!(
@@ -149,7 +150,8 @@ fn run(command: &str) -> Result<()> {
         "rustfs-start-uri" | "rustfs-stop-uri" => {
             let starting = command == "rustfs-start-uri";
             let verb = if starting { "start" } else { "stop" };
-            print!("Confirm {verb} RustFS? [y/N]: ");
+            println!("This controls the shared LXC: storage, Pocket ID and NetBird. Stopping it disables new PWA logins; recovery uses gnx workload private-services start.");
+            print!("Confirm {verb} private services? [y/N]: ");
             io::stdout().flush()?;
             let mut answer = String::new();
             io::stdin().read_line(&mut answer)?;
@@ -193,6 +195,7 @@ fn request(operation: Operation) -> Request {
 
 fn workload_request(operation: Operation) -> Request {
     let mut request = request(operation);
+    // Stable ownership/IPC key of the existing shared guest; never adopt a new guest.
     request.workload = Some("rustfs".into());
     request
 }
@@ -648,6 +651,11 @@ mod tests {
             parse_args(["password".into()]).unwrap(),
             ("password", false)
         );
+        for name in ["private-services", "rustfs"] {
+            assert_eq!(parse_args(["workload", name, "start"].map(str::to_owned)).unwrap(), ("rustfs-start", false));
+        }
+        assert_eq!(parse_args(["gnx://workloads/private-services/stop".into()]).unwrap(), ("rustfs-stop-uri", false));
+        assert!(parse_args(["workload", "arbitrary", "start"].map(str::to_owned)).is_err());
         for args in [
             vec!["--password", "do-not-print"],
             vec!["join", "tskey-auth-do-not-print"],

@@ -8,4 +8,4 @@
 - EXE completo con MSI embebido; no se duplica el MSI separado ni se almacena el EXE en Space Git/LFS.
 - Construido, instalado y actualizado hasta `NodeReady` en el nodo existente; verificaciones reales de disponibilidad y protocolos aprobadas.
 
-**No es una promoción de aceptación end-to-end completa:** passkey personal, sesión autenticada y tráfico entre peers pendientes. Consulta [notas](RELEASE_NOTES.md) y [evidencia](../../docs/validation/v0.1.67/README.md).
+**No es una promoción de aceptación end-to-end completa:** passkey personal, sesión autenticada y tráfico entre peers pendientes. Consulta [notas](RELEASE_NOTES.md) y [evidencia](../../validation/v0.1.67/README.md).

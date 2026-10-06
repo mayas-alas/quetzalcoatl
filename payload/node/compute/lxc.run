@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# GnX-owned LXC workload adapter. The caller selects only an allowlisted workload
+# Shared private-services LXC adapter. 'rustfs' is the legacy IPC/ownership key.
+# The caller selects only an allowlisted workload
 # and action; no user-supplied shell, VMID, path, or Proxmox argument is accepted.
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -91,7 +92,9 @@ install_bundle() {
   local vmid=$1 stage=/tmp/gnx-rustfs-bundle
   rm -rf -- "$stage"
   install -d -m 0700 "$stage"
-  cp -a /opt/gnx/payload/node/workloads/rustfs/. "$stage/"
+  # Source bundle represents the shared guest; legacy guest paths/tags remain
+  # migration-compatible and do not imply RustFS owns identity/network services.
+  cp -a /opt/gnx/payload/node/workloads/private-services/. "$stage/"
   local gateway_ip
   gateway_ip=$(podman exec gnx-mesh tailscale ip -4) || return 1
   [[ "$gateway_ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1

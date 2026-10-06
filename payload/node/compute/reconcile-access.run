@@ -17,3 +17,5 @@ if python3 -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("
   python3 "$runtime/access-mesh-policy.run"
   bash "$runtime/lxc.run" start rustfs
 fi
+# Gate the PWA even if Pocket/guest is unavailable: no anonymous fallback.
+bash "$payload/auth/install.run"

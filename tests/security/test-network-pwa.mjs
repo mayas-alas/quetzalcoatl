@@ -25,8 +25,8 @@ assert.match(routes, /tls_server_name rustfs\.gnx/);
 assert.match(routes, /header_up Host \{http\.request\.host\}/);
 assert.match(routes, /tls \/etc\/gnx\/ca\/rustfs-cert\.pem \/etc\/gnx\/ca\/rustfs-key\.pem/);
 assert.match(routes, /tls_trust_pool file \/etc\/gnx\/ca\/gateway-ca\.pem/);
-assert.match(routes, /@status path \/status\.json/);
-assert.match(routes, /header @status Cache-Control "no-store"/);
+assert.match(routes, /header Cache-Control "no-store, private"/);
+assert.match(routes, /reverse_proxy 127\.0\.0\.1:4180/);
 
 const ingress = await read('payload/node/network/ingress.nft');
 assert.match(ingress, /policy drop/);
@@ -51,13 +51,12 @@ assert.doesNotMatch(webText, /127\.0\.0\.1|localhost|pipe|localStorage|sessionSt
 assert.match(web[0], /Content-Security-Policy/);
 assert.match(web[1], /protocol === 'https:'/);
 assert.match(web[1], /hostname === 'app\.gnx'/);
-assert.match(web[1], /fetch\('\.\/status\.json', \{ cache: 'no-store' \}\)/);
+assert.match(web[1], /fetch\('\.\/status\.json', \{ cache: 'no-store', redirect: 'manual' \}\)/);
 assert.match(web[1], /window\.setInterval\(\(\) => void refreshStatus\(\), 15000\)/);
 assert.match(web[1], /safeStatus\.state === 'NodeReady'/);
-assert.match(web[2], /event\.request\.method !== 'GET'/);
-assert.match(web[2], /url\.origin !== self\.location\.origin/);
-assert.match(web[2], /cache\.addAll/);
-assert.match(web[2], /gnx-app-v\d+/);
+assert.match(web[2], /registration\.unregister/);
+assert.match(web[2], /caches\.delete/);
+assert.doesNotMatch(web[2], /cache\.addAll|respondWith|caches\.match/);
 assert.doesNotMatch(web[2], /compute\.gnx|Authorization|localStorage|sessionStorage/i);
 assert.match(web[3], /"start_url":"\.\/"/);
 assert.match(web[3], /"scope":"\.\/"/);
@@ -74,7 +73,7 @@ assert.match(app, /scopes\.includes\('repo'\).*scopes\.includes\('workflow'\)/);
 assert.match(app, /private: true, auto_init: true/);
 const nativeLinks = webText.match(/gnx:\/\/[^'"\s]+/g) ?? [];
 assert.ok(nativeLinks.length > 0);
-for (const link of nativeLinks) assert.match(link, /^gnx:\/\/workloads\/rustfs\/(?:start|stop)$/);
+for (const link of nativeLinks) assert.match(link, /^gnx:\/\/workloads\/(?:private-services|rustfs)\/(?:start|stop)$/);
 assert.match(await read('payload/node/install.run'), /--compute-secret-file/);
 assert.match(await read('payload/node/install.run'), /PROXMOX_PASSWORD/);
 const compute = await read('payload/node/services/compute.container');
@@ -98,8 +97,8 @@ async function githubCase({ scopes = 'repo, workflow', failure = 0, trusted = tr
   const state = { textContent: '' };
   const form = { elements: { namedItem: name => controls[name] }, reportValidity: () => valid, addEventListener() {} };
   const context = vm.createContext({
-    document: { querySelector: selector => selector === '#github-config' ? form : selector === '#github-state' ? state : {} },
-    window: { location: { protocol: 'https:', hostname: trusted ? 'app.gnx' : 'untrusted.example' }, setInterval() {} },
+    document: { querySelector: selector => selector === '#github-config' ? form : selector === '#github-state' ? state : { addEventListener() {} } },
+    window: { location: { protocol: 'https:', hostname: trusted ? 'app.gnx' : 'untrusted.example' }, setInterval() {}, addEventListener() {} },
     navigator: {}, Uint8Array, btoa: value => Buffer.from(value, 'binary').toString('base64'),
     fetch: async (url, options) => {
       if (url === './status.json') return { ok: false };

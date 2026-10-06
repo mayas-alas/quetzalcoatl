@@ -11,6 +11,7 @@
 ## Integration
 - Commit and push after each verified milestone.
 - Do not change shared contract without an explicit coordinator message.
-- Current mission: CLI-only onboarding. Coordinator assigns disjoint paths and exclusively runs tests, builds, installs, and live acceptance; workers edit code/docs only.
+- Current mission: Pocket ID login for the PWA, explicit group access and safe local logout; `.AGENTS/30-pwa-auth.md` defines the approved scope. CLI-only privileged onboarding remains unchanged. Coordinator assigns disjoint paths and exclusively runs tests, builds, installs, and live acceptance; workers edit code/docs only.
+- Auth milestone v0.1.71: installed/upgrade NodeReady, credentials preserved, anonymous boundary verified and isolated signed-OIDC group/logout/replay checks pass. Real Pocket passkey/group/logout acceptance is blocked on human interaction; never convert protocol tests into a personal acceptance claim. Proxmox ebtables/pending-changes warnings remain a separate limitation.
 - Keep generated builds under `target/` and `build/`; publish immutable versioned files under `releases/` only after verification. No scratch reports in product directories.
 - Report tested commands, commit SHA, and remaining blocker.

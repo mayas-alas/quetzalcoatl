@@ -12,7 +12,8 @@ const computeLink = document.querySelector('#compute-link');
 const rustfsDot = document.querySelector('#rustfs-dot');
 const rustfsVersion = document.querySelector('#rustfs-version');
 const rustfsState = document.querySelector('#rustfs-state');
-const rustfsToggle = document.querySelector('#rustfs-toggle');
+const servicesToggle = document.querySelector('#services-toggle');
+const servicesState = document.querySelector('#services-state');
 const rustfsLink = document.querySelector('#rustfs-link');
 const githubForm = document.querySelector('#github-config');
 const githubState = document.querySelector('#github-state');
@@ -117,21 +118,24 @@ function renderStatus(status) {
   }));
 
   const workloads = Array.isArray(safeStatus.workloads) ? safeStatus.workloads : [];
+  // 'rustfs' is the legacy IPC ownership key for the shared services guest;
+  // it is not the semantic name of the machine or identity/network services.
   const rustfs = workloads.find(workload => workload && workload.workload === 'rustfs');
   const running = rustfs?.state === 'running';
   const healthyWorkload = running && rustfs?.service === 'healthy';
   rustfsDot.className = `dot ${healthyWorkload ? 'pass' : running ? 'attention' : 'pending'}`;
   rustfsVersion.textContent = rustfs?.version ? `RustFS ${safeText(rustfs.version)}` : 'Almacenamiento de objetos';
   rustfsState.textContent = healthyWorkload
-    ? 'Máquina encendida y servicio operativo.'
+    ? 'Almacenamiento operativo.'
     : running
-      ? 'Máquina encendida; el servicio requiere atención.'
-      : 'Máquina apagada; los datos permanecen guardados.';
+      ? 'El almacenamiento requiere atención.'
+      : 'Almacenamiento detenido; los datos permanecen guardados.';
   rustfsLink.hidden = !healthyWorkload;
-  rustfsToggle.href = running ? 'gnx://workloads/rustfs/stop' : 'gnx://workloads/rustfs/start';
-  rustfsToggle.setAttribute('aria-checked', String(running));
-  rustfsToggle.setAttribute('aria-label', `${running ? 'Apagar' : 'Encender'} RustFS`);
-  rustfsToggle.classList.toggle('on', running);
+  servicesState.textContent = running ? 'LXC compartido encendido.' : 'LXC compartido apagado.';
+  servicesToggle.href = running ? 'gnx://workloads/private-services/stop' : 'gnx://workloads/private-services/start';
+  servicesToggle.setAttribute('aria-checked', String(running));
+  servicesToggle.setAttribute('aria-label', `${running ? 'Apagar' : 'Encender'} servicios privados`);
+  servicesToggle.classList.toggle('on', running);
 
   for (const [name, result, label] of [
     ['pocket', rustfs?.pocket_id, 'Pocket ID'],
@@ -150,11 +154,42 @@ function renderStatus(status) {
   }
 }
 
-async function refreshStatus() {
+let sessionEnded = false;
+let statusTimer;
+function clearPrivateView() {
+  sessionEnded = true;
+  if (statusTimer) window.clearInterval(statusTimer);
+  githubForm.reset();
+  document.querySelector('main').hidden = true;
+}
+async function logout(event) {
+  event.preventDefault();
+  clearPrivateView();
   try {
-    const response = await fetch('./status.json', { cache: 'no-store' });
+    const response = await fetch('/logout', { method: 'POST', credentials: 'same-origin', cache: 'no-store', redirect: 'follow' });
+    if (!response.ok) throw new Error('logout failed');
+    window.location.replace('/signed-out');
+  } catch (_) {
+    // Never claim the server session was deleted after a network failure.
+    document.querySelector('#session-message').textContent = 'No se pudo confirmar el cierre de sesión. Reconecta y vuelve a pulsar Cerrar sesión.';
+  }
+}
+const logoutButton = document.querySelector('#logout');
+if (isTrustedAppOrigin) logoutButton.addEventListener('click', logout);
+
+async function refreshStatus() {
+  if (sessionEnded) return;
+  try {
+    const response = await fetch('./status.json', { cache: 'no-store', redirect: 'manual' });
+    if (response.status === 401 || response.status === 403 || response.type === 'opaqueredirect'
+        || (response.ok && !response.headers.get('content-type')?.includes('application/json'))) {
+      clearPrivateView();
+      window.location.replace('/oauth2/sign_in?rd=%2F');
+      return;
+    }
     if (!response.ok) throw new Error('status unavailable');
-    renderStatus(await response.json());
+    const status = await response.json();
+    if (!sessionEnded) renderStatus(status);
   } catch (_) {
     statusTitle.textContent = 'Estado no disponible';
     statusMessage.textContent = 'No se pudo leer el último estado confirmado del nodo.';
@@ -164,11 +199,22 @@ async function refreshStatus() {
 
 if (isTrustedAppOrigin) {
   void refreshStatus();
-  window.setInterval(() => void refreshStatus(), 15000);
+  statusTimer = window.setInterval(() => void refreshStatus(), 15000);
+}
+
+if (isTrustedAppOrigin) {
+  // BFCache must not restore private DOM after logout or session expiry.
+  window.addEventListener('pagehide', () => { clearPrivateView(); });
+  window.addEventListener('pageshow', event => { if (event.persisted) window.location.reload(); });
 }
 
 if (isTrustedAppOrigin && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    void navigator.serviceWorker.register('./sw.js', { scope: './' });
+    // Only update existing legacy registrations. Registering the retirement
+    // worker anew on every load would unregister+navigate in a reload loop.
+    void navigator.serviceWorker.getRegistrations().then(registrations => Promise.all(
+      registrations.filter(registration => registration.scope === 'https://app.gnx/')
+        .map(registration => registration.update())
+    ));
   });
 }

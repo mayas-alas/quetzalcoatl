@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Create a dedicated PWA client and access group. Never enroll a person."""
+import json
+import os
+import stat
+import sys
+import urllib.request
+import urllib.error
+from pathlib import Path
+
+BASE = Path('/var/lib/gnx/access')
+GROUP = 'gnx-app-users'
+CALLBACK = 'https://app.gnx/oauth2/callback'
+
+
+def private(path):
+    st = path.lstat()
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or stat.S_IMODE(st.st_mode) != 0o600:
+        raise ValueError('permissions')
+    return path.read_text()
+
+
+def main():
+    if os.geteuid() != 0 or len(sys.argv) != 1:
+        raise ValueError('arguments')
+    credential = json.loads(private(BASE / 'pwa-client.json'))
+    cid = credential['client_id']
+    if not cid.startswith('gnx-app-') or len(cid) != 24:
+        raise ValueError('client')
+    key = dict(line.split('=', 1) for line in private(BASE / 'pocket-id.env').splitlines())['STATIC_API_KEY']
+
+    def request(method, path, body=None):
+        req = urllib.request.Request('http://127.0.0.1:1411/api/' + path,
+                                     data=json.dumps(body).encode() if body is not None else None,
+                                     headers={'X-API-Key': key, 'Content-Type': 'application/json'}, method=method)
+        with urllib.request.urlopen(req, timeout=15) as response:
+            return json.load(response)
+
+    marker = BASE / 'pwa-client-owned.json'
+    if marker.exists() and json.loads(private(marker))['client_id'] != cid:
+        raise ValueError('ownership')
+    try:
+        client = request('GET', 'oidc/clients/' + cid)
+        if not marker.exists():
+            raise ValueError('unowned existing client')
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        # Persist the creation intent before mutation; a random product client ID
+        # and unchanged protected credential make interrupted retries idempotent.
+        if not marker.exists():
+            fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, 'w') as f:
+                json.dump({'client_id': cid}, f)
+                f.flush()
+                os.fsync(f.fileno())
+        client = request('POST', 'oidc/clients', {
+            'id': cid, 'name': 'GnX App', 'isPublic': False, 'pkceEnabled': True,
+            'callbackURLs': [CALLBACK], 'skipConsent': False,
+            'requiresReauthentication': True, 'isGroupRestricted': True,
+            'accessTokenDurationMinutes': 5, 'refreshTokenDurationMinutes': 15,
+        })
+    if client.get('isPublic') or client.get('callbackURLs') != [CALLBACK] or not client.get('pkceEnabled'):
+        raise ValueError('client drift')
+    groups = request('GET', 'user-groups?search=gnx-app-users')['data']
+    matches = [group for group in groups if group['name'] == GROUP]
+    if len(matches) > 1:
+        raise ValueError('ambiguous group')
+    group = matches[0] if matches else request('POST', 'user-groups', {'name': GROUP, 'friendlyName': 'Acceso a GnX App'})
+    # Reuse only this explicitly named business access group; never edit its members.
+    request('PUT', 'oidc/clients/' + cid + '/allowed-user-groups', {'userGroupIds': [group['id']]})
+    secret_marker = BASE / 'pwa-client-secret.json'
+    if not secret_marker.exists():
+        secret = request('POST', 'oidc/clients/' + cid + '/secrets', {'secret': credential['client_secret']})
+        fd = os.open(secret_marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as f:
+            json.dump({'id': secret['id']}, f)
+    final = request('GET', 'oidc/clients/' + cid)
+    if not final.get('isGroupRestricted') or {g['id'] for g in final.get('allowedUserGroups', [])} != {group['id']}:
+        raise ValueError('group restriction')
+    print('{"event":"app_oidc_linked","group":"gnx-app-users","personal_enrollment":"required"}')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError, KeyError, urllib.error.URLError):
+        print('{"event":"error","code":"APP_AUTH_ENROLL_FAILED"}', file=sys.stderr)
+        raise SystemExit(1)

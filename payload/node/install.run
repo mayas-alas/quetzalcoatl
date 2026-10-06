@@ -45,7 +45,7 @@ for unit in mesh dns gateway compute; do [[ -f "$payload_dir/services/$unit.cont
 [[ -f "$payload_dir/services/platform.target" && -f "$payload_dir/services/gnx-ingress.service" && -f "$payload_dir/verify.run" ]] || die PAYLOAD_INVALID
 [[ -f "$payload_dir/gateway/routes.conf" && -f "$payload_dir/network/ingress.nft" ]] || die PAYLOAD_INVALID
 [[ -f "$payload_dir/compute/install-tls.sh" && -f "$payload_dir/compute/lxc.run" ]] || die PAYLOAD_INVALID
-[[ -f "$payload_dir/workloads/rustfs/Containerfile" && -f "$payload_dir/workloads/rustfs/rustfs.container" && -f "$payload_dir/workloads/rustfs/pocket-id.container" && -f "$payload_dir/workloads/rustfs/netbird-server.container" && -f "$payload_dir/workloads/rustfs/netbird-config.run" && -f "$payload_dir/workloads/rustfs/netbird-dashboard.container" && -f "$payload_dir/workloads/rustfs/install.run" ]] || die PAYLOAD_INVALID
+[[ -f "$payload_dir/workloads/private-services/Containerfile" && -f "$payload_dir/workloads/private-services/rustfs.container" && -f "$payload_dir/workloads/private-services/pocket-id.container" && -f "$payload_dir/workloads/private-services/netbird-server.container" && -f "$payload_dir/workloads/private-services/netbird-config.run" && -f "$payload_dir/workloads/private-services/netbird-dashboard.container" && -f "$payload_dir/workloads/private-services/install.run" ]] || die PAYLOAD_INVALID
 [[ -d "$payload_dir/web-app" ]] || die WEB_APP_MISSING
 
 runtime_dir=/var/lib/gnx-node
@@ -151,7 +151,7 @@ wait_for_mesh_auth() {
 
 runtime_https_ready() {
   [[ -r "$ca_dir/gateway-ca.pem" && -r "$ca_dir/backend-ca.pem" ]] || return 1
-  curl --fail --silent --connect-timeout 1 --max-time 2 --cacert "$ca_dir/gateway-ca.pem" --resolve app.gnx:443:127.0.0.1 https://app.gnx/ >/dev/null 2>&1 || return 1
+  python3 "$payload_dir/auth/verify.run" >/dev/null 2>&1 || return 1
   curl --fail --silent --connect-timeout 1 --max-time 2 --cacert "$ca_dir/gateway-ca.pem" --resolve compute.gnx:443:127.0.0.1 https://compute.gnx/ >/dev/null 2>&1 || return 1
   curl --fail --silent --connect-timeout 1 --max-time 2 --cacert "$ca_dir/backend-ca.pem" --resolve compute.gnx:8006:127.0.0.1 https://compute.gnx:8006/ >/dev/null 2>&1
 }
@@ -317,6 +317,12 @@ if [[ "$mode" == reconcile ]]; then
   mesh_authenticated || die MESH_AUTHENTICATION_FAILED
   generate_ca_material
   configure_private_dns
+  install -d -m 0755 "$runtime_dir/auth-public"
+  install -m 0644 "$payload_dir/auth/signed-out.html" "$runtime_dir/auth-public/signed-out.html"
+  python3 "$payload_dir/auth/configure.run" || die APP_AUTH_CONFIG_FAILED
+  # Reconcile gateway mounts as well as routes; auth public pages are a new mount.
+  install -m 0644 "$payload_dir/services/gateway.container" /etc/containers/systemd/gateway.container
+  systemctl daemon-reload
   install -m 0755 "$payload_dir/compute/lxc.run" "$runtime_dir/lxc.run"
   systemctl restart dns.service >/dev/null 2>&1 || die DNS_START_FAILED
   emit reconciled
@@ -342,12 +348,15 @@ install -d -m 0700 "$runtime_dir/mesh" "$runtime_dir/dns" "$runtime_dir/compute"
 install -d -m 0755 "$dnsmasq_dir" "$compute_systemd_dir/pveproxy.service.d"
 write_compute_hostname
 generate_ca_material
-install -d -m 0755 "$runtime_dir/web-app"
+install -d -m 0755 "$runtime_dir/web-app" "$runtime_dir/auth-public"
+install -m 0644 "$payload_dir/auth/signed-out.html" "$runtime_dir/auth-public/signed-out.html"
+python3 "$payload_dir/auth/configure.run" || die APP_AUTH_CONFIG_FAILED
 install -m 0755 "$payload_dir/compute/install-tls.sh" "$compute_hook_dir/install-tls.sh"
 install -m 0755 "$payload_dir/compute/lxc.run" "$runtime_dir/lxc.run"
 rm -rf -- "$runtime_dir/workloads/rustfs"
 install -d -m 0755 "$runtime_dir/workloads/rustfs"
-cp -a "$payload_dir/workloads/rustfs/." "$runtime_dir/workloads/rustfs/"
+# Runtime path is retained as an upgrade compatibility alias, not a service name.
+cp -a "$payload_dir/workloads/private-services/." "$runtime_dir/workloads/rustfs/"
 chmod 0755 "$runtime_dir/workloads/rustfs/install.run"
 chmod 0644 "$runtime_dir/workloads/rustfs/Containerfile" "$runtime_dir/workloads/rustfs/rustfs.container" "$runtime_dir/workloads/rustfs/pocket-id.container" "$runtime_dir/workloads/rustfs/netbird-server.container" "$runtime_dir/workloads/rustfs/netbird-dashboard.container"
 chmod 0755 "$runtime_dir/workloads/rustfs/netbird-config.run"
@@ -442,6 +451,7 @@ if mesh_authenticated; then
      python3 -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("state") == "running" else 1)' <<< "$guest_status"; then
     bash "$runtime_dir/lxc.run" start rustfs || die ACCESS_WORKLOAD_APPLY_FAILED
   fi
+  bash "$payload_dir/auth/install.run" || die APP_AUTH_APPLY_FAILED
   verify_output=$(wait_for_runtime_ready) || { printf '%s\n' "$verify_output"; die VERIFY_FAILED; }
   printf '%s\n' "$verify_output"
 else
