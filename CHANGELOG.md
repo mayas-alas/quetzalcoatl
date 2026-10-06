@@ -4,6 +4,25 @@ Los cambios pendientes no equivalen a una release publicada. Cada release conser
 
 ## [Unreleased]
 
+Sin cambios pendientes de release.
+
+## [0.1.72] — 2026-10-06
+
+[Notas](releases/v0.1.72/RELEASE_NOTES.md) · [Artefacto y hash](releases/v0.1.72/ARTIFACT.md) · [Evidencia](docs/validation/v0.1.72/README.md).
+
+- Corrige el 500 del callback Pocket con `email_verified=false`: identidad por
+  `sub` firmado y acceso por grupo; sin bypass de firma, nonce, CSRF o grupos.
+- Fix empaquetado en Burn/MSI offline; upgrade exacto instalado exit 0,
+  `gnx 0.1.72`, NodeReady y 53 checks runtime + payload actual pass.
+- SID, CA, credenciales Windows/OIDC/RustFS/Pocket y directorios persistentes
+  preservados; compute no recreado. Login personal observado con el hotfix.
+- 66 tests Rust, 16 checks OIDC aislados y 6 escenarios del MSI compilado pass.
+  El upgrade real omite cleanup destructivo en MSI viejo/nuevo.
+- No se ejecutó desinstalación destructiva ni se prueban host limpio/cold boot,
+  peers reales o logout/revocación Pocket personal completos.
+
+## [0.1.71] — candidato histórico
+
 - Candidato v0.1.71: OAuth2 Proxy/Pocket ID/Valkey protegen la PWA completa,
   grupos explícitos y logout local con revocación del servidor. Sin migración
   a NetBird, personas inventadas ni asignación automática de membresías.

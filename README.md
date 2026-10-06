@@ -34,19 +34,23 @@ seguridad de Hugging Face asociado al historial o al contenido del dataset.
 
 [Changelog](CHANGELOG.md) · [Release histórica v0.1.57](docs/releases/v0.1.57/RELEASE_NOTES.md)
 
-### v0.1.71: PWA protegida, aceptación Pocket personal pendiente
+### v0.1.72: corregido el 500 después del login Pocket
 
-Login por Pocket ID con OAuth2 Proxy, grupo `gnx-app-users` y sesiones del
-servidor en Valkey. Sin migración de la red a NetBird. La máquina compartida se
-llama **servicios privados**; RustFS es solamente su almacenamiento. Se conservan
-los identificadores persistentes y los datos.
+La PWA usa el `sub` firmado de Pocket y el grupo `gnx-app-users`, no depende de
+un correo verificado. Conserva OAuth2 Proxy, sesiones Valkey, PKCE/nonce/CSRF
+y logout seguro. El hotfix permitió acceso personal real; esta release incorpora
+el fix al instalador offline y su actualización exacta llegó a **NodeReady**.
+Identidad, CA, credenciales y directorios persistentes preservados.
 
-[Notas del candidato](releases/v0.1.71/RELEASE_NOTES.md) ·
-[Guía de acceso y recuperación](docs/pwa-access.md) ·
-[Pruebas y límites](docs/validation/v0.1.71/README.md).
+[Descarga y hash](releases/v0.1.72/ARTIFACT.md) ·
+[Notas](releases/v0.1.72/RELEASE_NOTES.md) ·
+[Guía de acceso](docs/pwa-access.md) ·
+[Pruebas y límites](docs/validation/v0.1.72/README.md).
 
-Hay pruebas aisladas del proxy real para grupos, CSRF, nonce, logout/replay y
-fallo de sesiones. No equivalen a completar una passkey personal en Pocket.
+66 tests Rust, 16 checks OIDC aislados, 53 checks runtime + payload actual y
+6 escenarios de condiciones del MSI aprobados. **No se hizo desinstalación
+destructiva real**; ni se declara logout/revocación Pocket personal o tráfico
+entre peers completamente aceptados. Sin migración de la red a NetBird.
 
 ### v0.1.67: historial de disponibilidad de servicios
 
