@@ -1,6 +1,6 @@
 # Inspección de servicios AI y Continuity
 
-Estado: **ampliación de alcance e inspección, no feature desplegado**.
+Estado: **inspección y cliente BYOP parcial con pruebas aisladas, no feature desplegado**.
 La release instalada sigue siendo v0.1.72. No se construyó ni publicó un nuevo
 installer, no se aplicó un hotfix y no se creó/modificó el guest AI en esta inspección.
 
@@ -91,6 +91,58 @@ Resultado: **32 passed, 0 failed, 1 ignored**.
 Las pruebas generan sus salidas normales bajo el `target/` del componente y sus
 fixtures propios; no se añadieron scripts temporales ni se alteraron datos
 productivos. No se reutilizaron ni imprimieron credenciales S3.
+
+## Inspección de prerequisitos y cliente BYOP
+
+Inspector versionado: `tests/node-runtime/inspect-ai.ps1` + `inspect-ai.run`.
+Usa la identidad dedicada existente con su credencial DPAPI sólo en memoria y
+transfiere el programa fijo de sólo lectura por stdin. No coloca runners en
+Windows Temp ni cambia payload/servicios/credenciales en vivo. Descubre el guest
+compartido por tag de ownership y rechaza ausencia/duplicados, sin calcular VMID.
+
+Comando ejecutado:
+
+```text
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/node-runtime/inspect-ai.ps1
+```
+
+Informe sanitizado durable: [runtime-inspection.jsonl](runtime-inspection.jsonl).
+Observado:
+
+- Sólo guest `100`, compartido; no guest AI creado.
+- Imagen Continuity del almacén guest: digest
+  `sha256:1afd94a9bccb26985160f3557ce4477f246247f2d93619d3d0add11298e0cd56`.
+  Todavía no es prueba de exportación/importación del bundle nuevo.
+- Health Continuity: `scope=business`, `ready=true`, generación `0`,
+  proyección ready y réplica enabled/sin pending/error. Con generación cero esto
+  **no prueba escritura remota ni permisos/restore de un nuevo prefijo S3**.
+- Management no requiere nuevo setup. La credencial existente permite consultar
+  users y las APIs `reverse-proxies/clusters` y `reverse-proxies/proxy-tokens`;
+  ambas devuelven HTTP 200 y count 0. No se expusieron valores ni se mintió un
+  token. Lectura autenticada no equivale a aceptación de creación/registro.
+
+Se implementó `payload/node/workloads/ai/proxy-enroll.run` siguiendo la API
+v0.80.0 de tokens de cuenta y custom domains. No usa el token global del management,
+no adopta registros sin ownership y falla ante cluster shared/offline, dominio sin
+verificar, token revocado o plaintext perdido tras interrupción. No se ha integrado
+con el provisioner/installer ni se ha activado en el runtime.
+
+Pruebas en memoria, sin red ni archivos temporales:
+
+```text
+PYTHONDONTWRITEBYTECODE=1 python3 tests/test-ai-proxy-enrollment.py
+node tests/test-static-contracts.mjs
+```
+
+Resultado: **13 pruebas BYOP pasan**; contratos estáticos y lifecycle in-memory
+existentes también pasan. No son prueba de TLS, DNS CNAME real, cuenta/cluster
+conectado, OAuth de aplicaciones o provisioning AI.
+
+Guías leídas: Custom Domains (actualizada 2026-09-12) y Bring Your Own Proxy
+(actualizada 2026-09-30), más schemas/handlers/validator de NetBird v0.80.0.
+Caddy sigue siendo la entrada TLS; el proxy oficial hace el registro account-scoped.
+La selección de apex/custom domains públicos o privados está pendiente de la
+persona operadora. No se sustituyó ese dato por un dominio ficticio.
 
 ## Trabajo aún no acreditado
 

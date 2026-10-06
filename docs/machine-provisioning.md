@@ -1,7 +1,8 @@
 # Máquinas dedicadas y publicación de servicios
 
-Estado: alcance del siguiente update, **no implementación desplegada**.
+Estado: implementación parcial de enrolamiento BYOP, **no feature desplegado**.
 La release instalada sigue siendo v0.1.72. No aplicar este feature como hotfix.
+El cliente BYOP tiene pruebas aisladas; falta el provisioner/stack AI y su build/aceptación.
 
 ## Objetivo
 
@@ -132,6 +133,50 @@ binario o compatibilidad con el management instalado**. Antes de activarlo:
    `*_FILE` ni meter credenciales en argv/Git/browser/logs.
 5. Mantener Caddy para la ruta privada actual. Evitar colisión de listeners TLS y
    tráfico de auth; no sustituir el login app.gnx con la incorporación del proxy.
+
+### BYOP con nuestro Caddy y custom domains
+
+Requisito confirmado por la persona operadora: Caddy conserva la entrada HTTPS;
+el contenedor oficial NetBird se vincula a un **account cluster**, no a un cluster
+shared mediante el `authSecret` global del management. Caddy no implementa ese
+registro gRPC y no sustituye la imagen oficial.
+
+Topología de entrada propuesta: cliente → Caddy HTTPS → proxy NetBird HTTPS
+verificado → backend del servicio. Listeners separados, Host original conservado,
+headers forwarded saneados y confianza sólo en el frontend esperado. Caddy puede
+terminar TLS, pero no desactivar la validación del backend. Si Caddy ocupa 443,
+no dejar ACME tls-alpn-01 del proxy esperando un challenge que Caddy no le entrega:
+usar certificados leaf/static propios o una estrategia explícita compatible.
+Nunca compartir la clave firmante de la CA.
+
+- `NB_PROXY_DOMAIN` define el apex del cluster. El dominio integrado self-hosted
+  es `{subdomain}.{cluster-apex}`; no tiene el nonce/domino cloud de NetBird.
+- Los custom domains se registran contra ese cluster y requieren CNAME verificable.
+  Una entrada Caddy o DNS A sola no acredita ownership ante NetBird.
+- El DNS debe cubrir el apex, los subdominios de servicios y la verificación del
+  custom domain. Comprobar contra el resolver que realmente usa management.
+  La implementación v0.80.0 consulta `validation.<custom-domain>`; el wildcard
+  CNAME descrito en la guía debe resolver también ese nombre.
+- Sólo declarar el cluster conectado cuando su API indica `type=account`,
+  `online=true` y `connected_proxies>0`; comprobar además health del proceso y
+  `management_connected`/`initial_sync_complete` antes de afirmar data-plane listo.
+- Un custom domain debe figurar `validated=true` con `target_cluster` correcto.
+  No alterar directamente DB/flags ni registrar un dominio sin DNS listo: los
+  pendientes caducan a las 48 horas según la guía actual.
+- `.gnx` conserva su carácter privado y usa la CA privada; no equivale a un dominio
+  público registrado ni habilita acceso desde Internet. Falta confirmar si se
+  usarán nombres privados o cuáles son los dominios registrados bajo control del
+  operador. No inventar ese dominio, su DNS público o autorización para abrir puertos.
+
+Código parcial: `payload/node/workloads/ai/proxy-enroll.run`, pensado para ejecutarse
+localmente en private-services durante el futuro provisioning. Consume config y
+PAT por archivos root `0600`, crea token account-scoped, exige ownership, y verifica
+cluster/custom domain. No emite valores, no rota tokens automáticamente ni adopta
+registros ajenos. **No está conectado todavía al lifecycle del instalador**, no
+se ejecutó contra la API con mutaciones ni crea por sí solo el guest/Quadlets AI.
+
+Las guías verificadas son [Custom Domains](https://docs.netbird.io/manage/reverse-proxy/custom-domains)
+y [BYOP / shared y account clusters](https://docs.netbird.io/manage/reverse-proxy/bring-your-own-proxy#shared-and-account-clusters).
 
 Referencias upstream:
 [README](https://github.com/netbirdio/netbird/blob/v0.80.0/proxy/README.md),
