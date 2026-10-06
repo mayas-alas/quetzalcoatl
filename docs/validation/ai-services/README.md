@@ -4,6 +4,30 @@ Estado: **inspección y cliente BYOP parcial con pruebas aisladas, no feature de
 La release instalada sigue siendo v0.1.72. No se construyó ni publicó un nuevo
 installer, no se aplicó un hotfix y no se creó/modificó el guest AI en esta inspección.
 
+## Corrección del formato y del alcance de implementación
+
+La persona operadora rechazó los nuevos archivos Python, las plantillas `.in`
+y el scaffolding paralelo al ciclo de vida existente. Se detuvieron los workers
+y se retiraron esos prototipos, incluido el controlador AI Python y la integración
+Rust/IPC incompleta que dependía de él. No se alteró el checkout dirty de Voice.
+
+La definición queda en `payload/node/workloads/ai/profile.json` y seis Quadlets
+reales `.container`, con referencias OCI por digest y sin placeholders. El perfil
+identifica un LXC no privilegiado, almacenamiento AI independiente, la identidad
+Tailscale `gnx-ai` con estado propio y el gateway privado. El empaquetador
+`installer/scripts/package-ai.run` es shell; comprueba los Quadlets existentes,
+no genera configuración desde plantillas ni cambia el código del componente.
+
+Validación de este bloque: `node tests/test-ai-profile.mjs` (13 contratos de
+**definición**, no aceptación runtime), suite estática existente y sintaxis Bash.
+El generador Quadlet también se utiliza en modo `--dryrun`, sin arrancar servicios.
+La integración debe añadirse al adaptador LXC y al enrolamiento existentes; no hay
+un segundo controlador. Registro de manifiestos en S3/Continuity, OAuth por app,
+TLS/DNS/Caddy, enrolamiento AI y aceptación real siguen pendientes. Estos archivos
+no prueban que exista un LXC AI ni que se haya generado una release nueva. Voice
+permanece explícitamente deshabilitado para inferencia hasta disponer de sus
+credenciales; una API token interna no habilita audio ni acredita billing.
+
 ## Fuente Continuity confirmada
 
 La persona operadora indicó `C:\Users\mayas\continuity`; es exactamente el

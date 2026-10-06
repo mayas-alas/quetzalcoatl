@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Host-user packaging of verified OCI build inputs. Never a deployed runner.
+# Runtime uses real, version-controlled Quadlets; this does not render templates.
+set -Eeuo pipefail
+umask 077
+fail() { printf 'AI packaging: %s\n' "$1" >&2; exit 1; }
+[[ $(id -u) != 0 && $# == 0 ]] || fail INVALID_CALLER
+for tool in jq skopeo podman tar sha256sum node; do command -v "$tool" >/dev/null || fail BUILD_TOOL_MISSING; done
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+build="$root/build/ai"
+payload="$root/payload/node/workloads/ai"
+images="$build/images"
+[[ -r "$build/voice-source.json" ]] || fail VOICE_PROVENANCE_REQUIRED
+# The component snapshot is a separate build input. Never copy dirty checkout,
+# credentials, node_modules or publisher identity during node packaging.
+jq -e '.distribution_overrides["@modelcontextprotocol/sdk"] == "1.31.0" and (.packaged_sha256 | test("^[a-f0-9]{64}$"))' "$build/voice-source.json" >/dev/null || fail VOICE_SECURITY_OVERRIDE_REQUIRED
+[[ $(node -p "require(process.argv[1]).dependencies['@modelcontextprotocol/sdk']" "$build/voice-source/package.json") == 1.31.0 ]] || fail VOICE_DEPENDENCY_DRIFT
+(cd "$build/voice-source" && npm audit --omit=dev --audit-level=high >/dev/null) || fail VOICE_DEPENDENCY_AUDIT_FAILED
+for name in voice oryx omniroute continuity netbird-proxy; do
+  [[ -f "$images/$name.oci.tar" ]] || fail IMAGE_BUILD_INPUT_REQUIRED
+done
+# Saving an existing Docker-digest reference as OCI preserves a stale name.
+# Normalize only index annotations; do not modify manifest/config/layer blobs.
+continuity="$build/continuity-oci"
+mkdir -p "$continuity"
+tar -xf "$images/continuity.oci.tar" -C "$continuity"
+jq '.manifests |= map(.annotations = ((.annotations // {}) + {"org.opencontainers.image.ref.name":"localhost/continuity:0.2.0", "io.containerd.image.name":"localhost/continuity:0.2.0"}))' "$continuity/index.json" > "$continuity/index.json.new"
+mv -- "$continuity/index.json.new" "$continuity/index.json"
+tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf "$images/continuity.oci.tar.new" -C "$continuity" oci-layout index.json blobs
+mv -- "$images/continuity.oci.tar.new" "$images/continuity.oci.tar"
+manifest="$build/images.json.new"
+jq -n --slurpfile source "$build/voice-source.json" '{schema:1,voice_source:$source[0],images:{}}' > "$manifest"
+store="$HOME/.local/share/gnx-build/ai-import"
+for name in voice oryx omniroute continuity netbird-proxy; do
+  repository="localhost/gnx/$name"
+  [[ $name != continuity ]] || repository=localhost/continuity
+  archive="$images/$name.oci.tar"
+  digest="sha256:$(skopeo inspect --raw "oci-archive:$archive" | sha256sum | awk '{print $1}')"
+  reference="$repository@$digest"
+  checksum=$(sha256sum "$archive" | awk '{print $1}')
+  bytes=$(stat -c %s "$archive")
+  declared=$(awk -F= '$1 == "Image" {print $2}' "$payload/$name.container")
+  [[ "$declared" == "$reference" ]] || fail QUADLET_IMAGE_DRIFT
+  podman --root "$store" --runroot "$store-run" --storage-driver vfs load -i "$archive" >/dev/null
+  podman --root "$store" --runroot "$store-run" --storage-driver vfs image exists "$reference" || fail IMAGE_IMPORT_IDENTITY_FAILED
+  jq --arg name "$name" --arg image "$reference" --arg archive "$name.oci.tar" --arg sha256 "$checksum" --argjson bytes "$bytes" '.images[$name]={image:$image,archive:$archive,sha256:$sha256,bytes:$bytes}' "$manifest" > "$manifest.next"
+  mv -- "$manifest.next" "$manifest"
+done
+mv -- "$manifest" "$payload/images.json"
+tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -I 'gzip -1 -n' -cf "$payload/offline.tar.gz" -C "$images" continuity.oci.tar netbird-proxy.oci.tar omniroute.oci.tar oryx.oci.tar voice.oci.tar
+(cd "$payload" && sha256sum offline.tar.gz > offline.sha256)
+printf '%s\n' 'AI OCI bundle verified; this is build evidence, not live service acceptance.'

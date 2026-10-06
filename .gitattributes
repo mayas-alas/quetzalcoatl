@@ -41,9 +41,11 @@ payload/host/gnx-node-rootfs.tar.sha256 -filter -diff -merge text eol=lf
 
 # Workload archive is a sealed dataset build input, never a Space/Git LFS object.
 payload/node/workloads/private-services/offline.tar.gz -filter -diff -merge -text
+payload/node/workloads/ai/offline.tar.gz -filter -diff -merge -text
 payload/node/auth/offline.tar.gz -filter -diff -merge -text
 
-# Linux runtime entrypoints must remain executable with POSIX line endings.
+# Linux build helpers and runtime entrypoints use POSIX line endings.
+installer/scripts/*.run text eol=lf
 payload/node/*.run text eol=lf
 payload/node/**/*.run text eol=lf
 payload/node/**/*.container text eol=lf

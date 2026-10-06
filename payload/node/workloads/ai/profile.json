@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "kind": "gnx.machine.profile",
+  "name": "ai",
+  "driver": "proxmox-lxc",
+  "unprivileged": true,
+  "payload_dir": "/opt/gnx/workloads/ai",
+  "quadlet_dir": "/etc/containers/systemd",
+  "hostname": "ai",
+  "ownership_tag": "gnx-ai",
+  "cores": 4,
+  "memory_mib": 4096,
+  "rootfs_gib": 24,
+  "template": "debian-13-standard_13.6-1_amd64.tar.zst",
+  "template_sha512": "4c0c27ca6ceab5ef0b84db57825a00f26157ef1854bafe97297813e1cbe8ecb8cc9c453cab6b3b0efe1ba193a50c47ece1e41d950e411b8730b835b71e9e754b",
+  "cluster_domain": "proxy.gnx",
+  "custom_domain": "ai.gnx",
+  "origins": {
+    "voice": "https://voice.ai.gnx",
+    "oryx": "https://oryx.ai.gnx",
+    "omniroute": "https://omniroute.ai.gnx",
+    "continuity": "https://continuity.ai.gnx"
+  },
+  "network": {"subnet": "10.89.50.0/24", "gateway": "10.89.50.1", "compute_gateway": "10.88.0.1", "quadlet": "ai.network", "guard_unit": "workload-mesh-guard.service"},
+  "mesh": {"hostname": "gnx-ai", "quadlet": "workload-mesh.container", "state_dir": "/var/lib/gnx/ai/mesh", "enrollment_key_file": "/var/lib/gnx/ai/mesh/enrollment.key", "copy_existing_identity": false},
+  "quadlets": ["voice.container", "oryx.container", "omniroute.container", "continuity.container", "netbird-proxy.container", "workload-mesh.container"],
+  "services": {"voice": {"ip": "10.89.50.10", "port": 18000}, "oryx": {"ip": "10.89.50.20", "port": 2022}, "omniroute": {"ip": "10.89.50.30", "port": 20128}, "continuity": {"ip": "10.89.50.40", "port": 7310}, "netbird-proxy": {"ip": "10.89.50.50", "port": 8443}},
+  "continuity": {"scope": "ai", "bucket": "continuity", "prefix": "continuity/ai", "ack": "remote"},
+  "public_ingress": false
+}

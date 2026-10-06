@@ -1,0 +1,29 @@
+[Unit]
+Description=GnX OmniRoute inference router
+After=workload-mesh-guard.service
+Requires=workload-mesh-guard.service
+
+[Container]
+Image=localhost/gnx/omniroute@sha256:78ab6b126660bc6091f659afd71b67428fc05c10f654b4d220f4ee20f4959377
+Pull=never
+ContainerName=gnx-omniroute
+Network=ai.network
+IP=10.89.50.30
+NoNewPrivileges=true
+Volume=/var/lib/gnx/ai/omniroute:/app/data
+EnvironmentFile=/var/lib/gnx/ai/secrets/omniroute.env
+Environment=HOSTNAME=0.0.0.0
+Environment=PORT=20128
+Environment=DATA_DIR=/app/data
+Environment=NEXT_TELEMETRY_DISABLED=1
+Environment=AUTH_COOKIE_SECURE=true
+Environment=OMNIROUTE_MEMORY_MB=768
+PodmanArgs=--memory=1024m --cpus=2
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target
