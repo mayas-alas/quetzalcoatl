@@ -41,14 +41,22 @@ captura de una máquina AI ya creada. No se usaron archivos temporales de trabaj
 
 | Máquina | Responsabilidad |
 | --- | --- |
-| `private-services` | RustFS, Pocket ID, NetBird management/server/dashboard y componentes compartidos actuales |
-| `ai` | Voice, cliente mesh y servicios AI explícitamente elegidos |
+| `private-services` | RustFS, Pocket ID, NetBird management/server/dashboard y Continuity `business` actuales |
+| `ai` | Voice, Oryx, OmniRoute, Continuity `ai` y el proxy oficial NetBird BYOP como Quadlets independientes |
 
-El proxy de NetBird es infraestructura de acceso, no parte del proceso Voice.
-Puede ejecutarse como Quadlet aislado en servicios privados si sólo se usa dentro
-de la red. Una entrada pública puede requerir ubicarlo en un host accesible desde
-Internet. No crear una tercera máquina sin esa necesidad y decisión de topología.
-No abrir puertos públicos ni mover servicios existentes automáticamente.
+Alcance ampliado por la persona operadora: usar el NetBird existente para vincular
+el proxy del nuevo LXC a un cluster de su cuenta, sin duplicar management ni
+dashboard. El proxy es infraestructura de acceso, no parte del proceso Voice.
+El dashboard inspeccionado muestra **No clusters available**; tener management
+activo no equivale a tener un cluster BYOP registrado. El update deberá registrar
+el cluster en la cuenta existente y comprobar su conexión antes de afirmar ready.
+Una entrada pública todavía requiere dominio y ubicación alcanzable; no abrir
+puertos públicos, crear otra máquina ni mover servicios actuales implícitamente.
+
+Voice consume servicios remotos de inferencia/Hugging Face y las APIs necesarias
+de Oryx y OmniRoute. Las rutas y modelos se fijan en configuración externa. No
+suponer que Oryx ofrece un endpoint genérico TTS compatible con el adapter Voice:
+validar el contrato upstream y ejecutar una prueba real de audio.
 
 La migración de nombre del LXC existente debe conservar VMID, disco/rootfs,
 cuenta, identidades de red, claves y datos. Hostname/tag y paths que representan
@@ -143,6 +151,65 @@ política de acceso. El proxy es la entrada; Voice puede seguir privado detrás
 del túnel NetBird. La CA privada del nodo no equivale a un certificado público.
 No prometer que un CNAME a `voice.gnx` lo hará accesible desde Internet.
 
+## Continuity, almacenamiento y trazabilidad
+
+Continuity forma parte del nuevo LXC AI. La implementación Rust inspeccionada
+(`C:/Users/mayas/continuity`, commit `d5c8886`) fija **un scope por instancia**;
+el cliente no puede seleccionar otro scope en cada petición. Por ello:
+
+- Conservar `continuity-business`, scope `business`, spool
+  `/var/lib/continuity-business` y prefijo `continuity/business`, sin migrarlos.
+- Crear en AI una instancia de **la misma imagen OCI verificada**, con
+  `CONTINUITY_SCOPE=ai`, spool `/var/lib/continuity-ai`, bucket existente
+  `continuity` y prefijo exclusivo `continuity/ai`. No reconstruir una imagen
+  por scope ni mantener dos archivos de imagen equivalentes en el bundle.
+  Los almacenes Podman independientes de cada LXC sí necesitan importar las
+  capas; deduplicar artefactos no significa compartir sus discos/journals.
+- Un único escritor por prefijo. Nunca montar el spool business en AI ni cambiar
+  su scope. No arrancar dos escritores con el mismo prefijo S3.
+- `CONTINUITY_ACK=remote` y CA pública para HTTPS a RustFS, mediante credencial
+  S3 limitada al prefijo AI. No copiar la clave admin actual de RustFS al guest
+  nuevo, aunque el Quadlet business inspeccionado utilice ese EnvironmentFile.
+- Health real: `/health/ready` debe confirmar materialización y réplica sin
+  pending/error. `Up`, `/health/live` o un `200` genérico no prueban durabilidad.
+- Integrar las cuatro operaciones reales: `continuity.record` →
+  `POST /v1/events`, `continuity.search` → `POST /v1/search`,
+  `continuity.get` → `GET /v1/entities/:id` y `continuity.timeline` →
+  `GET /v1/timeline`. Son nombres lógicos; Continuity no expone por sí solo
+  un servidor MCP. El adapter/registro de herramientas pertenece a la plataforma.
+- La plataforma verifica identidad y consentimiento. El modelo no puede
+  atribuirse un actor humano ni confirmar hechos por declarar `user:` en JSON.
+  No añadir grabación indiscriminada de conversaciones/prompts en el journal.
+
+Continuity aporta contexto y referencias de recursos, no un registry OCI ni
+almacenamiento de blobs administrado. Para release/codebase, guardar en S3
+artefactos/manifests inmutables direccionados por SHA-256 y referencia al commit
+fuente; registrar referencias y hashes en Continuity, no copiar imágenes al
+journal. No presentar un bucket como registry compatible con Distribution sin
+implementar y probar ese protocolo. Separar permisos de publicación del release
+de los permisos del proceso AI. No crear otra instancia `codebase` por defecto:
+la partición y el consumidor de trazabilidad deben quedar explícitos primero.
+
+Redis se reutiliza sólo si la dependencia real lo exige y se comprueban ACL,
+namespace y persistencia. El Valkey actual de sesiones es efímero y no sirve de
+fuente durable del registry ni de Continuity. Oryx upstream incluye Redis en su
+imagen: comprobar su configuración externa y aislamiento antes de prometer que
+usará el existente; no añadir un segundo Quadlet Redis automáticamente. Continuity
+no necesita Redis y OmniRoute usa su almacenamiento SQLite persistente.
+
+Cada aplicación nueva necesita un origen HTTPS privado y un cliente OIDC propio
+de Pocket ID, sin compartir cookies/client secret con `app.gnx`: destinos
+propuestos `voice.gnx`, `oryx.gnx`, `omniroute.gnx` y `continuity.gnx`. Para apps
+sin OIDC nativo, usar el boundary OAuth2 Proxy de la plataforma con callback,
+PKCE, nonce, cookies y autorización explícita por app. Los endpoints internos
+no deben convertirse en una puerta de entrada sin autenticación. No asignar
+personas a grupos automáticamente ni confundir login de navegador con autorización
+de llamadas entre servicios. Definir el transporte interno/adapters y sus límites
+antes de abrir una API fuera del loopback/red privada del workload.
+
+Evidencia de esta ampliación y límites: [inspección AI/Continuity](validation/ai-services/README.md).
+Todavía no hay Quadlets AI instalados ni nueva release del feature.
+
 ## Decisiones/gates pendientes antes del build de feature
 
 - Definir si se desea sólo acceso con cliente NetBird o un enlace de navegador
@@ -154,6 +221,14 @@ No prometer que un CNAME a `voice.gnx` lo hará accesible desde Internet.
   mostrarlas en chat. Permisos/billing HF no se deducen del login del Hub.
 - Diseñar y probar la migración de naming/IPC y la compatibilidad del proxy con
   la versión real del management. Respaldar estado antes de migraciones de DB.
+- Verificar/importar una sola imagen Continuity fijada por digest; provisionar
+  credencial S3 limitada y probar commit/retry/restore en un prefijo de aceptación,
+  separado de `continuity/business` y del journal AI productivo.
+- Comprobar la configuración Redis que Oryx admite, la integración Voice/Oryx/
+  OmniRoute/Continuity y OAuth de cada origen con las versiones fijadas.
+- Publicar la nueva release en el S3 existente con checksum y manifest inmutable;
+  verificar descarga y actualización real. Esto es adicional a la publicación
+  habitual del installer/fuente en Hugging Face, no prueba de registry OCI.
 
 La aceptación del update debe comprobar creación idempotente/ownership de AI,
 no modificación de datos del LXC existente, arranque Quadlets, HTTPS con CA,
