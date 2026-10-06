@@ -55,7 +55,12 @@ fn is_gnx_hosts_line(line: &str) -> bool {
         || names.iter().any(|name| {
             matches!(
                 name.as_str(),
-                "app.gnx" | "compute.gnx" | "rustfs.gnx" | "agents.gnx"
+                "app.gnx"
+                    | "compute.gnx"
+                    | "rustfs.gnx"
+                    | "pocket.gnx"
+                    | "netbird.gnx"
+                    | "agents.gnx"
             )
         })
 }
@@ -110,6 +115,7 @@ mod tests {
             "127.0.0.1 app.gnx compute.gnx # GnX Node"
         ));
         assert!(super::is_gnx_hosts_line("127.0.0.1 agents.gnx"));
+        assert!(super::is_gnx_hosts_line("127.0.0.1 pocket.gnx netbird.gnx"));
         assert!(!super::is_gnx_hosts_line("127.0.0.1 example.test"));
         assert!(!super::is_gnx_hosts_line("# app.gnx documentation"));
     }

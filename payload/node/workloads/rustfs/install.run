@@ -14,15 +14,24 @@ fi
 # Only the verified release bundle supplies dependencies/images, never guest egress.
 install -d -m 0755 /var/lib/gnx/rustfs
 bundle_digest=$(sha256sum /opt/gnx/workloads/rustfs/offline.tar.gz | awk '{print $1}') || die OFFLINE_BOOTSTRAP_REQUIRED
+expected_bundle=$(awk '$2 == "offline.tar.gz" {print $1}' /opt/gnx/workloads/rustfs/offline.sha256)
+[[ "$expected_bundle" =~ ^[a-f0-9]{64}$ && "$bundle_digest" == "$expected_bundle" ]] || die OFFLINE_BUNDLE_DIGEST_INVALID
 if [[ ! -r /var/lib/gnx/rustfs/offline.sha256 || $(< /var/lib/gnx/rustfs/offline.sha256) != "$bundle_digest" ]]; then
   tar -xzf /opt/gnx/workloads/rustfs/offline.tar.gz -C /opt/gnx/workloads/rustfs
   DEBIAN_FRONTEND=noninteractive dpkg -i /opt/gnx/workloads/rustfs/packages/*.deb >/dev/null || die OFFLINE_PACKAGE_INSTALL_FAILED
   podman load -i /opt/gnx/workloads/rustfs/tailscale.tar >/dev/null || die OFFLINE_MESH_IMAGE_REQUIRED
   podman load -i /opt/gnx/workloads/rustfs/rustfs.tar >/dev/null || die OFFLINE_WORKLOAD_IMAGE_REQUIRED
+  podman load -i /opt/gnx/workloads/rustfs/pocket-id.tar >/dev/null || die OFFLINE_POCKET_ID_IMAGE_REQUIRED
+  podman load -i /opt/gnx/workloads/rustfs/netbird-server.tar >/dev/null || die OFFLINE_NETBIRD_SERVER_IMAGE_REQUIRED
+  podman load -i /opt/gnx/workloads/rustfs/netbird-dashboard.tar >/dev/null || die OFFLINE_NETBIRD_DASHBOARD_IMAGE_REQUIRED
+  for name in pocket-id netbird-server netbird-dashboard; do
+    image=$(awk -F= '$1 == "Image" {print $2}' "/opt/gnx/workloads/rustfs/$name.container")
+    podman image exists "$image" || die OFFLINE_ACCESS_IMAGE_REQUIRED
+  done
   printf '%s\n' "$bundle_digest" > /var/lib/gnx/rustfs/offline.sha256
-  rm -rf /opt/gnx/workloads/rustfs/packages /opt/gnx/workloads/rustfs/tailscale.tar /opt/gnx/workloads/rustfs/rustfs.tar
+  rm -rf /opt/gnx/workloads/rustfs/packages /opt/gnx/workloads/rustfs/tailscale.tar /opt/gnx/workloads/rustfs/rustfs.tar /opt/gnx/workloads/rustfs/pocket-id.tar /opt/gnx/workloads/rustfs/netbird-server.tar /opt/gnx/workloads/rustfs/netbird-dashboard.tar
 fi
-for tool in podman nft jq curl openssl; do
+for tool in podman nft jq curl openssl python3; do
   command -v "$tool" >/dev/null 2>&1 || die OFFLINE_BOOTSTRAP_REQUIRED
 done
 [[ -c /dev/net/tun ]] || die GUEST_TUN_REQUIRED
@@ -31,9 +40,10 @@ version=$(podman version --format '{{.Client.Version}}' 2>/dev/null || true)
 ((10#${BASH_REMATCH[1]} > 4 || (10#${BASH_REMATCH[1]} == 4 && 10#${BASH_REMATCH[2]} >= 9))) || die PODMAN_VERSION_UNSUPPORTED
 install -d -m 0755 /etc/containers/systemd
 install -d -m 0755 -o 10001 -g 10001 /var/lib/gnx/rustfs/data /var/lib/gnx/rustfs/logs
+install -d -m 0755 -o 10001 -g 10001 /var/lib/gnx/access/pocket-id
 # Migrate only this workload's fixed volumes; preserve contents, do not follow
-# symlinks. The unprivileged RustFS principal must be able to write existing data.
-chown -R -P --no-dereference 10001:10001 /var/lib/gnx/rustfs/data /var/lib/gnx/rustfs/logs
+# symlinks. The unprivileged service principals must be able to write existing data.
+chown -R -P --no-dereference 10001:10001 /var/lib/gnx/rustfs/data /var/lib/gnx/rustfs/logs /var/lib/gnx/access/pocket-id
 install -d -m 0700 -o 65532 -g 65532 /var/lib/gnx/mesh
 install -m 0755 /opt/gnx/workloads/rustfs/mesh.run /usr/local/libexec/gnx-workload-mesh
 install -m 0644 /opt/gnx/workloads/rustfs/workload-mesh-guard.service /etc/systemd/system/workload-mesh-guard.service
@@ -61,9 +71,39 @@ if [[ ! -s /var/lib/gnx/rustfs/rustfs.env ]]; then
   chmod 0600 /var/lib/gnx/rustfs/rustfs.env.new
   mv /var/lib/gnx/rustfs/rustfs.env.new /var/lib/gnx/rustfs/rustfs.env
 fi
+if [[ ! -s /var/lib/gnx/access/pocket-id.env ]]; then
+  encryption_key=$(openssl rand -hex 32)
+  printf 'ENCRYPTION_KEY=%s\n' "$encryption_key" > /var/lib/gnx/access/pocket-id.env.new
+  unset encryption_key
+  chmod 0600 /var/lib/gnx/access/pocket-id.env.new
+  mv /var/lib/gnx/access/pocket-id.env.new /var/lib/gnx/access/pocket-id.env
+fi
+[[ -f /var/lib/gnx/access/pocket-id.env && ! -L /var/lib/gnx/access/pocket-id.env && $(stat -c %u /var/lib/gnx/access/pocket-id.env) == 0 && $(stat -c %a /var/lib/gnx/access/pocket-id.env) == 600 ]] || die POCKET_SECRET_PERMISSIONS
+if ! grep -q '^STATIC_API_KEY=' /var/lib/gnx/access/pocket-id.env; then
+  printf 'STATIC_API_KEY=%s\n' "$(openssl rand -hex 32)" >> /var/lib/gnx/access/pocket-id.env
+fi
+install -m 0755 /opt/gnx/workloads/rustfs/access-enroll.run /usr/local/libexec/gnx-access-enroll
 podman build --pull=never --tag localhost/gnx/rustfs:1.0.0-gnx.1 /opt/gnx/workloads/rustfs >/dev/null || die IMAGE_BUILD_FAILED
 install -m 0644 /opt/gnx/workloads/rustfs/rustfs.container /etc/containers/systemd/rustfs.container
+install -m 0644 /opt/gnx/workloads/rustfs/pocket-id.container /etc/containers/systemd/pocket-id.container
+install -m 0755 /opt/gnx/workloads/rustfs/netbird-config.run /usr/local/libexec/gnx-netbird-config
+/usr/local/libexec/gnx-netbird-config || die NETBIRD_CONFIG_FAILED
+gateway_ip=$(< /opt/gnx/workloads/rustfs/gateway.ip)
+[[ "$gateway_ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || die GATEWAY_IP_INVALID
+sed "s/GNX_GATEWAY_IP/$gateway_ip/" /opt/gnx/workloads/rustfs/netbird-server.container > /etc/containers/systemd/netbird-server.container
+chmod 0644 /etc/containers/systemd/netbird-server.container
+install -m 0644 /opt/gnx/workloads/rustfs/netbird-dashboard.container /etc/containers/systemd/netbird-dashboard.container
 systemctl daemon-reload
+for name in pocket-id netbird-server netbird-dashboard; do
+  image=$(awk -F= '$1 == "Image" {print $2}' "/opt/gnx/workloads/rustfs/$name.container")
+  podman image exists "$image" || die OFFLINE_ACCESS_IMAGE_REQUIRED
+  systemctl restart "$name.service" >/dev/null || die ACCESS_SERVICE_START_FAILED
+  # Combined relay health reaches the public gateway; the caller publishes
+  # backend DNS and verifies that health after this offline/local installation.
+  if [[ "$name" != netbird-server ]]; then
+    podman healthcheck run "gnx-$name" >/dev/null || die ACCESS_HEALTHCHECK_FAILED
+  fi
+done
 systemctl start rustfs.service >/dev/null || die SERVICE_START_FAILED
 for _ in $(seq 1 90); do
   if systemctl is-active --quiet rustfs.service && podman healthcheck run gnx-rustfs >/dev/null 2>&1; then

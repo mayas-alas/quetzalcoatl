@@ -16,7 +16,10 @@ table inet gnx_workload_mesh {
     chain input {
         type filter hook input priority -150; policy drop;
         iifname "lo" accept
-        iifname "tailscale0" accept
+        iifname "tailscale0" ct state established,related accept
+        # Workload services only; metrics, health and actors remain local.
+        iifname "tailscale0" tcp dport { 443, 1411, 8080, 8081 } accept
+        iifname "tailscale0" udp dport 3478 accept
         iifname "eth0" udp sport 67 udp dport 68 accept
         iifname "eth0" ct state established,related accept
         iifname "eth0" udp dport 41641 accept

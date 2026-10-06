@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Permanent guest-local configuration. Never reset an existing datastore key.
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 077
+fail() { printf '{"event":"error","code":"%s"}\n' "$1" >&2; exit 1; }
+[[ $(id -u) == 0 && $# == 0 ]] || fail NETBIRD_CONFIG_ARGUMENT
+base=/var/lib/gnx/netbird
+install -d -m 0700 "$base"
+install -d -m 0750 -o 10001 -g 10001 "$base/data"
+secret_file="$base/netbird.env"
+if [[ ! -e "$secret_file" ]]; then
+  {
+    printf 'AUTH_SECRET=%s\n' "$(openssl rand -hex 32)"
+    printf 'STORE_ENCRYPTION_KEY=%s\n' "$(openssl rand -base64 32)"
+    printf 'SESSION_COOKIE_ENCRYPTION_KEY=%s\n' "$(openssl rand -base64 32)"
+  } > "$secret_file"
+fi
+[[ -f "$secret_file" && ! -L "$secret_file" && $(stat -c %u "$secret_file") == 0 && $(stat -c %a "$secret_file") == 600 ]] || fail NETBIRD_SECRET_PERMISSIONS
+# Parse data, never source a writable EnvironmentFile as privileged shell code.
+auth_secret=$(awk -F= '$1 == "AUTH_SECRET" {print substr($0,index($0,"=")+1)}' "$secret_file")
+store_key=$(awk -F= '$1 == "STORE_ENCRYPTION_KEY" {print substr($0,index($0,"=")+1)}' "$secret_file")
+cookie_key=$(awk -F= '$1 == "SESSION_COOKIE_ENCRYPTION_KEY" {print substr($0,index($0,"=")+1)}' "$secret_file")
+[[ "$auth_secret" =~ ^[a-f0-9]{64}$ && "$store_key" =~ ^[A-Za-z0-9+/]{43}=$ && "$cookie_key" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail NETBIRD_SECRET_FORMAT
+cat > "$base/config.yaml.new" <<EOF
+server:
+  listenAddress: ":8081"
+  exposedAddress: "https://netbird.gnx:443"
+  stunPorts: [3478]
+  metricsPort: 9091
+  healthcheckAddress: "127.0.0.1:9001"
+  logLevel: "info"
+  logFile: "console"
+  authSecret: "$auth_secret"
+  dataDir: "/var/lib/netbird/"
+  disableAnonymousMetrics: true
+  disableGeoliteUpdate: true
+  auth:
+    issuer: "https://netbird.gnx/oauth2"
+    localAuthDisabled: false
+    signKeyRefreshEnabled: true
+    sessionCookieEncryptionKey: "$cookie_key"
+    dashboardRedirectURIs:
+      - "https://netbird.gnx/nb-auth"
+      - "https://netbird.gnx/nb-silent-auth"
+    dashboardPostLogoutRedirectURIs:
+      - "https://netbird.gnx/"
+    cliRedirectURIs:
+      - "http://localhost:53000/"
+  store:
+    engine: "sqlite"
+    encryptionKey: "$store_key"
+EOF
+unset auth_secret store_key cookie_key
+chown 0:10001 "$base/config.yaml.new"
+chmod 0640 "$base/config.yaml.new"
+# Avoid replacing the bind-mounted inode if the configuration is unchanged.
+if [[ -f "$base/config.yaml" ]] && cmp -s "$base/config.yaml.new" "$base/config.yaml"; then
+  rm -f "$base/config.yaml.new"
+else
+  mv "$base/config.yaml.new" "$base/config.yaml"
+fi

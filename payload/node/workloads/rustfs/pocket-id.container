@@ -1,0 +1,37 @@
+[Unit]
+Description=GnX Pocket ID identity service
+After=workload-mesh.service workload-mesh-guard.service
+Requires=workload-mesh.service workload-mesh-guard.service
+
+[Container]
+Image=localhost/gnx/pocket-id@sha256:9e2f0f60eb7235daa1a41810dedb741f5be88da92cbe4b1811ade5dfef82b255
+ContainerName=gnx-pocket-id
+Pull=never
+Network=host
+User=10001:10001
+DropCapability=all
+NoNewPrivileges=true
+Environment=APP_URL=https://pocket.gnx
+Environment=TRUST_PROXY=100.64.0.0/10,127.0.0.1/32
+Environment=HOST=0.0.0.0
+Environment=ANALYTICS_DISABLED=true
+Environment=VERSION_CHECK_DISABLED=true
+Environment=ICON_LIBRARY_URL=disabled
+Environment=PORT=1411
+EnvironmentFile=/var/lib/gnx/access/pocket-id.env
+Volume=/var/lib/gnx/access/pocket-id:/app/data:Z,U
+HealthCmd=/usr/bin/wget -q --spider --timeout=5 http://127.0.0.1:1411/healthz
+HealthInterval=30s
+HealthRetries=3
+HealthStartPeriod=60s
+HealthOnFailure=kill
+Notify=healthy
+
+[Service]
+Restart=always
+RestartSec=10s
+TimeoutStartSec=3min
+TimeoutStopSec=1min
+
+[Install]
+WantedBy=multi-user.target

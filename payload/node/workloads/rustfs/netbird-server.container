@@ -1,0 +1,42 @@
+[Unit]
+Description=GnX NetBird combined server
+After=workload-mesh.service workload-mesh-guard.service
+Requires=workload-mesh.service workload-mesh-guard.service
+
+[Container]
+Image=localhost/gnx/netbird-server@sha256:c75ce9a743ded882477530932ae060cb810af5d359fa047883ea960059cc1d1a
+ContainerName=gnx-netbird-server
+Pull=never
+Network=host
+# Rendered from the node's enrolled gateway IP by install.run, not public DNS.
+DNS=GNX_GATEWAY_IP
+User=10001:10001
+DropCapability=all
+NoNewPrivileges=true
+Volume=/var/lib/gnx/netbird/data:/var/lib/netbird:Z,U
+Volume=/var/lib/gnx/netbird/config.yaml:/etc/netbird/config.yaml:ro,Z
+Volume=/var/lib/gnx/rustfs/tls/ca.crt:/etc/gnx/gateway-ca.pem:ro,Z
+Environment=SSL_CERT_FILE=/etc/gnx/gateway-ca.pem
+Environment=NB_DISABLE_GEOLOCATION=true
+# Headless initial bootstrap is restricted to the fresh instance; token lasts 1 day.
+Environment=NB_SETUP_PAT_ENABLED=true
+# Upstream /health reports listeners:null in combined/multiplexed mode and
+# therefore 503 even with certificate_valid:true and a functioning relay.
+# Check the real combined management API locally; canonical access-verify.run
+# independently requires gateway gRPC, relay WebSocket and STUN before ready.
+HealthCmd=/bin/bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081; printf "GET /api/instance HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n" >&3; read -r proto code rest <&3; test "$code" = 200'
+HealthInterval=30s
+HealthRetries=3
+HealthStartPeriod=180s
+HealthOnFailure=kill
+# Public relay health is accepted only after gateway/backend DNS publication.
+Notify=conmon
+
+[Service]
+Restart=always
+RestartSec=10s
+TimeoutStartSec=3min
+TimeoutStopSec=1min
+
+[Install]
+WantedBy=multi-user.target

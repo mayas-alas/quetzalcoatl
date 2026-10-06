@@ -4,11 +4,36 @@ Los cambios pendientes no equivalen a una release publicada. Cada release conser
 
 ## [Unreleased]
 
-Sin cambios pendientes.
+Pendiente aceptación personal con passkey y tráfico entre peers reales; no equivale a fallo de disponibilidad de los servicios.
+
+## [0.1.67] — 2026-10-05
+
+[Notas y límites](releases/v0.1.67/RELEASE_NOTES.md). [Evidencia del nodo instalado](docs/validation/v0.1.67/README.md).
+
+- Pocket ID + NetBird combinado + dashboard separados, offline y privados, en el LXC existente.
+- OIDC asociado; gRPC h2c, relay WebSocket y STUN comprobados por el gateway real.
+- Upgrade instalado alcanza `NodeReady`, conservando credenciales; PWA y Firefox muestran servicios operativos y el flujo NetBird → Pocket ID.
+- Preflight ACL bidireccional, STUN forwarding estrecho, readiness protocolario y errores/diagnóstico sanitizados.
+- EXE e input offline en dataset; fuente/notas/evidencia en Space. Sin purga de historial.
+- Login personal completo y tráfico de peers **no demostrados**; candidatos fallidos v0.1.60–v0.1.66 no promovidos.
+
+## [0.1.59] — 2026-10-05
+
+[Notas históricas](docs/releases/v0.1.59/RELEASE_NOTES.md). Entrega previa incompleta: dashboard sin backend combinado; no demuestra login browser ni peers operativos.
+
+- Quadlets en el LXC gestionado para `pocket-id` y `netbird-dashboard`, con imágenes incluidas en el bundle offline, `Pull=never`, volúmenes persistentes y sin publicar puertos underlay.
+- Accesos privados nuevos `https://pocket.gnx` y `https://netbird.gnx` por Caddy/TLS del nodo, DNS split y hosts loopback; backends sólo por mesh (`*.mesh.gnx`).
+- Pocket ID genera `ENCRYPTION_KEY` persistente y NetBird dashboard queda parametrizado contra Pocket ID como autoridad OIDC.
+
+## [0.1.58] — 2026-10-05
+
+[Notas históricas](docs/releases/v0.1.58/RELEASE_NOTES.md).
+
+- Candidato con Quadlets y rutas iniciales; reemplazado por v0.1.59 para incluir las imágenes offline y la validación browser completa sin depender de descarga runtime.
 
 ## [0.1.57] — 2026-10-05
 
-[Notas y validación](releases/v0.1.57/RELEASE_NOTES.md) · [Hashes](releases/v0.1.57/SHA256SUMS.txt).
+[Notas históricas](docs/releases/v0.1.57/RELEASE_NOTES.md).
 
 - Status no entra en un distro manualmente detenido: primero inspecciona `wsl --list --running` bajo la identidad dedicada y proyecta reconciliación pendiente. Así no arranca compute por consultar el checkpoint.
 - Misma imagen limpia `9.2.21-gnx.2`; no necesita recreación al aplicar este cambio sólo de host.

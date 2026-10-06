@@ -43,5 +43,12 @@ payload/node/workloads/rustfs/offline.tar.gz -filter -diff -merge -text
 
 # Linux runtime entrypoints must remain executable with POSIX line endings.
 payload/node/*.run text eol=lf
+payload/node/**/*.run text eol=lf
+payload/node/**/*.container text eol=lf
+payload/node/**/*.service text eol=lf
+payload/node/**/*.nft text eol=lf
+payload/node/**/*.conf text eol=lf
+tests/*.py text eol=lf
+tests/*.run text eol=lf
 releases/**/*.msi filter=lfs diff=lfs merge=lfs -text
 releases/**/*.exe filter=lfs diff=lfs merge=lfs -text

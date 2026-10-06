@@ -629,6 +629,13 @@ pub fn reconcile_ingress() -> io::Result<()> {
     if !platform.status.success() {
         return Err(io::Error::other("PLATFORM_START_FAILED"));
     }
+    let access = run_wsl(
+        "/bin/bash",
+        &["/opt/gnx/payload/node/compute/reconcile-access.run"],
+    )?;
+    if !access.status.success() {
+        return Err(runtime_error(&access));
+    }
     Ok(())
 }
 
@@ -651,6 +658,10 @@ pub struct WorkloadStatus {
     pub state: String,
     pub service: String,
     pub version: String,
+    #[serde(default)]
+    pub pocket_id: String,
+    #[serde(default)]
+    pub netbird: String,
 }
 
 #[cfg(windows)]
@@ -675,6 +686,8 @@ pub fn workload_status() -> io::Result<WorkloadStatus> {
             state: "off".into(),
             service: "available".into(),
             version: "1.0.0-gnx.1".into(),
+            pocket_id: "stopped".into(),
+            netbird: "stopped".into(),
         });
     }
     parse_workload_status(&run_wsl(
@@ -690,6 +703,8 @@ pub fn workload_status() -> io::Result<WorkloadStatus> {
         state: "off".into(),
         service: "available".into(),
         version: "1.0.0-gnx.1".into(),
+        pocket_id: "stopped".into(),
+        netbird: "stopped".into(),
     })
 }
 
@@ -719,6 +734,8 @@ pub fn control_workload(_state_dir: &Path, start: bool) -> io::Result<WorkloadSt
         state: if start { "running" } else { "off" }.into(),
         service: if start { "healthy" } else { "stopped" }.into(),
         version: "1.0.0-gnx.1".into(),
+        pocket_id: if start { "healthy" } else { "stopped" }.into(),
+        netbird: if start { "healthy" } else { "stopped" }.into(),
     })
 }
 
@@ -812,6 +829,24 @@ pub fn runtime_checks(state_dir: &Path) -> io::Result<Vec<crate::state::RuntimeC
         "compute_gateway_https",
         "compute_https",
         "dns_rustfs",
+        "dns_pocket",
+        "dns_netbird",
+        "access_services",
+        "access_mesh_tcp_443",
+        "access_mesh_tcp_1411",
+        "access_mesh_tcp_8080",
+        "access_mesh_tcp_8081",
+        "access_mesh_udp_3478",
+        "access_mesh_gateway_tcp_53",
+        "access_mesh_gateway_udp_53",
+        "access_mesh_gateway_tcp_443",
+        "pocket_oidc_https",
+        "netbird_oidc_https",
+        "netbird_dashboard_https",
+        "netbird_management_grpc",
+        "netbird_signal_grpc",
+        "netbird_relay_websocket",
+        "netbird_stun",
         "rustfs_gateway_https",
     ];
     let output = run_wsl(
@@ -897,7 +932,14 @@ fn compute_diagnostic() -> io::Result<String> {
     use std::fmt::Write as _;
     // Diagnostics must not materialize the installed payload or change runtime.
     let mut report = String::new();
+    let access_diagnostic = path_arg(&payload_dir().join("compute/access-diagnose.run"));
+    let grpc_diagnostic = path_arg(&payload_dir().join("compute/access-grpc-diagnose.run"));
     for (label, program, args) in [
+        (
+            "access-transport",
+            "/bin/bash",
+            vec![access_diagnostic.as_str()],
+        ),
         (
             "release",
             "/usr/bin/podman",
@@ -963,12 +1005,68 @@ fn compute_diagnostic() -> io::Result<String> {
             vec!["exec", "gnx-compute", "/usr/sbin/pvesm", "status"],
         ),
         (
+            "access-grpc-metadata",
+            "/usr/bin/python3",
+            vec![grpc_diagnostic.as_str()],
+        ),
+        (
+            "access-protocols",
+            "/usr/bin/python3",
+            vec!["/var/lib/gnx-node/access-verify.run"],
+        ),
+        (
+            "netbird-health-command",
+            "/usr/bin/podman",
+            vec!["exec", "gnx-compute", "/usr/sbin/pct", "exec", "100", "--", "/usr/bin/podman", "inspect", "--format", "{{.Config.Healthcheck.Test}}", "gnx-netbird-server"],
+        ),
+        (
+            "netbird-health-http",
+            "/usr/bin/podman",
+            vec!["exec", "gnx-compute", "/usr/sbin/pct", "exec", "100", "--", "/usr/bin/curl", "--silent", "--max-time", "15", "http://127.0.0.1:9001/health"],
+        ),
+        (
+            "access-backend-services",
+            "/usr/bin/podman",
+            vec!["exec", "gnx-compute", "/usr/sbin/pct", "exec", "100", "--", "/usr/bin/podman", "ps", "--format", "{{.Names}} {{.Status}}"],
+        ),
+        (
+            "access-backend-discovery",
+            "/usr/bin/podman",
+            vec!["exec", "gnx-compute", "/usr/sbin/pct", "exec", "100", "--", "/usr/bin/curl", "--fail", "--silent", "--show-error", "--max-time", "5", "http://127.0.0.1:1411/.well-known/openid-configuration"],
+        ),
+        (
+            "access-backend-resolution",
+            "/usr/bin/podman",
+            vec!["exec", "gnx-dns", "dig", "+short", "+time=1", "+tries=1", "@127.0.0.1", "-p", "5353", "pocket.mesh.gnx", "A"],
+        ),
+        (
+            "stun-unit",
+            "/usr/bin/systemctl",
+            vec!["status", "netbird-stun.service", "--no-pager", "--lines=8"],
+        ),
+        (
+            "stun-journal",
+            "/usr/bin/journalctl",
+            vec!["-u", "netbird-stun.service", "--no-pager", "-n", "12"],
+        ),
+        (
+            "stun-forwarding",
+            "/usr/sbin/sysctl",
+            vec!["-n", "net.ipv4.ip_forward"],
+        ),
+        (
+            "access-backend-dns",
+            "/usr/bin/cat",
+            vec!["/var/lib/gnx-node/dnsmasq.d/03-rustfs.conf"],
+        ),
+        (
             "rustfs",
             "/opt/gnx/payload/node/compute/lxc.run",
             vec!["diagnose", "rustfs"],
         ),
     ] {
-        let mut bounded_args = vec!["--kill-after=5", "25", program];
+        let bound = if label == "access-protocols" { "90" } else { "25" };
+        let mut bounded_args = vec!["--kill-after=5", bound, program];
         bounded_args.extend(args);
         let output = run_wsl("/usr/bin/timeout", &bounded_args)?;
         let _ = writeln!(report, "--- {label} (exit={}) ---", output.status);
@@ -994,22 +1092,39 @@ pub fn diagnose_compute_file(state_dir: &Path) -> io::Result<()> {
     std::fs::write(state_dir.join("compute-diagnostic.txt"), report)
 }
 
+#[cfg(any(windows, test))]
+fn runtime_error_code(stderr: &str) -> String {
+    // Parse JSON, not serialization whitespace. Accept only bounded stable codes,
+    // never arbitrary diagnostic text or authentication response values.
+    stderr.lines().find_map(|line| {
+        let value: serde_json::Value = serde_json::from_str(line).ok()?;
+        let code = value.get("code")?.as_str()?;
+        (!code.is_empty() && code.len() <= 80
+            && code.bytes().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_'))
+            .then(|| code.to_owned())
+    }).unwrap_or_else(|| "RUNTIME_FAILED".into())
+}
+
 #[cfg(windows)]
 fn runtime_error(output: &std::process::Output) -> io::Error {
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    // Runtime diagnostics are JSONL and must never leak credentials into the
-    // progress store. Keep only a short, non-secret classification here.
-    let code = stderr
-        .lines()
-        .find_map(|line| line.split("\"code\":\"").nth(1))
-        .and_then(|v| v.split('\"').next())
-        .unwrap_or("RUNTIME_FAILED");
-    io::Error::other(code.chars().take(80).collect::<String>())
+    io::Error::other(runtime_error_code(&String::from_utf8_lossy(&output.stderr)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_error_accepts_json_whitespace_without_leaking_diagnostics() {
+        for line in [r#"{"code":"ACCESS_MESH_POLICY_REQUIRED"}"#,
+            r#"{"event": "error", "code": "ACCESS_MESH_POLICY_REQUIRED"}"#] {
+            assert_eq!(runtime_error_code(line), "ACCESS_MESH_POLICY_REQUIRED");
+        }
+        for line in ["private diagnostic text", r#"{"code":"secret=value"}"#,
+            r#"{"code":"lowercase_error"}"#, r#"{"code":12}"#, "{invalid}"] {
+            assert_eq!(runtime_error_code(line), "RUNTIME_FAILED");
+        }
+    }
 
     #[test]
     fn payload_validation_rejects_missing_contract() {

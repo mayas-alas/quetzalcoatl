@@ -29,7 +29,7 @@ find_vmid() {
   printf '%s' "$found"
 }
 status() {
-  local vmid state version="1.0.0-gnx.1" service=unknown
+  local vmid state version="1.0.0-gnx.1" service=unknown pocket_id=stopped netbird=stopped
   vmid=$(find_vmid)
   if [[ -z "$vmid" ]]; then
     printf '{"workload":"rustfs","state":"off","service":"absent","version":"%s"}\n' "$version"
@@ -44,10 +44,15 @@ status() {
          https://rustfs.gnx/rustfs/console/ >/dev/null 2>&1; then service=healthy
     else service=attention
     fi
+    pocket_id=attention; netbird=attention
+    if pve /usr/sbin/pct exec "$vmid" -- /usr/bin/podman healthcheck run gnx-pocket-id >/dev/null 2>&1; then pocket_id=healthy; fi
+    if pve /usr/sbin/pct exec "$vmid" -- /usr/bin/podman healthcheck run gnx-netbird-server >/dev/null 2>&1 &&
+       pve /usr/sbin/pct exec "$vmid" -- /usr/bin/podman healthcheck run gnx-netbird-dashboard >/dev/null 2>&1 &&
+       pve /usr/sbin/pct exec "$vmid" -- /usr/bin/test -f /var/lib/gnx/access/oidc-linked.json; then netbird=healthy; fi
   else
     state=off; service=stopped
   fi
-  printf '{"workload":"rustfs","state":"%s","service":"%s","version":"%s"}\n' "$state" "$service" "$version"
+  printf '{"workload":"rustfs","state":"%s","service":"%s","version":"%s","pocket_id":"%s","netbird":"%s"}\n' "$state" "$service" "$version" "$pocket_id" "$netbird"
 }
 configure_network() {
   local vmid=$1
@@ -87,12 +92,16 @@ install_bundle() {
   rm -rf -- "$stage"
   install -d -m 0700 "$stage"
   cp -a /opt/gnx/payload/node/workloads/rustfs/. "$stage/"
+  local gateway_ip
+  gateway_ip=$(podman exec gnx-mesh tailscale ip -4) || return 1
+  [[ "$gateway_ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  printf '%s\n' "$gateway_ip" > "$stage/gateway.ip"
   podman exec gnx-compute /usr/bin/rm -rf -- /tmp/gnx-rustfs-bundle || return 1
   podman cp "$stage"/. gnx-compute:/tmp/gnx-rustfs-bundle || return 1
   rm -rf -- "$stage"
   pve /usr/sbin/pct exec "$vmid" -- /usr/bin/mkdir -p /usr/local/libexec /opt/gnx/workloads/rustfs /etc/containers/systemd || return 1
   pve /usr/sbin/pct push "$vmid" /tmp/gnx-rustfs-bundle/install.run /usr/local/libexec/gnx-install-rustfs --perms 0755 || return 1
-  for file in Containerfile rustfs.container mesh.run mesh.nft workload-mesh.container workload-mesh-guard.service networkd-mesh-guard.conf offline.tar.gz; do
+  for file in Containerfile rustfs.container pocket-id.container netbird-server.container netbird-dashboard.container netbird-config.run access-enroll.run gateway.ip mesh.run mesh.nft workload-mesh.container workload-mesh-guard.service networkd-mesh-guard.conf offline.tar.gz offline.sha256; do
     pve /usr/sbin/pct push "$vmid" "/tmp/gnx-rustfs-bundle/$file" "/opt/gnx/workloads/rustfs/$file" --perms 0644 || return 1
   done
   install_tls "$vmid" || return 1
@@ -148,14 +157,23 @@ publish_dns() {
   [[ "$ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail WORKLOAD_DNS_FAILED
   # The public hostname belongs to the existing Caddy gateway. Only this
   # backend record points to the workload's enrolled mesh identity.
-  printf 'address=/rustfs.mesh.gnx/%s\n' "$ip" > /var/lib/gnx-node/dnsmasq.d/03-rustfs.conf
+  printf 'address=/rustfs.mesh.gnx/%s\naddress=/pocket.mesh.gnx/%s\naddress=/netbird.mesh.gnx/%s\n' "$ip" "$ip" "$ip" > /var/lib/gnx-node/dnsmasq.d/03-rustfs.conf
   chmod 0644 /var/lib/gnx-node/dnsmasq.d/03-rustfs.conf
   systemctl restart dns.service || fail WORKLOAD_DNS_FAILED
+  systemctl restart netbird-stun.service || fail STUN_POLICY_FAILED
+  python3 /var/lib/gnx-node/access-mesh-policy.run || fail ACCESS_MESH_POLICY_REQUIRED
   for _ in {1..15}; do
     if [[ $(podman exec gnx-dns dig +short +time=1 +tries=1 @127.0.0.1 -p 5353 rustfs.mesh.gnx A 2>/dev/null) == "$ip" ]]; then
       curl --proto '=https' --fail --silent --connect-timeout 2 --max-time 5 \
         --cacert /var/lib/gnx-node/ca/gateway-ca.pem --resolve rustfs.gnx:443:127.0.0.1 \
         https://rustfs.gnx/rustfs/console/ >/dev/null || fail WORKLOAD_GATEWAY_HTTPS_FAILED
+      for url in https://pocket.gnx/.well-known/openid-configuration https://netbird.gnx/api/instance; do
+        curl --proto '=https' --fail --silent --connect-timeout 2 --max-time 10 \
+          --cacert /var/lib/gnx-node/ca/gateway-ca.pem \
+          --resolve pocket.gnx:443:127.0.0.1 --resolve netbird.gnx:443:127.0.0.1 "$url" >/dev/null || fail ACCESS_GATEWAY_HTTPS_FAILED
+      done
+      pve /usr/sbin/pct exec "$vmid" -- /usr/local/libexec/gnx-access-enroll || fail ACCESS_OIDC_ENROLLMENT_FAILED
+      pve /usr/sbin/pct exec "$vmid" -- /usr/bin/podman healthcheck run gnx-netbird-server >/dev/null || fail NETBIRD_RELAY_HEALTH_FAILED
       return 0
     fi
     sleep 1

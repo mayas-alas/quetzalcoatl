@@ -9,7 +9,7 @@ y su distro WSL2 `gnx-node`. Podman/systemd ejecutan cuatro capacidades:
 | --- | --- | --- |
 | `mesh` | Tailscale | Red privada, `/dev/net/tun` |
 | `dns` | Pi-hole | Split DNS privado `gnx` |
-| `gateway` | Caddy | HTTPS para `app.gnx`, `compute.gnx` y `rustfs.gnx` |
+| `gateway` | Caddy | HTTPS privado para `app.gnx`, `compute.gnx`, `rustfs.gnx`, `pocket.gnx` y `netbird.gnx` |
 | `compute` | Imagen sellada Proxmox | KVM y HTTPS interno `8006` |
 
 Desde v0.1.2, **Setup es una CLI Rust mínima**. v0.1.4 la publica como `gnx` en el PATH del host, permite rotar de forma segura la contraseña de Proxmox y conserva el flujo de actualización. No hay WebView2, assets locales
@@ -151,6 +151,33 @@ sidecar para el backend de Caddy. Caddy consulta Pi-hole en loopback:5353 y vali
 CA y nombre `rustfs.gnx` del backend. La política del tailnet debe permitir al
 nodo gateway conectar a los servicios RustFS en TCP 443; no se abre el underlay.
 La salud del workload exige también HTTPS del dashboard a través de Caddy.
+
+Pocket ID, NetBird combined server y su dashboard separado comparten el LXC
+administrado de RustFS, su identidad mesh y el bundle offline. No sustituyen
+el transporte Tailscale del nodo. Caddy conserva los nombres públicos privados
+`pocket.gnx`/`netbird.gnx`; los nombres `*.mesh.gnx` son exclusivamente backend.
+Las imágenes nuevas están fijadas al digest **importado del archive offline**,
+no al digest incidental de un almacén de desarrollo con manifests previos.
+
+La política del tailnet debe permitir **del nodo gateway al LXC administrado**
+TCP `1411` (Pocket ID), `8080` (dashboard), `8081` (backend) y UDP `3478` (STUN),
+además del TCP `443` existente. El retorno **LXC → nodo gateway** necesita DNS
+TCP/UDP `53` y HTTPS TCP `443` para discovery OIDC y salud del relay.
+Sólo los clientes autorizados necesitan UDP
+`3478` hacia el nodo gateway para STUN. No se abren esos puertos en LAN/underlay
+ni se modifica automáticamente la política externa del tailnet. El preflight
+`compute/access-mesh-policy.run` consulta las reglas resueltas del sidecar y
+emite `ACCESS_MESH_POLICY_REQUIRED` cuando faltan permisos. La actualización
+comprueba esa condición antes de detener/reinstalar el workload existente.
+`NODE_READY` también exige discovery HTTPS, dashboard, gRPC y relay/STUN reales;
+una página de login o health local no acredita autenticación.
+
+La asociación OIDC usa un cliente confidencial de Pocket ID y el issuer integrado
+`https://netbird.gnx/oauth2`. El primer bootstrap guarda una identidad local de
+recuperación y un PAT de un día en archivos root `0600`; nunca adopta o resetea una
+cuenta existente sin ownership conocido. El passkey personal requiere la persona
+operadora. Los diagnósticos imprimen salud, conectividad y categorías de errores,
+no variables de entorno, claves, cookies ni respuestas de autenticación.
 
 Tailscale requiere TUN, **no KVM**. Compute requiere `/dev/kvm` funcional y
 virtualización habilitada en firmware/Windows; no se simula disponibilidad.

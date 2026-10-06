@@ -122,9 +122,16 @@ assert.match(routes, /tls_trust_pool file/);
 assert.doesNotMatch(routes, /tls_insecure_skip_verify/);
 assert.match(routes, /protocols h1 h2/);
 assert.doesNotMatch(routes, /protocols[^\n]*h3/);
-assert.equal((routes.match(/Alt-Svc "clear"/g) ?? []).length, 3);
+assert.equal((routes.match(/Alt-Svc "clear"/g) ?? []).length, 5);
 assert.match(routes, /https:\/\/rustfs\.gnx/);
 assert.match(routes, /https:\/\/rustfs\.mesh\.gnx:443/);
+assert.match(routes, /https:\/\/pocket\.gnx/);
+assert.match(routes, /http:\/\/pocket\.mesh\.gnx:1411/);
+assert.match(routes, /https:\/\/netbird\.gnx/);
+assert.match(routes, /http:\/\/netbird\.mesh\.gnx:8080/);
+assert.match(routes, /http:\/\/netbird\.mesh\.gnx:8081/);
+assert.match(routes, /h2c:\/\/netbird\.mesh\.gnx:8081/);
+for (const path of ['signalexchange.SignalExchange', 'management.ManagementService', 'management.ProxyService', '/oauth2', '/relay', '/ws-proxy/']) assert.ok(routes.includes(path));
 
 const ingress = await read('network/ingress.nft');
 assert.match(ingress, /tailscale0/);

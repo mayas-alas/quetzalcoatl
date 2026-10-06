@@ -133,6 +133,21 @@ function renderStatus(status) {
   rustfsToggle.setAttribute('aria-label', `${running ? 'Apagar' : 'Encender'} RustFS`);
   rustfsToggle.classList.toggle('on', running);
 
+  for (const [name, result, label] of [
+    ['pocket', rustfs?.pocket_id, 'Pocket ID'],
+    ['netbird', rustfs?.netbird, 'NetBird'],
+  ]) {
+    const dot = document.querySelector(`#${name}-dot`);
+    const state = document.querySelector(`#${name}-state`);
+    const link = document.querySelector(`#${name}-link`);
+    if (!dot || !state || !link) continue;
+    const ready = healthy && running && result === 'healthy';
+    dot.className = `dot ${ready ? 'pass' : running ? 'attention' : 'pending'}`;
+    state.textContent = ready ? `${label} operativo en el LXC privado.`
+      : running ? `${label} requiere atención; no se afirma que esté listo.`
+        : 'LXC apagado; los datos permanecen guardados.';
+    link.hidden = !ready;
+  }
 }
 
 async function refreshStatus() {

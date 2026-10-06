@@ -1,4 +1,4 @@
-const CACHE = 'gnx-app-v7';
+const CACHE = 'gnx-app-v8';
 const ASSETS = ['./','./index.html','./styles.css','./app.js','./manifest.webmanifest','./icon.svg','./sw.js'];
 const assetUrls = new Set(ASSETS.map(asset => new URL(asset, self.location.href).href));
 

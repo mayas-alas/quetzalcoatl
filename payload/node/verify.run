@@ -47,11 +47,19 @@ if command -v podman >/dev/null 2>&1; then dns_ip=$(podman exec gnx-mesh tailsca
 if valid_ipv4 "$dns_ip" && command -v dig >/dev/null 2>&1 && [[ "$(dig +short +time=2 +tries=1 @"$dns_ip" app.gnx A 2>/dev/null | head -n1)" == "$dns_ip" ]]; then check dns_app pass; else check dns_app fail; fi
 if valid_ipv4 "$dns_ip" && command -v dig >/dev/null 2>&1 && [[ "$(dig +short +time=2 +tries=1 @"$dns_ip" compute.gnx A 2>/dev/null | head -n1)" == "$dns_ip" ]]; then check dns_compute pass; else check dns_compute fail; fi
 if valid_ipv4 "$dns_ip" && command -v dig >/dev/null 2>&1 && [[ "$(dig +short +time=2 +tries=1 @"$dns_ip" rustfs.gnx A 2>/dev/null | head -n1)" == "$dns_ip" ]]; then check dns_rustfs pass; else check dns_rustfs fail; fi
+if valid_ipv4 "$dns_ip" && command -v dig >/dev/null 2>&1 && [[ "$(dig +short +time=2 +tries=1 @"$dns_ip" pocket.gnx A 2>/dev/null | head -n1)" == "$dns_ip" ]]; then check dns_pocket pass; else check dns_pocket fail; fi
+if valid_ipv4 "$dns_ip" && command -v dig >/dev/null 2>&1 && [[ "$(dig +short +time=2 +tries=1 @"$dns_ip" netbird.gnx A 2>/dev/null | head -n1)" == "$dns_ip" ]]; then check dns_netbird pass; else check dns_netbird fail; fi
 # A running workload is not ready merely because its in-guest healthcheck passes.
 # The adapter also validates the private-CA HTTPS path through Caddy.
 if workload_status=$("$runtime_dir/lxc.run" status rustfs 2>/dev/null); then
   if python3 -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin)["state"] == "running" else 1)' <<<"$workload_status"; then
     if python3 -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin)["service"] == "healthy" else 1)' <<<"$workload_status"; then check rustfs_gateway_https pass; else check rustfs_gateway_https fail; fi
+    if python3 -c 'import json,sys; s=json.load(sys.stdin); raise SystemExit(0 if s.get("pocket_id") == "healthy" and s.get("netbird") == "healthy" else 1)' <<<"$workload_status"; then check access_services pass; else check access_services fail; fi
+    if python3 "$runtime_dir/access-mesh-policy.run"; then
+      if ! python3 "$runtime_dir/access-verify.run"; then fail=1; fi
+    else
+      fail=1
+    fi
   fi
 else
   check rustfs_gateway_https fail

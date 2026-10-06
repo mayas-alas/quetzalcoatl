@@ -45,7 +45,7 @@ for unit in mesh dns gateway compute; do [[ -f "$payload_dir/services/$unit.cont
 [[ -f "$payload_dir/services/platform.target" && -f "$payload_dir/services/gnx-ingress.service" && -f "$payload_dir/verify.run" ]] || die PAYLOAD_INVALID
 [[ -f "$payload_dir/gateway/routes.conf" && -f "$payload_dir/network/ingress.nft" ]] || die PAYLOAD_INVALID
 [[ -f "$payload_dir/compute/install-tls.sh" && -f "$payload_dir/compute/lxc.run" ]] || die PAYLOAD_INVALID
-[[ -f "$payload_dir/workloads/rustfs/Containerfile" && -f "$payload_dir/workloads/rustfs/rustfs.container" && -f "$payload_dir/workloads/rustfs/install.run" ]] || die PAYLOAD_INVALID
+[[ -f "$payload_dir/workloads/rustfs/Containerfile" && -f "$payload_dir/workloads/rustfs/rustfs.container" && -f "$payload_dir/workloads/rustfs/pocket-id.container" && -f "$payload_dir/workloads/rustfs/netbird-server.container" && -f "$payload_dir/workloads/rustfs/netbird-config.run" && -f "$payload_dir/workloads/rustfs/netbird-dashboard.container" && -f "$payload_dir/workloads/rustfs/install.run" ]] || die PAYLOAD_INVALID
 [[ -d "$payload_dir/web-app" ]] || die WEB_APP_MISSING
 
 runtime_dir=/var/lib/gnx-node
@@ -131,7 +131,7 @@ write_private_dns() {
   # Pi-hole's BIND mode uses FTLCONF_dns_interface=tailscale0 and adds
   # loopback itself. Keep this file to records only; duplicate interface or
   # listen-address directives make FTL also bind WSL's reserved DNS tunnel.
-  printf 'address=/app.gnx/%s\naddress=/compute.gnx/%s\naddress=/rustfs.gnx/%s\n' "$ip" "$ip" "$ip" > "$dnsmasq_dir/02-gnx.conf"
+  printf 'address=/app.gnx/%s\naddress=/compute.gnx/%s\naddress=/rustfs.gnx/%s\naddress=/pocket.gnx/%s\naddress=/netbird.gnx/%s\n' "$ip" "$ip" "$ip" "$ip" "$ip" > "$dnsmasq_dir/02-gnx.conf"
   chmod 0644 "$dnsmasq_dir/02-gnx.conf"
   # Upgrade the previous direct-dashboard record without changing its enrolled
   # sidecar address. Keep rustfs.gnx owned by the gateway on every Retry.
@@ -285,7 +285,10 @@ generate_ca_material() {
   else
     make_ca gateway-ca '/CN=GnX Node Private Gateway CA'
   fi
-  make_leaf gateway-ca gateway '/CN=GnX Node Gateway' 'DNS:app.gnx,DNS:compute.gnx'
+  if [[ -s "$ca_dir/gateway-cert.pem" ]] && ! openssl verify -CAfile "$ca_dir/gateway-ca.pem" -verify_hostname netbird.gnx "$ca_dir/gateway-cert.pem" >/dev/null 2>&1; then
+    rm -f -- "$ca_dir/gateway-cert.pem" "$ca_dir/gateway-key.pem"
+  fi
+  make_leaf gateway-ca gateway '/CN=GnX Node Gateway' 'DNS:app.gnx,DNS:compute.gnx,DNS:pocket.gnx,DNS:netbird.gnx'
   # Caddy must be able to load its fixed RustFS route before any guest exists.
   # The workload adapter copies this same private-CA leaf into the guest.
   make_leaf gateway-ca rustfs '/CN=rustfs.gnx' 'DNS:rustfs.gnx'
@@ -346,12 +349,17 @@ rm -rf -- "$runtime_dir/workloads/rustfs"
 install -d -m 0755 "$runtime_dir/workloads/rustfs"
 cp -a "$payload_dir/workloads/rustfs/." "$runtime_dir/workloads/rustfs/"
 chmod 0755 "$runtime_dir/workloads/rustfs/install.run"
-chmod 0644 "$runtime_dir/workloads/rustfs/Containerfile" "$runtime_dir/workloads/rustfs/rustfs.container"
+chmod 0644 "$runtime_dir/workloads/rustfs/Containerfile" "$runtime_dir/workloads/rustfs/rustfs.container" "$runtime_dir/workloads/rustfs/pocket-id.container" "$runtime_dir/workloads/rustfs/netbird-server.container" "$runtime_dir/workloads/rustfs/netbird-dashboard.container"
+chmod 0755 "$runtime_dir/workloads/rustfs/netbird-config.run"
 bash "$payload_dir/compute/install-network.run"
 
 for unit in mesh dns gateway compute; do install -m 0644 "$payload_dir/services/$unit.container" "/etc/containers/systemd/$unit.container"; done
 install -m 0644 "$payload_dir/services/platform.target" /etc/systemd/system/platform.target
 install -m 0644 "$payload_dir/services/gnx-ingress.service" /etc/systemd/system/gnx-ingress.service
+install -m 0644 "$payload_dir/services/netbird-stun.service" /etc/systemd/system/netbird-stun.service
+install -m 0755 "$payload_dir/compute/netbird-stun.run" "$runtime_dir/netbird-stun.run"
+install -m 0755 "$payload_dir/compute/access-verify.run" "$runtime_dir/access-verify.run"
+install -m 0755 "$payload_dir/compute/access-mesh-policy.run" "$runtime_dir/access-mesh-policy.run"
 install -m 0644 "$payload_dir/gateway/routes.conf" "$runtime_dir/routes.conf"
 install -m 0644 "$payload_dir/network/ingress.nft" "$runtime_dir/ingress.nft"
 install -m 0755 "$payload_dir/verify.run" "$runtime_dir/verify.run"
@@ -378,6 +386,7 @@ if [[ -n "$mesh_secret_file" ]]; then
 fi
 nft -c -f "$runtime_dir/ingress.nft" >/dev/null 2>&1 || die NFT_INVALID
 systemctl daemon-reload
+systemctl enable netbird-stun.service >/dev/null 2>&1 || die STUN_ENABLE_FAILED
 systemctl enable --now gnx-ingress.service >/dev/null 2>&1 || die NFT_APPLY_FAILED
 # Quadlet applies mesh.container's WantedBy=multi-user.target during generation.
 # Enrollment is a real readiness boundary: before the mesh has an authenticated
@@ -427,6 +436,12 @@ if mesh_authenticated; then
     sleep 1
   done
   for unit in mesh dns gateway compute; do systemctl is-active --quiet "$unit.service" || die "${unit^^}_START_FAILED"; done
+  # An explicit runtime upgrade also reconciles the running, GnX-owned LXC.
+  # Never provision a new guest or wake a stopped guest as an upgrade side effect.
+  if guest_status=$(bash "$runtime_dir/lxc.run" status rustfs) && \
+     python3 -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("state") == "running" else 1)' <<< "$guest_status"; then
+    bash "$runtime_dir/lxc.run" start rustfs || die ACCESS_WORKLOAD_APPLY_FAILED
+  fi
   verify_output=$(wait_for_runtime_ready) || { printf '%s\n' "$verify_output"; die VERIFY_FAILED; }
   printf '%s\n' "$verify_output"
 else

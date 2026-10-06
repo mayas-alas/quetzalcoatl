@@ -32,4 +32,18 @@ seguridad de Hugging Face asociado al historial o al contenido del dataset.
 
 ## Releases
 
-[Changelog](CHANGELOG.md) · [Últimos instaladores](releases/v0.1.57/RELEASE_NOTES.md)
+[Changelog](CHANGELOG.md) · [Release histórica v0.1.57](docs/releases/v0.1.57/RELEASE_NOTES.md)
+
+### v0.1.67: servicios operativos, aceptación personal pendiente
+
+El candidato instalado alcanza `NodeReady`: LXC/RustFS, Pocket ID y NetBird
+combinado + dashboard operativos. El verificador real pasa HTTPS/OIDC, gRPC,
+relay WebSocket y STUN; Firefox confirma el flujo NetBird → Pocket ID.
+
+[Instalador candidato y hashes](releases/v0.1.67/ARTIFACT.md) ·
+[Notas y límites](releases/v0.1.67/RELEASE_NOTES.md) ·
+[Evidencia del nodo real](docs/validation/v0.1.67/README.md).
+
+Falta completar tu alta con passkey en `https://pocket.gnx/setup` y probar peers
+reales. No se presenta una pantalla de login como autenticación completada ni
+un STUN binding como tráfico WireGuard.
