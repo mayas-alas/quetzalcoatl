@@ -142,6 +142,16 @@ Validación documental: nueve Markdown con enlaces locales comprobados, ninguno
 faltante; `git diff --check` limpio. Suite estática, 13 contratos AI y prueba curl
 real/local pasan. No equivalen a build/instalación ni aceptación de los servicios.
 
+## Registro de fuente y publicación
+
+Documentación, reglas e inventario guardados en commit local `81adae7` (nueve
+archivos); no se incluyeron los cambios de producto heredados sin commit.
+El push al remote fuente HF falló: `Storage limit reached for this space (Max: 1 GB)`
+durante la fase LFS. **No afirmar que estos documentos estén publicados.** No se
+purga historial, no se salta la verificación LFS y no se publica el candidato AI
+para sortear esa cuota. Resolver la publicación de documentación sin duplicar
+inputs históricos y mantener el dataset/S3 aprobado para artefactos grandes.
+
 ## Límites del trabajo
 
 No se construyó/instaló/publicó una nueva aplicación en esta tarea de documentación
