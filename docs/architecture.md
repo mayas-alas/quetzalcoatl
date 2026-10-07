@@ -1,5 +1,19 @@
 # GnX Node — arquitectura vigente
 
+## Paradigma de evolución aprobado
+
+Los nuevos requisitos se implementan mediante configuración externa y un único
+lifecycle. No hotfixes en guests ni scripts temporales de trabajo del agente.
+La entrega exige build, instalación, verificación tras restart, evidencia browser
+y publicación de artefactos/inputs offline verificada también en el S3 aprobado.
+Autoridad de agentes: [40-config-driven-deployments](../.AGENTS/40-config-driven-deployments.md).
+
+El motor genérico de perfiles, la clave Tailscale reusable en secret store y la
+carga de bundles Quadlet desde el frontend son **objetivos aprobados**, no funciones
+ya disponibles. [Diseño, límites y baseline](config-driven-platform.md). Las secciones
+siguientes describen el contrato instalado/histórico; no autorizan saltarse su IPC,
+privilegios ni autenticación para adelantar esos objetivos.
+
 ## Decisión
 
 GnX Node instala un servicio Windows Rust, una identidad dedicada `gnxnodesvc`

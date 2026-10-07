@@ -1,8 +1,16 @@
 # Máquinas dedicadas y publicación de servicios
 
-Estado: implementación parcial de enrolamiento BYOP, **no feature desplegado**.
-La release instalada sigue siendo v0.1.72. No aplicar este feature como hotfix.
-El cliente BYOP tiene pruebas aisladas; falta el provisioner/stack AI y su build/aceptación.
+Este documento conserva el diseño y los checkpoints iniciales del caso AI;
+las descripciones de runtime siguientes son **históricas**, no inventario actual.
+El candidato v0.1.78 se instaló y creó el LXC AI, pero sus servicios no tienen
+aceptación completa; véase [evidencia AI](validation/ai-services/README.md).
+No aplicar correcciones como hotfix: fuente → build → instalación → aceptación.
+
+Autoridad actual para agentes: [paradigma config-driven](../.AGENTS/40-config-driven-deployments.md).
+Objetivo genérico, carga desde frontend y medición del núcleo:
+[propuesta de plataforma](config-driven-platform.md). La restricción histórica
+que excluía manifiestos de la PWA describe la implementación actual; el upload
+con admisión segura es ahora un objetivo aprobado, todavía no implementado.
 
 ## Objetivo
 

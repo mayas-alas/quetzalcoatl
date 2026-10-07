@@ -1,12 +1,15 @@
 # Scope
 
 - Product workspace is this repository root: `apps/`, `crates/`, `payload/`, and `installer/`.
+- Mandatory deployment authority: `.AGENTS/40-config-driven-deployments.md`. New services are external configuration consumed by one generic lifecycle, not per-app Rust branches or side scripts. No runtime hotfixes or agent-authored temporary runners. Build, install, validate restart and browser behavior, publish verified artifacts, and clean owned intermediates.
+- Approved target (not implemented yet): constrained Quadlet bundle upload from the authenticated frontend, common CLI lifecycle/logs, independent LXC/mesh identities and protected reusable Tailscale enrollment key. See `docs/config-driven-platform.md`; do not bypass existing privilege/auth boundaries to simulate it.
 - Architecture authority: `docs/architecture.md`. PWA auth authority: `.AGENTS/30-pwa-auth.md` (OAuth2 Proxy + Pocket ID + Valkey, explicit group, local logout; no NetBird migration).
 - Setup is a minimal Rust CLI; no WebView2, local web UI, or browser credential bridge.
 - No localhost HTTP control plane. Setup ↔ host agent uses the secured Windows Named Pipe.
 - Release retention: only the latest validated local `releases/v*/` contains verified Burn (with embedded MSI), notes and hashes. Publish source/notes/hashes in the Hugging Face Space; prefer its release folder for the binary when quota allows, otherwise use the existing `gnx-labs-mx/gnx-node-releases` dataset and link its verified immutable revision. Do not duplicate the MSI; check quota without purging history. Keep binaries out of source Git and explicitly upload the artifact. Older versions retain Markdown only under `docs/releases/`; `CHANGELOG.md` indexes release history. After notes and live validation, use `installer/scripts/verify.ps1 -PublishRelease`; publish via the host user's authenticated WSL, never the dedicated runtime identity. Do not rewrite Git/LFS history.
-- `https://app.gnx` is the unprivileged status/access PWA, never an onboarding client.
+- `https://app.gnx` currently is the unprivileged status/access PWA, never a node-credential onboarding client. The approved workload-upload target requires versioned admission/authorization; it is not permission for arbitrary root commands or a new localhost control plane.
 - Node credentials are entered interactively with echo disabled; never via argv, logs, URLs, or environment variables. The explicit GitHub-only PWA configuration uses an in-memory token against api.github.com; never persist it or bridge it to Windows.
 - Preserve the dedicated identity, WSL distro, CA, and enrolled credentials during upgrades.
 - Do not embed runtime config, Quadlets, gateway rules, or secrets in Rust.
-- Workers use `gpt-5.6-luna`, effort `medium`. For this CLI migration, only the coordinator runs tests, builds, installers, and live verification.
+- Artifacts and offline inputs must additionally be published to the operator-approved existing S3 destination, with immutable manifests and download/hash verification; never invent a bucket/credential or treat S3 blobs as an OCI registry. Existing HF source/release publication remains required. The current source remote is HF, not GitHub.
+- Workers use `gpt-5.6-luna`, effort **high**. Only the coordinator runs tests, builds, installers, live verification and owned cleanup. Existing sessions do not change model merely by editing this policy.
