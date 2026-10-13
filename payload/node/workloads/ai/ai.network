@@ -1,4 +1,0 @@
-[Network]
-NetworkName=gnx-ai
-Subnet=10.89.50.0/24
-Gateway=10.89.50.1

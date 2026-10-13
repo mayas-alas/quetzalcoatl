@@ -1,5 +1,0 @@
-# Sealed OCI copy of upstream docker.io/rustfs/rustfs@sha256:
-# ba0a1b53e36f321c0d46f3867104abef169f7bc59c467c664ddac87e7ddc9a8b
-FROM localhost/gnx/rustfs-upstream@sha256:5732ce075c2788a414bcda63f0f88094dc51389887fb06eadc80bd87775e95a0
-LABEL org.gnx.workload="rustfs" \
-      org.gnx.release="1.0.0-gnx.1"

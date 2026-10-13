@@ -1,19 +1,18 @@
 /build/
 /target/
-# Sealed workload input is versioned in the artifact dataset, not duplicated in Space LFS.
-/payload/node/workloads/private-services/offline.tar.gz
-/payload/node/workloads/ai/offline.tar.gz
-/payload/node/auth/offline.tar.gz
+/.secret/
+/.AGENTS/
 *.msi
 *.exe
-# Release notes/hashes are source; verified binaries are explicitly uploaded.
-# Prefer Space when quota allows; otherwise use the existing artifact dataset.
 *.wixpdb
 *.wixobj
 *.log
 .env
+.env.*
 *.pem
 *.key
+*.secret
+*.dpapi
 /installer/obj/
 /installer/bin/
 /installer/bundle/bin/

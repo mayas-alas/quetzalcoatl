@@ -1,6 +1,0 @@
-{"test":"fresh_cleanup_enabled","result":"pass","scope":"compiled-MSI-condition-only-no-uninstall"}
-{"test":"repair_cleanup_suppressed","result":"pass","scope":"compiled-MSI-condition-only-no-uninstall"}
-{"test":"new_upgrade_cleanup_suppressed","result":"pass","scope":"compiled-MSI-condition-only-no-uninstall"}
-{"test":"complete_uninstall_cleanup_enabled","result":"pass","scope":"compiled-MSI-condition-only-no-uninstall"}
-{"test":"old_upgrade_removal_cleanup_suppressed","result":"pass","scope":"compiled-MSI-condition-only-no-uninstall"}
-{"test":"partial_removal_cleanup_suppressed","result":"pass","scope":"compiled-MSI-condition-only-no-uninstall"}
