@@ -1,9 +1,10 @@
 # Read-only acceptance inspector using the existing managed Windows identity.
 # Fixed program, no arbitrary shell argument and no temporary runner files.
+param([string]$OutputDirectory)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path
 $source = Join-Path $PSScriptRoot 'inspect-ai.run'
-$outputDir = Join-Path $root 'docs\validation\ai-services'
+$outputDir = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $root 'docs\validation\ai-services' }
 $out = Join-Path $outputDir 'runtime-inspection.jsonl'
 $err = Join-Path $outputDir 'runtime-inspection.stderr.txt'
 $account = "$env:COMPUTERNAME\gnxnodesvc"
@@ -31,7 +32,12 @@ try {
     $process = [Diagnostics.Process]::Start($start)
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    $process.StandardInput.Write([IO.File]::ReadAllText($source).Replace("`r`n", "`n"))
+    $caddySource = [IO.File]::ReadAllText((Join-Path $root 'payload\node\gateway\routes.conf')).Replace("`r`n", "`n")
+    $program = [IO.File]::ReadAllText($source).Replace("`r`n", "`n").Replace('__GNX_CADDY_SOURCE__', ($caddySource | ConvertTo-Json -Compress))
+    # The native writer defaults to a Windows code page; stdin Python/Caddy
+    # source must retain UTF-8 (including the installed configuration comments).
+    $inputBytes = [Text.Encoding]::UTF8.GetBytes($program)
+    $process.StandardInput.BaseStream.Write($inputBytes, 0, $inputBytes.Length)
     $process.StandardInput.Close()
     $process.WaitForExit()
     [IO.File]::WriteAllText($out, $stdout.GetAwaiter().GetResult())

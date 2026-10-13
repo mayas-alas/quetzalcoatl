@@ -8,14 +8,24 @@ install -m 0755 "$payload/compute/netbird-stun.run" "$runtime/netbird-stun.run"
 install -m 0755 "$payload/compute/access-verify.run" "$runtime/access-verify.run"
 install -m 0755 "$payload/compute/access-mesh-policy.run" "$runtime/access-mesh-policy.run"
 install -m 0644 "$payload/services/netbird-stun.service" /etc/systemd/system/netbird-stun.service
+install -m 0644 "$payload/services/gnx-workload-transport.service" /etc/systemd/system/gnx-workload-transport.service
 systemctl daemon-reload
-systemctl enable netbird-stun.service >/dev/null
+systemctl enable netbird-stun.service gnx-workload-transport.service >/dev/null
 status=$(bash "$runtime/lxc.run" status rustfs)
 # Never create a new guest or wake a stopped one during an update.
 if python3 -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("state") == "running" else 1)' <<< "$status"; then
   systemctl restart netbird-stun.service
-  python3 "$runtime/access-mesh-policy.run"
+  # start performs the owned guest's resolved ACL check after warm discovery.
   bash "$runtime/lxc.run" start rustfs
 fi
 # Gate the PWA even if Pocket/guest is unavailable: no anonymous fallback.
 bash "$payload/auth/install.run"
+# Shared Pocket clients are independent of optional AI TLS/proxy readiness.
+# Business access must not be held behind an incomplete AI machine.
+if jq -e '.state == "running"' <<< "$status" >/dev/null; then
+  bash "$runtime/lxc.run" auth rustfs
+fi
+# Only the installed, operator-approved profile enables dedicated deployment.
+if [[ -f "$payload/workloads/continuity/profile.json" ]] && jq -e '.deployment.enabled==true' "$payload/workloads/continuity/profile.json" >/dev/null; then
+  bash "$runtime/lxc.run" start continuity
+fi

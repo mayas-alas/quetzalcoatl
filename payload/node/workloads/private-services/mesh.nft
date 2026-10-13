@@ -19,6 +19,9 @@ table inet gnx_workload_mesh {
         iifname "tailscale0" ct state established,related accept
         # Workload services only; metrics, health and actors remain local.
         iifname "tailscale0" tcp dport { 443, 1411, 8080, 8081 } accept
+        # Business HTTP has no application auth: only the Pocket-gated gateway
+        # may reach it. No LAN or direct tailnet-client bypass.
+        iifname "tailscale0" ip saddr $gnx_gateway tcp dport 7310 accept
         iifname "tailscale0" udp dport 3478 accept
         iifname "eth0" udp sport 67 udp dport 68 accept
         iifname "eth0" ct state established,related accept

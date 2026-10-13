@@ -123,7 +123,23 @@ assert.match(routes, /tls_trust_pool file/);
 assert.doesNotMatch(routes, /tls_insecure_skip_verify/);
 assert.match(routes, /protocols h1 h2/);
 assert.doesNotMatch(routes, /protocols[^\n]*h3/);
-assert.equal((routes.match(/Alt-Svc "clear"/g) ?? []).length, 5);
+assert.equal((routes.match(/Alt-Svc "clear"/g) ?? []).length, 9);
+for (const app of ['voice', 'oryx', 'omniroute', 'continuity']) {
+  assert.match(routes, new RegExp(`https://${app}\\.ai\\.gnx`));
+}
+assert.match(routes, /tls_server_name \{\$GNX_AI_TLS_NAME:ai\.invalid\}/);
+const aiBackend = routes.slice(routes.indexOf('(gnx_ai_backend)'), routes.indexOf('(gnx_service_auth)'));
+assert.doesNotMatch(aiBackend, /tls_insecure_skip_verify|tls_trust_pool file/);
+assert.match(aiBackend, /header_up -X-GnX-Backend-Key/);
+assert.match(aiBackend, /import \/etc\/gnx\/ai-auth\/backend\*\.caddy/);
+const enrollment = await read('workloads/ai/enroll.run');
+assert.match(enrollment, /header_auths:\[\{enabled:true,header:"X-GnX-Backend-Key"\}\]/);
+assert.doesNotMatch(enrollment, /bearer_auth:\{enabled:true\}/);
+const gatewayUnit = await read('services/gateway.container');
+assert.match(gatewayUnit, /EnvironmentFile=\/var\/lib\/gnx-node\/secrets\/gateway-backends\.env/);
+assert.doesNotMatch(gatewayUnit, /EnvironmentFile=-/);
+assert.match(gatewayUnit, /UMask=0077/);
+assert.match(gatewayUnit, /ExecStartPre=\/usr\/bin\/touch \/var\/lib\/gnx-node\/secrets\/gateway-backends\.env/);
 assert.match(routes, /https:\/\/rustfs\.gnx/);
 assert.match(routes, /https:\/\/rustfs\.mesh\.gnx:443/);
 assert.match(routes, /https:\/\/pocket\.gnx/);

@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# Trusted guest-local profile installer.  The file is kept at the historical AI
+# path so the installed payload has one common helper; it contains no workload
+# names or application-specific defaults.
+set -Eeuo pipefail
+IFS=$'\n\t'; umask 077
+
+fail() { printf '{"event":"error","code":"%s"}\n' "$1" >&2; exit 1; }
+[[ $(id -u) == 0 && $# == 2 && $1 == --prepare ]] || fail PROFILE_INSTALL_ARGUMENT
+p=$2
+[[ -d "$p" && ! -L "$p" && -f "$p/profile.json" ]] || fail PROFILE_REQUIRED
+expected=$(awk '$2=="bootstrap.tar.gz" {print $1}' "$p/bootstrap.sha256")
+[[ "$expected" =~ ^[a-f0-9]{64}$ && $(sha256sum "$p/bootstrap.tar.gz" | awk '{print $1}') == "$expected" ]] || fail BOOTSTRAP_DIGEST_MISMATCH
+install -d -m 0700 /var/cache/gnx/bootstrap
+tar -xzf "$p/bootstrap.tar.gz" -C /var/cache/gnx/bootstrap
+DEBIAN_FRONTEND=noninteractive dpkg -i /var/cache/gnx/bootstrap/packages/*.deb >/dev/null 2>&1 || fail BOOTSTRAP_PACKAGES_FAILED
+rm -rf -- /var/cache/gnx/bootstrap
+
+json() { jq -er "$1" "$p/profile.json"; }
+name=$(json '.name') || fail PROFILE_INVALID
+[[ "$name" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || fail PROFILE_INVALID
+[[ $(json '.kind') == gnx.machine.profile && $(json '.driver') == proxmox-lxc ]] || fail PROFILE_INVALID
+[[ $(json '.unprivileged') == true && $(json '.public_ingress') == false ]] || fail PROFILE_PRIVILEGE_INVALID
+tag=$(json '.ownership_tag') || fail PROFILE_INVALID
+[[ "$tag" =~ ^gnx-[a-z0-9-]{1,31}$ ]] || fail PROFILE_INVALID
+
+# A profile names an immutable, already admitted runtime input.  The installer
+# never downloads an engine or silently falls back to a distro Podman package.
+runtime_input=$(json '.runtime.input_manifest') || fail RUNTIME_INPUT_REQUIRED
+runtime_archive=$(json '.runtime.input_archive') || fail RUNTIME_INPUT_REQUIRED
+[[ "$runtime_input" =~ ^[a-zA-Z0-9_.-]{1,96}$ && "$runtime_archive" =~ ^[a-zA-Z0-9_.-]{1,128}$ ]] || fail RUNTIME_INPUT_INVALID
+[[ $(json '.runtime.engine') == podman && $(json '.runtime.version') == 6.1.3 ]] || fail RUNTIME_ENGINE_VERSION_INVALID
+[[ -f "$p/$runtime_input" && ! -L "$p/$runtime_input" ]] || fail RUNTIME_INPUT_REQUIRED
+[[ -f "$p/$runtime_archive" && ! -L "$p/$runtime_archive" ]] || fail RUNTIME_INPUT_REQUIRED
+runtime_sha=$(json '.runtime.input_sha256') || fail RUNTIME_INPUT_REQUIRED
+[[ "$runtime_sha" =~ ^[a-f0-9]{64}$ ]] || fail RUNTIME_INPUT_INVALID
+[[ "$runtime_archive" == podman-6.1.3-linux-amd64.tar.gz ]] || fail RUNTIME_INPUT_INVALID
+[[ $(sha256sum "$p/$runtime_archive" | awk '{print $1}') == "$runtime_sha" ]] || fail RUNTIME_INPUT_DIGEST_MISMATCH
+[[ $(jq -e --arg f "$runtime_archive" '.engine=="podman" and .version=="6.1.3" and .archive == $f' "$p/$runtime_input") == true ]] || fail RUNTIME_INPUT_MANIFEST_MISMATCH
+tar -xzf "$p/$runtime_archive" -C / || fail RUNTIME_INSTALL_FAILED
+[[ $(podman --version) == 'podman version 6.1.3' ]] || fail RUNTIME_ENGINE_VERSION_INVALID
+
+# Images are data, not a registry.  Every declared image is pinned and its
+# corresponding OCI archive is verified before import.
+[[ -f "$p/images.json" && -f "$p/offline.sha256" ]] || fail PROFILE_INPUTS_REQUIRED
+mapfile -t image_names < <(jq -er '.images | if type == "object" then keys[] else error end' "$p/images.json") || fail IMAGES_INVALID
+(( ${#image_names[@]} > 0 && ${#image_names[@]} <= 32 )) || fail IMAGES_INVALID
+cache=/var/cache/gnx/workloads/$name
+state=$(json '.state_dir') || fail PROFILE_STATE_INVALID
+secret_dir=$(json '.secrets.directory') || fail PROFILE_SECRETS_INVALID
+[[ "$state" =~ ^/var/lib/gnx/[a-z0-9-]{1,32}$ && "$secret_dir" =~ ^/var/lib/gnx/[a-z0-9-]{1,64}/secrets$ ]] || fail PROFILE_PATH_INVALID
+install -d -m 0700 "$cache"
+
+archive_hash=$(awk '$2 == "offline.tar.gz" {print $1}' "$p/offline.sha256")
+[[ "$archive_hash" =~ ^[a-f0-9]{64}$ && $(sha256sum "$p/offline.tar.gz" | awk '{print $1}') == "$archive_hash" ]] || fail PROFILE_BUNDLE_DIGEST_MISMATCH
+if [[ ! -r "$cache/images.sha256" || $(<"$cache/images.sha256") != "$archive_hash" ]]; then
+  install -d -m 0700 "$cache/images"
+  tar -xzf "$p/offline.tar.gz" -C "$cache/images" || fail PROFILE_ARCHIVE_INVALID
+  for image_name in "${image_names[@]}"; do
+    [[ "$image_name" =~ ^[a-z][a-z0-9-]{0,63}$ ]] || fail IMAGE_NAME_INVALID
+    image_archive=$(jq -er --arg n "$image_name" '.images[$n].archive' "$p/images.json") || fail IMAGES_INVALID
+    image_digest=$(jq -er --arg n "$image_name" '.images[$n].sha256' "$p/images.json") || fail IMAGES_INVALID
+    image_ref=$(jq -er --arg n "$image_name" '.images[$n].image' "$p/images.json") || fail IMAGES_INVALID
+    [[ "$image_archive" == "$image_name.oci.tar" && "$image_digest" =~ ^[a-f0-9]{64}$ ]] || fail IMAGES_INVALID
+    [[ $(sha256sum "$cache/images/$image_archive" | awk '{print $1}') == "$image_digest" ]] || fail IMAGE_DIGEST_MISMATCH
+    [[ "$image_ref" =~ ^[^[:space:]@]+@sha256:[a-f0-9]{64}$ ]] || fail IMAGE_REFERENCE_INVALID
+    podman load -i "$cache/images/$image_archive" >/dev/null 2>&1 || fail IMAGE_IMPORT_FAILED
+    podman image exists "$image_ref" || fail IMAGE_IDENTITY_MISMATCH
+    while read -r unit_image; do
+      [[ -z "$unit_image" ]] || jq -e --arg ref "$unit_image" '[.images[].image] | index($ref) != null' "$p/images.json" >/dev/null || fail QUADLET_IMAGE_MISMATCH
+    done < <(jq -er '.quadlets[]' "$p/profile.json" | while read -r file; do grep '^Image=' "$p/$file" | cut -d= -f2; done)
+  done
+  printf '%s' "$archive_hash" > "$cache/images.sha256"
+  rm -rf -- "$cache/images"
+fi
+
+network=$(json '.network.quadlet') || fail PROFILE_NETWORK_INVALID
+[[ "$network" =~ ^[a-z][a-z0-9-]{0,63}\.network$ && -f "$p/$network" && ! -L "$p/$network" ]] || fail PROFILE_NETWORK_INVALID
+mapfile -t units < <(jq -er '.quadlets[]' "$p/profile.json") || fail PROFILE_UNITS_INVALID
+(( ${#units[@]} > 0 && ${#units[@]} <= 32 )) || fail PROFILE_UNITS_INVALID
+for unit in "${units[@]}"; do
+  [[ "$unit" =~ ^[a-z][a-z0-9-]{0,63}\.container$ && -f "$p/$unit" && ! -L "$p/$unit" ]] || fail PROFILE_UNITS_INVALID
+  grep -q '^Image=[^[:space:]]\+@sha256:[a-f0-9]\{64\}$' "$p/$unit" || fail QUADLET_IMAGE_REQUIRED
+  grep -q '^Pull=never$' "$p/$unit" || fail QUADLET_PULL_POLICY_INVALID
+  grep -q '^Requires=workload-mesh-guard\.service' "$p/$unit" || fail QUADLET_GUARD_REQUIRED
+  ! grep -Eq '^(Privileged|Mount|Volume=.*\.\./)' "$p/$unit" || fail QUADLET_CAPABILITY_INVALID
+done
+
+# Secret references are declarations, never values.  Existing protected files
+# are retained; this helper neither generates credentials nor copies a secret
+# from another workload.
+mapfile -t secret_refs < <(jq -er '.secrets.references[]' "$p/profile.json") || fail PROFILE_SECRETS_INVALID
+(( ${#secret_refs[@]} > 0 && ${#secret_refs[@]} <= 32 )) || fail PROFILE_SECRETS_INVALID
+install -d -m 0755 "$state" /etc/gnx /etc/containers/systemd /etc/systemd/system/systemd-networkd.service.d
+install -d -m 0700 "$secret_dir"
+install -d -m 0700 -o 65532 -g 65532 "$state/mesh"
+install -d -m 0755 -o 10001 -g 10001 /var/lib/continuity-business
+install -d -m 0755 -o 1000 -g 1000 "$state/proxy"
+for ref in "${secret_refs[@]}"; do
+  [[ "$ref" =~ ^[a-zA-Z0-9_.-]{1,96}$ ]] || fail PROFILE_SECRET_REFERENCE_INVALID
+  target="$secret_dir/$ref"
+  [[ ! -e "$target" ]] || [[ -f "$target" && ! -L "$target" && $(stat -c %u "$target") == 0 && $(stat -c %a "$target") == 600 ]] || fail PROFILE_SECRET_REQUIRED
+done
+
+install -m 0644 "$p/profile.json" /etc/gnx/workload.json
+install -m 0644 "$p/$runtime_input" "/etc/gnx/$runtime_input"
+install -m 0644 "$p/$network" "/etc/containers/systemd/$network"
+for unit in "${units[@]}"; do install -m 0644 "$p/$unit" "/etc/containers/systemd/$unit"; done
+# These are the existing, trusted mesh helpers.  They are not supplied by the
+# profile and are shared by RustFS and every admitted dedicated workload.
+install -m 0755 "$p/mesh.run" /usr/local/libexec/gnx-workload-mesh
+install -m 0644 "$p/workload-mesh-guard.service" /etc/systemd/system/workload-mesh-guard.service
+install -m 0644 "$p/networkd-mesh-guard.conf" /etc/systemd/system/systemd-networkd.service.d/gnx-mesh-guard.conf
+install -m 0644 "$p/mesh.nft" /etc/gnx/workload-mesh.nft
+systemctl daemon-reload
+systemctl enable --now workload-mesh-guard.service >/dev/null 2>&1 || fail PROFILE_GUARD_FAILED
+printf '{"event":"profile_prepared","workload":"%s"}\n' "$name"

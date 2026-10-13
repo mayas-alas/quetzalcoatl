@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "kind": "gnx.machine.profile",
+  "name": "continuity",
+  "release": "0.1.93",
+  "driver": "proxmox-lxc",
+  "unprivileged": true,
+  "public_ingress": false,
+  "hostname": "continuity",
+  "ownership_tag": "gnx-continuity",
+  "state_dir": "/var/lib/gnx/continuity",
+  "cores": 2,
+  "memory_mib": 2048,
+  "rootfs_gib": 8,
+  "template": "debian-13-standard_13.6-1_amd64.tar.zst",
+  "template_sha512": "4c0c27ca6ceab5ef0b84db57825a00f26157ef1854bafe97297813e1cbe8ecb8cc9c453cab6b3b0efe1ba193a50c47ece1e41d950e411b8730b835b71e9e754b",
+  "runtime": {
+    "engine": "podman",
+    "version": "6.1.3",
+    "input_manifest": "runtime-input.json",
+    "input_archive": "podman-6.1.3-linux-amd64.tar.gz",
+    "input_sha256": "b693b4ae4a44709c8c3d4519525b9d32aa06012531ef201155d8ceac244c2e68"
+  },
+  "network": {"quadlet": "continuity.network", "compute_gateway": "10.88.0.1", "ingress_port": 7310, "backend_name": "continuity.mesh.gnx"},
+  "mesh": {"hostname": "gnx-continuity", "container_name": "gnx-continuity-mesh", "state_dir": "/var/lib/gnx/continuity/mesh", "enrollment_key_file": "/var/lib/gnx/continuity/mesh/enrollment.key", "guard_policy": "/opt/gnx/workloads/continuity/mesh.nft"},
+  "tls": {"issuer": "external-ca", "hostname": "continuity.gnx", "directory": "/var/lib/gnx/continuity/tls", "uid": 1000},
+  "quadlets": ["workload-mesh.container", "continuity.container"],
+  "secrets": {"directory": "/var/lib/gnx/continuity/secrets", "references": ["s3.env"]},
+  "continuity": {"scope": "business", "bucket": "continuity", "prefix": "continuity/business", "ack": "remote", "writer_unit": "continuity.container"},
+  "healthchecks": [
+    {"type": "systemd", "service": "continuity.service"},
+    {"type": "http", "url": "http://127.0.0.1:7310/health/ready", "expect": {"ready": true, "scope": "business", "replication.enabled": true, "replication.pending": false, "replication.error": null}}
+  ],
+  "deployment": {"enabled": true}
+}

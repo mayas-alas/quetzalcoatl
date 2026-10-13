@@ -6,21 +6,66 @@ umask 077
 fail() { printf '{"event":"error","code":"%s"}\n' "$1" >&2; exit 1; }
 [[ $(id -u) == 0 ]] || fail ROOT_REQUIRED
 [[ $# -ge 1 && $# -le 2 ]] || fail INVALID_ARGUMENT
-mesh() { podman exec gnx-workload-mesh tailscale --socket=/var/lib/tailscale/tailscaled.sock "$@"; }
+# Legacy shared identity defaults; admitted profiles declare their own peer.
+mesh_name=gnx-rustfs
+mesh_container=gnx-workload-mesh
+mesh_state=/var/lib/gnx/mesh
+mesh_key=$mesh_state/enrollment.key
+mesh_policy=/opt/gnx/workloads/rustfs/mesh.nft
+tls_dir=/var/lib/gnx/rustfs/tls
+tls_uid=10001
+if [[ -f /etc/gnx/workload.json ]]; then
+  [[ ! -L /etc/gnx/workload.json && $(stat -c %u /etc/gnx/workload.json) == 0 ]] || fail WORKLOAD_PROFILE_OWNER
+  mesh_name=$(jq -er .mesh.hostname /etc/gnx/workload.json)
+  mesh_container=$(jq -er .mesh.container_name /etc/gnx/workload.json)
+  mesh_state=$(jq -er .mesh.state_dir /etc/gnx/workload.json)
+  mesh_key=$(jq -er .mesh.enrollment_key_file /etc/gnx/workload.json)
+  mesh_policy=$(jq -er .mesh.guard_policy /etc/gnx/workload.json)
+  tls_dir=$(jq -er .tls.directory /etc/gnx/workload.json)
+  tls_uid=$(jq -er .tls.uid /etc/gnx/workload.json)
+  [[ "$mesh_name" =~ ^gnx-[a-z0-9-]+$ && "$mesh_container" =~ ^gnx-[a-z0-9-]+$ && "$tls_uid" =~ ^[0-9]{1,5}$ ]] || fail WORKLOAD_PROFILE_INVALID
+  [[ "$mesh_state" =~ ^/var/lib/gnx/[a-z0-9-]+/mesh$ && "$mesh_key" == "$mesh_state/enrollment.key" && "$tls_dir" =~ ^/var/lib/gnx/[a-z0-9-]+/tls$ && "$mesh_policy" =~ ^/opt/gnx/workloads/[a-z0-9-]+/mesh.nft$ ]] || fail WORKLOAD_PROFILE_INVALID
+fi
+# LocalAPI mutations/certificates require an administrator. Only the fixed CLI
+# runs as root; the underlay daemon remains UID 65532 with its existing state.
+mesh() { podman exec "$mesh_container" tailscale --socket=/var/lib/tailscale/tailscaled.sock "$@"; }
+mesh_root() { podman exec --user 0 "$mesh_container" tailscale --socket=/var/lib/tailscale/tailscaled.sock "$@"; }
+classify_cert_error() {
+  local text=${1,,}
+  case "$text" in
+    *'read-only file system'*|*erofs*) printf '%s' CERT_READONLY_FILESYSTEM ;;
+    *'unknown flag'*|*'flag provided but not defined'*|*'unrecognized option'*|*'unknown option'*|*'invalid option'*|*'unknown command'*) printf '%s' CERT_CLI_UNSUPPORTED ;;
+    *'too many requests'*|*'rate limit'*|*'rate limited'*|*429*) printf '%s' CERT_RATE_LIMITED ;;
+    *'localapi'*'permission'*|*'local api'*'permission'*|*'must be root'*|*'requires root'*|*'not authorized'*|*unauthorized*|*'access denied'*) printf '%s' CERT_ACCESS_DENIED ;;
+    *'permission denied'*|*'operation not permitted'*|*eacces*|*eperm*|*'cannot write'*|*'failed to write'*|*'could not open'*) printf '%s' CERT_FILE_PERMISSION_DENIED ;;
+    *https*'not enabled'*|*https*disabled*|*'https certificates are not available'*|*'certificate'*disabled*) printf '%s' CERT_HTTPS_DISABLED ;;
+    *domain*'not allowed'*|*'not allowed'*domain*|*'certificate'*'domain'*'forbidden'*) printf '%s' CERT_DOMAIN_DISALLOWED ;;
+    *'clock skew'*|*'clock is wrong'*|*'not yet valid'*|*'certificate has expired'*|*'system time'*) printf '%s' CERT_CLOCK_INVALID ;;
+    *'no such host'*|*'name resolution'*|*'temporary failure in name resolution'*|*servfail*) printf '%s' CERT_DNS_FAILED ;;
+    *'connection refused'*|*'network is unreachable'*|*'i/o timeout'*|*'context deadline exceeded'*|*timeout*) printf '%s' CERT_NETWORK_FAILED ;;
+    *acme*|*challenge*|*'certificate authority'*) printf '%s' CERT_ACME_FAILED ;;
+    *) printf '%s' CERT_UNKNOWN ;;
+  esac
+}
 case "$1" in
   guard)
     [[ $# == 1 ]] || fail INVALID_ARGUMENT
     command -v nft >/dev/null || fail OFFLINE_NFT_REQUIRED
     # Flush/repopulate only our table in a single atomic nft transaction.
-    { if nft list table inet gnx_workload_mesh >/dev/null 2>&1; then
+    { if grep -q '\$gnx_gateway' "$mesh_policy"; then
+        gateway=$(< "$(dirname "$mesh_policy")/gateway.ip")
+        [[ "$gateway" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail GATEWAY_IP_INVALID
+        printf 'define gnx_gateway = %s\n' "$gateway"
+      fi
+      if nft list table inet gnx_workload_mesh >/dev/null 2>&1; then
         printf 'delete table inet gnx_workload_mesh\n'
       fi
-      /usr/bin/cat /opt/gnx/workloads/rustfs/mesh.nft
+      /usr/bin/cat "$mesh_policy"
     } | nft -f - || fail MESH_GUARD_FAILED
     ;;
   enroll)
     [[ $# == 1 ]] || fail INVALID_ARGUMENT
-    key=/var/lib/gnx/mesh/enrollment.key
+    key=$mesh_key
     [[ -f "$key" && ! -L "$key" ]] || fail MESH_CREDENTIAL_REQUIRED
     [[ $(stat -c %a "$key") == 600 && $(stat -c %h "$key") == 1 ]] || fail MESH_CREDENTIAL_PERMISSIONS
     owner=$(stat -c %u "$key")
@@ -29,7 +74,8 @@ case "$1" in
     # The CLI runs as the sidecar UID and reads the file inside its fixed mount.
     chown --no-dereference 65532:65532 "$key" || fail MESH_CREDENTIAL_PERMISSIONS
     # The credential stays in a protected mounted file, never argv/env/logs.
-    mesh up --auth-key=file:/var/lib/tailscale/enrollment.key --hostname=gnx-rustfs --timeout=60s --accept-dns=true --accept-routes=false --ssh=false >/dev/null 2>&1 || fail MESH_ENROLL_FAILED
+    if mesh status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null; then fail MESH_ALREADY_ENROLLED; fi
+    mesh up --auth-key=file:/var/lib/tailscale/enrollment.key --hostname="$mesh_name" --timeout=60s --accept-dns=true --accept-routes=false --ssh=false >/dev/null 2>&1 || fail MESH_ENROLL_FAILED
     ;;
   select)
     [[ $# == 2 && "$2" =~ ^[1-9][0-9]{0,19}$ ]] || fail INVALID_RUN_ID
@@ -47,6 +93,47 @@ case "$1" in
       --cacert /var/lib/gnx/rustfs/tls/ca.crt --resolve rustfs.gnx:443:127.0.0.1 \
       https://rustfs.gnx/rustfs/console/ >/dev/null || fail CONSOLE_HTTPS_NOT_READY
     printf '%s\n' '{"event":"configured","dashboard_transport":"private_ca_https","hostname":"rustfs.gnx"}'
+    ;;
+  certificate|renew-certificate)
+    [[ $# == 1 ]] || fail INVALID_ARGUMENT
+    state=$(mesh status --json 2>/dev/null) || fail MESH_STATUS_FAILED
+    jq -e '.BackendState == "Running"' <<<"$state" >/dev/null || fail MESH_NOT_READY
+    domain=$(jq -er '.Self.DNSName | rtrimstr(".")' <<<"$state")
+    [[ "$domain" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.ts\.net$ ]] || fail MESH_TLS_NAME_INVALID
+    [[ ! -L "$tls_dir" && ! -L "$mesh_state" ]] || fail MESH_TLS_PERMISSIONS
+    install -d -m 0755 -o 0 -g 0 "$tls_dir"
+    changed=false
+    if ! openssl x509 -in "$tls_dir/tls.crt" -checkend 604800 -noout >/dev/null 2>&1 ||
+       ! openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt -untrusted "$tls_dir/tls.crt" -verify_hostname "$domain" "$tls_dir/tls.crt" >/dev/null 2>&1; then
+      # Native issuer: tailnet HTTPS must be enabled. Never forge .gnx names,
+      # copy a peer state, disable validation, or fall back to a CA leaf.
+      for file in backend.crt backend.key; do [[ ! -L "$mesh_state/$file" ]] || fail MESH_TLS_PERMISSIONS; done
+      cert_output=''
+      if ! cert_output=$(mesh_root cert --cert-file=/var/lib/tailscale/backend.crt --key-file=/var/lib/tailscale/backend.key "$domain" 2>&1); then
+        cert_reason=$(classify_cert_error "$cert_output")
+        unset cert_output
+        printf '{"event":"error","code":"MESH_TLS_CERT_REQUIRED","reason":"%s"}\n' "$cert_reason" >&2
+        exit 1
+      fi
+      unset cert_output
+      for pair in backend.crt:tls.crt backend.key:tls.key; do
+        from=${pair%%:*}; to=${pair#*:}
+        [[ -f "$mesh_state/$from" && ! -L "$mesh_state/$from" && ! -L "$tls_dir/$to" && ! -L "$tls_dir/$to.new" ]] || fail MESH_TLS_PERMISSIONS
+        install -m 0640 -o 0 -g "$tls_uid" "$mesh_state/$from" "$tls_dir/$to.new"
+        mv -T -- "$tls_dir/$to.new" "$tls_dir/$to"
+      done
+      openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt -untrusted "$tls_dir/tls.crt" -verify_hostname "$domain" "$tls_dir/tls.crt" >/dev/null 2>&1 || fail MESH_TLS_CERT_INVALID
+      changed=true
+    fi
+    jq -cn --arg name "$domain" '{issuer:"tailscale",tls_hostname:$name}' > "$tls_dir/certificate.json.new"
+    mv -T -- "$tls_dir/certificate.json.new" "$tls_dir/certificate.json"
+    if [[ "$1" == renew-certificate && "$changed" == true && -f /etc/gnx/workload.json ]]; then
+      while read -r unit; do
+        [[ "$unit" =~ ^[a-z][a-z0-9-]{0,63}\.service$ ]] || fail WORKLOAD_PROFILE_INVALID
+        systemctl try-restart "$unit" >/dev/null || fail MESH_TLS_SERVICE_RESTART_FAILED
+      done < <(jq -er '.tls.restart_units[]' /etc/gnx/workload.json)
+    fi
+    cat "$tls_dir/certificate.json"
     ;;
   status)
     [[ $# == 1 ]] || fail INVALID_ARGUMENT

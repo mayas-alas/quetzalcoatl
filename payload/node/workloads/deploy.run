@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# Installed bundle admission -> the existing LXC lifecycle, never uploaded code.
+set -Eeuo pipefail
+IFS=$'\n\t'; umask 077
+fail() { printf '{"event":"error","code":"%s"}\n' "$1" >&2; exit 1; }
+[[ $(id -u) == 0 && $# == 3 ]] || fail BUNDLE_DEPLOY_ARGUMENT
+source=$1 workload=$2 revision=$3
+[[ "$workload" =~ ^[a-z][a-z0-9-]{0,31}$ && "$revision" =~ ^[a-f0-9]{64}$ ]] || fail BUNDLE_ID_INVALID
+case "${source,,}" in /mnt/?/programdata/gnx/node/state/workload-bundles/*) ;; *) fail BUNDLE_SOURCE_NOT_ADMITTED ;; esac
+runtime=/var/lib/gnx-node
+base=/opt/gnx/payload/node/workloads
+install -d -m 0700 "$runtime/workload-bundles" /run/gnx-node
+exec 7>"/run/gnx-node/bundle-deploy.lock"; flock 7
+# Revalidate the fixed capability envelope after Windows admission. No executable
+# is transferred, even if an operator selected the complete shipped source tree.
+python3 - "$source" "$workload" "$revision" "$base" "$runtime" <<'PY'
+import hashlib, json, os, re, stat, sys
+from pathlib import Path
+source, name, revision, base, runtime = sys.argv[1:]
+root = Path(runtime) / 'workload-bundles' / name
+try:
+    src, builtin = Path(source), Path(base) / name
+    assert not src.is_symlink() and src.is_dir() and builtin.is_dir()
+    receipt_path = src / 'receipt.json'
+    assert not receipt_path.is_symlink() and receipt_path.stat().st_size <= 65536
+    receipt = json.loads(receipt_path.read_text(encoding='utf-8-sig'))
+    assert receipt['schema'] == 1 and receipt['workload'] == name and receipt['revision'] == revision
+    profile = json.loads((src / 'profile.json').read_text(encoding='utf-8-sig'))
+    standard_path = builtin / 'profile.json'
+    standard = json.loads(standard_path.read_text()) if standard_path.is_file() else None
+    if standard is not None:
+        accepted = {'profile.json', 'images.json', 'offline.sha256', standard['network']['quadlet'], *standard['quadlets']}
+    else:
+        # Continuity is intentionally supplied as a separately admitted
+        # profile.  Its trusted payload supplies exact Quadlet definitions,
+        # while the profile/receipts and runtime input remain operator data.
+        assert name == 'continuity'
+        definitions = {p.name for p in builtin.iterdir() if p.is_file() and p.suffix in ('.container', '.network')}
+        assert definitions and profile.get('network', {}).get('quadlet') in definitions
+        assert set(profile.get('quadlets', [])) == {p for p in definitions if p.endswith('.container')}
+        standard = {
+            'kind': 'gnx.machine.profile', 'driver': 'proxmox-lxc', 'unprivileged': True,
+            'public_ingress': False, 'ownership_tag': 'gnx-continuity', 'hostname': 'continuity',
+            'network': {'quadlet': profile['network']['quadlet']}, 'quadlets': profile['quadlets'],
+            'continuity': {'scope': 'business', 'prefix': 'continuity/business'},
+        }
+        runtime = profile.get('runtime', {})
+        assert re.fullmatch(r'[a-zA-Z0-9_.-]{1,96}', runtime.get('input_manifest', ''))
+        assert re.fullmatch(r'[a-zA-Z0-9_.-]{1,128}', runtime.get('input_archive', ''))
+        accepted = {'profile.json', 'images.json', 'offline.sha256', 'migration-receipt.json',
+                    profile['network']['quadlet'], *profile['quadlets'],
+                    runtime['input_manifest'], runtime['input_archive'], 'mesh.nft'}
+    files = receipt['files']
+    assert isinstance(files, list) and 1 <= len(files) <= 128
+    assert {f['path'] for f in files} == accepted and len(files) == len(accepted)
+    data, total = {}, 0
+    for entry in files:
+        path = entry['path']
+        assert re.fullmatch(r'[a-zA-Z0-9_.-]{1,64}', path) and path not in ('.', '..')
+        item = src / path
+        assert not item.is_symlink() and stat.S_ISREG(item.stat().st_mode)
+        content = item.read_bytes()
+        total += len(content)
+        assert total <= 2 * 1024 * 1024 and len(content) == entry['bytes']
+        assert hashlib.sha256(content).hexdigest() == entry['sha256']
+        if path == 'images.json':
+            images = json.loads(content.decode('utf-8-sig'))
+            assert isinstance(images.get('images'), dict) and 1 <= len(images['images']) <= 32
+            for image in images['images'].values():
+                assert re.fullmatch(r'[^\s@]+@sha256:[a-f0-9]{64}', image['image'])
+                assert re.fullmatch(r'[a-f0-9]{64}', image['sha256'])
+        elif path in accepted and path != 'profile.json' and (builtin / path).is_file():
+            expected = (builtin / path).read_bytes().replace(b'\r\n', b'\n').rstrip(b'\n') + b'\n'
+            assert content.replace(b'\r\n', b'\n').rstrip(b'\n') + b'\n' == expected
+        data[path] = content
+    digest = hashlib.sha256()
+    for path, content in sorted(data.items()):
+        digest.update(path.encode() + b'\0' + str(len(content)).encode() + b'\0' + content)
+    assert digest.hexdigest() == revision
+    assert profile['name'] == name and profile['driver'] == 'proxmox-lxc'
+    assert profile['unprivileged'] is True and profile['public_ingress'] is False
+    for key, low, high in [('cores', 1, 16), ('memory_mib', 4096, 16384), ('rootfs_gib', 24, 128)]:
+        assert type(profile[key]) is int and low <= profile[key] <= high
+    assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', profile['release'])
+    assert re.fullmatch(r'gnx-[a-z0-9-]{1,31}', profile['ownership_tag'])
+    assert re.fullmatch(r'[a-z][a-z0-9-]{0,31}', profile['hostname'])
+    mutable = {'cores', 'memory_mib', 'rootfs_gib', 'release'}
+    if standard_path.is_file():
+        assert {k:v for k,v in profile.items() if k not in mutable} == {k:v for k,v in standard.items() if k not in mutable}
+    else:
+        assert profile['kind'] == standard['kind'] and profile['unprivileged'] is True
+        assert profile['public_ingress'] is False and profile['ownership_tag'] == 'gnx-continuity'
+        assert profile['hostname'] == 'continuity'
+        assert profile['continuity'] == standard['continuity']
+        assert profile['network']['quadlet'] == standard['network']['quadlet']
+        assert set(profile['quadlets']) == set(standard['quadlets'])
+        assert profile.get('tls', {}).get('issuer') == 'external-ca'
+        assert re.fullmatch(r'[a-z0-9][a-z0-9.-]*\.gnx', profile.get('tls', {}).get('hostname', ''))
+        runtime = profile['runtime']
+        assert runtime.get('engine') == 'podman' and runtime.get('version') == '6.1.3'
+        assert runtime.get('input_archive') == 'podman-6.1.3-linux-amd64.tar.gz'
+        assert re.fullmatch(r'[a-f0-9]{64}', runtime.get('input_sha256', ''))
+        assert isinstance(profile.get('secrets', {}).get('references'), list)
+        assert 1 <= len(profile['secrets']['references']) <= 32
+        assert all(re.fullmatch(r'[a-zA-Z0-9_.-]{1,96}', ref) for ref in profile['secrets']['references'])
+        checks = profile.get('healthchecks', [])
+        assert isinstance(checks, list) and len(checks) <= 32
+        for check in checks:
+            assert check.get('type') in ('systemd', 'http')
+            if check['type'] == 'systemd':
+                assert re.fullmatch(r'[a-z][a-z0-9-]{0,63}\.service', check.get('service', ''))
+            else:
+                assert re.fullmatch(r'https?://(?:127\.0\.0\.1|localhost)(?::[0-9]{1,5})?/[^\s]*', check.get('url', ''))
+        migration = json.loads(data['migration-receipt.json'].decode('utf-8-sig'))
+        assert migration['schema'] == 1 and migration['workload'] == 'continuity'
+        assert migration['scope'] == 'business' and migration['prefix'] == 'continuity/business'
+        assert type(migration['source_generation']) is int and migration['source_generation'] >= 0
+        assert re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', migration['migration_id'])
+        assert re.fullmatch(r'/var/lib/continuity-business/[a-zA-Z0-9_.-]+', migration['source_spool'])
+        assert re.fullmatch(r'/var/lib/continuity-business/[a-zA-Z0-9_.-]+', migration['target_spool'])
+        runtime_manifest = json.loads(data[runtime['input_manifest']].decode('utf-8-sig'))
+        assert runtime_manifest.get('engine') == 'podman' and runtime_manifest.get('version') == '6.1.3'
+        assert runtime_manifest.get('archive') == runtime['input_archive']
+        assert runtime_manifest.get('sha256') == runtime['input_sha256']
+        assert len(data['mesh.nft']) <= 65536 and b'exec' not in data['mesh.nft'] and b'include' not in data['mesh.nft']
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    assert not root.is_symlink() and root.stat().st_uid == 0
+    destination = root / revision
+    destination.mkdir(mode=0o700, exist_ok=True)
+    assert not destination.is_symlink() and destination.stat().st_uid == 0
+    for path, content in data.items():
+        target = destination / path
+        if target.exists():
+            assert not target.is_symlink() and target.read_bytes() == content
+        else:
+            with target.open('xb') as output:
+                output.write(content)
+            target.chmod(0o600)
+    current = root / 'current.json'
+    new = root / 'current.json.new'
+    assert not current.is_symlink() and not new.is_symlink()
+    with new.open('w') as output:
+        json.dump({'schema':1, 'workload':name, 'revision':revision}, output)
+        output.flush(); os.fsync(output.fileno())
+    os.replace(new, current)
+except Exception:
+    print('{"event":"error","code":"BUNDLE_REVALIDATION_FAILED"}', file=sys.stderr)
+    sys.exit(1)
+PY
+state="$runtime/workload-bundles/$workload"
+record() {
+  local phase=$1 code=${2:-}
+  jq -cn --arg workload "$workload" --arg revision "$revision" --arg phase "$phase" --arg code "$code" \
+    '{schema:1,workload:$workload,revision:$revision,phase:$phase,error_code:(if $code=="" then null else $code end)}' > "$state/deployment.json.new"
+  mv -T -- "$state/deployment.json.new" "$state/deployment.json"
+}
+record applying
+# The adapter retains guest ownership, pinned installed offline inputs, private
+# auth and stopped-state policy. Import is an explicit operator start request.
+if bash "$runtime/lxc.run" start "$workload" > "$state/deployment.log" 2>&1; then
+  record applied
+  bash "$runtime/lxc.run" status "$workload"
+else
+  code=$(python3 - "$state/deployment.log" <<'PY'
+import json, re, sys
+code = 'BUNDLE_APPLY_FAILED'
+for line in open(sys.argv[1], errors='replace'):
+    try:
+        candidate = json.loads(line).get('code', '')
+        if re.fullmatch(r'[A-Z][A-Z0-9_]{1,63}', candidate): code = candidate
+    except (ValueError, AttributeError): pass
+print(code)
+PY
+)
+  record blocked "$code"
+  fail "$code"
+fi

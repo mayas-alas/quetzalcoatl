@@ -83,6 +83,25 @@ def relay():
         c.close()
 
 
+def netbird_container_dns():
+    # The NetBird Quadlet pins Pocket ID to the enrolled HTTPS gateway.
+    # Verify resolution from that running container, using the tagged guest rather
+    # than assuming a fixed Proxmox VMID.
+    raw = subprocess.check_output(['podman', 'exec', 'gnx-compute', 'pvesh', 'get',
+                                   '/cluster/resources', '--type', 'vm', '--output-format', 'json'],
+                                  text=True, timeout=15)
+    guests = [item['vmid'] for item in json.loads(raw)
+              if item.get('type') == 'lxc' and item.get('status') == 'running'
+              and 'gnx-rustfs' in item.get('tags', '').split(';')]
+    assert len(guests) == 1
+    address = subprocess.check_output(['podman', 'exec', 'gnx-mesh', 'tailscale', 'ip', '-4'],
+                                      text=True, timeout=10).strip()
+    answer = subprocess.check_output(['podman', 'exec', 'gnx-compute', 'pct', 'exec', str(guests[0]),
+                                      '--', 'podman', 'exec', 'gnx-netbird-server',
+                                      'getent', 'ahostsv4', 'pocket.gnx'], text=True, timeout=15)
+    assert any(line.split()[0] == address for line in answer.splitlines() if line.split())
+
+
 def stun():
     node = subprocess.check_output(['podman', 'exec', 'gnx-mesh', 'tailscale', 'ip', '-4'], text=True).strip()
     assert node.startswith('100.')
@@ -95,6 +114,7 @@ def stun():
     assert len(reply) >= 20 and reply[0:2] == b'\x01\x01' and reply[8:20] == xid
 
 
+check('netbird_container_dns_pocket', netbird_container_dns)
 check('pocket_oidc_https', lambda: discovery('pocket.gnx', '/.well-known/openid-configuration', 'https://pocket.gnx'))
 check('netbird_oidc_https', lambda: discovery('netbird.gnx', '/oauth2/.well-known/openid-configuration', 'https://netbird.gnx/oauth2'))
 check('netbird_dashboard_https', dashboard)

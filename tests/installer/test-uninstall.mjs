@@ -36,6 +36,7 @@ assert.doesNotMatch(await read('installer/bundle/Bundle.wixproj'), /WixToolset\.
 assert.match(wixproj, /target\\release\\gnx\.exe/);
 assert.doesNotMatch(wixproj, /target\\release\\gnx-setup\.exe/);
 assert.doesNotMatch(wixproj, /SetupUi|apps\\setup\\ui/);
+assert.match(wixproj, /PackageReference\s+Include="WixToolset\.Util\.wixext"/);
 assert.doesNotMatch(buildScript, /apps\\setup\\ui|Copy-Item.*SetupUi/);
 assert.match(readme, /silent installs do not prompt/i);
 assert.match(readme, /Start-Process -Verb RunAs -Wait/);
@@ -47,7 +48,13 @@ assert.match(releaseVerification, /\$_.Extension -eq '\.md'/);
 assert.match(releaseVerification, /docs\\releases/);
 assert.match(releaseVerification, /Historical note conflict/);
 assert.match(releaseVerification, /Remove-Item -LiteralPath \$old.FullName -Recurse -Force/);
-assert.deepEqual(await readdir(join(root, 'releases')), [`v${version}`]);
+// A candidate must pass tests before promotion. Keep the last validated release
+// rather than requiring tests to publish an unvalidated workspace version.
+const retained = await readdir(join(root, 'releases'));
+assert.equal(retained.length, 1, 'retain only the latest validated release');
+assert.match(retained[0], /^v\d+\.\d+\.\d+$/);
+const number = value => value.replace(/^v/, '').split('.').reduce((n, part) => n * 100000 + Number(part), 0);
+assert.ok(number(retained[0]) <= number(version), 'retained release must not be newer than the candidate');
 assert.match(await read('CHANGELOG.md'), /## \[Unreleased\]/);
 assert.match(releaseVerification, /SHA256SUMS\.txt/);
 assert.match(cargo, /license = "AGPL-3\.0-only"/);
@@ -63,7 +70,12 @@ for (const manifest of ['apps/setup/Cargo.toml', 'apps/host-agent/Cargo.toml', '
 // MSI owns service lifecycle and invokes the fixed host binary for complete
 // product cleanup. Upgrade removal must never run destructive cleanup.
 assert.match(product, /ServiceInstall[^>]*Name="GnXHostAgent"[^>]*Start="auto"/);
+assert.match(product, /ServiceInstall[^>]*Type="ownProcess"[^>]*ErrorControl="normal"[^>]*Account="LocalSystem"/);
 assert.match(product, /ServiceControl[^>]*Name="GnXHostAgent"[^>]*Stop="both"[^>]*Remove="uninstall"/);
+// SCM owns crash recovery: restart unexpected exits, but never converts a
+// deliberate stop into a restart. Keep the delay/reset policy bounded.
+assert.match(product, /<ServiceInstall[^>]*Name="GnXHostAgent"[^>]*Start="auto"[^>]*>[\s\S]*?<util:ServiceConfig\s+FirstFailureActionType="restart"\s+SecondFailureActionType="restart"\s+ThirdFailureActionType="restart"\s+ResetPeriodInDays="1"\s+RestartServiceDelayInSeconds="60"\s*\/>[\s\S]*?<\/ServiceInstall>/);
+assert.doesNotMatch(product, /FailureActionsOnStop|RestartOnStop/i);
 assert.match(product, /ComponentGroup Id="HostPayloadFiles"/);
 assert.match(product, /ComponentGroup Id="NodePayloadFiles"/);
 assert.match(product, /CustomAction Id="CleanupFreshResidue"[^>]*FileRef="HostAgentExe"[^>]*ExeCommand="--cleanup"[^>]*Execute="deferred"[^>]*Impersonate="no"[^>]*Return="check"/);

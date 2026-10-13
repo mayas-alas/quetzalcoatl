@@ -19,6 +19,9 @@ pub enum Operation {
     StartRuntime,
     StartWorkload,
     StopWorkload,
+    JoinWorkload,
+    ImportWorkload,
+    DiagnoseWorkload,
     DiagnoseCompute,
     /// Start the native GitHub Actions integration (device OAuth or gh import).
     Connect,
@@ -111,8 +114,12 @@ pub struct GitHubWorkflowRequest {
     pub reference: String,
 }
 
-fn default_github_workflow() -> String { "gnx-ephemeral-exit-node.yml".into() }
-fn default_github_ref() -> String { "main".into() }
+fn default_github_workflow() -> String {
+    "gnx-ephemeral-exit-node.yml".into()
+}
+fn default_github_ref() -> String {
+    "main".into()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Progress {
@@ -168,6 +175,9 @@ pub struct Request {
     /// shell fragment, VMID, path, or user-defined Proxmox identifier.
     #[serde(default)]
     pub workload: Option<String>,
+    /// Local absolute folder/ZIP source for the generic workload importer.
+    #[serde(default)]
+    pub bundle_source: Option<String>,
 }
 
 impl fmt::Debug for Request {
@@ -188,6 +198,7 @@ impl fmt::Debug for Request {
             .field("secret_file", &self.secret_file)
             .field("github", &self.github)
             .field("workload", &self.workload)
+            .field("bundle_source", &self.bundle_source)
             .finish()
     }
 }
@@ -240,7 +251,11 @@ impl Request {
                 "GitHub target is only accepted by GitHub actions".into(),
             ));
         }
-        if self.operation != Operation::JoinMesh && self.tailscale_auth_key.is_some() {
+        if !matches!(
+            self.operation,
+            Operation::JoinMesh | Operation::JoinWorkload
+        ) && self.tailscale_auth_key.is_some()
+        {
             return Err(ProtocolError::Invalid(
                 "secret is only accepted by JoinMesh".into(),
             ));
@@ -254,7 +269,10 @@ impl Request {
         }
         let workload_operation = matches!(
             self.operation,
-            Operation::StartWorkload | Operation::StopWorkload
+            Operation::StartWorkload
+                | Operation::StopWorkload
+                | Operation::JoinWorkload
+                | Operation::DiagnoseWorkload
         );
         if workload_operation != self.workload.is_some() {
             return Err(ProtocolError::Invalid(
@@ -262,14 +280,34 @@ impl Request {
             ));
         }
         if let Some(workload) = &self.workload {
-            if workload != "rustfs" {
+            if workload.is_empty() || workload.len() > 32 || !workload.as_bytes()[0].is_ascii_lowercase()
+                || !workload.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
                 return Err(ProtocolError::Invalid("unsupported workload".into()));
+            }
+            if self.operation == Operation::JoinWorkload && workload != "ai" {
+                return Err(ProtocolError::Invalid(
+                    "only the ai workload accepts workload enrollment".into(),
+                ));
+            }
+        }
+        let import_operation = self.operation == Operation::ImportWorkload;
+        if import_operation != self.bundle_source.is_some() {
+            return Err(ProtocolError::Invalid(
+                "bundle source is required only by workload import".into(),
+            ));
+        }
+        if let Some(source) = &self.bundle_source {
+            if !valid_local_absolute_path(source) {
+                return Err(ProtocolError::Invalid("invalid local workload source".into()));
             }
         }
         if self.secret_file.is_some()
             && !matches!(
                 self.operation,
-                Operation::Provision | Operation::JoinMesh | Operation::Connect
+                Operation::Provision
+                    | Operation::JoinMesh
+                    | Operation::JoinWorkload
+                    | Operation::Connect
             )
         {
             return Err(ProtocolError::Invalid(
@@ -289,12 +327,14 @@ impl Request {
                 return Err(ProtocolError::Invalid("invalid secret reference".into()));
             }
         }
-        if self.operation == Operation::JoinMesh
-            && self.tailscale_auth_key.is_none()
+        if matches!(
+            self.operation,
+            Operation::JoinMesh | Operation::JoinWorkload
+        ) && self.tailscale_auth_key.is_none()
             && self.secret_file.is_none()
         {
             return Err(ProtocolError::Invalid(
-                "mesh credential is required for JoinMesh".into(),
+                "mesh credential is required for workload enrollment".into(),
             ));
         }
         if let Some(key) = &self.tailscale_auth_key {
@@ -360,8 +400,11 @@ fn validate_github_target(target: &GitHubWorkflowRequest) -> Result<(), Protocol
             || value.contains('\\')
             || value.contains("..")
             || value.chars().any(|c| {
-                if label == "reference" { !(c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.')) }
-                else { !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) }
+                if label == "reference" {
+                    !(c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
+                } else {
+                    !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                }
             })
         {
             return Err(ProtocolError::Invalid(format!("invalid GitHub {label}")));
@@ -405,6 +448,31 @@ fn valid_secret_reference(path: &str) -> bool {
     Uuid::parse_str(uuid).is_ok() && uuid == Uuid::parse_str(uuid).unwrap().to_string()
 }
 
+fn valid_local_absolute_path(path: &str) -> bool {
+    let extended_local = path.strip_prefix(r"\\?\").is_some_and(|value| {
+        let bytes = value.as_bytes();
+        bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'/' | b'\\')
+    });
+    if path.is_empty()
+        || path.len() > 4096
+        || path.chars().any(char::is_control)
+        || (path.starts_with("\\\\") && !extended_local)
+        || path.starts_with("//")
+        || path.starts_with(r"\\.\")
+        || path.split(['/', '\\']).any(|part| part == "..")
+    {
+        return false;
+    }
+    extended_local
+        || path.starts_with('/')
+        || (path.len() >= 3
+            && path.as_bytes()[1] == b':'
+            && matches!(path.as_bytes()[2], b'/' | b'\\'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,6 +487,7 @@ mod tests {
             secret_file: None,
             github: None,
             workload: None,
+            bundle_source: None,
         };
         assert!(matches!(r.validate(), Err(ProtocolError::Invalid(_))));
     }
@@ -433,6 +502,7 @@ mod tests {
             secret_file: None,
             github: None,
             workload: None,
+            bundle_source: None,
         };
         assert_eq!(r.validate(), Err(ProtocolError::UnsupportedVersion));
     }
@@ -447,6 +517,7 @@ mod tests {
             secret_file: None,
             github: None,
             workload: None,
+            bundle_source: None,
         };
         assert!(!String::from_utf8(r.to_frame().unwrap())
             .unwrap()
@@ -464,6 +535,7 @@ mod tests {
             secret_file: None,
             github: None,
             workload: None,
+            bundle_source: None,
         };
         assert!(matches!(r.validate(), Err(ProtocolError::Invalid(_))));
     }
@@ -479,6 +551,7 @@ mod tests {
             secret_file: None,
             github: None,
             workload: None,
+            bundle_source: None,
         };
         assert!(matches!(r.validate(), Err(ProtocolError::Invalid(_))));
     }
@@ -511,6 +584,7 @@ mod tests {
             secret_file: None,
             github: None,
             workload: None,
+            bundle_source: None,
         };
         let mut value = serde_json::to_value(request).unwrap();
         value["proxmox_password"] = serde_json::json!("should-not-cross-the-pipe");
@@ -534,6 +608,7 @@ mod tests {
             ),
             github: None,
             workload: None,
+            bundle_source: None,
         };
         let frame = String::from_utf8(r.to_frame().unwrap()).unwrap();
         assert!(frame.contains("secret_file"));
@@ -559,6 +634,7 @@ mod tests {
                 reference: "main".into(),
             }),
             workload: None,
+            bundle_source: None,
         };
         let frame = String::from_utf8(request.to_frame().unwrap()).unwrap();
         assert!(frame.contains("gnx-ephemeral-exit-node.yml"));
@@ -568,10 +644,104 @@ mod tests {
     #[test]
     fn rejects_arbitrary_github_workflows() {
         let target = GitHubWorkflowRequest {
-            owner: "gnx".into(), repository: "node".into(),
-            workflow: "https://evil.invalid/run".into(), reference: "main".into(),
+            owner: "gnx".into(),
+            repository: "node".into(),
+            workflow: "https://evil.invalid/run".into(),
+            reference: "main".into(),
         };
-        assert!(matches!(validate_github_target(&target), Err(ProtocolError::Invalid(_))));
+        assert!(matches!(
+            validate_github_target(&target),
+            Err(ProtocolError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn workload_lifecycle_accepts_logical_ids_and_rejects_paths() {
+        let request = Request {
+            version: PROTOCOL_VERSION,
+            request_id: Uuid::new_v4(),
+            operation: Operation::StartWorkload,
+            tailscale_auth_key: None,
+            proxmox_password: None,
+            secret_file: None,
+            github: None,
+            workload: Some("ai".into()),
+            bundle_source: None,
+        };
+        assert!(request.validate().is_ok());
+        let mut invalid = request;
+        invalid.workload = Some("continuity".into());
+        assert!(invalid.validate().is_ok());
+        invalid.workload = Some("../compute".into());
+        assert!(matches!(invalid.validate(), Err(ProtocolError::Invalid(_))));
+    }
+
+    #[test]
+    fn workload_join_requires_ai_and_a_secret_reference_can_cross_the_pipe() {
+        let request = Request {
+            version: PROTOCOL_VERSION,
+            request_id: Uuid::new_v4(),
+            operation: Operation::JoinWorkload,
+            tailscale_auth_key: None,
+            proxmox_password: None,
+            secret_file: Some(
+                r"C:\Users\mayas\AppData\Local\Temp\gnx-onboarding-550e8400-e29b-41d4-a716-446655440000.secret".into(),
+            ),
+            github: None,
+            workload: Some("ai".into()),
+            bundle_source: None,
+        };
+        assert!(request.validate().is_ok());
+        let mut invalid = request;
+        invalid.workload = Some("rustfs".into());
+        assert!(matches!(invalid.validate(), Err(ProtocolError::Invalid(_))));
+    }
+
+    #[test]
+    fn import_requires_a_safe_local_absolute_source() {
+        let request = Request {
+            version: PROTOCOL_VERSION,
+            request_id: Uuid::new_v4(),
+            operation: Operation::ImportWorkload,
+            tailscale_auth_key: None,
+            proxmox_password: None,
+            secret_file: None,
+            github: None,
+            workload: None,
+            bundle_source: Some(r"C:\Users\maya\Downloads\ai.zip".into()),
+        };
+        assert!(request.validate().is_ok());
+        for source in [
+            r"\\server\share\ai.zip",
+            r"C:\Users\maya\Downloads\..\ai.zip",
+            "C:\\Users\\maya\\Downloads\\ai\n.zip",
+            r"relative\ai.zip",
+        ] {
+            let mut invalid = request.clone();
+            invalid.bundle_source = Some(source.into());
+            assert!(matches!(
+                invalid.validate(),
+                Err(ProtocolError::Invalid(message)) if message == "invalid local workload source"
+            ));
+        }
+    }
+
+    #[test]
+    fn diagnose_is_generic_but_requires_a_safe_workload_id() {
+        let mut request = Request {
+            version: PROTOCOL_VERSION,
+            request_id: Uuid::new_v4(),
+            operation: Operation::DiagnoseWorkload,
+            tailscale_auth_key: None,
+            proxmox_password: None,
+            secret_file: None,
+            github: None,
+            workload: Some("ai".into()),
+            bundle_source: None,
+        };
+        assert!(request.validate().is_ok());
+        request.workload = Some("arbitrary/code".into());
+        assert!(request.validate().is_err());
     }
 
     #[test]

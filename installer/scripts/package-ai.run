@@ -46,7 +46,16 @@ for name in voice oryx omniroute continuity netbird-proxy; do
   jq --arg name "$name" --arg image "$reference" --arg archive "$name.oci.tar" --arg sha256 "$checksum" --argjson bytes "$bytes" '.images[$name]={image:$image,archive:$archive,sha256:$sha256,bytes:$bytes}' "$manifest" > "$manifest.next"
   mv -- "$manifest.next" "$manifest"
 done
-mv -- "$manifest" "$payload/images.json"
-tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -I 'gzip -1 -n' -cf "$payload/offline.tar.gz" -C "$images" continuity.oci.tar netbird-proxy.oci.tar omniroute.oci.tar oryx.oci.tar voice.oci.tar
+# Pinned source-built S3 admin CLI, used only in existing private-services.
+# Its @self addon loads the account identifier in memory, not OS argv.
+[[ -x "$build/mc" ]] || fail MC_BUILD_INPUT_REQUIRED
+mkdir -p "$images/tools"
+cp -- "$build/mc" "$images/tools/mc"
+mc_sha=$(sha256sum "$images/tools/mc" | awk '{print $1}')
+addon_sha=$(sha256sum "$root/installer/tools/mc-self.go" | awk '{print $1}')
+jq --arg sha "$mc_sha" --arg addon "$addon_sha" '.tools.mc={archive_path:"tools/mc",sha256:$sha,source:"https://github.com/minio/mc",commit:"7394ce0dd2a80935aded936b09fa12cbb3cb8096",addon_sha256:$addon,license:"AGPL-3.0"}' "$manifest" > "$manifest.next"
+mv -- "$manifest.next" "$payload/images.json"
+rm -- "$manifest"
+tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -I 'gzip -1 -n' -cf "$payload/offline.tar.gz" -C "$images" continuity.oci.tar netbird-proxy.oci.tar omniroute.oci.tar oryx.oci.tar voice.oci.tar tools/mc
 (cd "$payload" && sha256sum offline.tar.gz > offline.sha256)
 printf '%s\n' 'AI OCI bundle verified; this is build evidence, not live service acceptance.'

@@ -45,6 +45,12 @@ fn hosts_path() -> std::path::PathBuf {
 
 #[cfg(any(windows, test))]
 fn is_gnx_hosts_line(line: &str) -> bool {
+    let owned = crate::host_access::cleanup_hostnames().unwrap_or_default();
+    is_gnx_hosts_line_owned(line, &owned)
+}
+
+#[cfg(any(windows, test))]
+fn is_gnx_hosts_line_owned(line: &str, owned: &[String]) -> bool {
     let content = line.split('#').next().unwrap_or_default();
     let names = content
         .split_whitespace()
@@ -52,17 +58,9 @@ fn is_gnx_hosts_line(line: &str) -> bool {
         .map(|name| name.to_ascii_lowercase())
         .collect::<Vec<_>>();
     line.to_ascii_lowercase().contains("# gnx node")
-        || names.iter().any(|name| {
-            matches!(
-                name.as_str(),
-                "app.gnx"
-                    | "compute.gnx"
-                    | "rustfs.gnx"
-                    | "pocket.gnx"
-                    | "netbird.gnx"
-                    | "agents.gnx"
-            )
-        })
+        || names
+            .iter()
+            .any(|name| owned.iter().any(|item| item.eq_ignore_ascii_case(name)))
 }
 
 #[cfg(windows)]
@@ -111,12 +109,21 @@ fn remove_legacy_portproxy() {
 mod tests {
     #[test]
     fn recognizes_only_product_host_names() {
-        assert!(super::is_gnx_hosts_line(
-            "127.0.0.1 app.gnx compute.gnx # GnX Node"
-        ));
-        assert!(super::is_gnx_hosts_line("127.0.0.1 agents.gnx"));
-        assert!(super::is_gnx_hosts_line("127.0.0.1 pocket.gnx netbird.gnx"));
-        assert!(!super::is_gnx_hosts_line("127.0.0.1 example.test"));
-        assert!(!super::is_gnx_hosts_line("# app.gnx documentation"));
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../../../payload/host/access-hosts.json")).unwrap();
+        let names: Vec<String> = config["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .chain(config["cleanup_hosts"].as_array().unwrap())
+            .map(|v| v.as_str().unwrap().to_owned())
+            .collect();
+        let owned = |line| super::is_gnx_hosts_line_owned(line, &names);
+        assert!(owned("127.0.0.1 app.gnx compute.gnx # GnX Node"));
+        assert!(owned("127.0.0.1 agents.gnx"));
+        assert!(owned("127.0.0.1 pocket.gnx netbird.gnx"));
+        assert!(owned("127.0.0.1 voice.ai.gnx"));
+        assert!(!owned("127.0.0.1 example.test"));
+        assert!(!owned("# app.gnx documentation"));
     }
 }

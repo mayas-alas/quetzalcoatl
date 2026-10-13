@@ -1,0 +1,201 @@
+{
+  "schema": 1,
+  "voice_source": {
+    "snapshot_sha256": "e5a7746173be2577a73719f4789a416fd9d98da18d2ed5c8c1f13b321ab16c60",
+    "files": [
+      {
+        "path": "package.json",
+        "sha256": "a3370dcd94dab616c0a9f3e1e35b2babf1ed93a13eac69a65ec13a7dec33f84e"
+      },
+      {
+        "path": "package-lock.json",
+        "sha256": "5f270bc534d28e5e50141deffa567471c086581a0f3ed04a0a8f0cfd355539d3"
+      },
+      {
+        "path": "Containerfile",
+        "sha256": "500447b1f05d5e755fdde30e18d051e42add45e5b6df28848dd77b7e2e69bc46"
+      },
+      {
+        "path": "app/audio.js",
+        "sha256": "a973c5f0ee25c68d491d7d05c9f94ce3a51053618ace232f45234ba7ec805eda"
+      },
+      {
+        "path": "app/correlation.js",
+        "sha256": "ab80f1c5180f9ae813b0527a628f3daeec4c9f8664fa188720a7961c6af0043a"
+      },
+      {
+        "path": "app/server.js",
+        "sha256": "28e0ec7c874c2ed489a5b5b4d986e6db137bf7a6428a1c4f7e1ea81a282572ed"
+      },
+      {
+        "path": "config/env.js",
+        "sha256": "0297d06ee3f8fef69740705c19fd24300463402bc6f1dfe6e52977394d61e99a"
+      },
+      {
+        "path": "config/mcp.json",
+        "sha256": "7e2ac8a5e12cf805805d0ae85527eb5b54651608f3ae4372f84c6432efdc6d95"
+      },
+      {
+        "path": "config/secrets.js",
+        "sha256": "6843c99259194355a03054198706166841c05fe92b817d2f76f2666dba06d8bc"
+      },
+      {
+        "path": "mcp/bridge.js",
+        "sha256": "0f82cfc096f3e331ff5817c28f0bf09522c8ca50895121333fb31470ef233f86"
+      },
+      {
+        "path": "mcp/hf-voice.js",
+        "sha256": "6216780a44a05e28e2269bad18b0ca9f7b4b2d9efd0deb28306f2aea22ab419b"
+      },
+      {
+        "path": "mcp/runtime.js",
+        "sha256": "7f13193043dfef1c55aff6d8d6e6d58fe448be522161910fb5c3cface0b44884"
+      },
+      {
+        "path": "web/app.js",
+        "sha256": "00a325ca1ab9c090fd8071e2e84a15485a6fab0fed0b0276ade3d4f3c7f99ce3"
+      },
+      {
+        "path": "web/icon.svg",
+        "sha256": "a405d5fe17504a5683759a84cfcde8075ec292b1dcb7986637fba925a217663f"
+      },
+      {
+        "path": "web/index.html",
+        "sha256": "8e6cb0b66146afaed3945a918e8bf9e4f22b908e485ac80b6aa1dd5f18b7f353"
+      },
+      {
+        "path": "web/manifest.webmanifest",
+        "sha256": "435814c7cf4105abab6142cd0e19298fb5bea715a3981d594096adf3e2ea732b"
+      },
+      {
+        "path": "web/style.css",
+        "sha256": "e3ce76697941386c811c1d60f69376e0152d5cf2aafe119ae62abfaa4565020e"
+      },
+      {
+        "path": "web/sw.js",
+        "sha256": "d398716db340bb0a28d5763c3d90b8805197b1fdaa7103298fe722359c32c826"
+      }
+    ],
+    "distribution_overrides": {
+      "@modelcontextprotocol/sdk": "1.31.0",
+      "reason": "GHSA-6qxp-vccf-f47h"
+    },
+    "packaged_files": [
+      {
+        "path": "Containerfile",
+        "sha256": "500447b1f05d5e755fdde30e18d051e42add45e5b6df28848dd77b7e2e69bc46"
+      },
+      {
+        "path": "app/audio.js",
+        "sha256": "a973c5f0ee25c68d491d7d05c9f94ce3a51053618ace232f45234ba7ec805eda"
+      },
+      {
+        "path": "app/correlation.js",
+        "sha256": "ab80f1c5180f9ae813b0527a628f3daeec4c9f8664fa188720a7961c6af0043a"
+      },
+      {
+        "path": "app/server.js",
+        "sha256": "28e0ec7c874c2ed489a5b5b4d986e6db137bf7a6428a1c4f7e1ea81a282572ed"
+      },
+      {
+        "path": "config/env.js",
+        "sha256": "0297d06ee3f8fef69740705c19fd24300463402bc6f1dfe6e52977394d61e99a"
+      },
+      {
+        "path": "config/mcp.json",
+        "sha256": "7e2ac8a5e12cf805805d0ae85527eb5b54651608f3ae4372f84c6432efdc6d95"
+      },
+      {
+        "path": "config/secrets.js",
+        "sha256": "6843c99259194355a03054198706166841c05fe92b817d2f76f2666dba06d8bc"
+      },
+      {
+        "path": "mcp/bridge.js",
+        "sha256": "0f82cfc096f3e331ff5817c28f0bf09522c8ca50895121333fb31470ef233f86"
+      },
+      {
+        "path": "mcp/hf-voice.js",
+        "sha256": "6216780a44a05e28e2269bad18b0ca9f7b4b2d9efd0deb28306f2aea22ab419b"
+      },
+      {
+        "path": "mcp/runtime.js",
+        "sha256": "7f13193043dfef1c55aff6d8d6e6d58fe448be522161910fb5c3cface0b44884"
+      },
+      {
+        "path": "package-lock.json",
+        "sha256": "dd8c2c74bbe5e23ebd0b092ff61b100fabdc0e036ec2d82fb197ed836361871b"
+      },
+      {
+        "path": "package.json",
+        "sha256": "a9ff5158be6b70f5db79fba19f03b65cf1d9eb33bd9710e91cd1393182418569"
+      },
+      {
+        "path": "web/app.js",
+        "sha256": "00a325ca1ab9c090fd8071e2e84a15485a6fab0fed0b0276ade3d4f3c7f99ce3"
+      },
+      {
+        "path": "web/icon.svg",
+        "sha256": "a405d5fe17504a5683759a84cfcde8075ec292b1dcb7986637fba925a217663f"
+      },
+      {
+        "path": "web/index.html",
+        "sha256": "8e6cb0b66146afaed3945a918e8bf9e4f22b908e485ac80b6aa1dd5f18b7f353"
+      },
+      {
+        "path": "web/manifest.webmanifest",
+        "sha256": "435814c7cf4105abab6142cd0e19298fb5bea715a3981d594096adf3e2ea732b"
+      },
+      {
+        "path": "web/style.css",
+        "sha256": "e3ce76697941386c811c1d60f69376e0152d5cf2aafe119ae62abfaa4565020e"
+      },
+      {
+        "path": "web/sw.js",
+        "sha256": "d398716db340bb0a28d5763c3d90b8805197b1fdaa7103298fe722359c32c826"
+      }
+    ],
+    "packaged_sha256": "cbc953e080b281c8de0848d2421786b636430ec27375915329b2c16b755b7e44"
+  },
+  "images": {
+    "voice": {
+      "image": "localhost/gnx/voice@sha256:2b19b2c24a2f83e87d175f8b4fc3f882ad2a596b53451de98d4752a43e0a6350",
+      "archive": "voice.oci.tar",
+      "sha256": "b1e2dfc425dd14acfe57c4450da395669d6ed2cf8ea718783c0d07827836048d",
+      "bytes": 88324096
+    },
+    "oryx": {
+      "image": "localhost/gnx/oryx@sha256:58bcf5453705b7138a291e8761c8fec627c6c982a92532c732a384eeb0ee6bf4",
+      "archive": "oryx.oci.tar",
+      "sha256": "7fe2a63eb6750b0b9e79927513fc7644df2688ec3a0028d1da3151c0f196ffdc",
+      "bytes": 231495680
+    },
+    "omniroute": {
+      "image": "localhost/gnx/omniroute@sha256:78ab6b126660bc6091f659afd71b67428fc05c10f654b4d220f4ee20f4959377",
+      "archive": "omniroute.oci.tar",
+      "sha256": "77e6576ebc55a0c8c65afb46021596bbcb521fa34b5018c58584ef0fba6a6350",
+      "bytes": 412067840
+    },
+    "continuity": {
+      "image": "localhost/continuity@sha256:f5cbdbe57d3e34341f00c902db72123d8f6cfd1408d9dc567c729bff735e8884",
+      "archive": "continuity.oci.tar",
+      "sha256": "ecb9139325e6554fa5905f885fbd884562e85647f2f5517413f9ceb96cac04e8",
+      "bytes": 3860480
+    },
+    "netbird-proxy": {
+      "image": "localhost/gnx/netbird-proxy@sha256:735c68a60624c72c315e7c3612bfe760f8c75251cf327afd2b5e0a60c9cdab6e",
+      "archive": "netbird-proxy.oci.tar",
+      "sha256": "f5d40d6c3789b8e7661f2516f63474f1eaf9751bdbc076a5e58f253cdd657455",
+      "bytes": 28457472
+    }
+  },
+  "tools": {
+    "mc": {
+      "archive_path": "tools/mc",
+      "sha256": "742ec8c74772dead3dbc44c66a5f09ebeb6b78682c00da5165186e5619b1ff32",
+      "source": "https://github.com/minio/mc",
+      "commit": "7394ce0dd2a80935aded936b09fa12cbb3cb8096",
+      "addon_sha256": "c4f7f8f7c40d6dbd0898388151374de16b5dd78068ad72ed7dbe96318de8c045",
+      "license": "AGPL-3.0"
+    }
+  }
+}

@@ -3,17 +3,536 @@
 set -Eeuo pipefail
 [[ $(id -u) == 0 && $# == 0 ]] || exit 64
 python3 - <<'PY'
-import json, re, subprocess
+import json, re, subprocess, stat
+from pathlib import Path
+CADDY_SOURCE = __GNX_CADDY_SOURCE__
 
 def run(args):
-    p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30)
-    return p.returncode, p.stdout.decode(errors='replace')
+    try:
+        p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30)
+        return p.returncode, p.stdout.decode(errors='replace')
+    except subprocess.TimeoutExpired:
+        return 124, 'Read-only observation timed out; result unknown.'
 def emit(label, value):
     print(json.dumps({'check':label, 'value':value}), flush=True)
+def safe_gateway_lines(raw):
+    lines = []
+    for line in raw.splitlines():
+        try:
+            entry = json.loads(line)
+            request = entry.get('request', {})
+            if 'uri' in request:
+                request['uri'] = request['uri'].split('?', 1)[0]
+            if isinstance(request.get('headers'), dict):
+                request['headers'] = {name:value for name,value in request['headers'].items()
+                    if name.lower() not in ('authorization','cookie','set-cookie','x-gnx-backend-key')}
+            line = json.dumps(entry)
+        except (ValueError,AttributeError):
+            if re.search(r'(?i)password|secret|token|tskey|cookie', line):
+                continue
+        lines.append(line)
+    return lines
+def bounded(args, timeout=10):
+    """Run one fixed, read-only probe without publishing its error body."""
+    try:
+        p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           timeout=timeout)
+        return p.returncode, p.stdout.decode(errors='replace'), p.stderr.decode(errors='replace')
+    except subprocess.TimeoutExpired:
+        return 124, '', ''
+    except OSError as exc:
+        return 127, '', str(exc)
+def error_class(stdout='', stderr='', code=None):
+    """Reduce command failures to non-sensitive evidence categories."""
+    if code == 124:
+        return 'timeout'
+    text = (stderr + '\n' + stdout).lower()
+    if 'passwd' in text or 'user 0' in text or 'unknown user' in text:
+        return 'user_lookup_failed'
+    if 'crun' in text or 'oci runtime' in text or 'container runtime' in text:
+        return 'oci_runtime_failed'
+    if 'permission denied' in text or 'operation not permitted' in text:
+        return 'permission_denied'
+    if 'not found' in text or 'no such file' in text or 'executable file' in text:
+        return 'not_found'
+    if 'not running' in text or 'container state improper' in text:
+        return 'container_not_running'
+    return 'command_failed'
+def guest_command(vmid, args):
+    return ['podman','exec','gnx-compute','pct','exec',vmid,'--'] + args
+def fixed_hash(args):
+    code, output, error = bounded(args)
+    result = {'exit':code}
+    match = re.search(r'\b([0-9a-f]{64})\b', output)
+    if code == 0 and match:
+        result['sha256'] = match.group(1)
+    else:
+        result['error'] = error_class(output, error, code)
+    return result
+def mesh_status(vmid, container, root):
+    command = ['podman','exec'] + (['--user','0'] if root else []) + [
+        container,'tailscale','--socket=/var/lib/tailscale/tailscaled.sock','status','--json']
+    code, output, error = bounded(guest_command(vmid, command))
+    if code != 0:
+        return {'exit':code, 'error':error_class(output, error, code)}
+    try:
+        data = json.loads(output)
+    except ValueError:
+        return {'exit':code, 'error':'invalid_json'}
+    if not isinstance(data, dict):
+        return {'exit':code, 'error':'invalid_json'}
+    backend = data.get('BackendState')
+    if not isinstance(backend, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,31}', backend):
+        backend = 'unknown'
+    self_data = data.get('Self') if isinstance(data.get('Self'), dict) else {}
+    dns_name = self_data.get('DNSName')
+    if not isinstance(dns_name, str) or not re.fullmatch(r'[a-z0-9][a-z0-9.-]{0,126}\.ts\.net\.?', dns_name):
+        dns_name = None
+    raw_ips = data.get('TailscaleIPs', [])
+    if not isinstance(raw_ips, list):
+        raw_ips = []
+    ips = [ip for ip in raw_ips
+           if isinstance(ip, str) and re.fullmatch(r'(?:100\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}|[0-9a-fA-F:]{3,45})', ip)]
+    raw_cert_domains = data.get('CertDomains', [])
+    if not isinstance(raw_cert_domains, list):
+        raw_cert_domains = []
+    cert_domains = [domain for domain in raw_cert_domains
+                    if isinstance(domain, str) and re.fullmatch(r'[a-z0-9][a-z0-9.-]{0,126}\.ts\.net', domain)]
+    return {'exit':code, 'backend':backend, 'dns_name':dns_name,
+            'ips':ips[:8], 'certificate_domains':cert_domains[:8]}
+def mesh_probe(vmid, container, name, args, output_kind=None, inside=True):
+    command = (['podman','exec'] + (['--user','0'] if name.startswith('root_') else []) +
+               [container] + args) if inside else args
+    code, output, error = bounded(guest_command(vmid, command))
+    result = {'exit':code}
+    if output_kind == 'uid' and code == 0:
+        uid = output.strip()
+        result['uid'] = uid if re.fullmatch(r'[0-9]{1,5}', uid) else 'unknown'
+    elif output_kind == 'runtime' and code == 0:
+        runtime = output.strip()
+        result['runtime'] = runtime if re.fullmatch(r'[a-z][a-z0-9_.-]{0,31}', runtime) else 'unknown'
+    elif output_kind == 'user' and code == 0:
+        user = output.strip()
+        result['configured_user'] = user if re.fullmatch(r'[0-9]{0,5}', user) else 'unknown'
+    elif output_kind == 'container_state' and code == 0:
+        state = output.strip()
+        result['state'] = state if re.fullmatch(r'[a-z][a-z0-9_-]{0,31}', state) else 'unknown'
+    elif output_kind == 'entrypoint' and code == 0:
+        text = output.strip()
+        result['tailscaled_entrypoint'] = '/usr/local/bin/tailscaled' in text
+    elif output_kind == 'state_args' and code == 0:
+        text = output.strip()
+        result['state_path_arg'] = '--state=/var/lib/tailscale/tailscaled.state' in text
+        result['socket_path_arg'] = '--socket=/var/lib/tailscale/tailscaled.sock' in text
+    elif output_kind == 'passwd':
+        result['root_entry_present'] = code == 0
+        if code != 0:
+            classified = error_class(output, error, code)
+            result['error'] = 'root_passwd_entry_absent' if classified == 'command_failed' else classified
+    elif code != 0:
+        result['error'] = error_class(output, error, code)
+    return result
+def mesh_path_metadata(vmid, path):
+    code, output, error = bounded(guest_command(vmid, ['stat','-c','%n %u %g %a %s %F',path]))
+    if code != 0:
+        return {'exit':code, 'error':error_class(output, error, code)}
+    fields = output.strip().split(' ', 5)
+    if len(fields) != 6 or fields[0] != path:
+        return {'exit':code, 'error':'invalid_metadata'}
+    if (not re.fullmatch(r'[0-9]+', fields[1]) or
+        not re.fullmatch(r'[0-9]+', fields[2]) or
+        not re.fullmatch(r'[0-7]{3,4}', fields[3]) or
+        not re.fullmatch(r'[0-9]+', fields[4]) or
+        fields[5] not in ('directory','socket','regular file')):
+        return {'exit':code, 'error':'invalid_metadata'}
+    return {'exit':code, 'uid':int(fields[1]), 'gid':int(fields[2]),
+            # stat(1) emits 770/600 without a leading zero; normalize so
+            # comparisons with documented 0700/0600 contracts are exact.
+            'mode':format(int(fields[3], 8), '04o'),
+            'bytes':int(fields[4]), 'type':fields[5]}
+def daemon_permission_category(line):
+    """Classify daemon permission/failure evidence without retaining errors."""
+    text = line.lower()
+    state = ('state' in text or 'tailscaled.state' in text or
+             '/var/lib/tailscale' in text)
+    permission_failure = any(word in text for word in
+        ('permission','denied','operation not permitted','eacces','eperm',
+         'failed','failure','error','cannot','could not'))
+    if not permission_failure:
+        return None
+    if 'chmod' in text and (state or 'directory' in text):
+        return 'chmod_state_dir'
+    if (('mkdir' in text or 'make' in text or 'create' in text) and
+        any(word in text for word in ('cert','tls','directory'))):
+        return 'mkdir_cert_dir'
+    if (('read' in text or 'open' in text or 'load' in text) and state):
+        return 'identity_load' if any(word in text for word in ('identity','machine','key','unseal')) else 'read_state_file'
+    if (('write' in text or 'rename' in text or 'create' in text or 'open' in text) and state):
+        return 'write_state_file'
+    if ('socket' in text and any(word in text for word in
+            ('create','bind','listen','open','permission','denied'))):
+        return 'socket_create'
+    if (('state director' in text or 'state directory' in text or state) and
+        any(word in text for word in ('mode','owner','ownership','permission','chmod'))):
+        return 'state_dir_permissions'
+    if any(word in text for word in ('permission','denied','operation not permitted',
+                                     'eacces','eperm')):
+        return 'unknown'
+    return None
+def mesh_daemon_log_evidence(vmid):
+    code, output, error = bounded(guest_command(vmid,
+        ['journalctl','-u','workload-mesh.service','--no-pager','-n','80','-o','cat']))
+    if code != 0:
+        return {'exit':code, 'error':error_class(output, error, code)}
+    classes = {
+        'startup': ('start','starting','started','launch','boot','exec'),
+        'health': ('health','ready','running','healthy','online'),
+        'failure': ('fail','failed','failure','error','fatal','panic','exit','stopped'),
+        'certificate': ('certificate','cert','tls','x509','https'),
+        'acme': ('acme','challenge','dns-01','http-01'),
+        'ownership': ('owner','ownership','chown','chmod','mode','uid','gid'),
+        'permission': ('permission','denied','forbidden','access','eacces','eperm','not permitted'),
+    }
+    matches = []
+    counts = {name:0 for name in classes}
+    permission_categories = ('chmod_state_dir','mkdir_cert_dir','read_state_file',
+                             'write_state_file','socket_create','state_dir_permissions',
+                             'identity_load','unknown')
+    permission_counts = {name:0 for name in permission_categories}
+    permission_matches = []
+    for line in output.splitlines():
+        lowered = line.lower()
+        found = [name for name, words in classes.items() if any(word in lowered for word in words)]
+        if found:
+            for name in found:
+                counts[name] += 1
+            # Deliberately retain classifications only, never journal text.
+            matches.append({'keywords':found})
+        category = daemon_permission_category(line)
+        if category:
+            permission_counts[category] += 1
+            permission_matches.append(category)
+    return {'exit':code, 'matched':matches[-32:], 'counts':counts,
+            'permission_classifier':{'matched':permission_matches[-32:],
+                                     'counts':permission_counts}}
+def certificate_metadata(vmid, path):
+    code, output, error = bounded(guest_command(vmid,
+        ['openssl','x509','-in',path,'-noout','-issuer','-subject','-dates']))
+    if code != 0:
+        return {'exit':code, 'error':error_class(output, error, code)}
+    result = {'exit':code}
+    for line in output.splitlines():
+        key, separator, value = line.partition('=')
+        if separator and key in ('issuer','subject','notBefore','notAfter'):
+            # Certificate identity/date metadata is useful evidence; reject
+            # arbitrary output rather than publishing it.
+            if re.fullmatch(r'[A-Za-z0-9 =,./:+_-]{1,512}', value):
+                result[key] = value
+    if not any(key in result for key in ('issuer','subject','notBefore','notAfter')):
+        result['error'] = 'invalid_certificate_metadata'
+    return result
+def mesh_cli_capabilities(vmid, container):
+    def probe(args):
+        code, output, error = bounded(guest_command(vmid,
+            ['podman','exec','--user','0',container,'tailscale'] + args))
+        return code, output, error
+    code, output, error = probe(['version'])
+    version_result = {'exit':code}
+    if code == 0:
+        versions = re.findall(r'(?<![0-9])v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?', output)
+        version_result['versions'] = versions[:4]
+    else:
+        version_result['error'] = error_class(output, error, code)
+    code, output, error = probe(['cert','--help'])
+    help_result = {'exit':code}
+    if code == 0:
+        text = (output + '\n' + error).lower()
+        help_result['capabilities'] = {
+            'cert_file': '--cert-file' in text,
+            'key_file': '--key-file' in text,
+            'https': 'https' in text,
+            'domain_argument': 'domain' in text,
+        }
+    else:
+        help_result['error'] = error_class(output, error, code)
+    return {'version':version_result, 'cert_help':help_result}
+def observed_service_states(command_builder, units):
+    """Return fixed systemd state fields only; never publish unit output."""
+    allowed = {'ActiveState','SubState','Result','ExecMainStatus'}
+    values = []
+    for unit in units:
+        code, output, error = bounded(command_builder(
+            ['systemctl','show',unit,'-p','ActiveState','-p','SubState',
+             '-p','Result','-p','ExecMainStatus']))
+        item = {'unit':unit, 'exit':code}
+        if code == 0:
+            for line in output.splitlines():
+                key, separator, value = line.partition('=')
+                if (separator and key in allowed and
+                    re.fullmatch(r'[A-Za-z0-9_-]{0,32}', value)):
+                    item[key] = value
+        else:
+            item['error'] = error_class(output, error, code)
+        values.append(item)
+    return values
+def mesh_source_contract(vmid, source, state_dir, source_form):
+    # This is deliberately a boolean source assertion, not a source dump.  It
+    # records whether the installed guest installer still declares the fixed
+    # daemon-owned 65532:65532/0700 directory contract required at reboot.
+    declaration = ('install -d -m 0700 -o 65532 -g 65532 /var/lib/gnx/mesh'
+                   if source_form == 'absolute_shared_path' else
+                   'install -d -m 0700 -o 65532 -g 65532 "$s/mesh"')
+    code, output, error = bounded(guest_command(vmid, [
+        'grep','-F','-q',declaration,source]))
+    live = mesh_path_metadata(vmid, state_dir)
+    expected = {'uid':65532, 'gid':65532, 'mode':'0700', 'type':'directory'}
+    matches = all(live.get(key) == value for key, value in expected.items())
+    return {
+        'source':fixed_hash(guest_command(vmid, ['sha256sum',source])),
+        'declares_daemon_65532_mode_0700': code == 0,
+        'declaration_error':None if code == 0 else error_class(output, error, code),
+        'expected':expected,
+        'live':live,
+        'live_matches_expected':matches,
+        'upstream_startup_contract': {
+            'reference': 'tailscale/paths/paths_unix.go:ensureStateDirPermsUnix',
+            'daemon_uid':65532,
+            'required_mode':'0700',
+            'chmod_requires_owner_or_fowner':True,
+            'daemon_owner_can_apply': live.get('uid') == 65532,
+        },
+        'source_form':source_form,
+        'declaration_shape':declaration,
+    }
+def mesh_container_startup(vmid, container):
+    return {
+        'state':mesh_probe(vmid, container, 'container_state',
+            ['podman','inspect',container,'--format','{{.State.Status}}'],
+            'container_state', False),
+        'configured_user':mesh_probe(vmid, container, 'configured_user',
+            ['podman','inspect',container,'--format','{{.Config.User}}'],
+            'user', False),
+        # Only booleans are retained from image metadata.  Config.Env is never
+        # queried because it may contain credentials.
+        'tailscaled_entrypoint':mesh_probe(vmid, container, 'entrypoint',
+            ['podman','inspect',container,'--format','{{json .Config.Entrypoint}}'],
+            'entrypoint', False),
+        'state_socket_args':mesh_probe(vmid, container, 'command',
+            ['podman','inspect',container,'--format','{{json .Config.Cmd}}'],
+            'state_args', False),
+    }
+def guest_disk_entry(vmid, path):
+    result = {'path':path}
+    metadata = mesh_path_metadata(vmid, path)
+    if metadata.get('exit') != 0:
+        result.update({'present':False, 'error':metadata.get('error','unavailable')})
+        return result
+    result['present'] = True
+    result['type'] = metadata.get('type')
+    result['uid'] = metadata.get('uid')
+    result['gid'] = metadata.get('gid')
+    result['mode'] = metadata.get('mode')
+    code, output, error = bounded(guest_command(vmid, ['du','-sx','-B1','--',path]))
+    if code == 0:
+        match = re.match(r'\s*([0-9]+)\s+', output)
+        result['disk_bytes'] = int(match.group(1)) if match else None
+        if match is None:
+            result['disk_error'] = 'invalid_size'
+    else:
+        result['disk_error'] = error_class(output, error, code)
+    return result
+def guest_count(vmid, args):
+    code, output, error = bounded(guest_command(vmid, args))
+    value = output.strip()
+    if code == 0 and re.fullmatch(r'[0-9]+', value):
+        return {'exit':code, 'count':int(value)}
+    return {'exit':code, 'error':error_class(output, error, code)}
+def guest_line_count(vmid, args):
+    code, output, error = bounded(guest_command(vmid, args))
+    if code == 0:
+        return {'exit':code, 'count':len([line for line in output.splitlines() if line.strip()])}
+    return {'exit':code, 'error':error_class(output, error, code)}
+def ai_retirement_inventory(vmid):
+    # Fixed names only: no recursive file listing and no content/secret dump.
+    paths = [
+        '/var/lib/gnx/ai', '/var/lib/gnx/ai/mesh', '/var/lib/gnx/ai/proxy',
+        '/var/lib/gnx/ai/omniroute', '/var/lib/gnx/ai/tls',
+        '/var/lib/gnx/ai/secrets', '/var/lib/gnx/ai/secrets/voice',
+        '/var/lib/continuity-ai', '/var/cache/gnx/ai',
+    ]
+    code, output, error = bounded(guest_command(vmid,
+        ['df','-P','-B1','/']))
+    disk = {'exit':code}
+    if code == 0:
+        fields = output.splitlines()[-1].split()
+        if len(fields) >= 6 and all(re.fullmatch(r'[0-9]+', fields[i]) for i in (1,2,3,4)):
+            disk.update({'filesystem':fields[0], 'bytes':int(fields[1]),
+                         'used_bytes':int(fields[2]), 'available_bytes':int(fields[3]),
+                         'use_percent':fields[4], 'mount':fields[5]})
+        else:
+            disk['error'] = 'invalid_disk_metadata'
+    else:
+        disk['error'] = error_class(output, error, code)
+    return {
+        'read_only':True,
+        'removal_attempted':False,
+        'removal_performed':False,
+        'persistent_paths': [guest_disk_entry(vmid, path) for path in paths],
+        'disk':disk,
+        'podman_counts': {
+            'containers':guest_line_count(vmid, ['podman','ps','-aq']),
+            'volumes':guest_line_count(vmid, ['podman','volume','ls','-q']),
+            'images':guest_line_count(vmid, ['podman','images','-q']),
+        },
+        'names_exposed':False,
+    }
+def host_path_metadata(path):
+    try:
+        value = Path(path).lstat()
+    except FileNotFoundError:
+        return {'path':path, 'present':False}
+    except OSError:
+        return {'path':path, 'error':'unavailable'}
+    kind = 'directory' if stat.S_ISDIR(value.st_mode) else ('regular_file' if stat.S_ISREG(value.st_mode) else 'other')
+    return {'path':path, 'present':True, 'type':kind, 'uid':value.st_uid,
+            'gid':value.st_gid, 'mode':oct(stat.S_IMODE(value.st_mode)),
+            'bytes':value.st_size, 'links':value.st_nlink}
+def host_json_reference(path, fields):
+    result = host_path_metadata(path)
+    if not result.get('present') or result.get('type') != 'regular_file':
+        return result
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError,UnicodeError,ValueError):
+        result['json'] = 'unavailable'
+        return result
+    projection = {}
+    for field in fields:
+        value = data.get(field) if isinstance(data, dict) else None
+        if isinstance(value, (str,int,bool)) and (not isinstance(value, str) or
+                re.fullmatch(r'[A-Za-z0-9_.:/-]{0,128}', value)):
+            projection[field] = value
+    result['json_fields'] = projection
+    return result
+def ai_retirement_host_refs():
+    # Receipts/config references are projected to non-secret identity fields;
+    # the files are never removed and their contents are never emitted.
+    return {
+        'owner_receipt':host_json_reference(
+            '/var/lib/gnx-node/machines/ai/owner.json',
+            ('vmid','phase','address')),
+        'bundle_current':host_json_reference(
+            '/var/lib/gnx-node/workload-bundles/ai/current.json',
+            ('schema','workload','revision','phase','error_code')),
+        'deployment_receipt':host_json_reference(
+            '/var/lib/gnx-node/workload-bundles/ai/deployment.json',
+            ('schema','workload','revision','phase','error_code')),
+        'profile_cache':host_path_metadata('/var/lib/gnx-node/compute/gnx/ai'),
+        'staging_reference':host_path_metadata('/var/lib/vz/gnx/ai'),
+    }
+node_mesh_source = fixed_hash(['sha256sum','/opt/gnx/payload/node/workloads/private-services/mesh.run'])
+def mesh_guest_diagnostic(vmid, role, container, guest_source, install_source, state_dir, tls_dir):
+    guest_source_hash = fixed_hash(guest_command(vmid, ['sha256sum',guest_source]))
+    helper_hash = fixed_hash(guest_command(vmid, ['sha256sum','/usr/local/libexec/gnx-workload-mesh']))
+    node_digest = node_mesh_source.get('sha256')
+    guest_digest = guest_source_hash.get('sha256')
+    helper_digest = helper_hash.get('sha256')
+    cli_capabilities = mesh_cli_capabilities(vmid, container)
+    source_contract = mesh_source_contract(
+        vmid, install_source, state_dir,
+        'absolute_shared_path' if role == 'shared' else 'installer_variable_mesh_path')
+    return {
+        'guest':vmid,
+        'role':role,
+        'read_only':True,
+        'applied':False,
+        'source_hashes': {
+            'installed_node_source':node_mesh_source,
+            'guest_source':guest_source_hash,
+            'helper':helper_hash,
+            'node_source_matches_guest_source': bool(node_digest and guest_digest and node_digest == guest_digest),
+            'node_source_matches_helper': bool(node_digest and helper_digest and node_digest == helper_digest),
+            'guest_source_matches_helper': bool(guest_digest and helper_digest and guest_digest == helper_digest),
+        },
+        'status': {
+            'default_uid':mesh_status(vmid, container, False),
+            'root_uid_0':mesh_status(vmid, container, True),
+        },
+        # The daemon-UID result is the stable health observation. Root CLI
+        # access may be denied by the daemon-owned 0700 state directory and
+        # is retained only as separate evidence, never as overall health.
+        'tailscale_status':mesh_status(vmid, container, False),
+        'tailscale_version':cli_capabilities['version'],
+        'directory_contract':source_contract,
+        'container_startup':mesh_container_startup(vmid, container),
+        # These probes distinguish an exec-user lookup issue from an OCI/crun
+        # failure without exposing command stderr or image/environment data.
+        'exec_evidence': {
+            'default_uid':mesh_probe(vmid, container, 'default_uid', ['id','-u'], 'uid'),
+            'root_uid_0':mesh_probe(vmid, container, 'root_uid_0', ['id','-u'], 'uid'),
+            'root_passwd_0':mesh_probe(vmid, container, 'root_passwd_0', ['getent','passwd','0'], 'passwd'),
+            'configured_user':mesh_probe(vmid, container, 'configured_user', ['podman','inspect',container,'--format','{{.Config.User}}'], 'user', False),
+            'oci_runtime':mesh_probe(vmid, container, 'oci_runtime', ['podman','info','--format','{{.Host.OCIRuntime.Name}}'], 'runtime', False),
+        },
+        'path_metadata': {
+            'state_dir':mesh_path_metadata(vmid, state_dir),
+            'state_file':mesh_path_metadata(vmid, state_dir + '/tailscaled.state'),
+            'socket':mesh_path_metadata(vmid, state_dir + '/tailscaled.sock'),
+            'state_cert_cache_dir':mesh_path_metadata(vmid, state_dir),
+            'state_cert':mesh_path_metadata(vmid, state_dir + '/backend.crt'),
+            'state_key':mesh_path_metadata(vmid, state_dir + '/backend.key'),
+            'tls_dir':mesh_path_metadata(vmid, tls_dir),
+            'tls_cert':mesh_path_metadata(vmid, tls_dir + '/tls.crt'),
+            'tls_key':mesh_path_metadata(vmid, tls_dir + '/tls.key'),
+            'tls_metadata':mesh_path_metadata(vmid, tls_dir + '/certificate.json'),
+        },
+        'certificate_evidence': {
+            'daemon_log':mesh_daemon_log_evidence(vmid),
+            'state_cert':certificate_metadata(vmid, state_dir + '/backend.crt'),
+            'tls_cert':certificate_metadata(vmid, tls_dir + '/tls.crt'),
+            'cli_capabilities':cli_capabilities,
+        },
+    }
+for key in ['/var/lib/gnx-node/secrets/mesh-reusable.env', '/var/lib/gnx-node/secrets/ai-mesh.env']:
+    try:
+        s = Path(key).lstat()
+        emit('mesh_credential_metadata', {'path':key,'regular':stat.S_ISREG(s.st_mode),'uid':s.st_uid,'mode':oct(stat.S_IMODE(s.st_mode)),'links':s.st_nlink})
+    except FileNotFoundError:
+        emit('mesh_credential_metadata', {'path':key,'present':False})
+# Parse candidate source with the pinned installed Caddy, without applying it
+# or writing a runner/config into the guest. Adapted config may contain secrets
+# from protected imports, so neither output nor error bodies are published.
+try:
+    parsed = subprocess.run(['podman','exec','-i','gnx-gateway','caddy','adapt','--config','/dev/stdin','--adapter','caddyfile'],
+        input=CADDY_SOURCE.encode(),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30)
+    emit('source_caddy_parse', {'exit':parsed.returncode,'applied':False})
+except (OSError,subprocess.TimeoutExpired):
+    emit('source_caddy_parse', {'error':'unavailable','applied':False})
+# Process names/wait channels only: never argv or environment/credential data.
+for label, command in [('node_process_waits',['ps','-eo','pid,ppid,comm,wchan:32,etimes']),
+                       ('compute_process_waits',['podman','exec','gnx-compute','ps','-eo','pid,ppid,comm,wchan:32,etimes'])]:
+    code, processes = run(command)
+    emit(label, {'exit':code,'output':processes.splitlines()[:128]})
+rc, raw = run(['df','-h','/','/var/lib/gnx-node/compute'])
+emit('runtime_disk_space',raw.splitlines())
+rc, raw = run(['findmnt','-n','-o','FSTYPE,OPTIONS','/'])
+emit('runtime_mount',raw.strip())
 rc, raw = run(['podman','inspect','gnx-compute','--format','{{json .NetworkSettings.Networks}}'])
 emit('compute_network', json.loads(raw) if rc == 0 else {'error':'unavailable'})
 rc, raw = run(['podman','ps','--format','{{.Names}} {{.Image}}'])
 emit('host_containers',raw.splitlines() if rc == 0 else [])
+for label, args in [('host_service_state',['systemctl','is-active','dns.service','gateway.service','compute.service','app-auth.service']),('ai_adapter_status',['bash','/var/lib/gnx-node/lxc.run','status','ai']),('gateway_diagnostic',['journalctl','-u','gateway.service','--no-pager','-n','35','-o','cat'])]:
+    rc, raw = run(args)
+    emit(label,{'exit':rc,'output':safe_gateway_lines(raw) if label=='gateway_diagnostic' else raw.splitlines()})
+emit('host_dependency_service_states', observed_service_states(
+    lambda args:args,
+    ['app-auth.service','app-sessions.service','auth-voice.service',
+     'auth-oryx.service','auth-omniroute.service','auth-continuity.service',
+     'auth-business.service','netbird-stun.service']))
+rc, raw = run(['journalctl','-u','dns.service','--no-pager','-n','35','-o','cat'])
+emit('dns_service_diagnostic',raw.splitlines() if rc == 0 else [])
+rc, raw = run(['journalctl','-u','compute.service','--no-pager','-n','70','-o','cat'])
+emit('compute_service_diagnostic',[line for line in raw.splitlines() if not re.search(r'(?i)password|secret|token|tskey',line)] if rc == 0 else [])
 rc, raw = run(['podman','exec','gnx-compute','pct','list'])
 emit('guests',raw.splitlines() if rc == 0 else [])
 managed = []
@@ -24,13 +543,121 @@ for line in raw.splitlines()[1:] if rc == 0 else []:
     guest = fields[0]
     code, config = run(['podman','exec','gnx-compute','pct','config',guest])
     tags = next((x.partition(':')[2].strip().split(';') for x in config.splitlines() if x.startswith('tags:')), [])
+    if 'gnx-ai' in tags:
+        emit('ai_guest_identity', [x for x in config.splitlines() if x.startswith(('description:','tags:','unprivileged:','hostname:'))])
+        emit('mesh_exec_diagnostic', mesh_guest_diagnostic(guest, 'ai', 'gnx-ai-mesh', '/opt/gnx/workloads/ai/mesh.run', '/opt/gnx/workloads/ai/install.run', '/var/lib/gnx/ai/mesh', '/var/lib/gnx/ai/tls'))
+        code, owner = run(['jq','-c','{vmid,owner,phase}','/var/lib/gnx-node/machines/ai/owner.json'])
+        emit('ai_owner_receipt', owner.strip() if code==0 else {'error':'unavailable'})
+        code, mesh = run(['podman','exec','gnx-compute','pct','exec',guest,'--','podman','exec','gnx-ai-mesh','tailscale','--socket=/var/lib/tailscale/tailscaled.sock','status','--json'])
+        try:
+            data=json.loads(mesh)
+            emit('ai_mesh_identity', {'backend':data.get('BackendState'),'dns_name':(data.get('Self') or {}).get('DNSName'),'ips':data.get('TailscaleIPs',[]),'certificate_domains':data.get('CertDomains',[])})
+        except ValueError: emit('ai_mesh_identity', {'error':'unavailable'})
+        for label, args in [
+            ('ai_mesh_helper', ['/usr/local/libexec/gnx-workload-mesh','status']),
+            ('ai_mesh_state_metadata', ['stat','-c','%n %u %g %a %s','/var/lib/gnx/ai/mesh/tailscaled.state']),
+            ('ai_mesh_certificate_files', ['stat','-c','%n %u %g %a %s','/var/lib/gnx/ai/mesh/backend.crt','/var/lib/gnx/ai/mesh/backend.key']),
+            ('ai_mesh_service', ['systemctl','show','workload-mesh.service','-p','ActiveState','-p','Result']),
+            ('ai_network', ['ip','-brief','address']),
+            ('ai_routes', ['ip','route']),
+            ('ai_network_service', ['systemctl','show','systemd-networkd.service','-p','ActiveState','-p','Result']),
+            ('ai_network_diagnostic', ['journalctl','-u','systemd-networkd.service','--no-pager','-n','15','-o','cat']),
+            ('ai_guard', ['nft','list','table','inet','gnx_workload_mesh']),
+        ]:
+            code, result = run(['podman','exec','gnx-compute','pct','exec',guest,'--']+args)
+            emit(label, {'exit':code,'output':result.splitlines()})
+        code, result = run(['podman','exec','gnx-compute','nft','list','table','netdev','gnx_lxc_transport'])
+        emit('compute_ingress_gate', {'exit':code,'output':result.splitlines()})
+        fingerprint = '''import hashlib,json,stat
+from pathlib import Path
+p=Path('/var/lib/gnx/ai/mesh/tailscaled.state')
+s=p.lstat(); assert stat.S_ISREG(s.st_mode) and stat.S_IMODE(s.st_mode)==0o600
+data=json.loads(p.read_text()); key=data.get('_machinekey')
+print(json.dumps({'machine_key_sha256':hashlib.sha256(key.encode()).hexdigest() if isinstance(key,str) else None}))
+'''
+        code, result = run(['podman','exec','gnx-compute','pct','exec',guest,'--','python3','-c',fingerprint])
+        emit('ai_identity_fingerprint', {'exit':code,'output':result.splitlines()})
+        code, cert = run(['podman','exec','gnx-compute','pct','exec',guest,'--','openssl','x509','-in','/var/lib/gnx/ai/tls/tls.crt','-noout','-issuer','-subject','-dates'])
+        emit('ai_tls_metadata', {'exit':code,'output':cert.splitlines()})
+        for label, args in [('ai_import_error',['tail','-30','/var/log/gnx-ai-image-import.log']),('ai_images',['podman','images','--format','{{.Repository}} {{.Digest}}']),('ai_guest_disk',['df','-h','/']),('ai_empty_overlay_links',['find','/var/lib/containers/storage/overlay','-mindepth','2','-maxdepth','2','-type','f','-name','link','-empty']),('ai_container_count',['podman','ps','-a','--format','{{.Names}}']),('ai_init_markers',['stat','-c','%n %s','/var/cache/gnx/ai/images.sha256','/var/cache/gnx/ai/packages.sha256']),('ai_init_script_hash',['sha256sum','/opt/gnx/workloads/ai/install.run']),('ai_podman_version',['podman','--version'])]:
+            code, result = run(['podman','exec','gnx-compute','pct','exec',guest,'--']+args)
+            emit(label,{'exit':code,'output':result.splitlines()})
+        emit('ai_retirement_inventory', ai_retirement_inventory(guest))
     if code == 0 and any(x in tags for x in ('gnx-rustfs','gnx-private-services')):
         managed.append(guest)
+emit('ai_retirement_host_refs', {
+    'read_only':True,
+    'removal_attempted':False,
+    'removal_performed':False,
+    'references':ai_retirement_host_refs(),
+})
 if len(managed) != 1:
     emit('shared_guest_ownership', {'error':'absent_or_ambiguous'})
     raise SystemExit(1)
 vmid = managed[0]
 emit('shared_guest_ownership', {'vmid':vmid})
+emit('mesh_exec_diagnostic', mesh_guest_diagnostic(vmid, 'shared', 'gnx-workload-mesh', '/opt/gnx/workloads/rustfs/mesh.run', '/opt/gnx/workloads/rustfs/install.run', '/var/lib/gnx/mesh', '/var/lib/gnx/rustfs/tls'))
+emit('shared_service_states', observed_service_states(
+    lambda args:guest_command(vmid,args),
+    ['workload-mesh.service','workload-mesh-guard.service','rustfs.service',
+     'pocket-id.service','netbird-server.service','netbird-dashboard.service',
+     'continuity.service']))
+for label, args in [('business_service',['systemctl','show','continuity.service','-p','ActiveState','-p','Result']),
+                    ('business_quadlet',['cat','/etc/containers/systemd/continuity.container']),
+                    ('business_image',['podman','inspect','continuity-business','--format','{{.Image}} {{.Config.Image}}'])]:
+    code, result = run(['podman','exec','gnx-compute','pct','exec',vmid,'--']+args)
+    if label == 'business_quadlet':
+        result = '\n'.join(line for line in result.splitlines() if line.startswith(('Image=','ContainerName=','Volume=','Environment=CONTINUITY_DATA_DIR=','Environment=CONTINUITY_SCOPE=','Environment=CONTINUITY_LISTEN=','Environment=CONTINUITY_ACK=','Environment=CONTINUITY_S3_ENDPOINT=','Environment=CONTINUITY_S3_BUCKET=','Environment=CONTINUITY_S3_PREFIX=')))
+    emit(label,{'exit':code,'output':result.splitlines()})
+# Test both entry paths without cookies, auth responses or credential logging.
+profile = json.loads(Path('/opt/gnx/payload/node/workloads/ai/profile.json').read_text())
+code, gateway = run(['podman','exec','gnx-mesh','tailscale','ip','-4'])
+gateway = gateway.strip()
+targets = [(app+'.ai.gnx','/') for app in profile['origins']]
+targets += [('continuity.gnx','/health/ready'),('continuty.gnx','/health/ready')]
+for host, path in targets:
+    code, answer = run(['podman','exec','gnx-dns','dig','+short','+time=2','+tries=1','@127.0.0.1','-p','5353',host,'A'])
+    emit('service_dns', {'host':host,'exit':code,'answers':answer.splitlines()})
+    common = ['curl','--silent','--max-time','10','--output','/dev/null','--write-out','%{http_code}',
+              '--header','X-GnX-Backend-Key:invalid-fixture','https://'+host+path]
+    for location, command in [
+        ('loopback',common+['--cacert','/var/lib/gnx-node/ca/gateway-ca.pem','--resolve',host+':443:127.0.0.1']),
+        ('tailscale-peer',['podman','exec','gnx-compute','pct','exec',vmid,'--']+common+
+         ['--cacert','/var/lib/gnx/rustfs/tls/ca.crt','--resolve',host+':443:'+gateway]),
+    ]:
+        code, result = run(command)
+        emit('service_gateway_anonymous_boundary', {'host':host,'client':location,'exit':code,'http_status':result.strip()})
+# Business backend must be reachable only from the gateway, through the shared
+# peer's mesh address. This readiness read never opens or writes its journal.
+code, result = run(['curl','--fail','--silent','--max-time','8','http://continuity.mesh.gnx:7310/health/ready'])
+try: business=json.loads(result)
+except ValueError: business={'error':'unavailable'}
+emit('business_gateway_readiness',{'exit':code,'status':business})
+# Native-TLS service readback uses the protected credential only in curl stdin.
+# It proves the service hop, not personal Pocket login or inference acceptance.
+try:
+    owner=json.loads(Path('/var/lib/gnx-node/machines/ai/owner.json').read_text())
+    tls_name=Path('/var/lib/gnx-node/secrets/gateway-backends.env').read_text().strip().partition('=')[2]
+    credential=Path('/var/lib/gnx-node/ai-auth/backend.key')
+    metadata=credential.lstat()
+    assert stat.S_ISREG(metadata.st_mode) and metadata.st_uid==0 and stat.S_IMODE(metadata.st_mode)==0o600
+    key=credential.read_text().strip(); assert re.fullmatch('[a-f0-9]{64}',key)
+    assert re.fullmatch(r'[a-z0-9.-]+\.ts\.net',tls_name)
+    address=owner['address']; assert re.fullmatch(r'172\.\d+\.\d+\.\d+',address)
+    for app, path in [('voice','/health/live'),('oryx','/'),('omniroute','/'),('continuity','/health/ready')]:
+        config='silent\nmax-time = 10\noutput = /dev/null\nwrite-out = "%{http_code}"\nurl = https://'+tls_name+':8443'+path+'\n'
+        config+='resolve = "'+tls_name+':8443:'+address+'"\nheader = "Host: '+app+'.ai.gnx"\n'
+        for supplied, label in [('invalid-fixture','unauthorized'),(key,'authorized')]:
+            result=subprocess.run(['curl','--config','-'],input=(config+'header = "X-GnX-Backend-Key: '+supplied+'"\n').encode(),
+                stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=15)
+            emit('ai_backend_readback',{'host':app+'.ai.gnx','credential':label,'exit':result.returncode,'http_status':result.stdout.decode().strip()})
+except (OSError,ValueError,KeyError,AssertionError,subprocess.TimeoutExpired):
+    emit('ai_backend_readback',{'error':'prerequisites_unavailable'})
+rc, raw = run(['podman','exec','gnx-compute','pvesh','get','/cluster/resources','--type','vm','--output-format','json'])
+try: emit('guest_resource_discovery',json.loads(raw))
+except ValueError: emit('guest_resource_discovery',{'exit':rc})
+rc, raw = run(['python3','/var/lib/gnx-node/access-mesh-policy.run'])
+emit('access_policy_check',{'exit':rc,'checks':raw.splitlines()})
 for name, command in [
  ('guest_images', ['podman','images','--format','{{.Repository}} {{.Digest}} {{.ID}}']),
  ('continuity_ready', ['curl','--fail','--silent','--max-time','10','http://127.0.0.1:7310/health/ready']),
@@ -49,13 +676,15 @@ p=Path('/var/lib/gnx/access/netbird-enrollment.json')
 try:
  s=p.lstat()
  assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and stat.S_IMODE(s.st_mode)==0o600
- token=json.loads(p.read_text())['token']
- request=urllib.request.Request('http://127.0.0.1:8081/api/users',headers={'Authorization':'Token '+token})
+  saved=json.loads(p.read_text())
+  token=saved['token']; scheme=saved.get('scheme','Token')
+  assert scheme in ('Token','Bearer')
+  request=urllib.request.Request('http://127.0.0.1:8081/api/users',headers={'Authorization':scheme+' '+token})
  with urllib.request.urlopen(request,timeout=10) as r:
   users=json.load(r)
   result={'authorized':True,'users':len(users)}
  for name in ['clusters','proxy-tokens']:
-  request=urllib.request.Request('http://127.0.0.1:8081/api/reverse-proxies/'+name,headers={'Authorization':'Token '+token})
+   request=urllib.request.Request('http://127.0.0.1:8081/api/reverse-proxies/'+name,headers={'Authorization':scheme+' '+token})
   with urllib.request.urlopen(request,timeout=10) as r:
    values=json.load(r)
    result[name+'_api']={'status':r.status,'count':len(values)}

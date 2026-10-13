@@ -25,6 +25,7 @@ Environment=NB_PROXY_PRIVATE=true
 Environment=NB_PROXY_CERTIFICATE_DIRECTORY=/certs
 Environment=NB_PROXY_CERTIFICATE_FILE=tls.crt
 Environment=NB_PROXY_CERTIFICATE_KEY_FILE=tls.key
+Environment=NB_PROXY_WILDCARD_CERT_DIR=/certs
 Environment=NB_PROXY_ACME_CERTIFICATES=false
 Environment=NB_PROXY_LOG_LEVEL=warn
 Environment=SSL_CERT_FILE=/certs/ca.crt

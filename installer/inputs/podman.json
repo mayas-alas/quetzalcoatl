@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "version": "6.1.3",
+  "architecture": "amd64",
+  "source": {
+    "repository": "https://github.com/podman-container-tools/podman",
+    "tag": "v6.1.3",
+    "tag_object": "46cd8dbefbbd6890790097123f4ece88df856433",
+    "commit": "85b994955e0b4e30fbce9c8351cab85676140ede",
+    "signature_verification": "GitHub git-tag API: verified=true, reason=valid",
+    "archive": "podman-85b994955e0b4e30fbce9c8351cab85676140ede.tar.gz",
+    "sha256": "fede663eae95f3b5053734796071b79774dd55332cf61014aa7f4184154f99ae"
+  },
+  "toolchain": {
+    "version": "go1.26.6",
+    "archive": "go1.26.6.linux-amd64.tar.gz",
+    "sha256": "708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89"
+  },
+  "helpers": {
+    "netavark": {
+      "version": "2.1.0",
+      "archive": "netavark-2.1.0.gz",
+      "sha256": "39fb540daf7578a793510b27b592b10f17b5d9aa3b07bc5c3f40881f12d590bd",
+      "source": "https://github.com/containers/netavark/releases/download/v2.1.0/netavark.gz",
+      "provenance": "upstream release binary, not locally rebuilt"
+    },
+    "aardvark-dns": {
+      "version": "2.1.0",
+      "archive": "aardvark-dns-2.1.0.gz",
+      "sha256": "a7bc5252ee0e083f3f46d5bb9dc5f0abdbaa31a70a5a19012412dc8055ac2976",
+      "source": "https://github.com/containers/aardvark-dns/releases/download/v2.1.0/aardvark-dns.gz",
+      "provenance": "upstream release binary, not locally rebuilt"
+    }
+  },
+  "build": {
+    "recipe": "upstream Makefile",
+    "targets": ["podman", "rootlessport", "quadlet"],
+    "tags": "grpcnotrace,seccomp,systemd,containers_image_openpgp,exclude_graphdriver_btrfs",
+    "prefix": "/usr",
+    "build_info": "1790686827",
+    "network": "GOPROXY=off, GOSUMDB=off, GOTOOLCHAIN=local, GOFLAGS=-mod=vendor"
+  }
+}

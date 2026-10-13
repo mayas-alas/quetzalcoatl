@@ -1,0 +1,9 @@
+{
+    "version":  "gnx 0.1.79",
+    "cli_sha256":  "d1648679f56cfea87e43f09d75f46ae2618e24d346db86963b59c97607b40aca",
+    "cli_matches_build":  true,
+    "agent_sha256":  "da713212709ece2b787679932703a1378a4b0c1f8ad6e91e79bbabfacbb5c9ce",
+    "agent_matches_build":  true,
+    "service":  "Running",
+    "burn_sha256":  "727bfea03f496cad86f1885ea260c739ea39dca58878d24f640ea57a0df2a35c"
+}

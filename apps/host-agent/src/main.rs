@@ -8,6 +8,7 @@ mod linux_node;
 mod provisioning;
 mod secret_store;
 mod state;
+mod workload_bundle;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(windows)]
@@ -121,6 +122,10 @@ mod service {
                 if crate::dedicated_account::run_wsl_as_windows_identity(&args).is_err() {
                     std::thread::sleep(std::time::Duration::from_secs(2));
                 }
+                // Release the managed-profile guard to waiting control/status
+                // callers. Immediately reacquiring an unfair OS mutex can
+                // starve them forever. This gap is below WSL's idle timeout.
+                std::thread::sleep(std::time::Duration::from_millis(250));
             }
         });
         // Best-effort host browser access reconciliation is intentionally

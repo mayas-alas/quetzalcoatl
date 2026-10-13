@@ -1,0 +1,54 @@
+﻿{
+    "schema":  1,
+    "builder":  "GnX-LinuxLab",
+    "inputs":  {
+                   "podman-85b994955e0b4e30fbce9c8351cab85676140ede.tar.gz":  "fede663eae95f3b5053734796071b79774dd55332cf61014aa7f4184154f99ae",
+                   "go1.26.6.linux-amd64.tar.gz":  "708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89",
+                   "netavark-2.1.0.gz":  "39fb540daf7578a793510b27b592b10f17b5d9aa3b07bc5c3f40881f12d590bd",
+                   "aardvark-dns-2.1.0.gz":  "a7bc5252ee0e083f3f46d5bb9dc5f0abdbaa31a70a5a19012412dc8055ac2976"
+               },
+    "source":  {
+                   "commit":  "85b994955e0b4e30fbce9c8351cab85676140ede",
+                   "tag":  "v6.1.3"
+               },
+    "build":  {
+                  "recipe":  "upstream Makefile",
+                  "targets":  [
+                                  "podman",
+                                  "rootlessport",
+                                  "quadlet"
+                              ],
+                  "build_info":  "1790686827",
+                  "build_tags":  "grpcnotrace,seccomp,systemd,containers_image_openpgp,exclude_graphdriver_btrfs"
+              },
+    "outputs":  {
+                    "nativepodman":  {
+                                         "path":  "source/bin/podman",
+                                         "sha256":  "7524f0170b6010424ca9f1de1100979a322760c7593b1ed2da11152912d1c264"
+                                     },
+                    "rootlessport":  {
+                                         "path":  "source/bin/rootlessport",
+                                         "sha256":  "872062106c381b9991b8cf73bf66227e2f993c73a1583e0b7bb63c87289390d5"
+                                     },
+                    "quadlet":  {
+                                    "path":  "source/bin/quadlet",
+                                    "sha256":  "2a94091eb92169f64dcccd663812507a2a03b710e28a7375314a4fde3fb81d41"
+                                },
+                    "netavark":  {
+                                     "path":  "stage/usr/libexec/podman/netavark",
+                                     "sha256":  "9ffa03d7af29e20593bc03e49a638f8a7dc97d79da6f65b65b35f9ea496c6dc5",
+                                     "provenance":  "upstream release binary, not locally rebuilt"
+                                 },
+                    "aardvark-dns":  {
+                                         "path":  "stage/usr/libexec/podman/aardvark-dns",
+                                         "sha256":  "86248f007300a4b7466c726eddbee8e82328ef33922ce560eb34cb880c21bb90",
+                                         "provenance":  "upstream release binary, not locally rebuilt"
+                                     },
+                    "archive":  {
+                                    "path":  "podman-6.1.3-linux-amd64.tar.gz",
+                                    "sha256":  "b693b4ae4a44709c8c3d4519525b9d32aa06012531ef201155d8ceac244c2e68"
+                                }
+                },
+    "prerequisites":  "GnX-LinuxLab provides gcc-14, libseccomp-dev, systemd development files, and libgpgme-dev from official Debian; exact runtime dependencies still require a manifest and test.",
+    "runtime_dependency_bundle":  "not complete"
+}

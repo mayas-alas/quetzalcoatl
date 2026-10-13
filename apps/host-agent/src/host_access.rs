@@ -6,6 +6,15 @@
 use std::io;
 use std::path::Path;
 
+#[cfg(any(windows, test))]
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AccessHosts {
+    schema: u8,
+    hosts: Vec<String>,
+    cleanup_hosts: Vec<String>,
+}
+
 #[cfg(windows)]
 const HOSTS_PATH: &str = r"C:\Windows\System32\drivers\etc\hosts";
 #[cfg(windows)]
@@ -16,6 +25,86 @@ const CERT_THUMBPRINT_FILE: &str = "root-ca-thumbprint.txt";
 const HOSTS_BEGIN: &str = "# BEGIN GNX HOST ACCESS";
 #[cfg(windows)]
 const HOSTS_END: &str = "# END GNX HOST ACCESS";
+
+#[cfg(any(windows, test))]
+pub(crate) fn owned_hostnames() -> io::Result<Vec<String>> {
+    let path = crate::linux_node::host_payload_dir().join("access-hosts.json");
+    let bytes = std::fs::read(&path).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("HOST_ACCESS_CONFIG_MISSING: {error}"),
+        )
+    })?;
+    let config: AccessHosts = serde_json::from_slice(&bytes).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("HOST_ACCESS_CONFIG_INVALID: {error}"),
+        )
+    })?;
+    if config.schema != 1
+        || config.hosts.is_empty()
+        || config.hosts.iter().any(|name| !valid_gnx_name(name))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "HOST_ACCESS_CONFIG_INVALID",
+        ));
+    }
+    let mut names = config.hosts;
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+#[cfg(any(windows, test))]
+pub(crate) fn cleanup_hostnames() -> io::Result<Vec<String>> {
+    let path = crate::linux_node::host_payload_dir().join("access-hosts.json");
+    let bytes = std::fs::read(&path).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("HOST_ACCESS_CONFIG_MISSING: {error}"),
+        )
+    })?;
+    let config: AccessHosts = serde_json::from_slice(&bytes).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("HOST_ACCESS_CONFIG_INVALID: {error}"),
+        )
+    })?;
+    if config.schema != 1
+        || config.hosts.is_empty()
+        || config
+            .hosts
+            .iter()
+            .chain(config.cleanup_hosts.iter())
+            .any(|name| !valid_gnx_name(name))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "HOST_ACCESS_CONFIG_INVALID",
+        ));
+    }
+    let mut names = config.hosts;
+    names.extend(config.cleanup_hosts);
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+#[cfg(any(windows, test))]
+fn valid_gnx_name(name: &str) -> bool {
+    name.len() <= 253
+        && name.ends_with(".gnx")
+        && name.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+        })
+}
 
 #[cfg(windows)]
 pub fn reconcile(certificate_path: &Path) -> io::Result<()> {
@@ -111,9 +200,16 @@ try {{
 fn reconcile_hosts() -> io::Result<()> {
     let path = Path::new(HOSTS_PATH);
     let current = std::fs::read_to_string(path).unwrap_or_default();
-    let cleaned = filter_hosts(&current);
-    let block =
-        format!("{HOSTS_BEGIN}\r\n127.0.0.1 app.gnx\r\n127.0.0.1 compute.gnx\r\n127.0.0.1 rustfs.gnx\r\n127.0.0.1 pocket.gnx\r\n127.0.0.1 netbird.gnx\r\n{HOSTS_END}\r\n");
+    let hosts = owned_hostnames()?;
+    let cleaned = filter_hosts(&current, &hosts);
+    let block = format!(
+        "{HOSTS_BEGIN}\r\n{}\r\n{HOSTS_END}\r\n",
+        hosts
+            .iter()
+            .map(|name| format!("127.0.0.1 {name}"))
+            .collect::<Vec<_>>()
+            .join("\r\n")
+    );
     let next = if cleaned.trim().is_empty() {
         block
     } else {
@@ -134,7 +230,8 @@ fn cleanup_hosts() -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(stage_error("HOST_ACCESS_HOSTS_READ_FAILED", error)),
     };
-    let next = filter_hosts(&current);
+    let hosts = owned_hostnames()?;
+    let next = filter_hosts(&current, &hosts);
     if current != next {
         std::fs::write(path, next)
             .map_err(|error| stage_error("HOST_ACCESS_HOSTS_WRITE_FAILED", error))?;
@@ -143,7 +240,7 @@ fn cleanup_hosts() -> io::Result<()> {
 }
 
 #[cfg(windows)]
-fn filter_hosts(input: &str) -> String {
+fn filter_hosts(input: &str, hosts: &[String]) -> String {
     let mut output = Vec::new();
     let mut in_block = false;
     for line in input.lines() {
@@ -156,7 +253,7 @@ fn filter_hosts(input: &str) -> String {
             in_block = false;
             continue;
         }
-        if in_block || hosts_line_mentions_product_name(trimmed) {
+        if in_block || hosts_line_mentions_product_name(trimmed, hosts) {
             continue;
         }
         output.push(line);
@@ -169,15 +266,11 @@ fn filter_hosts(input: &str) -> String {
 }
 
 #[cfg(windows)]
-fn hosts_line_mentions_product_name(line: &str) -> bool {
+fn hosts_line_mentions_product_name(line: &str, hosts: &[String]) -> bool {
     let body = line.split('#').next().unwrap_or_default();
-    body.split_whitespace().skip(1).any(|name| {
-        name.eq_ignore_ascii_case("app.gnx")
-            || name.eq_ignore_ascii_case("compute.gnx")
-            || name.eq_ignore_ascii_case("rustfs.gnx")
-            || name.eq_ignore_ascii_case("pocket.gnx")
-            || name.eq_ignore_ascii_case("netbird.gnx")
-    })
+    body.split_whitespace()
+        .skip(1)
+        .any(|name| hosts.iter().any(|owned| owned.eq_ignore_ascii_case(name)))
 }
 
 #[cfg(windows)]

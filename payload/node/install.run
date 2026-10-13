@@ -132,6 +132,14 @@ write_private_dns() {
   # loopback itself. Keep this file to records only; duplicate interface or
   # listen-address directives make FTL also bind WSL's reserved DNS tunnel.
   printf 'address=/app.gnx/%s\naddress=/compute.gnx/%s\naddress=/rustfs.gnx/%s\naddress=/pocket.gnx/%s\naddress=/netbird.gnx/%s\n' "$ip" "$ip" "$ip" "$ip" "$ip" > "$dnsmasq_dir/02-gnx.conf"
+  printf 'address=/continuity.gnx/%s\naddress=/continuty.gnx/%s\n' "$ip" "$ip" >> "$dnsmasq_dir/02-gnx.conf"
+  # Public AI aliases belong to this gateway even while the LXC is unavailable.
+  # The more-specific ai.mesh.gnx record is published by the owned adapter.
+  local name
+  while read -r name; do
+    [[ "$name" =~ ^[a-z0-9][a-z0-9.-]*\.gnx$ ]] || die WORKLOAD_DNS_INVALID
+    printf 'address=/%s/%s\n' "$name" "$ip" >> "$dnsmasq_dir/02-gnx.conf"
+  done < <(jq -er '.cluster_domain, .custom_domain' "$payload_dir/workloads/ai/profile.json")
   chmod 0644 "$dnsmasq_dir/02-gnx.conf"
   # Upgrade the previous direct-dashboard record without changing its enrolled
   # sidecar address. Keep rustfs.gnx owned by the gateway on every Retry.
@@ -219,14 +227,14 @@ check_prereqs() {
 }
 
 install_dependencies() {
-  if command -v podman >/dev/null 2>&1 && podman_supported && command -v nft >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && command -v dig >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then return 0; fi
+  if command -v podman >/dev/null 2>&1 && podman_supported && command -v nft >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && command -v dig >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then return 0; fi
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update >/dev/null 2>&1 || die DEPENDENCY_INSTALL_FAILED
-    DEBIAN_FRONTEND=noninteractive apt-get install -y podman nftables curl dnsutils libc-bin python3 openssl kmod >/dev/null 2>&1 || die DEPENDENCY_INSTALL_FAILED
+    DEBIAN_FRONTEND=noninteractive apt-get install -y podman nftables curl dnsutils libc-bin python3 openssl kmod jq >/dev/null 2>&1 || die DEPENDENCY_INSTALL_FAILED
   elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y podman nftables curl bind-utils glibc-common python3 openssl kmod >/dev/null 2>&1 || die DEPENDENCY_INSTALL_FAILED
+    dnf install -y podman nftables curl bind-utils glibc-common python3 openssl kmod jq >/dev/null 2>&1 || die DEPENDENCY_INSTALL_FAILED
   else die DEPENDENCY_INSTALL_UNSUPPORTED; fi
-  require_cmd podman; require_supported_podman; require_cmd nft; require_cmd curl; require_cmd dig; require_cmd python3; require_cmd openssl; require_cmd modprobe
+  require_cmd podman; require_supported_podman; require_cmd nft; require_cmd curl; require_cmd dig; require_cmd python3; require_cmd openssl; require_cmd modprobe; require_cmd jq
 }
 
 load_kvm() {
@@ -285,13 +293,18 @@ generate_ca_material() {
   else
     make_ca gateway-ca '/CN=GnX Node Private Gateway CA'
   fi
-  if [[ -s "$ca_dir/gateway-cert.pem" ]] && ! openssl verify -CAfile "$ca_dir/gateway-ca.pem" -verify_hostname netbird.gnx "$ca_dir/gateway-cert.pem" >/dev/null 2>&1; then
+  if [[ -s "$ca_dir/gateway-cert.pem" ]] && { ! openssl verify -CAfile "$ca_dir/gateway-ca.pem" -verify_hostname netbird.gnx "$ca_dir/gateway-cert.pem" >/dev/null 2>&1 || ! openssl verify -CAfile "$ca_dir/gateway-ca.pem" -verify_hostname continuity.gnx "$ca_dir/gateway-cert.pem" >/dev/null 2>&1 || ! openssl verify -CAfile "$ca_dir/gateway-ca.pem" -verify_hostname continuty.gnx "$ca_dir/gateway-cert.pem" >/dev/null 2>&1; }; then
     rm -f -- "$ca_dir/gateway-cert.pem" "$ca_dir/gateway-key.pem"
   fi
-  make_leaf gateway-ca gateway '/CN=GnX Node Gateway' 'DNS:app.gnx,DNS:compute.gnx,DNS:pocket.gnx,DNS:netbird.gnx'
+  make_leaf gateway-ca gateway '/CN=GnX Node Gateway' 'DNS:app.gnx,DNS:compute.gnx,DNS:pocket.gnx,DNS:netbird.gnx,DNS:continuity.gnx,DNS:continuty.gnx'
   # Caddy must be able to load its fixed RustFS route before any guest exists.
   # The workload adapter copies this same private-CA leaf into the guest.
   make_leaf gateway-ca rustfs '/CN=rustfs.gnx' 'DNS:rustfs.gnx'
+  # Same CA, distinct leaf; never transfer the CA signing key into AI.
+  if [[ -s "$ca_dir/ai-cert.pem" ]] && ! openssl verify -CAfile "$ca_dir/gateway-ca.pem" -verify_hostname proxy.gnx "$ca_dir/ai-cert.pem" >/dev/null 2>&1; then
+    rm -f -- "$ca_dir/ai-cert.pem" "$ca_dir/ai-key.pem"
+  fi
+  make_leaf gateway-ca ai '/CN=proxy.gnx' 'DNS:proxy.gnx,DNS:ai.gnx,DNS:*.ai.gnx'
   make_ca backend-ca '/CN=GnX Node Private Backend CA'
   make_leaf backend-ca backend '/CN=GnX Node Compute Backend' 'DNS:compute.gnx'
   openssl verify -CAfile "$ca_dir/gateway-ca.pem" "$ca_dir/gateway-cert.pem" >/dev/null 2>&1 || die GATEWAY_CA_INVALID
@@ -312,9 +325,10 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 if [[ "$mode" == reconcile ]]; then
-  # Retry applies the same CA/DNS contracts as install, without re-enrolling
-  # mesh, reinstalling dependencies, or recreating an unchanged compute guest.
+  # Reuse existing dependency lifecycle for newly required tools as well as
+  # fresh installs. Never re-enroll mesh or recreate an unchanged compute guest.
   mesh_authenticated || die MESH_AUTHENTICATION_FAILED
+  install_dependencies
   generate_ca_material
   configure_private_dns
   install -d -m 0755 "$runtime_dir/auth-public"
@@ -324,7 +338,8 @@ if [[ "$mode" == reconcile ]]; then
   install -m 0644 "$payload_dir/services/gateway.container" /etc/containers/systemd/gateway.container
   systemctl daemon-reload
   install -m 0755 "$payload_dir/compute/lxc.run" "$runtime_dir/lxc.run"
-  systemctl restart dns.service >/dev/null 2>&1 || die DNS_START_FAILED
+  source "$payload_dir/services/readiness.run"
+  gnx_restart_service dns.service >/dev/null 2>&1 || die DNS_START_FAILED
   emit reconciled
   exit 0
 fi
@@ -366,6 +381,8 @@ for unit in mesh dns gateway compute; do install -m 0644 "$payload_dir/services/
 install -m 0644 "$payload_dir/services/platform.target" /etc/systemd/system/platform.target
 install -m 0644 "$payload_dir/services/gnx-ingress.service" /etc/systemd/system/gnx-ingress.service
 install -m 0644 "$payload_dir/services/netbird-stun.service" /etc/systemd/system/netbird-stun.service
+install -m 0644 "$payload_dir/services/gnx-workload-transport.service" /etc/systemd/system/gnx-workload-transport.service
+systemctl enable gnx-workload-transport.service >/dev/null
 install -m 0755 "$payload_dir/compute/netbird-stun.run" "$runtime_dir/netbird-stun.run"
 install -m 0755 "$payload_dir/compute/access-verify.run" "$runtime_dir/access-verify.run"
 install -m 0755 "$payload_dir/compute/access-mesh-policy.run" "$runtime_dir/access-mesh-policy.run"
@@ -391,6 +408,7 @@ install -m 0600 /dev/null /run/gnx-node/mesh.env
 if [[ -n "$mesh_secret_file" ]]; then
   check_secret_file "$mesh_secret_file" TS_AUTHKEY
   install -m 0600 "$mesh_secret_file" /run/gnx-node/mesh.env
+  bash "$payload_dir/workloads/enrollment-key.run" /run/gnx-node/mesh.env >/dev/null
   mesh_staged=1
 fi
 nft -c -f "$runtime_dir/ingress.nft" >/dev/null 2>&1 || die NFT_INVALID

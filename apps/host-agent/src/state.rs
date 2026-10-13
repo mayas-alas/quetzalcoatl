@@ -72,22 +72,10 @@ pub fn save(progress: &Progress) -> io::Result<()> {
         serde_json::to_writer(&mut journal, &safe).map_err(io::Error::other)?;
         journal.write_all(b"\n")
     })?;
-    write_app_status(&dir, &safe, None)?;
-    #[cfg(windows)]
-    {
-        // `verify.run` remains the canonical service check. Its bounded,
-        // allowlisted results enrich only the browser projection; a missing
-        // runtime must never prevent the durable control checkpoint.
-        // RuntimeStopped is an intentional operator checkpoint. Running the
-        // verifier would launch WSL and defeat the requested RAM release.
-        if safe.state != NodeState::RuntimeStopped && !crate::linux_node::runtime_stop_requested() {
-            let runtime = crate::linux_node::runtime_checks(&dir).ok();
-            if let Some(checks) = runtime.as_deref() {
-                let _ = write_app_status(&dir, &safe, Some(checks));
-            }
-            let _ = crate::linux_node::publish_app_status(&dir.join(APP_STATUS_FILE));
-        }
-    }
+    write_app_status(&dir, &safe, None, Vec::new())?;
+    // Persist/acknowledge without Linux I/O. The existing service status
+    // monitor alone observes and publishes live health; its latency must not
+    // block Named Pipe progress, operation acceptance, or final checkpoints.
     Ok(())
 }
 
@@ -107,7 +95,15 @@ pub fn refresh_app_status() -> io::Result<()> {
         return Ok(());
     }
     let runtime = crate::linux_node::runtime_checks(&dir).ok();
-    write_app_status(&dir, &progress, runtime.as_deref())?;
+    let workloads = if runtime.is_some() && progress.node_private_ip.is_some() {
+        crate::linux_node::workload_statuses()
+    } else { Vec::new() };
+    let latest = load()?;
+    if latest.sequence != progress.sequence || latest.request_id != progress.request_id
+        || crate::linux_node::runtime_stop_requested() {
+        return Ok(()); // Never publish an observation over a newer checkpoint.
+    }
+    write_app_status(&dir, &progress, runtime.as_deref(), workloads)?;
     crate::linux_node::publish_app_status(&dir.join(APP_STATUS_FILE))
 }
 
@@ -143,9 +139,12 @@ pub(crate) struct RuntimeCheck {
 /// A desired/applied mismatch is not lost enrollment or a healthy new release.
 pub fn update_projection(progress: &Progress, pending: bool) -> Progress {
     let mut projected = progress.clone();
-    if pending && (progress.state == NodeState::NodeReady
-        || (progress.state == NodeState::Blocked && progress.node_private_ip.is_some()
-            && matches!(progress.phase.as_str(), "mesh" | "compute"))) {
+    if pending
+        && (progress.state == NodeState::NodeReady
+            || (progress.state == NodeState::Blocked
+                && progress.node_private_ip.is_some()
+                && matches!(progress.phase.as_str(), "mesh" | "compute")))
+    {
         projected.state = NodeState::Blocked;
         projected.phase = "compute".into();
         projected.error_code = Some("RUNTIME_UPDATE_PENDING".into());
@@ -159,9 +158,16 @@ fn write_app_status(
     dir: &std::path::Path,
     progress: &Progress,
     runtime: Option<&[RuntimeCheck]>,
+    workloads: Vec<crate::linux_node::WorkloadStatus>,
 ) -> io::Result<()> {
-    let projected = update_projection(progress, runtime.is_some_and(|checks|
-        checks.iter().any(|check| check.name == "payload_current" && check.result == "fail")));
+    let projected = update_projection(
+        progress,
+        runtime.is_some_and(|checks| {
+            checks
+                .iter()
+                .any(|check| check.name == "payload_current" && check.result == "fail")
+        }),
+    );
     let progress = &projected;
     let status = AppStatus {
         version: 1,
@@ -173,15 +179,9 @@ fn write_app_status(
         percent: progress.percent.unwrap_or(0).min(100),
         checks: app_checks(progress, runtime),
         runtime_checks: runtime,
-        workloads: if progress.state == NodeState::NodeReady
-            && !crate::linux_node::runtime_stop_requested()
-        {
-            crate::linux_node::workload_status().into_iter().collect()
-        } else {
-            Vec::new()
-        },
+        workloads,
     };
-    let tmp = dir.join(format!("{APP_STATUS_FILE}.tmp"));
+    let tmp = dir.join(format!("{APP_STATUS_FILE}.{}.tmp", Uuid::new_v4()));
     serde_json::to_writer(fs::File::create(&tmp)?, &status).map_err(io::Error::other)?;
     fs::rename(tmp, dir.join(APP_STATUS_FILE))
 }
@@ -211,9 +211,8 @@ fn app_checks(progress: &Progress, runtime: Option<&[RuntimeCheck]>) -> Vec<AppC
     ];
     match &progress.state {
         NodeState::NodeReady => {
-            for check in &mut checks {
-                check.result = "pass";
-            }
+            // A durable configured checkpoint is not fresh runtime evidence.
+            checks[0].result = "pass";
         }
         NodeState::MeshPending => {
             checks[0].result = "pass";
@@ -242,7 +241,14 @@ fn app_checks(progress: &Progress, runtime: Option<&[RuntimeCheck]>) -> Vec<AppC
             ["podman"].as_slice(),
             ["mesh", "mesh_authenticated"].as_slice(),
             ["gateway", "app_https"].as_slice(),
-            ["compute", "compute_gateway_https", "compute_https", "compute_release", "payload_current"].as_slice(),
+            [
+                "compute",
+                "compute_gateway_https",
+                "compute_https",
+                "compute_release",
+                "payload_current",
+            ]
+            .as_slice(),
         ]
         .iter()
         .enumerate()
@@ -284,7 +290,11 @@ fn sanitize(progress: &Progress) -> Progress {
         github.run_state = github.run_state.take().map(|value| sanitize_state(&value));
         github.conclusion = github.conclusion.take().map(|value| sanitize_state(&value));
         github.verification_uri = github.verification_uri.take().map(|value| {
-            if value == "https://github.com/login/device" { value } else { "https://github.com/login/device".into() }
+            if value == "https://github.com/login/device" {
+                value
+            } else {
+                "https://github.com/login/device".into()
+            }
         });
         github.user_code = github.user_code.take().map(|value| sanitize_code(&value));
         github.message = github.message.take().map(|value| sanitize_text(&value));
@@ -293,11 +303,19 @@ fn sanitize(progress: &Progress) -> Progress {
 }
 
 fn sanitize_state(value: &str) -> String {
-    value.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').take(32).collect()
+    value
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .take(32)
+        .collect()
 }
 
 fn sanitize_code(value: &str) -> String {
-    value.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').take(32).collect()
+    value
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .take(32)
+        .collect()
 }
 
 fn sanitize_text(value: &str) -> String {
@@ -371,14 +389,29 @@ mod tests {
         assert_eq!(pending.sequence, old.sequence);
         assert_eq!(pending.request_id, old.request_id);
         assert_eq!(pending.node_private_ip, old.node_private_ip);
-        assert_eq!(pending.error_code.as_deref(), Some("RUNTIME_UPDATE_PENDING"));
+        assert_eq!(
+            pending.error_code.as_deref(),
+            Some("RUNTIME_UPDATE_PENDING")
+        );
         assert_eq!(pending.state, NodeState::Blocked);
         assert_eq!(update_projection(&old, false), old);
         old.state = NodeState::Blocked;
         old.phase = "mesh".into();
-        assert_eq!(update_projection(&old, true).error_code.as_deref(), Some("RUNTIME_UPDATE_PENDING"));
+        assert_eq!(
+            update_projection(&old, true).error_code.as_deref(),
+            Some("RUNTIME_UPDATE_PENDING")
+        );
         old.state = NodeState::RuntimeStopped;
         assert_eq!(update_projection(&old, true), old);
+    }
+
+    #[test]
+    fn configured_checkpoint_without_observation_never_claims_live_health() {
+        let mut progress = initial();
+        progress.state = NodeState::NodeReady;
+        let checks = app_checks(&progress, None);
+        assert_eq!(checks[0].result, "pass");
+        assert!(checks[1..].iter().all(|check| check.result == "pending"));
     }
 
     #[test]
@@ -404,11 +437,11 @@ mod tests {
         progress.message = "Ready".into();
         progress.private_ca_certificate = Some("private-ca.key.pem".into());
         progress.node_private_ip = Some("100.64.0.1".into());
-        write_app_status(&root, &progress, None).unwrap_err();
+        write_app_status(&root, &progress, None, Vec::new()).unwrap_err();
         fs::create_dir_all(&root).unwrap();
-        write_app_status(&root, &progress, None).unwrap();
+        write_app_status(&root, &progress, None, Vec::new()).unwrap();
         let json = fs::read_to_string(root.join(APP_STATUS_FILE)).unwrap();
-        assert!(json.contains("\"Compute\",\"result\":\"pass\""));
+        assert!(json.contains("\"Compute\",\"result\":\"pending\""));
         assert!(!json.contains("private-ca"));
         assert!(!json.contains("100.64.0.1"));
         assert!(!json.contains("runtime_checks"));

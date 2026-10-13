@@ -1,0 +1,386 @@
+#!/usr/bin/env bash
+# GnX AI enrollment.  This file is copied to the existing private-services LXC
+# and is deliberately self-contained: no Python, no management-wide secrets,
+# and no shell-visible secret arguments or environment variables.
+set -Eeuo pipefail
+umask 077
+
+readonly BASE=/var/lib/gnx/access
+readonly PROFILE=/opt/gnx/workloads/ai-enroll/profile.json
+readonly PROXY_API=http://127.0.0.1:8081/api/reverse-proxies
+readonly POCKET_API=http://127.0.0.1:1411/api
+readonly RUSTFS_ENV=/var/lib/gnx/rustfs/rustfs.env
+readonly RUSTFS_CA=/var/lib/gnx/rustfs/tls/ca.crt
+readonly MC=/opt/gnx/workloads/ai-enroll/mc
+readonly MC_CONFIG=/var/lib/gnx/access/.ai-mc
+NETBIRD_AUTH_SCHEME=Token
+
+tmpdir=''
+response=''
+body=''
+config=''
+cleanup() {
+  [[ -z "$tmpdir" ]] || rm -rf -- "$tmpdir"
+}
+trap cleanup EXIT
+
+fail() {
+  printf '{"event":"error","code":"%s"}\n' "$1" >&2
+  exit 1
+}
+check() {
+  printf '{"check":"%s"}\n' "$1"
+}
+require_root() {
+  [[ "$(id -u)" == 0 ]] || fail AI_ENROLL_ROOT_REQUIRED
+  [[ $# == 1 && "$1" =~ ^(dependencies|services|oauth|storage)$ ]] || fail AI_ENROLL_ARGUMENT_INVALID
+}
+regular0600() {
+  local p=$1 s
+  [[ -e "$p" && ! -L "$p" ]] || return 1
+  s=$(stat -c '%F %u %a' -- "$p" 2>/dev/null) || return 1
+  [[ "$s" == "regular file 0 600" ]]
+}
+regular_file() {
+  local p=$1 s
+  [[ -e "$p" && ! -L "$p" ]] || return 1
+  s=$(stat -c '%F %u' -- "$p" 2>/dev/null) || return 1
+  [[ "$s" == 'regular file 0' ]]
+}
+state_dir() {
+  local s
+  [[ -d "$BASE" && ! -L "$BASE" ]] || fail AI_ACCESS_STATE_PERMISSIONS
+  s=$(stat -c '%F %u %a' -- "$BASE") || fail AI_ACCESS_STATE_PERMISSIONS
+  [[ "$s" == 'directory 0 700' || "$s" == 'directory 0 750' || "$s" == 'directory 0 755' ]] || fail AI_ACCESS_STATE_PERMISSIONS
+}
+read_secret() {
+  local p=$1
+  regular0600 "$p" || fail AI_SECRET_PERMISSIONS
+  cat -- "$p"
+}
+write_new() {
+  local p=$1 data=$2 t d
+  [[ ! -e "$p" && ! -L "$p" ]] || fail AI_CREATION_CONFLICT
+  d=$(dirname -- "$p")
+  t=$(mktemp "$d/.ai-enroll.XXXXXX") || fail AI_STATE_WRITE
+  chmod 600 "$t"
+  data=${data%\\n}
+  printf '%s\n' "$data" >"$t" || fail AI_STATE_WRITE
+  chown 0:0 "$t" || fail AI_STATE_WRITE
+  mv -n -- "$t" "$p" || { rm -f -- "$t"; fail AI_CREATION_CONFLICT; }
+  [[ ! -L "$p" ]] || fail AI_STATE_WRITE
+  sync -d "$p" 2>/dev/null || true
+}
+write_replace() {
+  local p=$1 data=$2 t d
+  d=$(dirname -- "$p")
+  [[ -d "$d" && ! -L "$d" ]] || fail AI_STATE_WRITE
+  t=$(mktemp "$d/.ai-enroll.XXXXXX") || fail AI_STATE_WRITE
+  chmod 600 "$t"; chown 0:0 "$t"
+  data=${data%\\n}
+  printf '%s\n' "$data" >"$t" || fail AI_STATE_WRITE
+  mv -f -- "$t" "$p" || { rm -f -- "$t"; fail AI_STATE_WRITE; }
+  [[ ! -L "$p" ]] || fail AI_STATE_WRITE
+  chmod 600 "$p"; chown 0:0 "$p"
+  sync -d "$p" 2>/dev/null || true
+}
+json_file() {
+  local p=$1
+  regular0600 "$p" || fail AI_JSON_PERMISSIONS
+  jq -e type "$p" >/dev/null 2>&1 || fail AI_JSON_INVALID
+}
+profile_value() {
+  jq -er "$1" "$PROFILE" 2>/dev/null || fail AI_PROFILE_INVALID
+}
+domain() {
+  local v=$1
+  [[ "$v" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]] || fail AI_DOMAIN_INVALID
+  printf '%s' "$v"
+}
+safe_id() {
+  [[ "$1" =~ ^[A-Za-z0-9_-]+$ ]] || fail AI_ID_INVALID
+}
+
+# curl gets authentication only through its protected stdin config.  Responses
+# and request bodies are always files with root/0600 ownership.
+curl_api() {
+  local method=$1 url=$2 auth_kind=$3 auth_value=$4; shift 4
+  local data_arg=''
+  [[ $# == 0 || $# == 1 ]] || fail AI_CURL_ARGUMENT
+  [[ $# == 0 ]] || data_arg=$1
+  response=$(mktemp "$tmpdir/response.XXXXXX"); chmod 600 "$response"
+  config=$(mktemp "$tmpdir/curl.XXXXXX"); chmod 600 "$config"
+  {
+    printf 'silent\nshow-error\nfail\nrequest = %s\nurl = %s\noutput = %s\nconnect-timeout = 5\nmax-time = 20\n' "$method" "$url" "$response"
+    if [[ "$auth_kind" == token ]]; then printf 'header = "Authorization: %s %s"\n' "$NETBIRD_AUTH_SCHEME" "$auth_value"; fi
+    if [[ "$auth_kind" == api ]]; then printf 'header = "X-API-Key: %s"\n' "$auth_value"; fi
+    if [[ -n "$data_arg" ]]; then printf 'header = "Content-Type: application/json"\ndata-binary = @%s\n' "$data_arg"; fi
+  } | curl --config - >/dev/null 2>&1 || {
+    rm -f -- "$config" "$response"
+    fail AI_API_UNAVAILABLE
+  }
+  rm -f -- "$config"
+}
+curl_status() {
+  local method=$1 url=$2 auth_kind=$3 auth_value=$4; shift 4
+  local data_arg=''
+  [[ $# == 0 || $# == 1 ]] || fail AI_CURL_ARGUMENT
+  [[ $# == 0 ]] || data_arg=$1
+  response=$(mktemp "$tmpdir/response.XXXXXX"); chmod 600 "$response"
+  config=$(mktemp "$tmpdir/curl.XXXXXX"); chmod 600 "$config"
+  REPLY=$({
+    printf 'silent\nshow-error\nrequest = %s\nurl = %s\noutput = %s\nwrite-out = %%{http_code}\nconnect-timeout = 5\nmax-time = 20\n' "$method" "$url" "$response"
+    if [[ "$auth_kind" == token ]]; then printf 'header = "Authorization: %s %s"\n' "$NETBIRD_AUTH_SCHEME" "$auth_value"; fi
+    if [[ "$auth_kind" == api ]]; then printf 'header = "X-API-Key: %s"\n' "$auth_value"; fi
+    if [[ -n "$data_arg" ]]; then printf 'header = "Content-Type: application/json"\ndata-binary = @%s\n' "$data_arg"; fi
+  } | curl --config - 2>/dev/null || true)
+}
+read_pat() {
+  local raw token
+  raw=$(read_secret "$BASE/netbird-enrollment.json")
+  token=$(jq -er '.token | strings' <<<"$raw" 2>/dev/null) || fail AI_NETBIRD_TOKEN_INVALID
+  [[ "$token" =~ ^[A-Za-z0-9_.-]+$ ]] || fail AI_NETBIRD_TOKEN_INVALID
+  printf '%s' "$token"
+}
+proxy_list() {
+  local path=$1 pat=$2
+  curl_api GET "$PROXY_API/$path" token "$pat"
+  jq -e 'type == "array" and all(.[]; type == "object")' "$response" >/dev/null 2>&1 || fail AI_PROXY_RESPONSE_INVALID
+}
+proxy_get() {
+  local path=$1 pat=$2
+  curl_api GET "$PROXY_API/$path" token "$pat"
+}
+proxy_post() {
+  local path=$1 pat=$2 json=$3
+  body=$(mktemp "$tmpdir/body.XXXXXX"); chmod 600 "$body"; printf '%s' "$json" >"$body"
+  curl_api POST "$PROXY_API/$path" token "$pat" "$body"
+  jq -e 'type == "object"' "$response" >/dev/null 2>&1 || fail AI_PROXY_RESPONSE_INVALID
+}
+
+load_rustfs() {
+  regular0600 "$RUSTFS_ENV" || fail AI_RUSTFS_ADMIN_PERMISSIONS
+  [[ -f "$RUSTFS_CA" && ! -L "$RUSTFS_CA" && $(stat -c %a "$RUSTFS_CA") == 644 ]] || fail AI_RUSTFS_CA_REQUIRED
+  local access secret
+  access=$(sed -n 's/^RUSTFS_ACCESS_KEY=//p' "$RUSTFS_ENV")
+  secret=$(sed -n 's/^RUSTFS_SECRET_KEY=//p' "$RUSTFS_ENV")
+  [[ "$access" =~ ^[A-Za-z0-9._~+/=-]+$ && "$secret" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || fail AI_RUSTFS_ADMIN_INVALID
+  RUST_ACCESS=$access RUST_SECRET=$secret
+}
+mc_config() {
+  local d=$MC_CONFIG/certs/CAs
+  [[ ! -L "$MC_CONFIG" && ( ! -e "$MC_CONFIG" || -d "$MC_CONFIG" ) ]] || fail AI_MC_CONFIG_CONFLICT
+  install -d -m 700 -o 0 -g 0 "$MC_CONFIG" "$d"
+  install -m 644 -o 0 -g 0 "$RUSTFS_CA" "$d/ca.crt"
+  # The admin credentials are read from the existing protected env and placed
+  # only in mc's protected config file; they never become argv or exported env.
+  printf '{"version":"10","aliases":{"gnx-root":{"url":"https://rustfs.gnx","accessKey":"%s","secretKey":"%s","api":"S3v4","path":"on","quiet":false}}}\n' "$RUST_ACCESS" "$RUST_SECRET" >"$MC_CONFIG/config.json"
+  chmod 600 "$MC_CONFIG/config.json"; chown 0:0 "$MC_CONFIG/config.json"
+  [[ ! -L "$MC_CONFIG/config.json" ]] || fail AI_MC_CONFIG_PERMISSIONS
+}
+mc_run() {
+  "$MC" --config-dir "$MC_CONFIG" "$@" >"$response" 2>/dev/null || fail AI_RUSTFS_API_FAILED
+  regular0600 "$response" || fail AI_RESPONSE_PERMISSIONS
+}
+
+proxy_token() {
+  local pat=$1 cfg cluster custom intent receipt secret name matches created plain id
+  cluster=$(domain "$(profile_value '.cluster_domain')"); custom=$(domain "$(profile_value '.custom_domain')")
+  [[ "$cluster" == proxy.gnx && "$custom" == ai.gnx ]] || fail AI_PROFILE_DOMAIN_INVALID
+  intent=$BASE/ai-proxy-intent.json; receipt=$BASE/ai-proxy-token.json; secret=$BASE/ai-proxy.env
+  if [[ ! -e "$intent" ]]; then
+    name="gnx-ai-$(openssl rand -hex 8)"
+    write_new "$intent" "{\"name\":\"$name\",\"cluster_domain\":\"$cluster\",\"custom_domain\":\"$custom\"}\n"
+  fi
+  json_file "$intent"
+  name=$(jq -er --arg c "$cluster" --arg d "$custom" 'select(.cluster_domain==$c and .custom_domain==$d) | .name' "$intent" 2>/dev/null) || fail AI_PROXY_OWNERSHIP_CONFLICT
+  [[ "$name" =~ ^gnx-ai-[0-9a-f]{16}$ ]] || fail AI_PROXY_OWNERSHIP_CONFLICT
+  proxy_list proxy-tokens "$pat"
+  matches=$(jq --arg n "$name" '[.[] | select(.name==$n)] | length' "$response")
+  if [[ -e "$receipt" ]]; then
+    json_file "$receipt"; [[ "$matches" == 1 && -e "$secret" ]] || fail AI_PROXY_TOKEN_REVOKED_OR_MISSING
+    id=$(jq -er '.id' "$receipt" 2>/dev/null); safe_id "$id"
+    jq -e --arg i "$id" '[.[] | select(.id==$i and (.revoked // false)==false)] | length == 1' "$response" >/dev/null || fail AI_PROXY_TOKEN_REVOKED_OR_MISSING
+    grep -Eq '^NB_PROXY_TOKEN=nbx_[A-Za-z0-9_-]+$' "$secret" || fail AI_PROXY_TOKEN_FORMAT_INVALID
+    return
+  fi
+  [[ "$matches" == 0 && ! -e "$secret" ]] || fail AI_PROXY_TOKEN_RECOVERY_REQUIRED
+  body=$(mktemp "$tmpdir/body.XXXXXX"); chmod 600 "$body"
+  printf '{"name":"%s","expires_in":0}\n' "$name" >"$body"
+  proxy_post proxy-tokens "$pat" "$(cat "$body")"
+  id=$(jq -er '.id' "$response" 2>/dev/null); plain=$(jq -er '.plain_token' "$response" 2>/dev/null)
+  [[ "$id" =~ ^[A-Za-z0-9_-]+$ && "$plain" =~ ^nbx_[A-Za-z0-9_-]+$ ]] || fail AI_PROXY_TOKEN_RESPONSE_INVALID
+  write_new "$secret" "NB_PROXY_TOKEN=$plain\n"
+  write_new "$receipt" "{\"id\":\"$id\"}\n"
+}
+
+proxy_domain_and_services() {
+  local pat=$1 cluster custom domain_id entries found svc ip port sid target key receipt backend
+  json_file "$BASE/ai-pocket-clients.json"
+  backend=$(jq -er .backend_key "$BASE/ai-pocket-clients.json")
+  [[ "$backend" =~ ^[a-f0-9]{64}$ ]] || fail AI_BACKEND_CREDENTIAL_INVALID
+  cluster=$(domain "$(profile_value '.cluster_domain')"); custom=$(domain "$(profile_value '.custom_domain')")
+  proxy_list clusters "$pat"
+  jq -e --arg c "$cluster" 'map(select(.address==$c and .type=="account" and .online==true and ((.connected_proxies // 0) >= 1))) | length == 1' "$response" >/dev/null || fail AI_PROXY_CLUSTER_NOT_READY
+  proxy_list domains "$pat"
+  if [[ -e "$BASE/ai-proxy-domain.json" ]]; then
+    json_file "$BASE/ai-proxy-domain.json"
+    domain_id=$(jq -er --arg c "$cluster" --arg d "$custom" 'select(.cluster_domain==$c and .custom_domain==$d) | .id' "$BASE/ai-proxy-domain.json" 2>/dev/null) || fail AI_PROXY_DOMAIN_OWNERSHIP_CONFLICT
+  else
+    jq -e --arg d "$custom" 'any(.[]; .domain==$d)' "$response" >/dev/null && fail AI_PROXY_DOMAIN_UNOWNED
+    proxy_post domains "$pat" "{\"domain\":\"$custom\",\"target_cluster\":\"$cluster\"}"
+    domain_id=$(jq -er '.id' "$response" 2>/dev/null); safe_id "$domain_id"
+    write_new "$BASE/ai-proxy-domain.json" "{\"id\":\"$domain_id\",\"cluster_domain\":\"$cluster\",\"custom_domain\":\"$custom\"}\n"
+  fi
+  proxy_get "domains/$domain_id/validate" "$pat"
+  proxy_list domains "$pat"
+  jq -e --arg i "$domain_id" --arg c "$cluster" --arg d "$custom" 'any(.[]; .id==$i and .domain==$d and .type=="custom" and .validated==true and .target_cluster==$c)' "$response" >/dev/null || fail AI_PROXY_DOMAIN_VERIFICATION_REQUIRED
+  for svc in voice oryx omniroute continuity; do
+    ip=$(profile_value ".services.$svc.ip"); port=$(profile_value ".services.$svc.port"); key="ai-$svc"
+    receipt="$BASE/ai-service-$svc.json"
+    if [[ -e "$receipt" ]]; then
+      json_file "$receipt"; sid=$(jq -er --arg h "$svc.ai.gnx" '.id' "$receipt" 2>/dev/null) || fail AI_SERVICE_OWNERSHIP_CONFLICT
+    else
+      proxy_list services "$pat"
+      jq -e --arg d "$svc.ai.gnx" 'any(.[]; .domain==$d)' "$response" >/dev/null && fail AI_SERVICE_UNOWNED
+      body=$(mktemp "$tmpdir/service.XXXXXX"); chmod 600 "$body"
+      jq -n --arg name "GnX $svc" --arg domain "$svc.ai.gnx" --arg cluster "$cluster" --arg ip "$ip" --argjson port "$port" '{name:$name,domain:$domain,mode:"http",enabled:true,private:false,pass_host_header:true,auth:{header_auths:[{enabled:true,header:"X-GnX-Backend-Key"}]},targets:[{target_id:$cluster,target_type:"cluster",host:$ip,port:$port,protocol:"http",path:"/",enabled:true,options:{direct_upstream:true,path_rewrite:"preserve"}}]}' > "$body"
+      # Read the secret as protected input, never jq --arg/argv or an env var.
+      jq --slurpfile clients "$BASE/ai-pocket-clients.json" '.auth.header_auths[0].value=$clients[0].backend_key' "$body" > "$body.new"
+      mv -- "$body.new" "$body"
+      if [[ "$svc" == voice ]]; then
+        jq --slurpfile creds "$BASE/ai-app-credentials.json" '.targets[0].options.custom_headers={Authorization:("Bearer "+$creds[0].voice_api_token)}' "$body" > "$body.new"
+        mv -- "$body.new" "$body"
+      fi
+      curl_api POST "$PROXY_API/services" token "$pat" "$body"
+      sid=$(jq -er '.id' "$response" 2>/dev/null); safe_id "$sid"
+      write_new "$receipt" "{\"id\":\"$sid\",\"domain\":\"$svc.ai.gnx\",\"target_cluster\":\"$cluster\",\"target_address\":\"$ip:$port\"}\n"
+    fi
+    proxy_get "services/$sid" "$pat"
+    jq -e --arg d "$svc.ai.gnx" --arg c "$cluster" --arg ip "$ip" --argjson port "$port" '(.domain==$d and .enabled==true and .private==false and (.auth.bearer_auth.enabled // false)==false and (.auth.header_auths|length)==1 and .auth.header_auths[0].enabled==true and .auth.header_auths[0].header=="X-GnX-Backend-Key" and .pass_host_header==true and (.targets|length==1) and .targets[0].target_id==$c and .targets[0].host==$ip and .targets[0].port==$port and .targets[0].options.direct_upstream==true)' "$response" >/dev/null || fail AI_SERVICE_DRIFT
+  done
+}
+
+rustfs_account() {
+  local name prefix bucket intent receipt env owned access secret policy
+  name=$(profile_value '.name'); prefix=$(profile_value '.continuity.prefix'); bucket=$(profile_value '.continuity.bucket')
+  [[ "$name" =~ ^[a-z][a-z0-9-]{0,31}$ && "$prefix" =~ ^continuity/[a-z0-9-]+$ && "$bucket" == continuity ]] || fail STORAGE_PROFILE_INVALID
+  intent=$BASE/$name-s3-intent.json; receipt=$BASE/$name-s3-account.json; env=$BASE/$name-s3.env
+  load_rustfs; mc_config
+  policy="$tmpdir/protected_file.json"
+  jq -n --arg prefix "$prefix" '{Version:"2012-10-17",Statement:[{Effect:"Allow",Action:["s3:PutObject","s3:GetObject"],Resource:("arn:aws:s3:::continuity/"+$prefix+"/*")},{Effect:"Allow",Action:"s3:ListBucket",Resource:"arn:aws:s3:::continuity",Condition:{StringLike:{"s3:prefix":[$prefix,($prefix+"/*")]}}}]}' >"$policy"
+  response=$(mktemp "$tmpdir/mc.XXXXXX"); chmod 600 "$response"
+  if [[ ! -e "$intent" ]]; then
+    owned="$name-$(openssl rand -hex 12)"
+    write_new "$intent" "{\"owned_id\":\"$owned\",\"policy\":\"protected_file\"}\n"
+  fi
+  json_file "$intent"; owned=$(jq -er '.owned_id' "$intent" 2>/dev/null); [[ "$owned" =~ ^$name-[0-9a-f]{24}$ ]] || fail AI_S3_OWNERSHIP_CONFLICT
+  if [[ -e "$receipt" || -e "$env" ]]; then
+    regular0600 "$receipt" && regular0600 "$env" || fail AI_S3_CREDENTIAL_RECOVERY_REQUIRED
+    access=$(sed -n 's/^STORE_ACCESS_KEY=//p' "$env"); secret=$(sed -n 's/^STORE_SECRET_KEY=//p' "$env")
+    [[ "$access" =~ ^[A-Za-z0-9._~+/=-]+$ && "$secret" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || fail AI_S3_CREDENTIAL_INVALID
+  else
+    [[ ! -e "$BASE/$name-s3-request-issued.json" ]] || fail AI_S3_CREDENTIAL_RECOVERY_REQUIRED
+    write_new "$BASE/$name-s3-request-issued.json" "{\"owned_id\":\"$owned\"}"
+    mc_run --json admin user svcacct add gnx-root @self --policy "$policy" --name "$owned"
+    access=$(jq -er '.accessKey' "$response" 2>/dev/null); secret=$(jq -er '.secretKey' "$response" 2>/dev/null)
+    [[ "$access" =~ ^[A-Za-z0-9._~+/=-]+$ && "$secret" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || fail AI_S3_RESPONSE_INVALID
+    write_new "$receipt" "$(jq -c '{accessKey,secretKey}' "$response")\n"
+    write_new "$env" "$(printf 'STORE_ACCESS_KEY=%s\nSTORE_SECRET_KEY=%s\n' "$access" "$secret")"
+  fi
+  S3_ACCESS=$access S3_SECRET=$secret S3_ID=$owned
+}
+rustfs_acceptance() {
+  local key="continuity/$(profile_value '.continuity.prefix')/acceptance/$S3_ID.json" p=$tmpdir/acceptance.json status
+  printf '{"owned_id":"%s","scope":"ai"}\n' "$S3_ID" >"$p"; chmod 600 "$p"
+  status=$(curl_s3 PUT "$key" "$p" '*')
+  [[ "$status" == 200 || "$status" == 204 || "$status" == 412 ]] || fail AI_S3_CONDITIONAL_PUT_FAILED
+  status=$(curl_s3 GET "$key")
+  [[ "$status" == 200 ]] || fail AI_S3_GET_FAILED
+  cmp -s "$p" "$response" || fail AI_S3_READBACK_MISMATCH
+  status=$(curl_s3 PUT "$key" "$p" '*')
+  [[ "$status" == 412 ]] || fail AI_S3_CREATE_ONLY_NOT_ENFORCED
+  local other=business; [[ $(profile_value '.continuity.scope') != business ]] || other=ai
+  status=$(curl_s3 GET "continuity/continuity/$other/head.json")
+  [[ "$status" == 403 ]] || fail AI_S3_SCOPE_DENIED
+}
+curl_s3() {
+  local method=$1 key=$2 p=${3:-} condition=${4:-}
+  local url="https://rustfs.gnx/$key"
+  response=$(mktemp "$tmpdir/s3.XXXXXX"); chmod 600 "$response"
+  {
+    printf 'silent\nrequest = %s\nurl = %s\noutput = %s\nwrite-out = %%{http_code}\nuser = %s:%s\naws-sigv4 = aws:amz:us-east-1:s3\ncacert = %s\n' "$method" "$url" "$response" "$S3_ACCESS" "$S3_SECRET" "$RUSTFS_CA"
+    [[ -z "$condition" ]] || printf 'header = "If-None-Match: %s"\n' "$condition"
+    [[ -z "$p" ]] || printf 'data-binary = @%s\n' "$p"
+  } | curl --config - 2>/dev/null || true
+}
+
+oauth() {
+  local clients=$BASE/ai-pocket-clients.json intent=$BASE/ai-oauth-intent.json receipt key group_id app cid csecret callback id body secret_receipt
+  json_file "$clients"; regular0600 "$BASE/pocket-id.env" || fail AI_POCKET_SECRET_PERMISSIONS
+  key=$(sed -n 's/^STATIC_API_KEY=//p' "$BASE/pocket-id.env"); [[ "$key" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || fail AI_POCKET_KEY_INVALID
+  jq -e 'type=="object" and (.voice|type=="object" and (.client_id|type=="string") and (.client_secret|type=="string")) and (.oryx|type=="object" and (.client_id|type=="string") and (.client_secret|type=="string")) and (.omniroute|type=="object" and (.client_id|type=="string") and (.client_secret|type=="string")) and (.continuity|type=="object" and (.client_id|type=="string") and (.client_secret|type=="string"))' "$clients" >/dev/null || fail AI_POCKET_CLIENTS_INVALID
+  if [[ ! -e "$intent" ]]; then
+    write_new "$intent" "$(jq -c '{voice:{client_id:.voice.client_id},oryx:{client_id:.oryx.client_id},omniroute:{client_id:.omniroute.client_id},continuity:{client_id:.continuity.client_id}}' "$clients")\n"
+  fi
+  json_file "$intent"
+  body=$(mktemp "$tmpdir/pocket.XXXXXX"); chmod 600 "$body"
+  curl_api GET 'http://127.0.0.1:1411/api/user-groups?search=gnx-app-users' api "$key"
+  group_id=$(jq -er '[.data[] | select(.name=="gnx-app-users")] | if length==1 then .[0].id else error end' "$response" 2>/dev/null) || fail AI_POCKET_GROUP_REQUIRED
+  for app in voice oryx omniroute continuity business; do
+    cid=$(jq -er --arg a "$app" '.[$a].client_id' "$clients"); csecret=$(jq -er --arg a "$app" '.[$a].client_secret' "$clients")
+    callback=$(jq -er --arg a "$app" '.[$a].callback' "$clients")
+    [[ "$callback" =~ ^https://[a-z0-9.-]+\.gnx/oauth2/callback$ ]] || fail AI_POCKET_CALLBACK_INVALID
+    [[ "$cid" =~ ^[A-Za-z0-9._-]{3,128}$ && "$csecret" =~ ^[^[:space:]]+$ ]] || fail AI_POCKET_CLIENTS_INVALID
+    id="ai-$app"; receipt="$BASE/ai-oauth-$app.json"; secret_receipt="$BASE/ai-oauth-$app-secret.json"
+    if [[ -e "$receipt" ]]; then
+      json_file "$receipt"; [[ "$(jq -er '.client_id' "$receipt")" == "$cid" ]] || fail AI_POCKET_OWNERSHIP_CONFLICT
+      regular0600 "$secret_receipt" || fail AI_POCKET_SECRET_RECOVERY_REQUIRED
+    else
+      curl_status GET "$POCKET_API/oidc/clients/$cid" api "$key"
+      [[ "$REPLY" == 404 ]] || { [[ "$REPLY" == 200 ]] && fail AI_POCKET_UNOWNED || fail AI_POCKET_API_FAILED; }
+      printf '{"id":"%s","name":"GnX %s","isPublic":false,"pkceEnabled":true,"isGroupRestricted":true,"skipConsent":false,"accessTokenDurationMinutes":5,"refreshTokenDurationMinutes":15,"requiresReauthentication":true,"callbackURLs":["%s"]}\n' "$cid" "$app" "$callback" >"$body"
+      curl_api POST "$POCKET_API/oidc/clients" api "$key" "$body"
+      write_new "$receipt" "{\"client_id\":\"$cid\"}\n"
+      printf '{"secret":"%s"}\n' "$csecret" >"$body"
+      curl_api POST "$POCKET_API/oidc/clients/$cid/secrets" api "$key" "$body"
+      id=$(jq -er '.id' "$response" 2>/dev/null) || fail AI_POCKET_SECRET_RESPONSE_INVALID
+      safe_id "$id"; write_new "$secret_receipt" "{\"id\":\"$id\"}\n"
+    fi
+    printf '{"userGroupIds":["%s"]}\n' "$group_id" >"$body"
+    curl_api PUT "$POCKET_API/oidc/clients/$cid/allowed-user-groups" api "$key" "$body"
+    curl_api GET "$POCKET_API/oidc/clients/$cid" api "$key"
+    jq -e --arg cb "$callback" --arg gid "$group_id" '(.isPublic==false and .pkceEnabled==true and .callbackURLs==[$cb] and .isGroupRestricted==true and .requiresReauthentication==true and (.allowedUserGroups|map(.id))==[$gid])' "$response" >/dev/null || fail AI_POCKET_CLIENT_DRIFT
+    check "oauth_$app"
+  done
+}
+
+main() {
+  require_root "$@"; state_dir; [[ -r "$PROFILE" && ! -L "$PROFILE" ]] || fail AI_PROFILE_REQUIRED
+  tmpdir=$(mktemp -d "$BASE/.ai-enroll.XXXXXX"); chmod 700 "$tmpdir"
+  case "$1" in
+    storage) rustfs_account; rustfs_acceptance; check storage ;;
+    dependencies)
+      command -v jq >/dev/null || fail AI_JQ_REQUIRED; command -v curl >/dev/null || fail AI_CURL_REQUIRED
+      [[ -x "$MC" ]] || fail AI_MC_REQUIRED
+      /usr/local/libexec/gnx-access-enroll --refresh-token >/dev/null || fail AI_NETBIRD_AUTH_REQUIRED
+      NETBIRD_AUTH_SCHEME=$(jq -r '.scheme // "Token"' "$BASE/netbird-enrollment.json")
+      [[ "$NETBIRD_AUTH_SCHEME" == Token || "$NETBIRD_AUTH_SCHEME" == Bearer ]] || fail AI_NETBIRD_TOKEN_INVALID
+      pat=$(read_pat); proxy_token "$pat"; rustfs_account; rustfs_acceptance
+      # Voice receives only its own protected application credential.
+      if [[ ! -e "$BASE/ai-app-credentials.json" ]]; then
+        voice=$(openssl rand -hex 32)
+        write_new "$BASE/ai-app-credentials.json" "{\"voice_api_token\":\"$voice\"}"
+      else
+        regular0600 "$BASE/ai-app-credentials.json" || fail AI_VOICE_CREDENTIAL_PERMISSIONS
+      fi
+      check dependencies
+      ;;
+    services)
+      NETBIRD_AUTH_SCHEME=$(jq -r '.scheme // "Token"' "$BASE/netbird-enrollment.json")
+      [[ "$NETBIRD_AUTH_SCHEME" == Token || "$NETBIRD_AUTH_SCHEME" == Bearer ]] || fail AI_NETBIRD_TOKEN_INVALID
+      pat=$(read_pat); proxy_domain_and_services "$pat"; check services ;;
+    oauth) oauth; check oauth ;;
+  esac
+}
+main "$@"

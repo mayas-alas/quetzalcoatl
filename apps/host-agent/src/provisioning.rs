@@ -7,16 +7,18 @@ pub fn execute(req: &Request, current: &Progress) -> Progress {
     // GetProgress is a read-only snapshot. It must not advance sequence,
     // replace the last request, clear diagnostics, or create a journal entry.
     if req.operation == Operation::GetProgress {
-        #[cfg(windows)]
-        if (current.state == NodeState::NodeReady
-            || (current.state == NodeState::Blocked && matches!(current.phase.as_str(), "mesh" | "compute")))
-            && current.node_private_ip.is_some() && !crate::linux_node::runtime_stop_requested()
-        {
-            // Read-only comparison; do not apply an update from a status request.
-            return crate::state::update_projection(current,
-                crate::linux_node::runtime_update_pending().unwrap_or(true));
-        }
+        // No WSL, profile mutex, verifier or runtime-version comparison here.
+        // The existing status monitor reports live payload/health observations;
+        // this command returns only the last durable checkpoint, even while an
+        // upgrade/import holds Linux resources or the runtime is stopped.
         return current.clone();
+    }
+    if matches!(req.operation, Operation::ImportWorkload | Operation::DiagnoseWorkload) {
+        let accepted = handle(req, current);
+        if accepted.error_code.is_some() {
+            return accepted;
+        }
+        return complete_long(req, &accepted, current);
     }
     let mut p = handle(req, current);
     if matches!(
@@ -67,7 +69,11 @@ pub fn execute(req: &Request, current: &Progress) -> Progress {
                 p.percent = Some(100);
             }
             Err(error) => {
-                p.github = Some(p.github.clone().unwrap_or_else(crate::github::initial_status));
+                p.github = Some(
+                    p.github
+                        .clone()
+                        .unwrap_or_else(crate::github::initial_status),
+                );
                 p.phase = "github".into();
                 p.message = "GitHub Actions operation did not complete.".into();
                 p.state = current.state.clone();
@@ -120,7 +126,7 @@ pub fn execute(req: &Request, current: &Progress) -> Progress {
             } else {
                 p.state = NodeState::MeshPending;
                 p.phase = "mesh".into();
-                p.message = "Windows and WSL are ready; enter a temporary mesh credential.".into();
+                p.message = "Windows and WSL are ready; enter a reusable mesh key for protected Linux storage.".into();
                 p.percent = Some(60);
             }
         }
@@ -144,14 +150,11 @@ pub fn execute(req: &Request, current: &Progress) -> Progress {
             }
         }
         // A pipe client can disconnect or the service can restart after the
-        // one-shot key was consumed but before NODE_READY was persisted. Retry
+        // the reusable key was consumed but before NODE_READY was persisted. Retry
         // refreshes the installed payload and ingress policy without
         // credentials, then checks live readiness.
         if matches!(req.operation, Operation::Retry)
-            && (current.state == NodeState::NodeReady
-                || current.state == NodeState::MeshPending
-                || (current.state == NodeState::Blocked
-                    && (current.phase == "mesh" || (current.phase == "compute" && current.node_private_ip.is_some()))))
+            && retry_can_reconcile(current)
         {
             let state_dir = crate::state::state_dir();
             let readiness = crate::linux_node::reconcile_ingress()
@@ -228,25 +231,179 @@ pub fn execute(req: &Request, current: &Progress) -> Progress {
         ) && p.error_code.is_none()
         {
             let start = req.operation == Operation::StartWorkload;
-            match crate::linux_node::control_workload(&crate::state::state_dir(), start) {
+            let workload = req.workload.as_deref().unwrap_or("rustfs");
+            match crate::linux_node::control_workload(&crate::state::state_dir(), workload, start) {
                 Ok(status) => {
-                    p.state = NodeState::NodeReady;
+                    p.state = current.state.clone();
                     p.phase = "workloads".into();
-                    p.message = if status.state == "running" {
-                        "The shared private-services LXC is running.".into()
+                    let observation_failed = matches!(status.state.as_str(), "ERROR" | "unknown")
+                        || status.service == "unknown";
+                    let attention = observation_failed
+                        || status.service == "attention"
+                        || status.state == "attention";
+                    p.message = if observation_failed {
+                        format!("The {workload} workload status could not be observed safely.")
+                    } else if attention {
+                        format!("The {workload} workload is running but requires attention; its adapter did not report healthy.")
+                    } else if status.state == "running" {
+                        format!("The {workload} workload is running and healthy.")
                     } else {
-                        "The private-services LXC is stopped; persistent data is retained. Pocket ID login is unavailable until it starts.".into()
+                        format!("The {workload} workload is stopped; persistent data is retained.")
                     };
+                    if attention {
+                        p.error_code = Some(if status.error_code.is_empty() {
+                            "WORKLOAD_ATTENTION".into()
+                        } else {
+                            status.error_code.clone()
+                        });
+                        p.retryable = true;
+                    } else {
+                        p.error_code = None;
+                        p.retryable = false;
+                    }
                     p.percent = Some(100);
                 }
                 Err(error) => {
                     p.state = current.state.clone();
                     p.phase = "workloads".into();
-                    p.message = "The private-services LXC operation did not complete safely.".into();
+                    p.message =
+                        "The workload operation did not complete safely.".into();
                     p.error_code = Some(classify_error(&error));
                     p.retryable = true;
                 }
             }
+        }
+        if req.operation == Operation::JoinWorkload && p.error_code.is_none() {
+            let workload = req.workload.as_deref().unwrap_or_default();
+            match join_workload(req, workload) {
+                Ok(status) => {
+                    p.state = current.state.clone();
+                    p.phase = "workloads".into();
+                    p.message = if status.service == "healthy" && status.state == "running" {
+                        "The AI workload mesh is enrolled and healthy.".into()
+                    } else {
+                        "The AI workload mesh enrollment completed, but the workload requires attention; it is not reported healthy.".into()
+                    };
+                    if status.service != "healthy" || status.state != "running" {
+                        p.error_code = Some(if status.error_code.is_empty() {
+                            "WORKLOAD_ATTENTION".into()
+                        } else {
+                            status.error_code.clone()
+                        });
+                        p.retryable = true;
+                    } else {
+                        p.error_code = None;
+                        p.retryable = false;
+                    }
+                    p.percent = Some(100);
+                }
+                Err(error) => {
+                    p.state = current.state.clone();
+                    p.phase = "workloads".into();
+                    p.message = "The AI workload mesh enrollment did not complete safely.".into();
+                    p.error_code = Some(classify_error(&error));
+                    p.retryable = true;
+                }
+            }
+        }
+    }
+    p
+}
+
+pub fn is_long_operation(operation: Operation) -> bool {
+    matches!(operation, Operation::ImportWorkload | Operation::DiagnoseWorkload | Operation::Retry | Operation::StartWorkload | Operation::StopWorkload)
+}
+
+/// Create the durable accepted checkpoint without entering the long-running
+/// admission/LXC path. The control pipe persists this before acknowledging.
+pub fn begin_long(req: &Request, current: &Progress) -> Progress {
+    let mut accepted = handle(req, current);
+    // execute() already reconciles an existing enrollment without recapturing
+    // initial setup credentials. Admission must not reject that supported
+    // recovery path merely because handle() describes the secret-needed case.
+    if req.operation == Operation::Retry && req.validate().is_ok()
+        && current.request_id != Some(req.request_id)
+        && allowed(Operation::Retry, current)
+        && retry_can_reconcile(current)
+    {
+        accepted.error_code = None;
+        accepted.retryable = false;
+        accepted.phase = "runtime-reconcile".into();
+        accepted.percent = Some(20);
+        accepted.message = "Reconciling the existing enrolled runtime with installed source; workload health is observed separately.".into();
+    }
+    accepted
+}
+
+/// Finish a previously accepted long workload operation. The caller owns the
+/// serialized mutation guard; read-only GetProgress does not enter it.
+pub fn complete_long(req: &Request, accepted: &Progress, previous: &Progress) -> Progress {
+    if matches!(req.operation, Operation::Retry | Operation::StartWorkload | Operation::StopWorkload) {
+        let mut completed = execute(req, previous);
+        completed.sequence = accepted.sequence + 1;
+        return completed;
+    }
+    let mut p = accepted.clone();
+    p.operation_id = Uuid::new_v4();
+    p.sequence += 1;
+    #[cfg(windows)]
+    let result = match &req.operation {
+        Operation::ImportWorkload => {
+            let source = req.bundle_source.as_deref().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "WORKLOAD_SOURCE_INVALID")
+            });
+            source.and_then(|source| {
+                crate::workload_bundle::import(source, &crate::state::state_dir()).and_then(
+                    |admission| {
+                        crate::linux_node::deploy_bundle(
+                            &admission.bundle_dir,
+                            &admission.workload,
+                            &admission.revision,
+                        )
+                        .map(|_| ())
+                    },
+                )
+            })
+        }
+        Operation::DiagnoseWorkload => req
+            .workload
+            .as_deref()
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "WORKLOAD_NOT_ALLOWED")
+            })
+            .and_then(|workload| {
+                crate::linux_node::diagnose_workload_file(
+                    &crate::state::state_dir(),
+                    workload,
+                )
+                .map(|_| ())
+            }),
+        _ => Err(std::io::Error::other("INVALID_LONG_OPERATION")),
+    };
+    #[cfg(not(windows))]
+    let result: std::io::Result<()> = Err(std::io::Error::other(
+        "WORKLOAD_OPERATION_UNAVAILABLE",
+    ));
+    match result {
+        Ok(_) => {
+            p.error_code = None;
+            p.retryable = false;
+            p.percent = Some(100);
+            p.message = match &req.operation {
+                Operation::ImportWorkload => "The workload bundle was admitted and deployed; runtime status remains authoritative.".into(),
+                Operation::DiagnoseWorkload => "The AI workload diagnostic was captured locally.".into(),
+                _ => p.message,
+            };
+        }
+        Err(error) => {
+            p.state = accepted.state.clone();
+            p.error_code = Some(classify_error(&error));
+            p.retryable = true;
+            p.message = match &req.operation {
+                Operation::ImportWorkload => "The workload bundle was not admitted or deployed safely.".into(),
+                Operation::DiagnoseWorkload => "The AI workload diagnostic could not be captured safely.".into(),
+                _ => "The workload operation did not complete safely.".into(),
+            };
         }
     }
     p
@@ -322,8 +479,10 @@ fn consume_secrets(
             "PROXMOX_CREDENTIAL_MISSING",
         ));
     }
-    if matches!(operation, Operation::JoinMesh | Operation::Connect)
-        && material.tailscale_auth_key.is_none()
+    if matches!(
+        operation,
+        Operation::JoinMesh | Operation::JoinWorkload | Operation::Connect
+    ) && material.tailscale_auth_key.is_none()
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -335,6 +494,32 @@ fn consume_secrets(
         ));
     }
     Ok(std::mem::take(&mut material))
+}
+
+#[cfg(windows)]
+fn join_workload(
+    req: &Request,
+    workload: &str,
+) -> std::io::Result<crate::linux_node::WorkloadStatus> {
+    if workload != "ai" {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "WORKLOAD_NOT_ALLOWED",
+        ));
+    }
+    let mut material = consume_secrets(req, Operation::JoinWorkload)?;
+    let mut key = material.tailscale_auth_key.take().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "MESH_CREDENTIAL_MISSING")
+    })?;
+    let path = crate::secret_store::staging_dir(&crate::state::state_dir())
+        .join(format!("ai-mesh-{}.env", req.request_id));
+    let result = (|| {
+        crate::secret_store::stage_runtime_file(&path, "TS_AUTHKEY", &key)?;
+        crate::linux_node::enroll_workload(&path)
+    })();
+    crate::secret_store::clear_string(&mut key);
+    let _ = std::fs::remove_file(&path);
+    result
 }
 
 #[cfg(windows)]
@@ -494,7 +679,7 @@ pub fn handle(req: &Request, current: &Progress) -> Progress {
         p.error_code = Some("INVALID_REQUEST".into());
         return p;
     }
-    if !allowed(req.operation.clone(), &current.state) {
+    if !allowed(req.operation.clone(), current) {
         // An invalid request must not destroy the last known-safe checkpoint.
         // Keep the real state/phase so a follow-up can choose the right
         // operation instead of recovering from a fabricated checkpoint.
@@ -521,17 +706,17 @@ pub fn handle(req: &Request, current: &Progress) -> Progress {
             p.state = NodeState::MeshPending;
             p.phase = "mesh".into();
             p.message =
-                "Mesh enrollment accepted; runtime will consume the temporary credential.".into();
+                "Mesh enrollment accepted; the reusable key is stored in protected Linux state.".into();
             p.percent = Some(80);
             p
         }
         Operation::Retry => {
             // Retry carries no secret by design. Never report a scheduled
-            // operation when the next runtime step needs a one-shot value.
+            // operation when the next runtime step needs a reusable key.
             let (code, message) = match (&current.state, current.phase.as_str()) {
                 (NodeState::MeshPending, _) | (NodeState::Blocked, "mesh") => (
                     "MESH_CREDENTIAL_MISSING",
-                    "Retry needs a new one-shot mesh credential; submit JoinMesh.",
+                    "Retry needs a reusable mesh key; submit JoinMesh to store it safely.",
                 ),
                 (NodeState::Blocked, _) | (NodeState::RecoveryRequired, _) => (
                     "PROXMOX_CREDENTIAL_MISSING",
@@ -578,7 +763,28 @@ pub fn handle(req: &Request, current: &Progress) -> Progress {
         Operation::StopWorkload => {
             p.state = current.state.clone();
             p.phase = "workloads".into();
-            p.message = "Stopping the managed private-services LXC cleanly, including Pocket ID.".into();
+            p.message =
+                "Stopping the managed private-services LXC cleanly, including Pocket ID.".into();
+            p
+        }
+        Operation::JoinWorkload => {
+            p.state = current.state.clone();
+            p.phase = "workloads".into();
+            p.message = "Storing the reusable AI workload mesh key in protected Linux state.".into();
+            p
+        }
+        Operation::ImportWorkload => {
+            p.state = current.state.clone();
+            p.phase = "workloads-import".into();
+            p.message = "Admitting the workload bundle with the installed policy.".into();
+            p
+        }
+        Operation::DiagnoseWorkload => {
+            p.state = current.state.clone();
+            // Diagnostics are observational and must not strand the durable
+            // lifecycle checkpoint in a workload-specific phase.
+            p.phase = current.phase.clone();
+            p.message = "Capturing a bounded local AI workload diagnostic.".into();
             p
         }
         Operation::DiagnoseCompute => {
@@ -596,7 +802,9 @@ pub fn handle(req: &Request, current: &Progress) -> Progress {
     }
 }
 
-fn allowed(operation: Operation, state: &NodeState) -> bool {
+fn allowed(operation: Operation, current: &Progress) -> bool {
+    let state = &current.state;
+    let has_enrolled_recovery = enrolled_recovery(current);
     match operation {
         Operation::GetProgress | Operation::Cancel => true,
         Operation::Provision => matches!(
@@ -620,12 +828,32 @@ fn allowed(operation: Operation, state: &NodeState) -> bool {
                 | NodeState::MeshPending
                 | NodeState::NodeReady
         ),
-        Operation::StopRuntime => matches!(state, NodeState::NodeReady),
+        Operation::StopRuntime => matches!(state, NodeState::NodeReady) || has_enrolled_recovery,
         Operation::StartRuntime => matches!(state, NodeState::RuntimeStopped),
-        Operation::StartWorkload | Operation::StopWorkload => matches!(state, NodeState::NodeReady),
+        Operation::StartWorkload | Operation::StopWorkload | Operation::JoinWorkload => {
+            matches!(state, NodeState::NodeReady) || has_enrolled_recovery
+        }
+        Operation::ImportWorkload => matches!(state, NodeState::NodeReady) || has_enrolled_recovery,
+        Operation::DiagnoseWorkload => !matches!(state, NodeState::New),
         Operation::DiagnoseCompute => !matches!(state, NodeState::New),
         Operation::Connect | Operation::Start | Operation::Stop | Operation::Status => true,
     }
+}
+
+/// A durable node address is the checkpoint's evidence that initial mesh
+/// enrollment already happened. It permits recovery of a stranded lifecycle
+/// operation without treating an un-enrolled blocked checkpoint as credentialless.
+fn enrolled_recovery(current: &Progress) -> bool {
+    current.node_private_ip.is_some()
+        && matches!(
+            &current.state,
+            NodeState::Blocked | NodeState::Failed | NodeState::RecoveryRequired
+        )
+}
+
+fn retry_can_reconcile(current: &Progress) -> bool {
+    matches!(&current.state, NodeState::NodeReady | NodeState::MeshPending)
+        || enrolled_recovery(current)
 }
 
 #[cfg(test)]
@@ -644,6 +872,7 @@ mod tests {
             secret_file: None,
             github: None,
             workload: None,
+            bundle_source: None,
         }
     }
 
@@ -707,6 +936,72 @@ mod tests {
     }
 
     #[test]
+    fn async_retry_admits_existing_ready_enrollment_without_faking_completion() {
+        let mut current = crate::state::initial();
+        current.state = NodeState::NodeReady;
+        current.node_private_ip = Some("100.64.0.12".into());
+        let accepted = begin_long(&request(Operation::Retry), &current);
+        assert!(accepted.error_code.is_none());
+        assert_eq!(accepted.phase, "runtime-reconcile");
+        assert_eq!(accepted.percent, Some(20));
+        assert_eq!(accepted.sequence, current.sequence + 1);
+    }
+
+    #[test]
+    fn stranded_enrolled_workload_checkpoint_recovers_without_provisioning_credential() {
+        let mut current = crate::state::initial();
+        current.sequence = 41;
+        current.state = NodeState::Blocked;
+        current.phase = "workloads-diagnose".into();
+        current.node_private_ip = Some("100.64.0.12".into());
+        current.tailscale_ip = current.node_private_ip.clone();
+        current.error_code = Some("MESH_STATUS_FAILED".into());
+        current.retryable = true;
+
+        let accepted = begin_long(&request(Operation::Retry), &current);
+        assert_eq!(accepted.error_code, None);
+        assert_eq!(accepted.phase, "runtime-reconcile");
+        assert_eq!(accepted.sequence, current.sequence + 1);
+        assert_eq!(accepted.node_private_ip, current.node_private_ip);
+
+        let mut un_enrolled = current;
+        un_enrolled.node_private_ip = None;
+        let rejected = begin_long(&request(Operation::Retry), &un_enrolled);
+        assert_eq!(
+            rejected.error_code.as_deref(),
+            Some("PROXMOX_CREDENTIAL_MISSING")
+        );
+    }
+
+    #[test]
+    fn workload_diagnostic_preserves_the_observed_lifecycle_phase() {
+        let mut current = crate::state::initial();
+        current.state = NodeState::Blocked;
+        current.phase = "mesh".into();
+        current.node_private_ip = Some("100.64.0.12".into());
+        let mut diagnostic = request(Operation::DiagnoseWorkload);
+        diagnostic.workload = Some("ai".into());
+
+        let accepted = begin_long(&diagnostic, &current);
+        assert_eq!(accepted.phase, current.phase);
+        assert_eq!(accepted.state, current.state);
+        assert_eq!(accepted.sequence, current.sequence + 1);
+    }
+
+    #[test]
+    fn enrolled_attention_allows_protected_workload_recovery_not_fresh_bootstrap() {
+        let mut current = crate::state::initial();
+        current.state = NodeState::Blocked;
+        assert!(!allowed(Operation::ImportWorkload, &current));
+        assert!(!allowed(Operation::JoinWorkload, &current));
+        current.node_private_ip = Some("100.64.0.12".into());
+        assert!(allowed(Operation::ImportWorkload, &current));
+        assert!(allowed(Operation::JoinWorkload, &current));
+        assert!(allowed(Operation::StopRuntime, &current));
+        assert_eq!(current.state, NodeState::Blocked);
+    }
+
+    #[test]
     fn get_progress_is_read_only() {
         let mut current = crate::state::initial();
         current.sequence = 7;
@@ -721,6 +1016,7 @@ mod tests {
             secret_file: None,
             github: None,
             workload: None,
+            bundle_source: None,
         };
         assert_eq!(execute(&request, &current), current);
     }

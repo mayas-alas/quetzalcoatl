@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "hosts": [
+    "app.gnx",
+    "compute.gnx",
+    "rustfs.gnx",
+    "pocket.gnx",
+    "netbird.gnx",
+    "continuity.gnx",
+    "continuty.gnx",
+    "ai.gnx",
+    "proxy.gnx",
+    "voice.ai.gnx",
+    "oryx.ai.gnx",
+    "omniroute.ai.gnx",
+    "continuity.ai.gnx"
+  ],
+  "cleanup_hosts": ["agents.gnx"]
+}

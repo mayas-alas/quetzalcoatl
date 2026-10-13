@@ -5,6 +5,10 @@ const script=(await readFile(new URL('../../payload/node/wait-ready.run',import.
 for (const mode of ['ready','warm','timeout']) {
   const fake=`
 SECONDS=0
+timeout() {
+  [[ "$1" == --kill-after=3 && "$2" == 60 && "$3" == bash ]] || return 64
+  shift 3; bash "$@"
+}
 bash() {
   if [[ '${mode}' == ready || ( '${mode}' == warm && $SECONDS -ge 2 ) ]]; then
     printf '{"ready":true}\\n'; return 0

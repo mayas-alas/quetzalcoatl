@@ -27,7 +27,35 @@
   <section class="card workload-card" aria-labelledby="services-title">
     <div class="workload-heading"><strong id="services-title">Máquina de servicios privados</strong><a id="services-toggle" class="power-toggle" href="gnx://workloads/private-services/start" aria-label="Encender servicios privados" role="switch" aria-checked="false"><span></span></a></div>
     <p id="services-state" role="status">Comprobando la máquina compartida…</p>
-    <p class="workload-note">Este LXC aloja almacenamiento, Pocket ID y NetBird. Apagarlo también detiene el login; para volver a encenderlo usa la CLI GnX del host. Los datos permanecen guardados. Cada cambio requiere autorización Windows.</p>
+    <p class="workload-note">Este LXC aloja almacenamiento, Pocket ID, NetBird y Continuity de negocio. Apagarlo detiene estos servicios y el login. Los datos permanecen guardados; cada cambio requiere autorización Windows.</p>
+  </section>
+  <section class="card import-card" aria-labelledby="import-title">
+    <strong id="import-title">Desplegar un workload Quadlet</strong>
+    <p>Selecciona el bundle AI revisado, como carpeta o ZIP. GnX valida el perfil y sus Quadlets antes de crear o actualizar el LXC. Esta entrega permite ajustar recursos; no admite servicios, imágenes ni scripts arbitrarios.</p>
+    <div class="import-actions">
+      <a id="import-folder" class="button" href="gnx://workloads/import/folder">Seleccionar carpeta</a>
+      <a id="import-zip" class="button" href="gnx://workloads/import/zip">Seleccionar ZIP</a>
+    </div>
+    <p class="workload-note">La selección abre GnX instalado y su selector nativo elevado, con la confirmación de Windows. Esta página no recibe rutas locales ni secretos.</p>
+  </section>
+  <section class="card workload-card ai-card" aria-labelledby="ai-title">
+    <div class="workload-heading"><div><span id="ai-dot" class="dot pending"></span><strong id="ai-title">AI · workload observado</strong></div><a id="ai-toggle" class="power-toggle" href="gnx://workloads/ai/start" aria-label="Encender workload AI" role="switch" aria-checked="false"><span></span></a></div>
+    <p id="ai-state" role="status">Estado observado: sin datos.</p>
+    <dl class="observations">
+      <div><dt>Servicio</dt><dd id="ai-service">No observado</dd></div>
+      <div><dt>Mesh</dt><dd id="ai-mesh">No observado</dd></div>
+    </dl>
+    <p class="observation-label">Servicios observados</p>
+    <ul id="ai-services" class="observations-list" aria-label="Servicios AI observados"></ul>
+    <p id="ai-error" class="status-error" hidden></p>
+    <p class="observation-label">Eventos recientes</p>
+    <ul id="ai-events" class="events" aria-label="Eventos recientes del workload AI"></ul>
+    <div class="ai-actions"><a id="ai-logs" class="button" href="gnx://workloads/logs/ai">Abrir diagnóstico en la CLI GnX</a></div>
+    <p class="workload-note">Estos valores son observaciones del servicio; un error o un dato ausente no se presenta como listo.</p>
+  </section>
+  <section id="workloads-section" class="card" aria-labelledby="workloads-title" hidden>
+    <strong id="workloads-title">Workloads observados</strong>
+    <ul id="workloads-list" class="workloads-list" aria-label="Workloads observados"></ul>
   </section>
   <section class="card" aria-labelledby="rustfs-title">
     <div><span id="rustfs-dot" class="dot pending"></span><strong id="rustfs-title">Almacenamiento · RustFS</strong></div>
@@ -40,6 +68,12 @@
     <p id="pocket-state" role="status">Comprobando identidad…</p>
     <a id="pocket-link" class="button" href="https://pocket.gnx" hidden>Abrir Pocket ID</a>
     <p class="workload-note">Acceso a GnX mediante passkey y pertenencia al grupo gnx-app-users. Cerrar sesión de GnX no cierra tus otras aplicaciones.</p>
+  </section>
+  <section class="card" aria-labelledby="business-title">
+    <div><span id="business-dot" class="dot pending"></span><strong id="business-title">Continuity · memoria de negocio</strong></div>
+    <p id="business-state" role="status">Comprobando el servicio…</p>
+    <a id="business-link" class="button" href="https://continuity.gnx/" hidden>Abrir Continuity</a>
+    <p class="workload-note">Instancia de negocio independiente de AI. Conserva su historial en el bucket continuity.</p>
   </section>
   <section class="card" aria-labelledby="netbird-title">
     <div><span id="netbird-dot" class="dot pending"></span><strong id="netbird-title">Red · NetBird</strong></div>

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check native workload TLS certificate renewal daily
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1d
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

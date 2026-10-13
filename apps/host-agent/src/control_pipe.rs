@@ -4,6 +4,8 @@ use std::io;
 #[cfg(not(windows))]
 use std::io::{BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(windows)]
+use std::sync::{Mutex, OnceLock};
 
 pub const PIPE_NAME: &str = r"\\.\pipe\GnX.Platform.Control";
 const PIPE_MAX_INSTANCES: u32 = 1;
@@ -12,6 +14,10 @@ const PIPE_MAX_INSTANCES: u32 = 1;
 const PIPE_REJECT_REMOTE_CLIENTS: u32 = 0x0000_0008;
 const PIPE_SECURITY_DESCRIPTOR: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)";
 static STOP: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
+static MUTATION_GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+#[cfg(windows)]
+static MUTATION_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 #[cfg(windows)]
 pub fn request_stop() {
@@ -162,6 +168,9 @@ fn run_windows() -> Result<(), Box<dyn std::error::Error>> {
                     // broken pipe. That is a per-connection failure: never let
                     // it terminate the only server thread while SCM continues
                     // to report the surrounding service process as Running.
+                    if let Ok(snapshot) = state::load() {
+                        current = snapshot;
+                    }
                     let _ = serve_client_frame(pipe, &frame, &mut current);
                 }
             }
@@ -272,41 +281,103 @@ fn serve_client_frame(
     frame: &[u8],
     current: &mut gnx_control_protocol::Progress,
 ) -> io::Result<()> {
-    use windows_sys::Win32::Storage::FileSystem::{FlushFileBuffers, WriteFile};
     if let Ok(req) = Request::from_frame(frame) {
-        let progress = provisioning::execute(&req, current);
-        if req.operation != gnx_control_protocol::Operation::GetProgress {
-            *current = progress.clone();
-            state::save(current)?;
+        if req.operation == gnx_control_protocol::Operation::GetProgress {
+            return write_response(pipe, &req, provisioning::execute(&req, current));
         }
-        let mut output = serde_json::to_vec(&Response {
-            version: PROTOCOL_VERSION,
-            request_id: req.request_id,
-            operation_id: progress.operation_id,
-            progress,
-        })
-        .map_err(io::Error::other)?;
-        output.push(b'\n');
-        let mut written = 0u32;
-        if unsafe {
-            WriteFile(
-                pipe,
-                output.as_ptr().cast(),
-                output.len() as u32,
-                &mut written,
-                std::ptr::null_mut(),
-            )
-        } == 0
-            || written != output.len() as u32
+        if MUTATION_ACTIVE
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
         {
-            return Err(io::Error::last_os_error());
+            let mut busy = current.clone();
+            busy.operation_id = uuid::Uuid::new_v4();
+            busy.sequence += 1;
+            busy.request_id = Some(req.request_id);
+            busy.error_code = Some("WORKLOAD_OPERATION_BUSY".into());
+            busy.retryable = true;
+            busy.message = "Another serialized host mutation is still in progress.".into();
+            return write_response(pipe, &req, busy);
         }
-        // A fast read-only request can otherwise be lost when
-        // DisconnectNamedPipe runs before the client has drained the pipe.
-        // FlushFileBuffers is the documented server-side handoff barrier.
-        if unsafe { FlushFileBuffers(pipe) } == 0 {
-            return Err(io::Error::last_os_error());
+        if provisioning::is_long_operation(req.operation.clone()) {
+            let previous = current.clone();
+            let accepted = provisioning::begin_long(&req, current);
+            *current = accepted.clone();
+            if let Err(error) = state::save(&accepted) {
+                MUTATION_ACTIVE.store(false, Ordering::Release);
+                return Err(error);
+            }
+            if accepted.error_code.is_some() {
+                let response = write_response(pipe, &req, accepted);
+                MUTATION_ACTIVE.store(false, Ordering::Release);
+                return response;
+            }
+            let request = req.clone();
+            let worker_accepted = accepted.clone();
+            if std::thread::Builder::new()
+                .name("gnx-workload-operation".into())
+                .spawn(move || {
+                    let completed = provisioning::complete_long(&request, &worker_accepted, &previous);
+                    let _ = state::save(&completed);
+                    MUTATION_ACTIVE.store(false, Ordering::Release);
+                })
+                .is_err()
+            {
+                MUTATION_ACTIVE.store(false, Ordering::Release);
+                return Err(io::Error::other("WORKLOAD_OPERATION_UNAVAILABLE"));
+            }
+            return write_response(pipe, &req, accepted);
         }
+        let _guard = MUTATION_GUARD
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .map_err(|_| io::Error::other("WORKLOAD_OPERATION_BUSY"));
+        let Ok(_guard) = _guard else {
+            MUTATION_ACTIVE.store(false, Ordering::Release);
+            return Err(io::Error::other("WORKLOAD_OPERATION_BUSY"));
+        };
+        let progress = provisioning::execute(&req, current);
+        *current = progress.clone();
+        let save_result = state::save(current);
+        MUTATION_ACTIVE.store(false, Ordering::Release);
+        save_result?;
+        return write_response(pipe, &req, progress);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn write_response(
+    pipe: windows_sys::Win32::Foundation::HANDLE,
+    req: &Request,
+    progress: gnx_control_protocol::Progress,
+) -> io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::{FlushFileBuffers, WriteFile};
+    let mut output = serde_json::to_vec(&Response {
+        version: PROTOCOL_VERSION,
+        request_id: req.request_id,
+        operation_id: progress.operation_id,
+        progress,
+    })
+    .map_err(io::Error::other)?;
+    output.push(b'\n');
+    let mut written = 0u32;
+    if unsafe {
+        WriteFile(
+            pipe,
+            output.as_ptr().cast(),
+            output.len() as u32,
+            &mut written,
+            std::ptr::null_mut(),
+        )
+    } == 0
+        || written != output.len() as u32
+    {
+        return Err(io::Error::last_os_error());
+    }
+    // A fast read-only request can otherwise be lost when DisconnectNamedPipe
+    // runs before the client has drained the pipe.
+    if unsafe { FlushFileBuffers(pipe) } == 0 {
+        return Err(io::Error::last_os_error());
     }
     Ok(())
 }

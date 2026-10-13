@@ -1,0 +1,12 @@
+{
+    "Name":  "GnXHostAgent",
+    "State":  "Running",
+    "ProcessId":  210408,
+    "PathName":  "\"C:\\Program Files (x86)\\GnX Node\\gnx-host-agent.exe\""
+}
+{
+    "Name":  "wsl.exe",
+    "ProcessId":  210248,
+    "ParentProcessId":  210408,
+    "CommandLine":  "wsl.exe --distribution gnx-node -- /opt/gnx/payload/node/verify.run --state-dir /mnt/c/ProgramData/GnX/Node/state"
+}

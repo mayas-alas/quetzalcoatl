@@ -1,8 +1,33 @@
 # Inspección de servicios AI y Continuity
 
-Estado: **inspección y cliente BYOP parcial con pruebas aisladas, no feature desplegado**.
-La release instalada sigue siendo v0.1.72. No se construyó ni publicó un nuevo
-installer, no se aplicó un hotfix y no se creó/modificó el guest AI en esta inspección.
+Estado actual: **LXC AI creado; servicios y HTTPS todavía no aceptados; no publicado**.
+El candidato instalado es **v0.1.78**, Burn exit 0. El runtime base volvió a
+`NodeReady` mediante la CLI instalada después de pausar el guest AI incompleto
+con el adaptador instalado. El guest 100 permanece preservado; el AI es 101,
+unprivilegiado, tags `gnx;gnx-ai`, vinculado al recibo original de propiedad.
+Las seis imágenes pinned están importadas. Esto no demuestra servicios activos.
+
+La falta de espacio en C: produjo errores de filesystem y caché Overlay. Se
+reparó offline el VHDX original del runtime, sin unregister/reinstalación;
+el recheck terminó sin errores. Podman detectó capas dañadas, reparadas con su
+`system check --repair` antes de crear contenedores o volúmenes AI, y se restauró
+la imagen mesh desde el archivo sellado. No se borraron journals ni guest disks.
+
+El último intento de enrolamiento devolvió `AI_API_UNAVAILABLE`. Una prueba con
+curl real demostró que los headers del config stdin sin comillas no se enviaban.
+La corrección está en source y `tests/test-ai-curl-config.mjs` pasa, pero **no está
+incluida en el EXE v0.1.78 instalado**. El cambio adicional de reparación SDK del
+caché también está pendiente de empaquetado. No publicar ese EXE como entrega AI.
+
+C: tiene aproximadamente 1.3 GiB libres: no iniciar otro build/install/import sin
+headroom suficiente. Faltan enrolamiento BYOP/S3/OAuth, mesh AI independiente,
+servicios activos y pruebas HTTPS/login/Oppo. La release completa v0.1.72 se
+conserva en `build/last-complete-v0.1.72/` y su documentación histórica permanece.
+
+## Registro histórico de la inspección inicial
+
+Las secciones siguientes documentan el alcance/evidencia de su checkpoint
+original; no convierten pruebas aisladas en aceptación de v0.1.78.
 
 ## Corrección del formato y del alcance de implementación
 

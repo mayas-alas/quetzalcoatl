@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Lifecycle library: observe systemd's scheduled recovery, never replay a restart.
+gnx_restart_service() {
+  local unit=$1 previous current
+  case "$unit" in dns.service|gateway.service|compute.service) ;; *) return 64 ;; esac
+  previous=$(systemctl show "$unit" --property=InvocationID --value)
+  systemctl restart "$unit" || true
+  for _ in {1..60}; do
+    current=$(systemctl show "$unit" --property=InvocationID --value)
+    if [[ -n "$current" && "$current" != "$previous" ]] && systemctl is-active --quiet "$unit"; then return 0; fi
+    sleep 1
+  done
+  return 1
+}

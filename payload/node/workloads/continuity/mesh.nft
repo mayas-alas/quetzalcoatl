@@ -1,0 +1,28 @@
+table inet gnx_workload_mesh {
+  chain input {
+    type filter hook input priority -150; policy drop;
+    ct state established,related accept
+    iifname "lo" accept
+    iifname "eth0" udp sport 67 udp dport 68 accept
+    iifname "eth0" ip saddr 10.88.0.1 tcp dport 7310 accept
+    iifname "tailscale0" ip saddr $gnx_gateway tcp dport 7310 accept
+  }
+  chain output {
+    type filter hook output priority -150; policy drop;
+    ct state established,related accept
+    oifname "lo" accept
+    oifname "tailscale0" accept
+    oifname "eth0" udp sport 68 udp dport 67 accept
+    oifname "eth0" meta skuid 65532 accept
+    oifname "eth0" ip daddr 10.88.0.1 tcp dport {443,5353} accept
+    oifname "eth0" ip daddr 10.88.0.1 udp dport {53,5353} accept
+  }
+  chain forward {
+    type filter hook forward priority -150; policy drop;
+    ct state established,related accept
+    iifname "eth0" ip saddr 10.88.0.1 ip daddr 10.89.60.10 tcp dport 7310 accept
+    iifname "tailscale0" ip saddr $gnx_gateway ip daddr 10.89.60.10 tcp dport 7310 accept
+    ip saddr 10.89.60.0/24 oifname "eth0" ip daddr 10.88.0.1 tcp dport 443 accept
+    ip saddr 10.89.60.0/24 oifname "eth0" ip daddr 10.88.0.1 udp dport 53 accept
+  }
+}

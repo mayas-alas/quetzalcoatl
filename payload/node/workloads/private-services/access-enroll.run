@@ -5,13 +5,19 @@ Fresh NetBird gets a randomly generated local break-glass owner; existing accoun
 are never reset/adopted. The operator still enrolls their own Pocket ID passkey.
 """
 import json
+import base64
+import hashlib
+import http.cookiejar
 import os
 import secrets
+import ssl
 import stat
 import sys
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
+from html.parser import HTMLParser
 from pathlib import Path
 
 os.umask(0o077)
@@ -41,11 +47,11 @@ def persist(path, value):
         os.fsync(f.fileno())
 
 
-def request(service, method, path, body=None, token=None):
+def request(service, method, path, body=None, token=None, scheme='Token'):
     port = 1411 if service == 'pocket' else 8081
     headers = {'Content-Type': 'application/json'}
     if token:
-        headers['X-API-Key' if service == 'pocket' else 'Authorization'] = token if service == 'pocket' else 'Token ' + token
+        headers['X-API-Key' if service == 'pocket' else 'Authorization'] = token if service == 'pocket' else scheme + ' ' + token
     req = urllib.request.Request(f'http://127.0.0.1:{port}{path}',
                                  data=json.dumps(body).encode() if body is not None else None,
                                  headers=headers, method=method)
@@ -69,9 +75,94 @@ def request(service, method, path, body=None, token=None):
         raise
 
 
+def refresh_enrollment():
+    """Recover API access as the original owned local user, not a new PAT/owner.
+
+    Use the existing OIDC authorization-code + PKCE flow. No password grant,
+    database edits, passkey simulation, token in argv, or persistent web session.
+    """
+    path = BASE / 'netbird-enrollment.json'
+    saved = json.loads(read_private(path))
+    scheme = saved.get('scheme', 'Token')
+    if scheme not in ('Token', 'Bearer') or not saved.get('user_id'):
+        fail('NETBIRD_ENROLLMENT_IDENTITY_INVALID')
+    try:
+        request('netbird', 'GET', '/api/users', token=saved['token'], scheme=scheme)
+        return
+    except urllib.error.HTTPError as error:
+        if error.code != 401:
+            raise
+    owned = json.loads(read_private(STATE))
+    origin = 'https://netbird.gnx'
+    redirect = origin + '/nb-auth'
+    verifier, state = secrets.token_urlsafe(48), secrets.token_urlsafe(32)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    class LoginForm(HTMLParser):
+        action = None
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == 'form' and attrs.get('method', '').lower() == 'post':
+                self.action = attrs.get('action')
+
+    opener = urllib.request.build_opener(NoRedirect(), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
+        urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile='/var/lib/gnx/rustfs/tls/ca.crt')))
+    query = urllib.parse.urlencode({'client_id':'netbird-dashboard','redirect_uri':redirect,'response_type':'code',
+        'scope':'openid profile email','state':state,'code_challenge':challenge,'code_challenge_method':'S256'})
+    url, data, code = origin + '/oauth2/auth/local?' + query, None, None
+    for _ in range(10):
+        parsed = urllib.parse.urlsplit(url)
+        if (parsed.scheme, parsed.netloc) != ('https', 'netbird.gnx'):
+            fail('NETBIRD_RECOVERY_ORIGIN_INVALID')
+        if parsed.path == '/nb-auth':
+            values = urllib.parse.parse_qs(parsed.query)
+            if values.get('state') != [state] or len(values.get('code', [])) != 1:
+                fail('NETBIRD_RECOVERY_STATE_INVALID')
+            code = values['code'][0]
+            break
+        if parsed.path not in ('/oauth2/auth/local', '/oauth2/auth/local/login'):
+            fail('NETBIRD_RECOVERY_PATH_INVALID')
+        if data is not None and parsed.path != '/oauth2/auth/local/login':
+            fail('NETBIRD_RECOVERY_FORM_INVALID')
+        try:
+            with opener.open(urllib.request.Request(url, data=data), timeout=15) as response:
+                page = response.read(262145)
+                if len(page) > 262144 or data is not None:
+                    fail('NETBIRD_RECOVERY_LOGIN_FAILED')
+                form = LoginForm(); form.feed(page.decode())
+                if form.action is None:
+                    fail('NETBIRD_RECOVERY_FORM_INVALID')
+                url = urllib.parse.urljoin(url, form.action)
+                data = urllib.parse.urlencode({'login':owned['email'],'password':owned['password']}).encode()
+        except urllib.error.HTTPError as error:
+            if error.code not in (302, 303) or not error.headers.get('Location'):
+                raise
+            url = urllib.parse.urljoin(url, error.headers['Location']); data = None
+    if code is None:
+        fail('NETBIRD_RECOVERY_LOGIN_FAILED')
+    payload = urllib.parse.urlencode({'client_id':'netbird-dashboard','grant_type':'authorization_code','code':code,
+        'redirect_uri':redirect,'code_verifier':verifier}).encode()
+    with opener.open(urllib.request.Request(origin + '/oauth2/token', data=payload), timeout=15) as response:
+        token = json.load(response)['id_token']
+    users = request('netbird', 'GET', '/api/users', token=token, scheme='Bearer')
+    if not any(user.get('id') == saved['user_id'] and user.get('is_current') is True for user in users):
+        fail('NETBIRD_RECOVERY_OWNER_MISMATCH')
+    staged = path.with_suffix('.new')
+    persist(staged, {'token':token,'user_id':saved['user_id'],'scheme':'Bearer'})
+    os.replace(staged, path)
+    print('{"event":"netbird_enrollment_recovered","identity":"preserved"}')
+
+
 def main():
-    if os.geteuid() != 0 or len(sys.argv) != 1:
+    if os.geteuid() != 0 or sys.argv[1:] not in ([], ['--refresh-token']):
         fail('ACCESS_ENROLL_ARGUMENT')
+    if sys.argv[1:]:
+        refresh_enrollment()
+        return
     BASE.mkdir(exist_ok=True)
     pocket_env = dict(line.split('=', 1) for line in read_private(BASE / 'pocket-id.env').splitlines())
     api_key = pocket_env.get('STATIC_API_KEY')
@@ -146,9 +237,10 @@ def main():
     print('{"event":"oidc_linked","provider":"pocketid","operator_passkey":"required"}')
 
 
-try:
-    main()
-except urllib.error.HTTPError as e:
-    fail('ACCESS_ENROLL_' + getattr(e, 'gnx_operation', 'API') + '_HTTP_' + str(e.code))
-except (OSError, ValueError, KeyError):
-    fail('ACCESS_ENROLL_FAILED')
+if __name__ == '__main__':
+    try:
+        main()
+    except urllib.error.HTTPError as e:
+        fail('ACCESS_ENROLL_' + getattr(e, 'gnx_operation', 'API') + '_HTTP_' + str(e.code))
+    except (OSError, ValueError, KeyError):
+        fail('ACCESS_ENROLL_FAILED')

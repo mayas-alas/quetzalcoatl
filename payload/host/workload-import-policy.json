@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "profile": {
+    "name": "ai",
+    "mutable_fields": ["cores", "memory_mib", "rootfs_gib", "release"],
+    "release_pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+    "resource_bounds": {
+      "cores": {"min": 1, "max": 16},
+      "memory_mib": {"min": 4096, "max": 16384},
+      "rootfs_gib": {"min": 24, "max": 128}
+    }
+  },
+  "limits": {
+    "max_entries": 128,
+    "max_config_bytes": 2097152
+  },
+  "required_files": ["profile.json", "images.json", "offline.sha256", "ai.network"],
+  "quadlets": ["voice.container", "oryx.container", "omniroute.container", "continuity.container", "netbird-proxy.container", "workload-mesh.container"],
+  "ignored_exact_extensions": [".url", ".run", ".service", ".timer", ".nft", ".conf", ".sh", ".ps1", ".bat", ".cmd", ".py", ".js", ".exe", ".dll"],
+  "quadlet_admission": "exact_shipped_only"
+}

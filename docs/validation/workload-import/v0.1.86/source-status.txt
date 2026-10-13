@@ -1,0 +1,81 @@
+ M .AGENTS/40-config-driven-deployments.md
+ M Cargo.lock
+ M Cargo.toml
+ M apps/host-agent/src/cleanup.rs
+ M apps/host-agent/src/control_pipe.rs
+ M apps/host-agent/src/github.rs
+ M apps/host-agent/src/host_access.rs
+ M apps/host-agent/src/linux_node.rs
+ M apps/host-agent/src/main.rs
+ M apps/host-agent/src/provisioning.rs
+ M apps/host-agent/src/state.rs
+ M apps/setup/src/main.rs
+ M apps/web-app/app.js
+ M apps/web-app/index.html
+ M apps/web-app/styles.css
+ M crates/control-protocol/src/lib.rs
+ M docs/config-driven-platform.md
+ M docs/validation/ai-services/README.md
+ M docs/validation/ai-services/runtime-inspection.jsonl
+ M docs/validation/ai-services/runtime-inspection.stderr.txt
+ M installer/Product.wxs
+ M installer/bundle/Bundle.wxs
+ M installer/scripts/build.ps1
+ M installer/scripts/package-ai.run
+ M payload/node/compute/lxc.run
+ M payload/node/compute/network.run
+ M payload/node/compute/reconcile-access.run
+ M payload/node/compute/reconcile.run
+ M payload/node/gateway/routes.conf
+ M payload/node/install.run
+ M payload/node/network/ingress.nft
+ M payload/node/services/gateway.container
+ M payload/node/wait-ready.run
+ M payload/node/workloads/ai/netbird-proxy.container
+ M payload/node/workloads/ai/profile.json
+ M payload/node/workloads/private-services/mesh.run
+ D releases/v0.1.72/ARTIFACT.md
+ D releases/v0.1.72/RELEASE_NOTES.md
+ D releases/v0.1.72/SHA256SUMS.txt
+ M tests/node-runtime/inspect-ai.ps1
+ M tests/node-runtime/inspect-ai.run
+ M tests/node-runtime/test-compute-upgrade.mjs
+ M tests/node-runtime/test-lxc-network.mjs
+ M tests/node-runtime/test-runtime.mjs
+ M tests/node-runtime/test-warm-readiness.mjs
+ M tests/security/test-network-pwa.mjs
+ M tests/test-access-services.mjs
+ M tests/test-static-contracts.mjs
+ M tests/test-workload-mesh.mjs
+?? apps/host-agent/src/workload_bundle.rs
+?? docs/releases/v0.1.72/
+?? docs/validation/workload-import/
+?? installer/tools/
+?? payload/host/access-hosts.json
+?? payload/host/select-workload.ps1
+?? payload/host/workload-bundle.ps1
+?? payload/host/workload-import-policy.json
+?? payload/node/auth/continuity.cfg
+?? payload/node/auth/omniroute.cfg
+?? payload/node/auth/oryx.cfg
+?? payload/node/auth/voice.cfg
+?? payload/node/auth/workload-auth.run
+?? payload/node/services/auth-continuity.container
+?? payload/node/services/auth-omniroute.container
+?? payload/node/services/auth-oryx.container
+?? payload/node/services/auth-voice.container
+?? payload/node/services/gnx-workload-transport.service
+?? payload/node/services/readiness.run
+?? payload/node/workloads/ai/enroll.run
+?? payload/node/workloads/ai/images.json
+?? payload/node/workloads/ai/install.run
+?? payload/node/workloads/ai/mesh.nft
+?? payload/node/workloads/ai/offline.sha256
+?? payload/node/workloads/ai/workload-tls-renew.service
+?? payload/node/workloads/ai/workload-tls-renew.timer
+?? payload/node/workloads/deploy.run
+?? payload/node/workloads/enrollment-key.run
+?? tests/installer/test-workload-bundle.ps1
+?? tests/test-ai-curl-config.mjs
+?? tests/test-workload-deployment.mjs
+?? tests/test-workload-import-ui.mjs

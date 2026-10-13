@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/control-protocol", "apps/host-agent", "apps/setup"]
 
 [workspace.package]
-version = "0.1.72"
+version = "0.1.93"
 edition = "2021"
 license = "AGPL-3.0-only"
 

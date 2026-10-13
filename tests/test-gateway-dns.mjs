@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+const verify = read('payload/node/compute/access-verify.run');
+const lxc = read('payload/node/compute/lxc.run');
+const quadlet = read('payload/node/workloads/private-services/netbird-server.container');
+const install = read('payload/node/workloads/private-services/install.run');
+const ingress = read('payload/node/network/ingress.nft');
+assert.match(lxc, /podman exec gnx-mesh tailscale ip -4/);
+assert.match(lxc, /--nameserver 100\.100\.100\.100/);
+assert.match(quadlet, /^DNS=GNX_GATEWAY_IP$/m);
+assert.match(quadlet, /^AddHost=pocket\.gnx:GNX_GATEWAY_IP$/m);
+assert.match(install, /sed "s\/GNX_GATEWAY_IP\/\$gateway_ip\/"/);
+assert.match(ingress, /iifname "tailscale0" udp dport 53 redirect to :5353/);
+assert.match(verify, /check\('netbird_container_dns_pocket', netbird_container_dns\)/);
+assert.match(verify, /'getent', 'ahostsv4', 'pocket\.gnx'/);
+assert.match(verify, /'gnx-rustfs' in item\.get\('tags', ''\)\.split\(';'\)/);
+console.log('NetBird connector resolves Pocket ID via the enrolled HTTPS gateway, independently of gateway DNS :53.');

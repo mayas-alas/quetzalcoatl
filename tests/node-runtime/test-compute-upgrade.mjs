@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {spawnSync} from 'node:child_process';
 const source = (await readFile(new URL('../../payload/node/compute/reconcile.run', import.meta.url), 'utf8')).replace(/\r/g, '');
-const library = source.split('# Dispatch')[0];
+const recovery = (await readFile(new URL('../../payload/node/services/readiness.run', import.meta.url), 'utf8')).replace(/\r/g, '');
+const library = source.split('# Dispatch')[0].replace('source "$source_dir/services/readiness.run"', recovery);
 // Exercise the actual lifecycle functions with memory-only OS fakes. No files,
 // disposable helpers, credentials, live units or containers are created.
 const fake = `
@@ -28,16 +29,22 @@ podman() {
     *) return 125 ;;
   esac
 }
+sleep() { :; }
 systemctl() {
+  case "$1" in
+    show) printf 'generation-%s' "$generation"; return 0 ;;
+    is-active) [[ "$status" == running ]]; return ;;
+  esac
   trace+="$1;"
-  [[ "$restartfail" == 0 ]] || return 1
-  live=new; status=running; fakepkg=$afterfake
+  if [[ "$restartfail" != 0 && "$autorecover" == 0 ]]; then return 1; fi
+  generation=$((generation+1)); live=new; status=running; fakepkg=$afterfake
+  [[ "$restartfail" == 0 ]]
 }
 trap 'printf "TRACE=%s RECEIPT=%s LIVE=%s QUADLET=%s\\n" "$trace" "$applied" "$live" "$installed"' EXIT
 `;
 function run(mode, overrides={}) {
   const state={applied:'old',installed:0,cached:0,live:'old',status:'running',fakepkg:1,
-    afterfake:0,blocked:0,execfail:0,pullfail:0,restartfail:0,...overrides};
+    afterfake:0,blocked:0,execfail:0,pullfail:0,restartfail:0,generation:0,autorecover:0,...overrides};
   const setup=Object.entries(state).map(([k,v])=>`${k}=${v}`).join('\n');
   return spawnSync('bash', ['-c', library+'\n'+fake+'\n'+setup+'\nimage=registry/image@sha256:abc\nfingerprint=new\ntrace=""\n'+(mode==='force'?'apply_compute --restart':mode==='apply'?'apply_compute':'check_compute')], {encoding:'utf8'});
 }
@@ -53,6 +60,10 @@ assert.notEqual(r.status,0); assert.match(r.stderr,/COMPUTE_PAYLOAD_INSTALL_FAIL
 assert.doesNotMatch(r.stdout,/copy;|restart;|ack;/); assert.match(r.stdout,/RECEIPT=old LIVE=old QUADLET=0/);
 r=run('apply',{restartfail:1});
 assert.notEqual(r.status,0); assert.doesNotMatch(r.stdout,/ack;/); assert.match(r.stdout,/RECEIPT=old LIVE=old QUADLET=1/);
+// A scheduled systemd recovery is observed; the lifecycle does not restart twice.
+r=run('apply',{restartfail:1,autorecover:1});
+assert.equal(r.status,0,r.stderr); assert.match(r.stdout,/restart;ack;/);
+assert.equal((r.stdout.match(/restart;/g) ?? []).length,1);
 // Retrying a failed activation still recreates despite identical installed files.
 r=run('apply',{installed:1,cached:1});
 assert.equal(r.status,0,r.stderr); assert.match(r.stdout,/restart;ack;/);

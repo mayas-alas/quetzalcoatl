@@ -1,0 +1,9 @@
+[Unit]
+Description=Renew the workload's native Tailscale TLS certificate
+After=workload-mesh.service
+Requires=workload-mesh.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/gnx-workload-mesh renew-certificate
+TimeoutStartSec=120s

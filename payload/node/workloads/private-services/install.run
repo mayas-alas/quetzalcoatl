@@ -44,6 +44,9 @@ install -d -m 0755 -o 10001 -g 10001 /var/lib/gnx/access/pocket-id
 # Migrate only this workload's fixed volumes; preserve contents, do not follow
 # symlinks. The unprivileged service principals must be able to write existing data.
 chown -R -P --no-dereference 10001:10001 /var/lib/gnx/rustfs/data /var/lib/gnx/rustfs/logs /var/lib/gnx/access/pocket-id
+# The daemon remains UID/GID 65532 and owns its state directory. Tailscale
+# reasserts 0700 on startup; the fixed root CLI can inspect it as root.
+# State/credential files keep their own restrictive modes.
 install -d -m 0700 -o 65532 -g 65532 /var/lib/gnx/mesh
 install -m 0755 /opt/gnx/workloads/rustfs/mesh.run /usr/local/libexec/gnx-workload-mesh
 install -m 0644 /opt/gnx/workloads/rustfs/workload-mesh-guard.service /etc/systemd/system/workload-mesh-guard.service
@@ -105,6 +108,9 @@ for name in pocket-id netbird-server netbird-dashboard; do
   fi
 done
 systemctl start rustfs.service >/dev/null || die SERVICE_START_FAILED
+if [[ -f /etc/containers/systemd/continuity.container.d/gnx-access.conf ]] && [[ $(systemctl is-enabled continuity.service 2>/dev/null || true) != masked ]]; then
+  systemctl restart continuity.service >/dev/null || die BUSINESS_CONTINUITY_START_FAILED
+fi
 for _ in $(seq 1 90); do
   if systemctl is-active --quiet rustfs.service && podman healthcheck run gnx-rustfs >/dev/null 2>&1; then
     /usr/local/libexec/gnx-workload-mesh https || die MESH_HTTPS_NOT_READY

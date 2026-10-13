@@ -4,6 +4,7 @@
 //! Podman, Quadlets, networking and runtime configuration.
 
 use std::io;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -38,6 +39,24 @@ pub fn host_payload_dir() -> PathBuf {
         .unwrap_or_else(|| {
             installed_payload_dir("payload-host").unwrap_or_else(|| PathBuf::from("payload/host"))
         })
+}
+
+#[cfg(windows)]
+pub(crate) fn trusted_installed_payload_dir(directory: &str) -> io::Result<PathBuf> {
+    let executable = std::env::current_exe()
+        .map_err(|_| io::Error::other("INSTALLED_PAYLOAD_UNAVAILABLE"))?;
+    let parent = executable
+        .parent()
+        .ok_or_else(|| io::Error::other("INSTALLED_PAYLOAD_UNAVAILABLE"))?;
+    let root = parent.join(directory);
+    let canonical_parent = std::fs::canonicalize(parent)
+        .map_err(|_| io::Error::other("INSTALLED_PAYLOAD_UNAVAILABLE"))?;
+    let canonical = std::fs::canonicalize(&root)
+        .map_err(|_| io::Error::other("INSTALLED_PAYLOAD_UNAVAILABLE"))?;
+    if canonical.parent() != Some(canonical_parent.as_path()) || is_reparse_point(&root) {
+        return Err(io::Error::other("INSTALLED_PAYLOAD_UNAVAILABLE"));
+    }
+    Ok(canonical)
 }
 
 #[cfg(windows)]
@@ -287,8 +306,8 @@ pub fn verify(_state_dir: &Path) -> io::Result<RuntimeResult> {
 }
 
 /// Stop the managed runtime and release the shared WSL VM memory. The command
-/// is fixed to `wsl --shutdown`: GnX owns the dedicated service identity and
-/// intentionally treats all WSL work under this host operation as disposable.
+/// targets only the managed distro under its dedicated Windows identity;
+/// unrelated host-user laboratories/distributions must remain untouched.
 #[cfg(windows)]
 pub fn stop_runtime() -> io::Result<()> {
     RUNTIME_STOP_REQUESTED.store(true, Ordering::Release);
@@ -305,17 +324,12 @@ pub fn stop_runtime() -> io::Result<()> {
         if !output.status.success() {
             return Err(io::Error::other("RUNTIME_STOP_FAILED"));
         }
-        let output = std::process::Command::new("wsl.exe")
-            .arg("--shutdown")
-            .output()
-            .map_err(|error| {
-                io::Error::new(error.kind(), format!("WSL_SHUTDOWN_FAILED: {error}"))
-            })?;
-        // WSL can return a nonzero status from the LocalSystem service context
-        // after it has already shut down the shared VM (that account owns no
-        // registered distro). Launch failure above is actionable; the fixed
-        // shutdown request itself is therefore treated as complete here.
-        let _ = output;
+        let output = crate::dedicated_account::run_wsl_as_windows_identity(&[
+            "--terminate".into(), DISTRO_NAME.into(),
+        ])?;
+        if !output.status.success() {
+            return Err(io::Error::other("WSL_RUNTIME_TERMINATE_FAILED"));
+        }
         Ok(())
     })();
     // A failed stop leaves the durable checkpoint at NodeReady, so the
@@ -332,11 +346,7 @@ pub fn start_runtime() -> io::Result<()> {
     ensure_distro()?;
     let output = run_wsl(
         "/usr/bin/systemctl",
-        &[
-            "start",
-            "gnx-ingress.service",
-            "mesh.service",
-        ],
+        &["start", "gnx-ingress.service", "mesh.service"],
     )?;
     if output.status.success() {
         reconcile_ingress()?;
@@ -349,15 +359,140 @@ pub fn start_runtime() -> io::Result<()> {
 
 #[cfg(windows)]
 fn run_wsl(script: &str, args: &[&str]) -> io::Result<std::process::Output> {
+    run_wsl_mode(script, args, "--")
+}
+
+#[cfg(windows)]
+fn run_wsl_mode(script: &str, args: &[&str], mode: &str) -> io::Result<std::process::Output> {
     let mut command = vec![
         "--distribution".to_string(),
         DISTRO_NAME.to_string(),
-        "--".to_string(),
+        mode.to_string(),
         script.to_string(),
     ];
     command.extend(args.iter().map(|arg| (*arg).to_string()));
     crate::dedicated_account::run_wsl_as_windows_identity(&command)
         .map_err(|error| io::Error::new(error.kind(), format!("WSL_IDENTITY_FAILED: {error}")))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeOutcome {
+    Deployed,
+}
+
+pub(crate) fn validate_revision(revision: &str) -> io::Result<()> {
+    if revision.len() != 64
+        || !revision.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "WORKLOAD_REVISION_INVALID",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+pub fn deploy_bundle(bundle_dir: &Path, workload: &str, revision: &str) -> io::Result<RuntimeOutcome> {
+    validate_workload_id(workload)?;
+    validate_revision(revision)?;
+    if !bundle_dir.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "WORKLOAD_BUNDLE_INVALID",
+        ));
+    }
+    let installed_script = trusted_installed_payload_dir("payload-node")?
+        .join("workloads")
+        .join("deploy.run");
+    let metadata = std::fs::symlink_metadata(&installed_script)
+        .map_err(|_| io::Error::other("WORKLOAD_DEPLOY_UNAVAILABLE"))?;
+    if !metadata.file_type().is_file() || is_reparse_point(&installed_script) {
+        return Err(io::Error::other("WORKLOAD_DEPLOY_UNAVAILABLE"));
+    }
+    // Direct argv via the existing managed-identity runner: WSL's default
+    // shell must not expand an intermediate bash -c string or lose arguments.
+    // Only the installed script executes; the accepted directory is data.
+    let bundle_drvfs_path = path_arg(bundle_dir);
+    let output = run_wsl_mode(
+        "/usr/bin/timeout",
+        &[
+            "--kill-after=5",
+            "2400",
+            "/bin/bash",
+            "/opt/gnx/payload/node/workloads/deploy.run",
+            bundle_drvfs_path.as_str(),
+            workload,
+            revision,
+        ],
+        "--exec",
+    )?;
+    if output.status.success() {
+        Ok(RuntimeOutcome::Deployed)
+    } else {
+        Err(runtime_error(&output))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn deploy_bundle(
+    _bundle_dir: &Path,
+    workload: &str,
+    revision: &str,
+) -> io::Result<RuntimeOutcome> {
+    validate_workload_id(workload)?;
+    validate_revision(revision)?;
+    Err(io::Error::other("WORKLOAD_DEPLOY_UNAVAILABLE"))
+}
+
+#[cfg(windows)]
+pub fn diagnose_workload_file(state_dir: &Path, workload: &str) -> io::Result<()> {
+    validate_workload(workload)?;
+    let output = run_wsl(
+        "/usr/bin/timeout",
+        &[
+            "--kill-after=5",
+            "120",
+            "/opt/gnx/payload/node/compute/lxc.run",
+            "diagnose",
+            workload,
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(runtime_error(&output));
+    }
+    const MAX_DIAGNOSTIC_BYTES: usize = 64 * 1024;
+    let mut report = String::from("GnX workload diagnostic\n");
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if report.len() >= MAX_DIAGNOSTIC_BYTES {
+            break;
+        }
+        let clean = line.chars().filter(|c| !c.is_control()).take(500).collect::<String>();
+        let lower = clean.to_ascii_lowercase();
+        let clean = if ["authorization", "token", "password", "secret", "tskey-", "key="]
+            .iter()
+            .any(|marker| lower.contains(marker))
+        {
+            "[redacted diagnostic line]".to_owned()
+        } else {
+            clean
+        };
+        let remaining = MAX_DIAGNOSTIC_BYTES.saturating_sub(report.len() + 1);
+        if remaining == 0 {
+            break;
+        }
+        report.push_str(&clean.chars().take(remaining).collect::<String>());
+        report.push('\n');
+    }
+    std::fs::write(
+        state_dir.join(format!("workload-{workload}-diagnostic.txt")),
+        report.as_bytes(),
+    )
+}
+
+#[cfg(not(windows))]
+pub fn diagnose_workload_file(_state_dir: &Path, _workload: &str) -> io::Result<()> {
+    Err(io::Error::other("WORKLOAD_DIAGNOSTIC_UNAVAILABLE"))
 }
 
 fn wsl_reports_no_distributions(status: Option<i32>, stdout: &[u8], stderr: &[u8]) -> bool {
@@ -388,7 +523,8 @@ fn decode_wsl_text(bytes: &[u8]) -> String {
 
 #[cfg(any(windows, test))]
 fn wsl_listing_contains_distro(bytes: &[u8]) -> bool {
-    decode_wsl_text(bytes).lines()
+    decode_wsl_text(bytes)
+        .lines()
         .any(|line| line.trim().trim_start_matches('*').trim() == DISTRO_NAME)
 }
 
@@ -529,9 +665,11 @@ pub fn install_with_secrets(
 pub fn runtime_update_pending() -> io::Result<bool> {
     // Executing inside a stopped distro boots systemd/guests. Listing is the
     // non-launching boundary; a stopped runtime requires explicit application.
-    let running = crate::dedicated_account::run_wsl_as_windows_identity(
-        &["--list".into(), "--running".into(), "--quiet".into()],
-    )?;
+    let running = crate::dedicated_account::run_wsl_as_windows_identity(&[
+        "--list".into(),
+        "--running".into(),
+        "--quiet".into(),
+    ])?;
     if !running.status.success() || !wsl_listing_contains_distro(&running.stdout) {
         return Ok(true);
     }
@@ -543,7 +681,9 @@ pub fn runtime_update_pending() -> io::Result<bool> {
     Ok(!run_wsl(
         "/bin/bash",
         &["/opt/gnx/payload/node/compute/reconcile.run", "check"],
-    )?.status.success())
+    )?
+    .status
+    .success())
 }
 
 #[cfg(windows)]
@@ -664,10 +804,130 @@ pub struct WorkloadStatus {
     pub pocket_id: String,
     #[serde(default)]
     pub netbird: String,
+    #[serde(default)]
+    pub mesh: bool,
+    #[serde(default)]
+    pub services: BTreeMap<String, bool>,
+    #[serde(default)]
+    pub error_code: String,
+    #[serde(default)]
+    pub events: Vec<String>,
+}
+
+pub(crate) fn validate_workload_id(workload: &str) -> io::Result<()> {
+    let bytes = workload.as_bytes();
+    if bytes.is_empty()
+        || bytes.len() > 32
+        || !bytes[0].is_ascii_lowercase()
+        || !bytes[1..]
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "WORKLOAD_ID_INVALID",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_workload(workload: &str) -> io::Result<()> {
+    validate_workload_id(workload)?;
+    if matches!(workload, "rustfs" | "ai") {
+        Ok(())
+    } else {
+        #[cfg(windows)]
+        {
+            let profile = trusted_installed_payload_dir("payload-node")?.join("workloads").join(workload).join("profile.json");
+            if let Ok(metadata) = std::fs::symlink_metadata(&profile) {
+                if metadata.is_file() && metadata.len() <= 65536 && !is_reparse_point_for_import(&profile) {
+                    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(&profile)?).map_err(|_| io::Error::other("WORKLOAD_PROFILE_INVALID"))?;
+                    if value["name"] == workload && value["kind"] == "gnx.machine.profile" && value["unprivileged"] == true {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "WORKLOAD_NOT_ALLOWED",
+        ))
+    }
+}
+
+fn unavailable_workload_status(workload: &str) -> WorkloadStatus {
+    WorkloadStatus {
+        workload: workload.into(),
+        state: "ERROR".into(),
+        service: "unknown".into(),
+        version: if workload == "ai" {
+            env!("CARGO_PKG_VERSION").into()
+        } else {
+            "1.0.0-gnx.1".into()
+        },
+        pocket_id: "unknown".into(),
+        netbird: "unknown".into(),
+        mesh: false,
+        services: BTreeMap::new(),
+        error_code: "WORKLOAD_STATUS_UNAVAILABLE".into(),
+        events: vec!["status-unavailable".into()],
+    }
+}
+
+fn sanitize_workload_status(mut status: WorkloadStatus, requested: &str) -> WorkloadStatus {
+    status.workload = requested.into();
+    if !matches!(status.state.as_str(), "running" | "off" | "stopped" | "attention" | "ERROR")
+    {
+        status.state = "unknown".into();
+        if status.error_code.is_empty() {
+            status.error_code = "WORKLOAD_STATUS_INVALID".into();
+        }
+    }
+    if !matches!(
+        status.service.as_str(),
+        "healthy" | "stopped" | "attention" | "absent" | "unknown"
+    ) {
+        status.service = "unknown".into();
+        if status.error_code.is_empty() {
+            status.error_code = "WORKLOAD_STATUS_INVALID".into();
+        }
+    }
+    if !status.error_code.is_empty()
+        && (status.error_code.len() > 80
+            || !status
+                .error_code
+                .bytes()
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'))
+    {
+        status.error_code = "WORKLOAD_STATUS_INVALID".into();
+        status.state = "ERROR".into();
+        status.service = "unknown".into();
+    }
+    status.services.retain(|name, _| {
+        !name.is_empty()
+            && name.len() <= 64
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    });
+    status.events = if status.state == "running" && status.mesh {
+        vec!["phase-running".into(), "check-mesh-connected".into()]
+    } else if status.state == "running" {
+        vec!["phase-running".into()]
+    } else if status.state == "off" || status.state == "stopped" {
+        vec!["phase-stopped".into()]
+    } else {
+        vec!["phase-attention".into()]
+    };
+    status
 }
 
 #[cfg(windows)]
-fn parse_workload_status(output: &std::process::Output) -> io::Result<WorkloadStatus> {
+fn parse_workload_status(
+    output: &std::process::Output,
+    requested: &str,
+) -> io::Result<WorkloadStatus> {
+    validate_workload(requested)?;
     if !output.status.success() {
         return Err(runtime_error(output));
     }
@@ -675,43 +935,55 @@ fn parse_workload_status(output: &std::process::Output) -> io::Result<WorkloadSt
         .lines()
         .rev()
         .find_map(|line| serde_json::from_str::<WorkloadStatus>(line).ok())
-        .filter(|status| status.workload == "rustfs")
+        .filter(|status| status.workload == requested)
+        .map(|status| sanitize_workload_status(status, requested))
         .ok_or_else(|| io::Error::other("WORKLOAD_STATUS_INVALID"))
 }
 
 #[cfg(windows)]
-pub fn workload_status() -> io::Result<WorkloadStatus> {
+pub fn workload_status(workload: &str) -> io::Result<WorkloadStatus> {
+    validate_workload(workload)?;
     let available = run_wsl("/usr/bin/test", &["-x", "/var/lib/gnx-node/lxc.run"])?;
     if !available.status.success() {
-        return Ok(WorkloadStatus {
-            workload: "rustfs".into(),
-            state: "off".into(),
-            service: "available".into(),
-            version: "1.0.0-gnx.1".into(),
-            pocket_id: "stopped".into(),
-            netbird: "stopped".into(),
-        });
+        return Ok(unavailable_workload_status(workload));
     }
-    parse_workload_status(&run_wsl(
-        "/var/lib/gnx-node/lxc.run",
-        &["status", "rustfs"],
-    )?)
-}
-
-#[cfg(not(windows))]
-pub fn workload_status() -> io::Result<WorkloadStatus> {
-    Ok(WorkloadStatus {
-        workload: "rustfs".into(),
-        state: "off".into(),
-        service: "available".into(),
-        version: "1.0.0-gnx.1".into(),
-        pocket_id: "stopped".into(),
-        netbird: "stopped".into(),
-    })
+    parse_workload_status(
+        &run_wsl("/var/lib/gnx-node/lxc.run", &["status", workload])?,
+        workload,
+    )
 }
 
 #[cfg(windows)]
-pub fn control_workload(state_dir: &Path, start: bool) -> io::Result<WorkloadStatus> {
+pub fn workload_statuses() -> Vec<WorkloadStatus> {
+    ["rustfs", "ai"]
+        .into_iter()
+        .map(|workload| {
+            workload_status(workload).unwrap_or_else(|_| unavailable_workload_status(workload))
+        })
+        .collect()
+}
+
+#[cfg(not(windows))]
+pub fn workload_status(workload: &str) -> io::Result<WorkloadStatus> {
+    validate_workload(workload)?;
+    Ok(unavailable_workload_status(workload))
+}
+
+#[cfg(not(windows))]
+pub fn workload_statuses() -> Vec<WorkloadStatus> {
+    ["rustfs", "ai"]
+        .into_iter()
+        .map(unavailable_workload_status)
+        .collect()
+}
+
+#[cfg(windows)]
+pub fn control_workload(
+    state_dir: &Path,
+    workload: &str,
+    start: bool,
+) -> io::Result<WorkloadStatus> {
+    validate_workload(workload)?;
     ensure_distro()?;
     let refresh = run_wsl(
         "/usr/bin/install",
@@ -726,19 +998,43 @@ pub fn control_workload(state_dir: &Path, start: bool) -> io::Result<WorkloadSta
         install_with_secrets(state_dir, None, None)?;
     }
     let action = if start { "start" } else { "shutdown" };
-    parse_workload_status(&run_wsl("/var/lib/gnx-node/lxc.run", &[action, "rustfs"])?)
+    parse_workload_status(
+        &run_wsl("/var/lib/gnx-node/lxc.run", &[action, workload])?,
+        workload,
+    )
 }
 
 #[cfg(not(windows))]
-pub fn control_workload(_state_dir: &Path, start: bool) -> io::Result<WorkloadStatus> {
-    Ok(WorkloadStatus {
-        workload: "rustfs".into(),
-        state: if start { "running" } else { "off" }.into(),
-        service: if start { "healthy" } else { "stopped" }.into(),
-        version: "1.0.0-gnx.1".into(),
-        pocket_id: if start { "healthy" } else { "stopped" }.into(),
-        netbird: if start { "healthy" } else { "stopped" }.into(),
-    })
+pub fn control_workload(
+    _state_dir: &Path,
+    workload: &str,
+    _start: bool,
+) -> io::Result<WorkloadStatus> {
+    validate_workload(workload)?;
+    Ok(unavailable_workload_status(workload))
+}
+
+/// Copy the reusable AI enrollment key into the fixed guest-owned location,
+/// invoke the existing LXC adapter, and clear the transit file on every
+/// outcome. The key is never placed in argv or an inline shell command; the
+/// installed payload owns protected Linux persistence.
+#[cfg(windows)]
+pub fn enroll_workload(secret_file: &Path) -> io::Result<WorkloadStatus> {
+    let guest_secret = "/var/lib/gnx-node/secrets/ai-mesh.env";
+    let source = path_arg(secret_file);
+    let copy = run_wsl(
+        "/usr/bin/install",
+        &["-m", "0600", source.as_str(), guest_secret],
+    );
+    let result = copy.and_then(|copy| {
+        if !copy.status.success() {
+            return Err(runtime_error(&copy));
+        }
+        let output = run_wsl("/var/lib/gnx-node/lxc.run", &["enroll", "ai"])?;
+        parse_workload_status(&output, "ai")
+    });
+    let _ = run_wsl("/usr/bin/rm", &["-f", guest_secret]);
+    result
 }
 
 #[cfg(windows)]
@@ -798,7 +1094,11 @@ pub fn verify(state_dir: &Path) -> io::Result<RuntimeResult> {
     }
     let output = run_wsl(
         "/bin/bash",
-        &["/opt/gnx/payload/node/wait-ready.run", "--state-dir", &path_arg(state_dir)],
+        &[
+            "/opt/gnx/payload/node/wait-ready.run",
+            "--state-dir",
+            &path_arg(state_dir),
+        ],
     )?;
     if !output.status.success() {
         return Err(runtime_error(&output));
@@ -858,9 +1158,11 @@ pub fn runtime_checks(state_dir: &Path) -> io::Result<Vec<crate::state::RuntimeC
         "netbird_stun",
         "rustfs_gateway_https",
     ];
-    let output = run_wsl(
-        "/opt/gnx/payload/node/verify.run",
-        &["--state-dir", &path_arg(state_dir)],
+    let output = run_wsl_mode(
+        "/usr/bin/timeout",
+        &["--kill-after=3", "30", "/bin/bash", "/opt/gnx/payload/node/verify.run",
+          "--state-dir", &path_arg(state_dir)],
+        "--exec",
     )?;
     let mut checks = String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -879,7 +1181,10 @@ pub fn runtime_checks(state_dir: &Path) -> io::Result<Vec<crate::state::RuntimeC
     if checks.is_empty() {
         Err(io::Error::other("RUNTIME_CHECKS_UNAVAILABLE"))
     } else {
-        checks.push(crate::state::RuntimeCheck { name: "payload_current".into(), result: "pass".into() });
+        checks.push(crate::state::RuntimeCheck {
+            name: "payload_current".into(),
+            result: "pass".into(),
+        });
         Ok(checks)
     }
 }
@@ -912,6 +1217,7 @@ fn path_arg(path: &Path) -> String {
 }
 
 fn windows_path_to_wsl(value: &str) -> String {
+    let value = value.strip_prefix(r"\\?\").unwrap_or(value);
     let normalized = value.replace('\\', "/");
     let bytes = normalized.as_bytes();
     if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
@@ -934,6 +1240,11 @@ fn is_reparse_point(path: &Path) -> bool {
         .collect::<Vec<_>>();
     let attributes = unsafe { GetFileAttributesW(wide.as_ptr()) };
     attributes != INVALID_FILE_ATTRIBUTES && attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(windows)]
+pub(crate) fn is_reparse_point_for_import(path: &Path) -> bool {
+    is_reparse_point(path)
 }
 
 #[cfg(windows)]
@@ -1105,13 +1416,19 @@ pub fn diagnose_compute_file(state_dir: &Path) -> io::Result<()> {
 fn runtime_error_code(stderr: &str) -> String {
     // Parse JSON, not serialization whitespace. Accept only bounded stable codes,
     // never arbitrary diagnostic text or authentication response values.
-    stderr.lines().find_map(|line| {
-        let value: serde_json::Value = serde_json::from_str(line).ok()?;
-        let code = value.get("code")?.as_str()?;
-        (!code.is_empty() && code.len() <= 80
-            && code.bytes().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_'))
+    stderr
+        .lines()
+        .find_map(|line| {
+            let value: serde_json::Value = serde_json::from_str(line).ok()?;
+            let code = value.get("code")?.as_str()?;
+            (!code.is_empty()
+                && code.len() <= 80
+                && code
+                    .bytes()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_'))
             .then(|| code.to_owned())
-    }).unwrap_or_else(|| "RUNTIME_FAILED".into())
+        })
+        .unwrap_or_else(|| "RUNTIME_FAILED".into())
 }
 
 #[cfg(windows)]
@@ -1124,13 +1441,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn workload_allowlist_covers_both_native_workloads() {
+        assert!(validate_workload("rustfs").is_ok());
+        assert!(validate_workload("ai").is_ok());
+        assert!(validate_workload("arbitrary").is_err());
+        let statuses = workload_statuses();
+        assert_eq!(
+            statuses
+                .iter()
+                .map(|status| status.workload.as_str())
+                .collect::<Vec<_>>(),
+            ["rustfs", "ai"]
+        );
+        assert_eq!(statuses[1].version, env!("CARGO_PKG_VERSION"));
+        assert!(statuses.iter().all(|status| {
+            status.state != "off" || status.error_code.is_empty()
+        }));
+        assert!(statuses
+            .iter()
+            .flat_map(|status| status.events.iter())
+            .all(|event| event.starts_with("phase-")
+                || event.starts_with("check-")
+                || event == "status-unavailable"));
+    }
+
+    #[test]
     fn runtime_error_accepts_json_whitespace_without_leaking_diagnostics() {
-        for line in [r#"{"code":"ACCESS_MESH_POLICY_REQUIRED"}"#,
-            r#"{"event": "error", "code": "ACCESS_MESH_POLICY_REQUIRED"}"#] {
+        for line in [
+            r#"{"code":"ACCESS_MESH_POLICY_REQUIRED"}"#,
+            r#"{"event": "error", "code": "ACCESS_MESH_POLICY_REQUIRED"}"#,
+        ] {
             assert_eq!(runtime_error_code(line), "ACCESS_MESH_POLICY_REQUIRED");
         }
-        for line in ["private diagnostic text", r#"{"code":"secret=value"}"#,
-            r#"{"code":"lowercase_error"}"#, r#"{"code":12}"#, "{invalid}"] {
+        for line in [
+            "private diagnostic text",
+            r#"{"code":"secret=value"}"#,
+            r#"{"code":"lowercase_error"}"#,
+            r#"{"code":12}"#,
+            "{invalid}",
+        ] {
             assert_eq!(runtime_error_code(line), "RUNTIME_FAILED");
         }
     }
@@ -1162,11 +1511,19 @@ mod tests {
 
     #[test]
     fn running_listing_never_matches_stopped_or_other_distro() {
-        for text in ["", "GnX-SlimFit\n", "No running distributions.\n", "gnx-node-other\n"] {
+        for text in [
+            "",
+            "GnX-SlimFit\n",
+            "No running distributions.\n",
+            "gnx-node-other\n",
+        ] {
             assert!(!wsl_listing_contains_distro(text.as_bytes()));
         }
         assert!(wsl_listing_contains_distro(b"gnx-node\n"));
-        let utf16: Vec<u8> = "gnx-node\r\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let utf16: Vec<u8> = "gnx-node\r\n"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
         assert!(wsl_listing_contains_distro(&utf16));
     }
 

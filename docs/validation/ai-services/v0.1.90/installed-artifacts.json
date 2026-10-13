@@ -1,0 +1,12 @@
+[
+    {
+        "name":  "gnx.exe",
+        "sha256":  "f5f87c2c01da1636fd0cb1132accca00c6acd5661ca16316c837076c4876f364",
+        "matches_build":  true
+    },
+    {
+        "name":  "gnx-host-agent.exe",
+        "sha256":  "9531e00fff9f21a608bdef64df21e635ed8e05bf65d56d02f843b91b9ebeb045",
+        "matches_build":  true
+    }
+]

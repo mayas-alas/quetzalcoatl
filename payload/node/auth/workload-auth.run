@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Separate confidential clients/cookies; reuse the existing ephemeral Valkey.
+set -Eeuo pipefail
+umask 077
+[[ $(id -u) == 0 && $# == 0 ]] || exit 64
+base=/var/lib/gnx-node/ai-auth
+payload=/opt/gnx/payload/node
+install -d -m 0750 -o 0 -g 10001 "$base"
+if [[ ! -e "$base/backend.key" ]]; then openssl rand -hex 32 > "$base/backend.key"; fi
+[[ -f "$base/backend.key" && ! -L "$base/backend.key" && $(stat -c %u "$base/backend.key") == 0 && $(stat -c %a "$base/backend.key") == 600 ]] || exit 65
+backend=$(<"$base/backend.key")
+[[ "$backend" =~ ^[a-f0-9]{64}$ ]] || exit 65
+printf 'header_up X-GnX-Backend-Key %s\n' "$backend" > "$base/backend.caddy.new"
+mv -T -- "$base/backend.caddy.new" "$base/backend.caddy"
+unset backend
+for app in voice oryx omniroute continuity business; do
+  directory="$base/$app"
+  install -d -m 0750 -o 0 -g 10001 "$directory"
+  if [[ ! -e "$directory/owner.json" ]]; then
+    openssl rand -hex 32 > "$directory/client.secret"
+    jq -n --arg id "gnx-$app-$(openssl rand -hex 16)" --rawfile secret "$directory/client.secret" '{client_id:$id,client_secret:($secret|rtrimstr("\n"))}' > "$directory/owner.json"
+  fi
+  [[ -f "$directory/owner.json" && ! -L "$directory/owner.json" && $(stat -c %u "$directory/owner.json") == 0 && $(stat -c %a "$directory/owner.json") == 600 ]] || exit 65
+  callback=$(awk -F'"' '/^redirect_url = / {print $2}' "$payload/auth/$app.cfg")
+  [[ "$callback" =~ ^https://[a-z0-9.-]+\.gnx/oauth2/callback$ ]] || exit 65
+  jq --arg callback "$callback" '. + {callback:$callback}' "$directory/owner.json" > "$directory/owner.json.new"
+  mv -T -- "$directory/owner.json.new" "$directory/owner.json"
+  jq -jr .client_secret "$directory/owner.json" > "$directory/client.secret"
+  [[ -e "$directory/cookie.secret" ]] || openssl rand 32 > "$directory/cookie.secret"
+  [[ $(stat -c %s "$directory/cookie.secret") == 32 ]] || exit 65
+  cp -- "$payload/auth/$app.cfg" "$directory/oauth2-proxy.cfg"
+  jq -r '"client_id = "+(.client_id|tojson)' "$directory/owner.json" >> "$directory/oauth2-proxy.cfg"
+  jq -r '"redis_password = "+(.redis_password|tojson)' /var/lib/gnx-node/app-auth/owner.json >> "$directory/oauth2-proxy.cfg"
+  chown 0:10001 "$directory/client.secret" "$directory/cookie.secret" "$directory/oauth2-proxy.cfg"
+  chmod 0640 "$directory/client.secret" "$directory/cookie.secret" "$directory/oauth2-proxy.cfg"
+  install -m 0644 "$payload/services/auth-$app.container" "/etc/containers/systemd/auth-$app.container"
+done
+jq -n --rawfile backend "$base/backend.key" --slurpfile voice "$base/voice/owner.json" --slurpfile oryx "$base/oryx/owner.json" --slurpfile omniroute "$base/omniroute/owner.json" --slurpfile continuity "$base/continuity/owner.json" --slurpfile business "$base/business/owner.json" '{backend_key:($backend|rtrimstr("\n")),voice:$voice[0],oryx:$oryx[0],omniroute:$omniroute[0],continuity:$continuity[0],business:$business[0]}' > "$base/pocket-clients.json"
+chmod 0600 "$base/pocket-clients.json"
+systemctl daemon-reload
+printf '%s\n' '{"event":"workload_auth_configured","group":"gnx-app-users","membership_changes":false}'

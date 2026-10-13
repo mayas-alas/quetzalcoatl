@@ -1,8 +1,13 @@
 /build/
 /target/
+/.secret/
+# Local operator/agent harness; never package or publish its private policy.
+/.AGENTS/
 # Sealed workload input is versioned in the artifact dataset, not duplicated in Space LFS.
 /payload/node/workloads/private-services/offline.tar.gz
 /payload/node/workloads/ai/offline.tar.gz
+/payload/node/workloads/continuity/*.tar.gz
+/payload/node/workloads/continuity/continuity-s3-acceptance.bin
 /payload/node/auth/offline.tar.gz
 *.msi
 *.exe

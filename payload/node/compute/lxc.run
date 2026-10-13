@@ -6,13 +6,19 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
 
-fail() { printf '{"workload":"rustfs","state":"error","code":"%s"}\n' "$1" >&2; exit 1; }
+fail() { printf '{"workload":"%s","state":"error","code":"%s"}\n' "${workload:-rustfs}" "$1" >&2; exit 1; }
 [[ "$(id -u)" == 0 ]] || fail ROOT_REQUIRED
 [[ $# == 2 ]] || fail INVALID_ARGUMENT
 action=$1
 workload=$2
-[[ "$workload" == rustfs ]] || fail WORKLOAD_NOT_ALLOWED
-case "$action" in status|provision|start|shutdown|diagnose) ;; *) fail ACTION_NOT_ALLOWED ;; esac
+[[ "$workload" == rustfs || "$workload" == ai || "$workload" == continuity ]] || fail WORKLOAD_NOT_ALLOWED
+case "$action" in
+  status|provision|start|shutdown|diagnose) ;;
+  auth) [[ "$workload" == rustfs ]] || fail ACTION_NOT_ALLOWED ;;
+  migrate) [[ "$workload" == continuity ]] || fail ACTION_NOT_ALLOWED ;;
+  enroll|transport) [[ "$workload" == ai ]] || fail ACTION_NOT_ALLOWED ;;
+  *) fail ACTION_NOT_ALLOWED ;;
+esac
 command -v podman >/dev/null 2>&1 || fail PODMAN_MISSING
 podman container exists gnx-compute || fail COMPUTE_MISSING
 
@@ -30,7 +36,7 @@ find_vmid() {
   printf '%s' "$found"
 }
 status() {
-  local vmid state version="1.0.0-gnx.1" service=unknown pocket_id=stopped netbird=stopped
+  local vmid state version="1.0.0-gnx.1" service=unknown pocket_id=stopped netbird=stopped business=false
   vmid=$(find_vmid)
   if [[ -z "$vmid" ]]; then
     printf '{"workload":"rustfs","state":"off","service":"absent","version":"%s"}\n' "$version"
@@ -50,10 +56,13 @@ status() {
     if pve /usr/sbin/pct exec "$vmid" -- /usr/bin/podman healthcheck run gnx-netbird-server >/dev/null 2>&1 &&
        pve /usr/sbin/pct exec "$vmid" -- /usr/bin/podman healthcheck run gnx-netbird-dashboard >/dev/null 2>&1 &&
        pve /usr/sbin/pct exec "$vmid" -- /usr/bin/test -f /var/lib/gnx/access/oidc-linked.json; then netbird=healthy; fi
+    if pve /usr/sbin/pct exec "$vmid" -- /usr/bin/systemctl is-active --quiet continuity.service >/dev/null 2>&1 &&
+       pve /usr/sbin/pct exec "$vmid" -- curl -fsS --max-time 5 http://127.0.0.1:7310/health/ready 2>/dev/null |
+       jq -e '.ready and .scope=="business" and .replication.enabled and (.replication.pending|not) and .replication.error==null' >/dev/null; then business=true; fi
   else
     state=off; service=stopped
   fi
-  printf '{"workload":"rustfs","state":"%s","service":"%s","version":"%s","pocket_id":"%s","netbird":"%s"}\n' "$state" "$service" "$version" "$pocket_id" "$netbird"
+  printf '{"workload":"rustfs","state":"%s","service":"%s","version":"%s","pocket_id":"%s","netbird":"%s","services":{"continuity-business":%s}}\n' "$state" "$service" "$version" "$pocket_id" "$netbird" "$business"
 }
 configure_network() {
   local vmid=$1
@@ -107,6 +116,15 @@ install_bundle() {
   for file in Containerfile rustfs.container pocket-id.container netbird-server.container netbird-dashboard.container netbird-config.run access-enroll.run gateway.ip mesh.run mesh.nft workload-mesh.container workload-mesh-guard.service networkd-mesh-guard.conf offline.tar.gz offline.sha256; do
     pve /usr/sbin/pct push "$vmid" "/tmp/gnx-rustfs-bundle/$file" "/opt/gnx/workloads/rustfs/$file" --perms 0644 || return 1
   done
+  # Extend only the operator's existing business Quadlet; never introduce an
+  # extra writer/image or replace the component-owned definition and data.
+  # Once the dedicated writer has been applied, never recreate the legacy
+  # business drop-in while refreshing RustFS/Pocket/management.
+  if [[ ! -f /var/lib/gnx-node/workload-bundles/continuity/migration-applied.json ]] &&
+     pve /usr/sbin/pct exec "$vmid" -- test -f /etc/containers/systemd/continuity.container; then
+    pve /usr/sbin/pct exec "$vmid" -- mkdir -p /etc/containers/systemd/continuity.container.d || return 1
+    pve /usr/sbin/pct push "$vmid" /tmp/gnx-rustfs-bundle/continuity.container.d/access.conf /etc/containers/systemd/continuity.container.d/gnx-access.conf --perms 0644 || return 1
+  fi
   install_tls "$vmid" || return 1
   pve /usr/sbin/pct exec "$vmid" -- /usr/local/libexec/gnx-install-rustfs --prepare || return 1
   podman exec gnx-compute /usr/bin/rm -rf -- /tmp/gnx-rustfs-bundle || true
@@ -161,10 +179,21 @@ publish_dns() {
   # The public hostname belongs to the existing Caddy gateway. Only this
   # backend record points to the workload's enrolled mesh identity.
   printf 'address=/rustfs.mesh.gnx/%s\naddress=/pocket.mesh.gnx/%s\naddress=/netbird.mesh.gnx/%s\n' "$ip" "$ip" "$ip" > /var/lib/gnx-node/dnsmasq.d/03-rustfs.conf
+  [[ -f /var/lib/gnx-node/workload-bundles/continuity/migration-applied.json ]] || printf 'address=/continuity.mesh.gnx/%s\n' "$ip" >> /var/lib/gnx-node/dnsmasq.d/03-rustfs.conf
   chmod 0644 /var/lib/gnx-node/dnsmasq.d/03-rustfs.conf
   systemctl restart dns.service || fail WORKLOAD_DNS_FAILED
   systemctl restart netbird-stun.service || fail STUN_POLICY_FAILED
-  python3 /var/lib/gnx-node/access-mesh-policy.run || fail ACCESS_MESH_POLICY_REQUIRED
+  # pvestatd/mesh discovery may lag cold boot. Wait on the read-only
+  # probe only; never replay provisioning or weaken a resolved ACL denial.
+  local policy_ready=false policy_result
+  for _ in {1..30}; do
+    if policy_result=$(python3 /var/lib/gnx-node/access-mesh-policy.run 2>&1); then
+      policy_ready=true; break
+    fi
+    grep -q 'ACCESS_MESH_POLICY_UNAVAILABLE' <<<"$policy_result" || fail ACCESS_MESH_POLICY_REQUIRED
+    sleep 2
+  done
+  [[ "$policy_ready" == true ]] || fail ACCESS_MESH_POLICY_UNAVAILABLE
   for _ in {1..15}; do
     if [[ $(podman exec gnx-dns dig +short +time=1 +tries=1 @127.0.0.1 -p 5353 rustfs.mesh.gnx A 2>/dev/null) == "$ip" ]]; then
       curl --proto '=https' --fail --silent --connect-timeout 2 --max-time 5 \
@@ -183,7 +212,306 @@ publish_dns() {
   done
   fail WORKLOAD_DNS_FAILED
 }
+# AI and new dedicated profiles use this same adapter.  The legacy RustFS
+# branch below deliberately remains separate because its guest also owns Pocket
+# ID and NetBird management.  No uploaded executable is ever trusted.
+profile_builtin=/opt/gnx/payload/node/workloads
+profile_registry=/var/lib/gnx-node/workload-bundles
+profile_dir=''; registry_dir=''; profile_revision=''; profile_tag=''; profile_state=''; profile_vmid=''; profile_owner=''
+workload_fail() { printf '{"workload":"%s","state":"error","code":"%s"}\n' "$workload" "$1" >&2; exit 1; }
+profile_load() {
+  local current="$profile_registry/$workload/current.json" revision
+  registry_dir="$profile_registry/$workload"
+  profile_dir="$profile_builtin/$workload"
+  if [[ -e "$current" ]]; then
+    [[ -f "$current" && ! -L "$current" && $(stat -c %u "$current") == 0 && $(stat -c %a "$current") == 600 ]] || workload_fail PROFILE_REGISTRY_PERMISSIONS
+    revision=$(jq -er 'select(.schema==1 and .workload==$w) | .revision' --arg w "$workload" "$current") || workload_fail PROFILE_REVISION_INVALID
+    [[ "$revision" =~ ^[a-f0-9]{64}$ && -d "$registry_dir/$revision" && ! -L "$registry_dir/$revision" ]] || workload_fail PROFILE_REVISION_INVALID
+    profile_dir="$registry_dir/$revision"; profile_revision="$revision"
+  fi
+  [[ -f "$profile_dir/profile.json" && ! -L "$profile_dir/profile.json" ]] || workload_fail PROFILE_REQUIRED
+  profile_tag=$(jq -er .ownership_tag "$profile_dir/profile.json") || workload_fail PROFILE_INVALID
+  profile_state=$(jq -r '.state_dir // ("/var/lib/gnx/" + .name)' "$profile_dir/profile.json") || workload_fail PROFILE_INVALID
+  [[ "$profile_tag" =~ ^gnx-[a-z0-9-]{1,31}$ && "$profile_state" =~ ^/var/lib/gnx/[a-z0-9-]{1,64}$ ]] || workload_fail PROFILE_INVALID
+  if [[ "$workload" == continuity ]]; then
+    [[ $(jq -r '.continuity.scope' "$profile_dir/profile.json") == business && $(jq -r '.continuity.prefix' "$profile_dir/profile.json") == continuity/business ]] || workload_fail CONTINUITY_SCOPE_INVALID
+    [[ $(jq -r '.tls.issuer' "$profile_dir/profile.json") == external-ca ]] || workload_fail CONTINUITY_EXTERNAL_CA_REQUIRED
+    [[ $(jq -r '.tls.hostname' "$profile_dir/profile.json") =~ ^[a-z0-9][a-z0-9.-]*\.gnx$ ]] || workload_fail CONTINUITY_PRIVATE_CA_NAME_REQUIRED
+  fi
+}
+profile_exec() { pve /usr/sbin/pct exec "$profile_vmid" -- "$@"; }
+profile_push() { pve /usr/sbin/pct push "$profile_vmid" "$1" "$2" --perms "${3:-0644}"; }
+profile_identity() {
+  profile_load
+  local id cfg found='' matches=0 owner_file="$registry_dir/ownership.json"
+  [[ -e "$owner_file" ]] || owner_file="/var/lib/gnx-node/machines/$workload/owner.json"
+  while read -r id; do
+    [[ "$id" =~ ^[1-9][0-9]{2,8}$ ]] || continue
+    cfg=$(pve /usr/sbin/pct config "$id" 2>/dev/null || true)
+    if grep -Eq "^tags: .*\b$profile_tag\b" <<<"$cfg"; then matches=$((matches+1)); found=$id; fi
+  done < <(pve /usr/sbin/pct list 2>/dev/null | awk 'NR>1 {print $1}')
+  (( matches <= 1 )) || workload_fail PROFILE_DUPLICATE_OWNERSHIP
+  profile_vmid=''
+  if [[ -e "$owner_file" ]]; then
+    [[ -f "$owner_file" && ! -L "$owner_file" && $(stat -c %u "$owner_file") == 0 && $(stat -c %a "$owner_file") == 600 ]] || workload_fail PROFILE_OWNER_PERMISSIONS
+    profile_vmid=$(jq -er .vmid "$owner_file"); profile_owner=$(jq -er .owner "$owner_file") || workload_fail PROFILE_OWNER_INVALID
+    [[ "$profile_vmid" =~ ^[1-9][0-9]{2,8}$ && "$profile_owner" =~ ^[a-f0-9-]{36}$ ]] || workload_fail PROFILE_OWNER_INVALID
+    [[ -z "$found" || "$found" == "$profile_vmid" ]] || workload_fail PROFILE_OWNER_CONFLICT
+    if [[ -n "$found" ]]; then
+      cfg=$(pve /usr/sbin/pct config "$profile_vmid")
+      { grep -Fxq "description: GnX $workload $profile_owner" <<< "$cfg" || grep -Fxq "description: GnX $workload $profile_owner%0A" <<< "$cfg"; } || workload_fail PROFILE_OWNER_CONFLICT
+      grep -Fxq 'unprivileged: 1' <<< "$cfg" || workload_fail PROFILE_PRIVILEGE_CONFLICT
+    fi
+    [[ -z "$found" ]] && pve /usr/sbin/pct config "$profile_vmid" >/dev/null 2>&1 && workload_fail PROFILE_OWNER_CONFLICT
+  elif [[ -n "$found" ]]; then
+    workload_fail PROFILE_UNRECORDED_GUEST
+  fi
+}
+profile_prepare() {
+  local stage=/tmp/gnx-profile-$workload file
+  profile_load
+  [[ -f "$profile_dir/runtime-input.json" || -n "$(jq -r '.runtime.input_manifest // empty' "$profile_dir/profile.json")" ]] || workload_fail RUNTIME_INPUT_REQUIRED
+  rm -rf -- "$stage"; install -d -m 0700 "$stage"
+  cp -a "$profile_dir"/. "$stage/"
+  for file in bootstrap.tar.gz bootstrap.sha256 offline.tar.gz podman-6.1.3-linux-amd64.tar.gz runtime-input.json; do cp "$profile_builtin/$workload/$file" "$stage/$file"; done
+  podman exec gnx-mesh tailscale ip -4 > "$stage/gateway.ip"
+  cp /opt/gnx/payload/node/workloads/ai/install.run "$stage/install.run"
+  cp /opt/gnx/payload/node/workloads/private-services/mesh.run "$stage/mesh.run"
+  cp /opt/gnx/payload/node/workloads/private-services/workload-mesh-guard.service "$stage/workload-mesh-guard.service"
+  cp /opt/gnx/payload/node/workloads/private-services/networkd-mesh-guard.conf "$stage/networkd-mesh-guard.conf"
+  podman exec gnx-compute /usr/bin/rm -rf -- "/tmp/gnx-profile-$workload"
+  podman cp "$stage" gnx-compute:"/tmp/gnx-profile-$workload"
+  rm -rf -- "$stage"
+  profile_exec mkdir -p "/opt/gnx/workloads/$workload" /usr/local/libexec /etc/containers/systemd
+  while read -r file; do
+    [[ "$file" =~ ^[a-zA-Z0-9_.-]{1,128}$ ]] || workload_fail PROFILE_FILE_INVALID
+    profile_push "/tmp/gnx-profile-$workload/$file" "/opt/gnx/workloads/$workload/$file"
+  done < <(podman exec gnx-compute find "/tmp/gnx-profile-$workload" -maxdepth 1 -type f -printf '%f\n' | sort)
+  for file in mesh.run workload-mesh-guard.service networkd-mesh-guard.conf; do profile_push "/tmp/gnx-profile-$workload/$file" "/opt/gnx/workloads/$workload/$file"; done
+  profile_push "/tmp/gnx-profile-$workload/install.run" "/usr/local/libexec/gnx-install-profile" 0755
+  profile_exec bash /usr/local/libexec/gnx-install-profile --prepare "/opt/gnx/workloads/$workload" || workload_fail PROFILE_PREPARATION_FAILED
+  profile_exec mkdir -p "$profile_state/tls"
+  podman cp /var/lib/gnx-node/ca/gateway-ca.pem gnx-compute:/tmp/gnx-profile-ca.pem
+  profile_push /tmp/gnx-profile-ca.pem "$profile_state/tls/ca.crt"
+  pve rm -f /tmp/gnx-profile-ca.pem
+  local shared
+  shared=$(find_vmid); [[ -n "$shared" ]] || workload_fail SHARED_GUEST_REQUIRED
+  pve /usr/sbin/pct exec "$shared" -- mkdir -p /opt/gnx/workloads/ai-enroll
+  podman cp /opt/gnx/payload/node/workloads/ai/enroll.run gnx-compute:/tmp/gnx-profile-enroll.run
+  pve /usr/sbin/pct push "$shared" /tmp/gnx-profile-enroll.run /opt/gnx/workloads/ai-enroll/enroll.run --perms 0700
+  pve /usr/sbin/pct push "$shared" "/tmp/gnx-profile-$workload/profile.json" /opt/gnx/workloads/ai-enroll/profile.json --perms 0600
+  tar -xzf "$profile_builtin/$workload/offline.tar.gz" -C /var/lib/gnx-node/compute tools/mc
+  [[ $(sha256sum /var/lib/gnx-node/compute/tools/mc | awk '{print $1}') == $(jq -er .tools.mc.sha256 "$profile_dir/images.json") ]] || workload_fail STORAGE_TOOL_HASH_MISMATCH
+  podman cp /var/lib/gnx-node/compute/tools/mc gnx-compute:/tmp/gnx-profile-mc
+  pve /usr/sbin/pct push "$shared" /tmp/gnx-profile-mc /opt/gnx/workloads/ai-enroll/mc --perms 0700
+  pve /usr/sbin/pct exec "$shared" -- bash /opt/gnx/workloads/ai-enroll/enroll.run storage || workload_fail SCOPED_STORAGE_ENROLLMENT_FAILED
+  pve install -d -m 0700 "/var/lib/vz/gnx/$workload/secrets"
+  trap 'pve rm -f "/var/lib/vz/gnx/$workload/secrets/s3.env" "/var/lib/vz/gnx/$workload/secrets/enrollment.key"; rm -f "$registry_dir/enrollment.key"' EXIT
+  pve /usr/sbin/pct pull "$shared" "/var/lib/gnx/access/$workload-s3.env" "/var/lib/vz/gnx/$workload/secrets/s3.env"
+  pve /usr/sbin/pct push "$profile_vmid" "/var/lib/vz/gnx/$workload/secrets/s3.env" "$profile_state/secrets/s3.env" --perms 0600
+  pve rm -f "/var/lib/vz/gnx/$workload/secrets/s3.env" /tmp/gnx-profile-enroll.run /tmp/gnx-profile-mc
+  podman exec gnx-compute /usr/bin/rm -rf -- "/tmp/gnx-profile-$workload" || true
+}
+profile_health() {
+  local check type result ok=true service
+  while read -r check; do
+    type=$(jq -r '.type' <<<"$check")
+    case "$type" in
+      systemd) service=$(jq -er '.service' <<<"$check"); profile_exec systemctl is-active --quiet "$service" || ok=false ;;
+      http) result=$(profile_exec curl --fail --silent --show-error --max-time 5 "$(jq -er '.url' <<<"$check")") && jq -e --argjson body "$result" --argjson expected "$(jq '.expect // {}' <<<"$check")" 'all($expected|to_entries[]; .key as $key | .value == ($body|getpath($key|split("."))))' <<< '{}' >/dev/null || ok=false ;;
+      *) workload_fail PROFILE_HEALTHCHECK_INVALID ;;
+    esac
+  done < <(jq -c '.healthchecks // [] | .[]' "$profile_dir/profile.json")
+  [[ "$ok" == true ]]
+}
+profile_transport() {
+  local net compute_ip address network port backend
+  net=$(podman inspect gnx-compute --format '{{json .NetworkSettings.Networks}}')
+  compute_ip=$(jq -er 'to_entries|select(length==1)|.[0].value.IPAddress' <<< "$net")
+  [[ "$compute_ip" =~ ^10\.88\.[0-9]+\.[0-9]+$ ]] || workload_fail COMPUTE_ADDRESS_INVALID
+  address=$(profile_exec ip -4 -o address show dev eth0 scope global | awk '{print $4}')
+  network=$(pve ip -4 -o address show dev vmbr0 scope global | awk '{print $4;exit}')
+  [[ "$address" =~ ^172\.[0-9]+\.[0-9]+\.[0-9]+/24$ && "$network" =~ ^172\.[0-9]+\.[0-9]+\.1/24$ && "${address%.*}" == "${network%.*}" ]] || workload_fail GUEST_ADDRESS_INVALID
+  port=$(jq -er .network.ingress_port "$profile_dir/profile.json"); backend=$(jq -er .network.backend_name "$profile_dir/profile.json")
+  [[ "$port" =~ ^[0-9]{1,5}$ && "$backend" =~ ^[a-z0-9.-]+\.mesh\.gnx$ ]] || workload_fail BACKEND_INVALID
+  ip route replace "${network%.1/24}.0/24" via "$compute_ip"
+  local rule=(-i eth0 -o vmbr0 -s 10.88.0.1/32 -d "${address%/*}/32" -p tcp --dport "$port" -m comment --comment "GNX_$workload" -j ACCEPT)
+  pve iptables -w -C FORWARD "${rule[@]}" 2>/dev/null || pve iptables -w -I FORWARD 1 "${rule[@]}"
+  nft add element inet gnx_ingress ai_compute "{ $compute_ip }"
+  printf 'address=/%s/%s\n' "$backend" "${address%/*}" > "/var/lib/gnx-node/dnsmasq.d/05-$workload.conf"
+  chmod 0644 "/var/lib/gnx-node/dnsmasq.d/05-$workload.conf"
+  systemctl restart dns.service
+}
+profile_status() {
+  profile_identity
+  local version state service='stopped' healthy=true checks='{}' unit name mesh=false mesh_required
+  version=$(jq -er .release "$profile_dir/profile.json")
+  if [[ -z "$profile_vmid" ]]; then jq -cn --arg w "$workload" --arg v "$version" '{workload:$w,state:"off",service:"absent",version:$v}'; return; fi
+  if ! pve /usr/sbin/pct status "$profile_vmid" | grep -q running; then jq -cn --arg w "$workload" --arg v "$version" '{workload:$w,state:"off",service:"stopped",version:$v}'; return; fi
+  while read -r unit; do
+    name=${unit%.container}
+    if profile_exec systemctl is-active --quiet "$name.service" >/dev/null 2>&1; then checks=$(jq -c --arg n "$name" '.[$n]=true' <<<"$checks"); else checks=$(jq -c --arg n "$name" '.[$n]=false' <<<"$checks"); healthy=false; fi
+  done < <(jq -er '.quadlets[]' "$profile_dir/profile.json")
+  mesh_required=$(jq -r 'if (.quadlets | index("workload-mesh.container")) then "true" else "false" end' "$profile_dir/profile.json")
+  if [[ "$mesh_required" == true ]]; then
+    if profile_exec /usr/local/libexec/gnx-workload-mesh status 2>/dev/null | jq -e '.mesh == true' >/dev/null; then mesh=true; else healthy=false; fi
+  else
+    mesh=true
+  fi
+  profile_health || healthy=false
+  [[ "$healthy" == true ]] && service=healthy || service=attention
+  jq -cn --arg w "$workload" --arg v "$version" --arg s "$service" --argjson mesh "$mesh" --argjson services "$checks" '{workload:$w,state:"running",service:$s,version:$v,mesh:$mesh,services:$services,pocket_id:"external",netbird:"external"}'
+}
+profile_provision() {
+  [[ "$workload" == continuity ]] || workload_fail AI_RETIRED_STOPPED
+  profile_identity; profile_load
+  local template template_store root_store requested_size current_size
+  template=$(jq -er .template "$profile_dir/profile.json")
+   [[ "$template" =~ ^debian-[0-9]+-standard_[0-9.-]+_amd64.tar.zst$ ]] || workload_fail PROFILE_TEMPLATE_INVALID
+   [[ $(sha512sum "/var/lib/gnx-node/compute/template/cache/$template" | awk '{print $1}') == $(jq -er .template_sha512 "$profile_dir/profile.json") ]] || workload_fail PROFILE_TEMPLATE_DIGEST_MISMATCH
+  template_store=$(pve /usr/bin/pvesm status -content vztmpl | awk '$3=="active" {print $1;exit}')
+  root_store=$(pve /usr/bin/pvesm status -content rootdir | awk '$3=="active" {print $1;exit}')
+  [[ "$template_store" == local && "$root_store" =~ ^[A-Za-z0-9_-]+$ ]] || workload_fail PROFILE_STORAGE_UNAVAILABLE
+  if [[ -z "$profile_vmid" ]]; then
+    profile_vmid=$(pve /usr/bin/pvesh get /cluster/nextid --output-format json | tr -dc 0-9)
+    profile_owner=$(cat /proc/sys/kernel/random/uuid)
+    [[ "$profile_vmid" =~ ^[1-9][0-9]{2,8}$ ]] || workload_fail PROFILE_VMID_INVALID
+    install -d -m 0700 "$registry_dir"
+    jq -n --arg vmid "$profile_vmid" --arg owner "$profile_owner" --arg rev "$profile_revision" --arg tag "$profile_tag" '{schema:1,vmid:($vmid|tonumber),owner:$owner,revision:$rev,tag:$tag,state:"creating"}' > "$registry_dir/ownership.json"
+    chmod 600 "$registry_dir/ownership.json"
+    pve /etc/gnx/network/network.run close "$profile_vmid" || workload_fail TRANSPORT_GATE_FAILED
+    pve /usr/bin/systemd-run --quiet --scope -- /usr/sbin/pct create "$profile_vmid" "local:vztmpl/$template" --hostname "$(jq -er .hostname "$profile_dir/profile.json")" --unprivileged 1 --features nesting=1,keyctl=1 --cores "$(jq -er .cores "$profile_dir/profile.json")" --memory "$(jq -er .memory_mib "$profile_dir/profile.json")" --rootfs "$root_store:$(jq -er .rootfs_gib "$profile_dir/profile.json")" --net0 'name=eth0,bridge=vmbr0,ip=dhcp,type=veth' --nameserver 100.100.100.100 --dev0 path=/dev/net/tun,mode=0666 --onboot 0 --tags "gnx;$profile_tag" --description "GnX $(jq -er .name "$profile_dir/profile.json") $profile_owner" --start 0 || workload_fail PROFILE_CREATE_FAILED
+  else
+    pve /usr/sbin/pct set "$profile_vmid" --onboot 0 --cores "$(jq -er .cores "$profile_dir/profile.json")" --memory "$(jq -er .memory_mib "$profile_dir/profile.json")" >/dev/null || workload_fail PROFILE_UPDATE_FAILED
+  fi
+  pve /usr/sbin/pct status "$profile_vmid" | grep -q running || pve /usr/bin/systemd-run --quiet --scope -- /usr/sbin/pct start "$profile_vmid" || workload_fail PROFILE_START_FAILED
+   profile_prepare
+   configure_network "$profile_vmid"
+   profile_exec systemctl stop continuity.service >/dev/null 2>&1 || true
+   profile_exec systemctl mask continuity.service >/dev/null || workload_fail TARGET_WRITER_GUARD_FAILED
+  pve /etc/gnx/network/network.run close "$profile_vmid" || workload_fail TRANSPORT_GATE_FAILED
+  pve /usr/sbin/pct shutdown "$profile_vmid" --timeout 90 >/dev/null || workload_fail PROFILE_SHUTDOWN_FAILED
+  jq --arg state prepared '.state=$state' "$registry_dir/ownership.json" > "$registry_dir/ownership.json.new" && mv -T "$registry_dir/ownership.json.new" "$registry_dir/ownership.json"
+  printf '{"workload":"%s","state":"prepared","vmid":%s}\n' "$workload" "$profile_vmid"
+}
+continuity_rollback() {
+  local shared=$1 state
+  profile_exec systemctl stop continuity.service >/dev/null 2>&1 || true
+  profile_exec systemctl mask continuity.service >/dev/null 2>&1 || true
+  state=$(pve /usr/sbin/pct status "$profile_vmid" 2>/dev/null | awk '{print $2}')
+  [[ "$state" == stopped ]] || state=$(profile_exec systemctl show continuity.service --property=ActiveState --value 2>/dev/null || true)
+  if [[ "$state" == stopped || "$state" == inactive || "$state" == failed ]]; then
+    pve /usr/sbin/pct exec "$shared" -- systemctl unmask continuity.service >/dev/null 2>&1 || true
+    pve /usr/sbin/pct exec "$shared" -- systemctl start continuity.service >/dev/null 2>&1 || true
+  else
+    printf '%s\n' '{"workload":"continuity","code":"ROLLBACK_TARGET_STATE_UNKNOWN"}' >&2
+  fi
+}
+continuity_migrate() {
+  [[ "$workload" == continuity ]] || workload_fail ACTION_NOT_ALLOWED
+  profile_identity; [[ -n "$profile_vmid" ]] || workload_fail CONTINUITY_GUEST_REQUIRED
+   local shared source_generation target_generation spool migration_id source_spool=/var/lib/continuity-business target_spool=/var/lib/continuity-business unit writer_unit
+   migration_id=$(cat /proc/sys/kernel/random/uuid)
+  shared=$(find_vmid); [[ -n "$shared" && "$shared" != "$profile_vmid" ]] || workload_fail SHARED_GUEST_REQUIRED
+  [[ $(pve /usr/sbin/pct status "$profile_vmid" | awk '{print $2}') != running ]] || { profile_exec systemctl stop continuity.service >/dev/null 2>&1 || true; profile_exec systemctl is-active --quiet continuity.service >/dev/null 2>&1 && workload_fail TARGET_WRITER_ACTIVE; }
+   source_generation=$(pve /usr/sbin/pct exec "$shared" -- curl -fsS --max-time 5 http://127.0.0.1:7310/health/ready | jq -er 'select(.ready and .scope=="business" and .replication.pending==false and .replication.error==null) | .generation') || workload_fail CONTINUITY_SOURCE_NOT_READY
+  pve /usr/sbin/pct exec "$shared" -- systemctl stop continuity.service || workload_fail CONTINUITY_QUIESCE_FAILED
+  pve /usr/sbin/pct exec "$shared" -- systemctl is-active --quiet continuity.service >/dev/null 2>&1 && workload_fail CONTINUITY_QUIESCE_FAILED
+   pve /usr/sbin/pct exec "$shared" -- systemctl mask continuity.service >/dev/null || { continuity_rollback "$shared"; workload_fail CONTINUITY_QUIESCE_FAILED; }
+  install -d -m 0700 /var/lib/gnx-node/workload-bundles/continuity/spool
+  spool="/var/lib/gnx-node/workload-bundles/continuity/spool/$migration_id.tar"
+  pve /usr/sbin/pct exec "$shared" -- tar -C "$source_spool" -cf - . > "$spool" || { continuity_rollback "$shared"; workload_fail CONTINUITY_SPOOL_EXPORT_FAILED; }
+   pve /usr/bin/systemd-run --quiet --scope -- /usr/sbin/pct start "$profile_vmid" >/dev/null || { continuity_rollback "$shared"; workload_fail TARGET_START_FAILED; }
+   configure_network "$profile_vmid" || { continuity_rollback "$shared"; workload_fail TARGET_NETWORK_FAILED; }
+   podman cp "$spool" gnx-compute:/tmp/continuity-migration.tar || { continuity_rollback "$shared"; workload_fail CONTINUITY_SPOOL_IMPORT_FAILED; }
+   pve /usr/sbin/pct push "$profile_vmid" /tmp/continuity-migration.tar /tmp/continuity-migration.tar --perms 0600 || { continuity_rollback "$shared"; workload_fail CONTINUITY_SPOOL_IMPORT_FAILED; }
+  profile_exec mkdir -p "$target_spool" || { continuity_rollback "$shared"; workload_fail CONTINUITY_SPOOL_IMPORT_FAILED; }
+   profile_exec tar -C "$target_spool" -xf /tmp/continuity-migration.tar || { continuity_rollback "$shared"; workload_fail CONTINUITY_SPOOL_IMPORT_FAILED; }
+   profile_exec chown -R -P --no-dereference 10001:10001 "$target_spool"
+  profile_exec rm -f /tmp/continuity-migration.tar || { continuity_rollback "$shared"; workload_fail CONTINUITY_SPOOL_CLEANUP_FAILED; }
+  writer_unit=$(jq -er '.continuity.writer_unit // "continuity.container"' "$profile_dir/profile.json")
+  while read -r unit; do
+    [[ "$unit" == "$writer_unit" ]] && continue
+    profile_exec systemctl start "${unit%.container}.service" || { continuity_rollback "$shared"; workload_fail PROFILE_SERVICE_START_FAILED; }
+   done < <(jq -er '.quadlets[]' "$profile_dir/profile.json")
+   local key=/var/lib/gnx-node/secrets/mesh-reusable.env value
+   if ! profile_exec /usr/local/libexec/gnx-workload-mesh status 2>/dev/null | jq -e '.mesh' >/dev/null; then
+     [[ -f "$key" && ! -L "$key" && $(stat -c %u "$key") == 0 && $(stat -c %a "$key") == 600 ]] || { continuity_rollback "$shared"; workload_fail MESH_REUSABLE_KEY_REQUIRED; }
+     value=$(awk -F= '$1=="TS_AUTHKEY" {print $2}' "$key")
+     [[ "$value" =~ ^tskey-auth-[A-Za-z0-9_-]+$ ]] || { continuity_rollback "$shared"; workload_fail MESH_CREDENTIAL_INVALID; }
+     printf '%s' "$value" > "$registry_dir/enrollment.key"; unset value
+     podman cp "$registry_dir/enrollment.key" "gnx-compute:/var/lib/vz/gnx/$workload/secrets/enrollment.key"
+     profile_push "/var/lib/vz/gnx/$workload/secrets/enrollment.key" "$profile_state/mesh/enrollment.key" 0600
+     rm -f "$registry_dir/enrollment.key"; pve rm -f "/var/lib/vz/gnx/$workload/secrets/enrollment.key"
+     profile_exec /usr/local/libexec/gnx-workload-mesh enroll || { continuity_rollback "$shared"; workload_fail MESH_ENROLL_FAILED; }
+   fi
+   profile_exec systemctl unmask continuity.service || { continuity_rollback "$shared"; workload_fail TARGET_WRITER_START_FAILED; }
+   profile_exec systemctl start continuity.service || { continuity_rollback "$shared"; workload_fail TARGET_WRITER_START_FAILED; }
+   for _ in {1..30}; do profile_health && break; sleep 2; done
+   target_generation=$(profile_exec curl -fsS --max-time 10 http://127.0.0.1:7310/health/ready | jq -er 'select(.ready and .scope=="business" and .replication.pending==false and .replication.error==null) | .generation') || { continuity_rollback "$shared"; workload_fail TARGET_CONTINUITY_NOT_READY; }
+   [[ "$target_generation" == "$source_generation" ]] || { continuity_rollback "$shared"; workload_fail CONTINUITY_GENERATION_MISMATCH; }
+   [[ $(profile_exec sha256sum /opt/gnx/workloads/continuity/continuity-s3-acceptance.bin | awk '{print $1}') == $(jq -er .acceptance.sha256 "$profile_dir/images.json") ]] || { continuity_rollback "$shared"; workload_fail ACCEPTANCE_BINARY_HASH_MISMATCH; }
+   profile_exec chmod 0755 /opt/gnx/workloads/continuity/continuity-s3-acceptance.bin
+   profile_exec systemd-run --quiet --wait --collect --pipe --unit=gnx-continuity-acceptance --property="EnvironmentFile=$profile_state/secrets/s3.env" --setenv=CONTINUITY_SCOPE=business --setenv=CONTINUITY_S3_ENDPOINT=https://rustfs.gnx --setenv=CONTINUITY_S3_CONNECT_ADDR=10.88.0.1:443 --setenv=CONTINUITY_S3_BUCKET=continuity --setenv=CONTINUITY_S3_PREFIX=continuity/business --setenv="CONTINUITY_S3_CA_CERT=$profile_state/tls/ca.crt" /opt/gnx/workloads/continuity/continuity-s3-acceptance.bin --ignored --nocapture || { continuity_rollback "$shared"; workload_fail S3_COMMIT_RESTORE_FAILED; }
+  profile_exec systemctl is-active --quiet continuity.service || { continuity_rollback "$shared"; workload_fail TARGET_WRITER_INACTIVE; }
+  jq -n --arg id "$migration_id" --arg source "$shared" --arg target "$profile_vmid" --arg generation "$target_generation" '{schema:1,workload:"continuity",migration_id:$id,source_vmid:($source|tonumber),target_vmid:($target|tonumber),generation:($generation|tonumber),state:"applied"}' > "$registry_dir/migration-applied.json.new" || { continuity_rollback "$shared"; workload_fail MIGRATION_RECEIPT_WRITE_FAILED; }
+  chmod 600 "$registry_dir/migration-applied.json.new" && mv -T "$registry_dir/migration-applied.json.new" "$registry_dir/migration-applied.json" || { continuity_rollback "$shared"; workload_fail MIGRATION_RECEIPT_WRITE_FAILED; }
+   pve /usr/sbin/pct set "$profile_vmid" --onboot 1 >/dev/null || { continuity_rollback "$shared"; workload_fail TARGET_AUTOSTART_UPDATE_FAILED; }
+   profile_transport
+   publish_dns
+  rm -f -- "$spool"
+  printf '{"workload":"continuity","state":"running","migration":"applied","generation":%s}\n' "$target_generation"
+}
+if [[ "$workload" != rustfs ]]; then
+  install -d -m 0700 /run/gnx-node
+  exec 8>/run/gnx-node/workload-$workload.lock
+  if [[ "$action" == status ]]; then flock -n 8 || workload_fail WORKLOAD_OBSERVATION_BUSY; else flock 8; fi
+  case "$action" in
+    status) profile_status ;;
+    shutdown) profile_identity; if [[ -n "$profile_vmid" ]]; then pve /usr/sbin/pct set "$profile_vmid" --onboot 0; pve /usr/sbin/pct shutdown "$profile_vmid" --timeout 90; fi; profile_status ;;
+    diagnose) profile_identity; [[ -n "$profile_vmid" ]] || workload_fail PROFILE_GUEST_REQUIRED; pve /usr/sbin/pct config "$profile_vmid"; profile_exec podman ps --format '{{.Names}} {{.Status}}'; profile_status ;;
+    provision) profile_provision ;;
+    migrate) continuity_migrate ;;
+    start)
+      [[ "$workload" == continuity ]] || workload_fail AI_RETIRED_STOPPED
+      profile_load
+      podman cp /opt/gnx/payload/node/compute/network.run gnx-compute:/etc/gnx/network/network.run
+      install -m 0644 /opt/gnx/payload/node/services/gnx-workload-transport.service /etc/systemd/system/gnx-workload-transport.service
+      systemctl daemon-reload
+      systemctl enable gnx-workload-transport.service >/dev/null
+      if [[ -f "$registry_dir/migration-applied.json" ]]; then
+        profile_identity
+        [[ -n "$profile_vmid" ]] || workload_fail CONTINUITY_GUEST_REQUIRED
+        pve /usr/sbin/pct set "$profile_vmid" --onboot 1 >/dev/null
+        pve /usr/sbin/pct status "$profile_vmid" | grep -q running || pve /usr/bin/systemd-run --quiet --scope -- /usr/sbin/pct start "$profile_vmid" || workload_fail PROFILE_START_FAILED
+        configure_network "$profile_vmid"
+        profile_transport
+        profile_exec systemctl start continuity.service || workload_fail TARGET_WRITER_START_FAILED
+        profile_status
+      else
+        profile_provision; continuity_migrate
+      fi
+      ;;
+    transport) profile_identity; if [[ -n "$profile_vmid" ]] && pve /usr/sbin/pct status "$profile_vmid" | grep -q running; then profile_transport; fi ;;
+    enroll) workload_fail AI_RETIRED_STOPPED ;;
+  esac
+  exit 0
+fi
+shared_auth() {
+  local shared=$1
+  # Pocket ID/NetBird remain owned by the shared guest.  Refresh their existing
+  # confidential client projection, but never wake or enroll the retired AI
+  # guest and never alter the business writer here.
+  bash /opt/gnx/payload/node/auth/workload-auth.run || fail SHARED_AUTH_CONFIG_FAILED
+  pve /usr/sbin/pct exec "$shared" -- /usr/local/libexec/gnx-access-enroll || fail ACCESS_OIDC_ENROLLMENT_FAILED
+  systemctl restart gateway.service || fail GATEWAY_AUTH_CONFIG_FAILED
+}
 case "$action" in
+  auth)
+    vmid=$(find_vmid)
+    [[ -n "$vmid" ]] && pve /usr/sbin/pct status "$vmid" | grep -q running || fail SHARED_GUEST_REQUIRED
+    shared_auth "$vmid"
+    ;;
   status) status ;;
   provision) provision; publish_dns; status ;;
   start)

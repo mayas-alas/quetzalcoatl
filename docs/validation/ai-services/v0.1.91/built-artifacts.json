@@ -1,0 +1,33 @@
+{
+    "artifacts":  [
+                      {
+                          "path":  "build/installer/GnxNodeSetup.exe",
+                          "bytes":  1278368797,
+                          "sha256":  "44e9961dc2b5cc8f549aa3bf27a55c071d1e56130eba803c9fef9ae9f674fbf1"
+                      },
+                      {
+                          "path":  "build/installer/GnxNode.msi",
+                          "bytes":  1277665280,
+                          "sha256":  "7de29ac495406733cf4b2a585e09d1a95c3c279237ff412a11fc0befcc2231dd"
+                      },
+                      {
+                          "path":  "target/release/gnx.exe",
+                          "bytes":  552448,
+                          "sha256":  "e88c5a8221f8b5a5a7065866edb111726c06abe4d196ceefbf1c10e4e2d39048"
+                      },
+                      {
+                          "path":  "target/release/gnx-host-agent.exe",
+                          "bytes":  1866752,
+                          "sha256":  "53067a31fd454c72f0ab3278f51917980058144c10eac8a1c3c9c78629f3770f"
+                      },
+                      {
+                          "path":  "build/payload/node/.gnx-payload.sha256",
+                          "bytes":  11889,
+                          "sha256":  "06f3e66b93abb556db7cb490852a109d4745c7cf13ad2ee300bb95dc88aac178"
+                      }
+                  ],
+    "source_is_dirty":  true,
+    "version":  "0.1.91",
+    "source_base":  "501a7ecf813102e4f3fc792782e23424cc751db4",
+    "c_free_bytes":  14590177280
+}

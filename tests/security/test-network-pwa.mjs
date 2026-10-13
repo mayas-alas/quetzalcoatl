@@ -15,7 +15,7 @@ assert.match(routes, /tls_server_name compute\.gnx/);
 assert.doesNotMatch(routes, /tls_insecure_skip_verify|tls_server_name\s+127\.0\.0\.1/);
 assert.match(routes, /protocols h1 h2/);
 assert.doesNotMatch(routes, /protocols[^\n]*h3/);
-assert.equal((routes.match(/Alt-Svc "clear"/g) ?? []).length, 5);
+assert.equal((routes.match(/Alt-Svc "clear"/g) ?? []).length, 9);
 assert.match(routes, /https:\/\/rustfs\.gnx[\s\S]*reverse_proxy https:\/\/rustfs\.mesh\.gnx:443/);
 assert.match(routes, /https:\/\/pocket\.gnx[\s\S]*reverse_proxy http:\/\/pocket\.mesh\.gnx:1411/);
 assert.match(routes, /https:\/\/netbird\.gnx[\s\S]*reverse_proxy http:\/\/netbird\.mesh\.gnx:8080/);
@@ -36,11 +36,16 @@ assert.match(ingress, /iifname "tailscale0" udp dport 5353 accept/);
 assert.match(ingress, /iifname "tailscale0" tcp dport 5353 accept/);
 assert.match(ingress, /iifname "tailscale0" tcp dport 443 accept/);
 assert.doesNotMatch(ingress, /dport 8006/);
+assert.match(ingress, /set ai_compute \{ type ipv4_addr; \}/);
+const lxc = await read('payload/node/compute/lxc.run');
+assert.match(lxc, /nft add element inet gnx_ingress ai_compute/);
+assert.match(lxc, /PROFILE_OWNER_CONFLICT/);
+assert.match(lxc, /description: GnX \$workload \$profile_owner/);
 
 const acceptRules = ingress.split(/\r?\n/).map(line => line.trim()).filter(line => line.endsWith('accept'));
 assert.deepEqual(acceptRules.filter(rule => rule.includes('ct state')), ['ct state established,related accept']);
 for (const rule of acceptRules.filter(rule => !rule.includes('ct state'))) {
-  assert.match(rule, /^(?:iifname "(?:lo|tailscale0)"(?: (?:udp|tcp) dport (?:443|5353))?|iifname "eth0" ip saddr 172\.16\.0\.0\/12 tcp dport 443) accept$/,
+  assert.match(rule, /^(?:iifname "(?:lo|tailscale0)"(?: (?:udp|tcp) dport (?:443|5353))?|iifname "eth0" ip saddr 172\.16\.0\.0\/12 tcp dport 443|iifname "podman0" ip saddr @ai_compute tcp dport 443) accept$/,
     `new inbound accept rule is not limited to approved local/tailnet sources: ${rule}`);
 }
 
@@ -73,7 +78,7 @@ assert.match(app, /scopes\.includes\('repo'\).*scopes\.includes\('workflow'\)/);
 assert.match(app, /private: true, auto_init: true/);
 const nativeLinks = webText.match(/gnx:\/\/[^'"\s]+/g) ?? [];
 assert.ok(nativeLinks.length > 0);
-for (const link of nativeLinks) assert.match(link, /^gnx:\/\/workloads\/(?:private-services|rustfs)\/(?:start|stop)$/);
+for (const link of nativeLinks) assert.match(link, /^gnx:\/\/workloads\/(?:(?:private-services|rustfs|ai)\/(?:start|stop)|import\/(?:folder|zip)|logs\/ai)$/);
 assert.match(await read('payload/node/install.run'), /--compute-secret-file/);
 assert.match(await read('payload/node/install.run'), /PROXMOX_PASSWORD/);
 const compute = await read('payload/node/services/compute.container');
@@ -97,7 +102,7 @@ async function githubCase({ scopes = 'repo, workflow', failure = 0, trusted = tr
   const state = { textContent: '' };
   const form = { elements: { namedItem: name => controls[name] }, reportValidity: () => valid, addEventListener() {} };
   const context = vm.createContext({
-    document: { querySelector: selector => selector === '#github-config' ? form : selector === '#github-state' ? state : { addEventListener() {} } },
+    document: { querySelectorAll: () => [], querySelector: selector => selector === '#github-config' ? form : selector === '#github-state' ? state : { addEventListener() {} } },
     window: { location: { protocol: 'https:', hostname: trusted ? 'app.gnx' : 'untrusted.example' }, setInterval() {}, addEventListener() {} },
     navigator: {}, Uint8Array, btoa: value => Buffer.from(value, 'binary').toString('base64'),
     fetch: async (url, options) => {

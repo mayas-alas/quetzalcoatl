@@ -1,0 +1,15 @@
+[Unit]
+Description=Restore owned Continuity private transport after compute boot
+After=compute.service gnx-ingress.service dns.service
+Requires=compute.service
+ConditionPathExists=/var/lib/gnx-node/workload-bundles/continuity/migration-applied.json
+
+[Service]
+Type=oneshot
+ExecStart=/var/lib/gnx-node/lxc.run transport continuity
+Restart=on-failure
+RestartSec=15s
+TimeoutStartSec=120
+
+[Install]
+WantedBy=platform.target

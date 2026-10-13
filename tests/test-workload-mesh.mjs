@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 const read = name => readFileSync(new URL(`../payload/node/workloads/private-services/${name}`, import.meta.url), 'utf8');
 const nft = read('mesh.nft');
@@ -6,6 +7,7 @@ const mesh = read('workload-mesh.container');
 const guard = read('workload-mesh-guard.service');
 const rustfs = read('rustfs.container');
 const install = read('install.run');
+const aiInstall = readFileSync(new URL('../payload/node/workloads/ai/install.run', import.meta.url), 'utf8');
 const adapter = read('mesh.run');
 assert.match(nft, /chain output\s*{\s*type filter hook output priority -150; policy drop;/);
 assert.match(nft, /chain forward\s*{\s*type filter hook forward priority -150; policy drop;/);
@@ -18,6 +20,10 @@ assert.match(mesh, /Pull=never/);
 assert.match(mesh, /DropCapability=all/);
 assert.match(mesh, /NoNewPrivileges=true/);
 assert.doesNotMatch(mesh, /EnvironmentFile|TS_AUTHKEY|--auth-key/);
+assert.match(install, /install -d -m 0700 -o 65532 -g 65532 \/var\/lib\/gnx\/mesh/);
+assert.match(aiInstall, /install -d -m 0700 -o 65532 -g 65532 "\$state\/mesh"/);
+assert.doesNotMatch(mesh, /Privileged=true/i);
+assert.deepEqual([...mesh.matchAll(/^AddCapability=([A-Z0-9_]+)$/gm)].map(match => match[1]), ['NET_ADMIN','NET_RAW']);
 assert.match(guard, /^ExecStart=\/usr\/local\/libexec\/gnx-workload-mesh guard$/m);
 assert.doesNotMatch(guard, /^ExecStop=/m);
 assert.match(rustfs, /Requires=workload-mesh.service workload-mesh-guard.service/);
@@ -50,6 +56,45 @@ assert.match(adapter, /\.Online == true and \.ExitNodeOption == true/);
 assert.match(adapter, /length == 1/);
 assert.match(adapter, /\.ExitNodeStatus.Online == true/);
 assert.match(adapter, /--auth-key=file:/);
+assert.match(adapter, /mesh\(\) \{ podman exec "\$mesh_container" tailscale/);
+assert.match(adapter, /mesh_root\(\) \{ podman exec --user 0 "\$mesh_container" tailscale/);
+const classifierStart = adapter.indexOf('classify_cert_error() {');
+const classifierEnd = adapter.indexOf('\ncase "$1" in', classifierStart);
+assert.ok(classifierStart >= 0 && classifierEnd > classifierStart, 'missing certificate error classifier');
+const classifier = adapter.slice(classifierStart, classifierEnd);
+const classifierCases = [
+  ['LocalAPI permission denied', 'CERT_ACCESS_DENIED'],
+  ['open backend.key: permission denied', 'CERT_FILE_PERMISSION_DENIED'],
+  ['HTTPS certificates are not enabled', 'CERT_HTTPS_DISABLED'],
+  ['certificate domain not allowed', 'CERT_DOMAIN_DISALLOWED'],
+  ['ACME rate limit exceeded', 'CERT_RATE_LIMITED'],
+  ['ACME challenge failed', 'CERT_ACME_FAILED'],
+  ['network is unreachable', 'CERT_NETWORK_FAILED'],
+  ['no such host', 'CERT_DNS_FAILED'],
+  ['system time is wrong', 'CERT_CLOCK_INVALID'],
+  ['read-only file system', 'CERT_READONLY_FILESYSTEM'],
+  ['unknown flag: --cert-file', 'CERT_CLI_UNSUPPORTED'],
+  ['unexpected certificate response', 'CERT_UNKNOWN'],
+];
+const classifierFixture = ['set -euo pipefail', classifier,
+  ...classifierCases.map(([input]) => `classify_cert_error ${JSON.stringify(input)}; printf '\\n'`)].join('\n') + '\n';
+const classified = process.platform === 'win32'
+  ? spawnSync('wsl.exe', ['-d', 'GnX-LinuxLab', '--exec', 'bash', '-s'], { input: classifierFixture, encoding: 'utf8' })
+  : spawnSync('bash', ['-s'], { input: classifierFixture, encoding: 'utf8' });
+assert.equal(classified.status, 0, classified.stderr || String(classified.error));
+assert.deepEqual(classified.stdout.trim().split('\n'), classifierCases.map(([, expected]) => expected));
+assert.match(adapter, /cert_output=\$\(mesh_root cert[\s\S]*2>&1\)/);
+assert.match(adapter, /MESH_TLS_CERT_REQUIRED/);
+assert.match(adapter, /cert_reason=\$\(classify_cert_error/);
+const inspector = readFileSync(new URL('./node-runtime/inspect-ai.run', import.meta.url), 'utf8');
+for (const category of ['chmod_state_dir','mkdir_cert_dir','read_state_file','write_state_file',
+  'socket_create','state_dir_permissions','identity_load','unknown']) {
+  assert.match(inspector, new RegExp(`['"]${category}['"]`));
+}
+assert.match(inspector, /declares_daemon_65532_mode_0700/);
+assert.match(inspector, /tailscale_status':mesh_status\(vmid, container, False\)/);
+assert.match(nft, /iifname "tailscale0" ip saddr \$gnx_gateway tcp dport 7310 accept/);
+assert.doesNotMatch(nft, /iifname "tailscale0" tcp dport 7310 accept/);
 assert.match(adapter, /--accept-dns=true/);
 assert.doesNotMatch(adapter, /--accept-dns=false/);
 assert.doesNotMatch(adapter, /--exit-node=""|--exit-node=auto/);
@@ -71,6 +116,9 @@ const verify = readFileSync(new URL('../payload/node/verify.run', import.meta.ur
 assert.match(verify, /check dns_rustfs pass/);
 assert.match(verify, /check rustfs_gateway_https pass/);
 assert.match(verify, /"\$runtime_dir\/lxc.run" status rustfs/);
-assert.match(host, /127\.0\.0\.1 rustfs\.gnx/);
-assert.match(host, /name\.eq_ignore_ascii_case\("rustfs\.gnx"\)/);
+const hostConfig = JSON.parse(readFileSync(new URL('../payload/host/access-hosts.json', import.meta.url), 'utf8'));
+assert.ok(hostConfig.hosts.includes('rustfs.gnx'));
+assert.match(host, /owned_hostnames\(\)/);
+assert.match(host, /127\.0\.0\.1 \{name\}/);
+assert.match(host, /access-hosts\.json/);
 console.log('Workload mesh static contracts passed (not live network acceptance).');

@@ -10,6 +10,9 @@ Pull=never
 Network=host
 # Rendered from the node's enrolled gateway IP by install.run, not public DNS.
 DNS=GNX_GATEWAY_IP
+# The OIDC connector must not depend on the gateway's optional DNS :53
+# redirect: the same enrolled gateway serves Pocket ID over verified HTTPS.
+AddHost=pocket.gnx:GNX_GATEWAY_IP
 User=10001:10001
 DropCapability=all
 NoNewPrivileges=true

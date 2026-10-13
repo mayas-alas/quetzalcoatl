@@ -1,0 +1,9 @@
+﻿{
+    "observed_utc":  "2026-10-08T17:11:35.2874388Z",
+    "installed_version":  "gnx 0.1.88",
+    "dedicated_sid":  "S-1-5-21-3516817351-1644187441-2088017031-1022",
+    "public_ca_sha256":  "ba9c6be39f23bb89e4de13e04d90a41d3399a34ca1a88670a978616831535eba",
+    "c_free_bytes":  19568308224,
+    "source_base":  "501a7ecf813102e4f3fc792782e23424cc751db4",
+    "source_is_dirty":  true
+}

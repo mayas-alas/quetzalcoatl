@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Protected reusable enrollment input. Peer state is never copied or reset.
+set -Eeuo pipefail
+umask 077
+fail() { printf '{"event":"error","code":"%s"}\n' "$1" >&2; exit 1; }
+[[ $(id -u) == 0 && $# == 1 ]] || fail MESH_KEY_STORE_ARGUMENT
+source=$1
+[[ -f "$source" && ! -L "$source" && $(stat -c %u "$source") == 0 && $(stat -c %a "$source") == 600 && $(stat -c %h "$source") == 1 ]] || fail MESH_KEY_STORE_PERMISSIONS
+# No eval/source of credential files and no credential in argv, stdout or env.
+[[ $(wc -l < "$source") == 1 ]] || fail MESH_KEY_STORE_INVALID
+value=$(awk -F= '$1=="TS_AUTHKEY" {print $2}' "$source")
+[[ "$value" =~ ^tskey-auth-[A-Za-z0-9_-]+$ ]] || fail MESH_KEY_STORE_INVALID
+unset value
+state=/var/lib/gnx-node/secrets
+install -d -m 0700 "$state"
+[[ ! -L "$state/mesh-reusable.env" && ! -L "$state/mesh-reusable.env.new" ]] || fail MESH_KEY_STORE_PERMISSIONS
+install -m 0600 -o 0 -g 0 "$source" "$state/mesh-reusable.env.new"
+mv -T -- "$state/mesh-reusable.env.new" "$state/mesh-reusable.env"
+printf '%s\n' '{"event":"mesh_key_stored","scope":"new_peers","existing_identity":"preserved"}'

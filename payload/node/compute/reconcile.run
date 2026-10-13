@@ -59,7 +59,8 @@ apply_compute() {
   bash "$source_dir/compute/install-network.run" || fail COMPUTE_PAYLOAD_INSTALL_FAILED
   install -m 0755 "$source_dir/compute/install-tls.sh" "$runtime_dir/compute-hook/install-tls.sh"
   if ((recreate)); then
-    systemctl restart compute.service || fail COMPUTE_RESTART_FAILED
+    source "$source_dir/services/readiness.run"
+    gnx_restart_service compute.service || fail COMPUTE_RESTART_FAILED
   else
     systemctl start compute.service || fail COMPUTE_START_FAILED
   fi

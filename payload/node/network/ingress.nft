@@ -3,6 +3,8 @@
 # Implementación aprobada: nftables
 # Permite DNS y HTTPS solo por tailscale0/loopback; no expone 8006.
 table inet gnx_ingress {
+  # Populated only by the owned LXC adapter with the sealed compute address.
+  set ai_compute { type ipv4_addr; }
   chain dns_redirect {
     type nat hook prerouting priority dstnat; policy accept;
     iifname "tailscale0" udp dport 53 redirect to :5353
@@ -28,5 +30,7 @@ table inet gnx_ingress {
     # interface is not LAN-facing; limit the source to WSL's private RFC1918
     # range so local app.gnx/compute.gnx survive a Windows reboot.
     iifname "eth0" ip saddr 172.16.0.0/12 tcp dport 443 accept
+    # AI bootstrap stays inside this host's private Podman/PVE transport.
+    iifname "podman0" ip saddr @ai_compute tcp dport 443 accept
   }
 }

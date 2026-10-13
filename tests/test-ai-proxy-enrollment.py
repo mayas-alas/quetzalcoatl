@@ -11,6 +11,7 @@ import stat
 from types import SimpleNamespace
 import unittest
 import urllib.error
+import urllib.parse
 from unittest.mock import patch
 
 SOURCE = Path(__file__).resolve().parents[1] / 'payload/node/workloads/ai/proxy-enroll.run'
@@ -18,6 +19,11 @@ loader = importlib.machinery.SourceFileLoader('ai_proxy_enrollment', str(SOURCE)
 spec = importlib.util.spec_from_loader(loader.name, loader)
 module = importlib.util.module_from_spec(spec)
 loader.exec_module(module)
+access_source = SOURCE.parents[1] / 'private-services/access-enroll.run'
+access_loader = importlib.machinery.SourceFileLoader('access_enrollment', str(access_source))
+access_spec = importlib.util.spec_from_loader(access_loader.name, access_loader)
+access = importlib.util.module_from_spec(access_spec)
+access_loader.exec_module(access)
 
 
 class MemoryPath:
@@ -27,6 +33,8 @@ class MemoryPath:
         return MemoryPath(self.state, name)
     def exists(self):
         return self.name in self.state
+    def with_suffix(self, suffix):
+        return MemoryPath(self.state, str(Path(self.name).with_suffix(suffix)))
 
 
 class EnrollmentTests(unittest.TestCase):
@@ -155,6 +163,93 @@ class EnrollmentTests(unittest.TestCase):
         self.assertNotIn('NB_PROXY_ALLOW_INSECURE', text)
         self.assertNotIn('authSecret', text)
         self.assertEqual(module.API, 'http://127.0.0.1:8081/api/reverse-proxies/')
+
+
+class RecoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.saved = {'token':'expired-fixture','user_id':'owned-user'}
+        self.files = {'netbird-enrollment.json':json.dumps(self.saved),
+                      'netbird-bootstrap.json':json.dumps({'email':'admin@fixture.test','password':'fixture-password'})}
+        self.state, self.form, self.callback_state, self.owner = None, '/oauth2/auth/local/login', None, 'owned-user'
+        self.sent, self.replacements = [], []
+        self.patches = [
+            patch.object(access, 'BASE', MemoryPath(self.files)),
+            patch.object(access, 'STATE', MemoryPath(self.files, 'netbird-bootstrap.json')),
+            patch.object(access, 'read_private', side_effect=lambda p:self.files[p.name]),
+            patch.object(access, 'request', side_effect=self.api),
+            patch.object(access.ssl, 'create_default_context'),
+            patch.object(access.urllib.request, 'build_opener', return_value=SimpleNamespace(open=self.open)),
+            patch.object(access, 'persist', side_effect=lambda p,v:self.files.update({p.name:json.dumps(v)})),
+            patch.object(access.os, 'replace', side_effect=self.replace),
+            patch.object(access, 'fail', side_effect=lambda code: (_ for _ in ()).throw(RuntimeError(code))),
+        ]
+        for p in self.patches:
+            p.start(); self.addCleanup(p.stop)
+    def api(self, service, method, path, body=None, token=None, scheme='Token'):
+        self.assertEqual((service,method,path), ('netbird','GET','/api/users'))
+        if token == 'expired-fixture':
+            raise urllib.error.HTTPError('fixture',401,'expired',{},None)
+        self.assertEqual((token,scheme), ('signed-fixture','Bearer'))
+        return [{'id':self.owner,'is_current':True}]
+    def open(self, req, timeout):
+        self.sent.append(req)
+        parsed = urllib.parse.urlsplit(req.full_url)
+        self.assertEqual((parsed.scheme,parsed.netloc), ('https','netbird.gnx'))
+        if parsed.path == '/oauth2/auth/local':
+            self.state = urllib.parse.parse_qs(parsed.query)['state'][0]
+            self.assertEqual(urllib.parse.parse_qs(parsed.query)['code_challenge_method'], ['S256'])
+            return io.BytesIO(f'<form method="post" action="{self.form}"></form>'.encode())
+        if parsed.path == '/oauth2/auth/local/login':
+            self.assertEqual(urllib.parse.parse_qs(req.data.decode())['password'], ['fixture-password'])
+            destination = 'https://netbird.gnx/nb-auth?' + urllib.parse.urlencode({'code':'fixture-code','state':self.callback_state or self.state})
+            raise urllib.error.HTTPError(req.full_url,302,'redirect',{'Location':destination},None)
+        if parsed.path == '/oauth2/token':
+            values = urllib.parse.parse_qs(req.data.decode())
+            self.assertEqual(values['grant_type'], ['authorization_code'])
+            self.assertTrue(values['code_verifier'][0])
+            return io.BytesIO(b'{"id_token":"signed-fixture"}')
+        self.fail('unexpected OIDC operation')
+    def replace(self, src, dst):
+        self.replacements.append((src.name,dst.name))
+        self.files[dst.name] = self.files.pop(src.name)
+    def recover(self):
+        with patch('sys.stdout', new=io.StringIO()):
+            access.refresh_enrollment()
+    def test_recovery_uses_existing_owner_pkce_and_atomic_protected_state(self):
+        self.recover()
+        self.assertEqual(json.loads(self.files['netbird-enrollment.json']),
+                         {'token':'signed-fixture','user_id':'owned-user','scheme':'Bearer'})
+        self.assertEqual(len(self.replacements),1)
+        self.assertFalse(any('/tokens' in req.full_url or '/setup' in req.full_url for req in self.sent))
+    def test_valid_enrollment_does_not_login_or_rotate(self):
+        self.patches[3].stop()
+        with patch.object(access, 'request', return_value=[]): self.recover()
+        self.assertEqual(self.sent,[])
+        self.assertEqual(self.replacements,[])
+    def test_forbidden_api_access_does_not_trigger_recovery(self):
+        self.patches[3].stop()
+        with patch.object(access, 'request', side_effect=urllib.error.HTTPError('fixture',403,'denied',{},None)):
+            with self.assertRaises(urllib.error.HTTPError): self.recover()
+        self.assertEqual(self.sent,[])
+    def test_external_form_never_receives_credentials(self):
+        self.form = 'https://evil.invalid/oauth2/auth/login'
+        with self.assertRaisesRegex(RuntimeError,'ORIGIN_INVALID'): self.recover()
+        self.assertEqual(len(self.sent),1)
+        self.assertIsNone(self.sent[0].data)
+    def test_wrong_state_cannot_exchange_code(self):
+        self.callback_state = 'wrong-state'
+        with self.assertRaisesRegex(RuntimeError,'STATE_INVALID'): self.recover()
+        self.assertEqual(len(self.sent),2)
+        self.assertEqual(self.replacements,[])
+    def test_different_owner_cannot_replace_enrollment(self):
+        self.owner = 'other-user'
+        with self.assertRaisesRegex(RuntimeError,'OWNER_MISMATCH'): self.recover()
+        self.assertEqual(self.replacements,[])
+    def test_invalid_scheme_is_rejected_without_network(self):
+        self.saved['scheme'] = 'unsafe'
+        self.files['netbird-enrollment.json'] = json.dumps(self.saved)
+        with self.assertRaisesRegex(RuntimeError,'IDENTITY_INVALID'): self.recover()
+        self.assertEqual(self.sent,[])
 
 
 if __name__ == '__main__':

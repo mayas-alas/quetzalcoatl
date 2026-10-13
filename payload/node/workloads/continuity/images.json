@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "source": {"repository": "C:/Users/mayas/continuity", "commit": "d5c888686bb4fecd5d1dffc7ed1d13c8dcf221fb", "recipe": "deploy/Containerfile", "binary_sha256": "4bec2af16e52c306290bbfaa38665e3473155a1d1bf11921e1c67c4b9f61d332", "rustc": "1.95.0", "build": "cargo build --release --locked"},
+  "images": {
+    "continuity": {"image": "localhost/continuity@sha256:4b9067a1a38a8d2175a8aa27713aaf3d13003d0aaa73120220c8df16ec0ca604", "archive": "continuity.oci.tar", "sha256": "7c0fce1d9d1fa01564d74fdd142cced0d75ea56a92020304e2605e489b71c4df", "bytes": 3906048},
+    "workload-mesh": {"image": "localhost/gnx/workload-mesh@sha256:b6d8956b30e9fd5c6077f24454c5f772f6c4b7754373cd82c0350b5aa6c83f96", "archive": "workload-mesh.oci.tar", "sha256": "d4697b671f3ddedca2dbe26469649afa3ed42a76e920e3137b14cce2e291e161", "bytes": 58101760}
+  },
+  "tools": {"mc": {"sha256": "742ec8c74772dead3dbc44c66a5f09ebeb6b78682c00da5165186e5619b1ff32", "source": "existing sealed AI input, protected @self addon"}},
+  "acceptance": {"binary": "continuity-s3-acceptance.bin", "sha256": "64d1d9bc4576162b0e2eda82a59d9cc15cc947503fb52caf8bc42d82b0b62f1d", "source": "tests/s3_live.rs, locked Rust build; separate acceptance prefix only"}
+}

@@ -1,0 +1,11 @@
+{
+    "version":  "gnx 0.1.88",
+    "cli_sha256":  "3a7f2c9b398eb2fce85ccd0fe9edffd262d6d099eb04ba96ab432983d7922fb3",
+    "cli_matches_build":  true,
+    "agent_sha256":  "83cdf49f0fcdccc0a6fe219b6d488554339baaf984ead0d071af7b8cbaafd177",
+    "agent_matches_build":  true,
+    "burn_sha256":  "9f067d8f69b01429025db1f18c7b2f3574636bae93a89fb4a5ecc7581d9331c9",
+    "burn_bytes":  1278361791,
+    "service":  "Running",
+    "c_free_bytes":  25928990720
+}

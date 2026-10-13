@@ -5,7 +5,7 @@ set -Eeuo pipefail
 deadline=$((SECONDS + 300))
 output=""
 while true; do
-  if output=$(bash /opt/gnx/payload/node/verify.run "$@" 2>/dev/null); then
+  if output=$(timeout --kill-after=3 60 bash /opt/gnx/payload/node/verify.run "$@" 2>/dev/null); then
     printf '%s\n' "$output"
     exit 0
   fi
