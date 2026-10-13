@@ -57,9 +57,6 @@ tests/*.py text eol=lf
 tests/*.run text eol=lf
 releases/**/*.msi filter=lfs diff=lfs merge=lfs -text
 releases/**/*.exe filter=lfs diff=lfs merge=lfs -text
-docs/validation/v0.1.67/access-services-ready.png filter=lfs diff=lfs merge=lfs -text
-docs/validation/v0.1.70/pocket-app-login.png filter=lfs diff=lfs merge=lfs -text
-docs/validation/v0.1.67/node-ready.png filter=lfs diff=lfs merge=lfs -text
 docs/validation/v0.1.67/pocket-login.png filter=lfs diff=lfs merge=lfs -text
 docs/validation/v0.1.67/pocket-netbird-flow.png filter=lfs diff=lfs merge=lfs -text
 docs/validation/v0.1.67/pocket-setup.png filter=lfs diff=lfs merge=lfs -text
