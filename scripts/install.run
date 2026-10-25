@@ -15,13 +15,13 @@ if [[ ! -f "$root/ca-private/root.key" ]]; then
     openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$root/ca-private/root.key" >/dev/null 2>&1
 fi
 if [[ ! -f "$root/tls/root.crt" ]]; then
-    openssl req -x509 -key "$root/ca-private/root.key" -out "$root/tls/root.crt" -days 3650 -subj '/CN=GnX Core Root' >/dev/null 2>&1
+    openssl req -x509 -key "$root/ca-private/root.key" -out "$root/tls/root.crt" -days 3650 -subj '/O=GnX Labs/CN=GnX Labs' >/dev/null 2>&1
 fi
 if [[ ! -f "$root/tls/node.key" ]]; then
     openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$root/tls/node.key" >/dev/null 2>&1
 fi
 if [[ ! -f "$root/tls/node.crt" ]]; then
-    openssl req -new -key "$root/tls/node.key" -out "$root/tls/node.csr" -subj '/CN=app.gnx' >/dev/null 2>&1
+    openssl req -new -key "$root/tls/node.key" -out "$root/tls/node.csr" -subj '/O=GnX Labs/CN=app.gnx' >/dev/null 2>&1
     openssl x509 -req -in "$root/tls/node.csr" -CA "$root/tls/root.crt" -CAkey "$root/ca-private/root.key" -CAcreateserial -out "$root/tls/node.crt" -days 365 -extfile "$payload/config/pki/node.ext" >/dev/null 2>&1
 fi
 chmod 0600 "$root/tls/"*.key
