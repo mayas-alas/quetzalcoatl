@@ -1,0 +1,38 @@
+#!/usr/bin/bash
+# Fixed secret consumers. Input arrives through inherited stdin, never argv.
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 ]]
+systemctl is-active --quiet gnx-core.target
+IFS= read -r secret
+[[ -n "$secret" && ${#secret} -le 1024 ]]
+case ${1:-} in
+  mesh)
+    temporary=$(mktemp -d /run/gnx-core-secret.XXXXXX)
+    trap 'rm -f -- "$temporary/key"; rmdir -- "$temporary"' EXIT
+    printf '%s' "$secret" > "$temporary/key"
+    unset secret
+    podman cp "$temporary/key" gnx-core-mesh:/run/gnx-auth-key >/dev/null 2>&1
+    trap 'podman exec gnx-core-mesh rm -f /run/gnx-auth-key >/dev/null 2>&1 || :; rm -f -- "$temporary/key"; rmdir -- "$temporary"' EXIT
+    podman exec gnx-core-mesh chmod 0600 /run/gnx-auth-key >/dev/null 2>&1
+    podman exec gnx-core-mesh tailscale up --auth-key=file:/run/gnx-auth-key --accept-dns=false --timeout=120s >/dev/null 2>&1
+    printf '%s\n' 'Mesh configurada; acceso remoto no comprobado.' > /var/lib/gnx-core/web/status.txt
+    ;;
+  compute)
+    [[ ${#secret} -ge 12 && "$secret" != root ]]
+    hash=$(printf '%s' "$secret" | openssl passwd -6 -stdin)
+    unset secret
+    printf 'PASSWORD_HASH=%s\n' "$hash" > /var/lib/gnx-core/secrets/compute.env.new
+    chmod 0600 /var/lib/gnx-core/secrets/compute.env.new
+    mv /var/lib/gnx-core/secrets/compute.env.new /var/lib/gnx-core/secrets/compute.env
+    if systemctl is-active --quiet gnx-core-compute.service; then
+      printf 'root:%s\n' "$hash" | podman exec -i gnx-core-compute chpasswd -e >/dev/null 2>&1
+    else
+      systemctl start gnx-core-compute.service
+    fi
+    unset hash
+    printf '%s\n' 'Compute iniciado; comprobar HTTPS y autenticación nativa.' > /var/lib/gnx-core/web/status.txt
+    ;;
+  *) exit 64 ;;
+esac
+chmod 0644 /var/lib/gnx-core/web/status.txt

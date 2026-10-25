@@ -1,0 +1,4 @@
+#!/usr/bin/bash
+set -euo pipefail
+install -m 0644 /etc/gnx/tls/node.crt /etc/pve/local/pve-ssl.pem
+install -m 0640 -g www-data /etc/gnx/tls/node.key /etc/pve/local/pve-ssl.key

@@ -1,0 +1,30 @@
+[Unit]
+Description=GnX local Pi-hole DNS
+PartOf=gnx-core.target
+
+[Quadlet]
+DefaultDependencies=false
+
+[Container]
+Image=sha256:15d302c0f85902d6378e159b906b3ffc7b5ef2af079e1d296d1dcf3f5f217e29
+Pull=never
+ContainerName=gnx-core-dns
+Network=host
+Environment=FTLCONF_dns_interface=lo
+Environment=FTLCONF_dns_port=5353
+Environment=FTLCONF_dns_listeningMode=BIND
+Environment=FTLCONF_webserver_port=0
+Environment=SKIPGRAVITYONBOOT=1
+Environment=FTLCONF_dns_hosts="127.0.0.1 app.gnx;127.0.0.1 compute.gnx"
+Volume=/var/lib/gnx-core/dns:/etc/pihole
+LogDriver=journald
+StopTimeout=20
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=90s
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=gnx-core.target

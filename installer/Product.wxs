@@ -1,0 +1,36 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="GnX Core" Manufacturer="GnX" Version="$(var.Version)" UpgradeCode="7A34F3DC-EA24-4DDF-8ADB-5817BF28BD21" Scope="perMachine">
+    <SummaryInformation Description="GnX Core: Rust control, dedicated WSL and native Quadlets" />
+    <MajorUpgrade DowngradeErrorMessage="A newer GnX Core is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="medium" />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="GnX Core">
+        <Directory Id="PAYLOADFOLDER" Name="payload" />
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="Core" Title="GnX Core" Level="1">
+      <ComponentRef Id="CoreBinary" />
+      <ComponentRef Id="CoreLicense" />
+      <ComponentGroupRef Id="OfflinePayload" />
+    </Feature>
+  </Package>
+  <Fragment>
+    <Component Id="CoreLicense" Directory="INSTALLFOLDER" Guid="B266DE54-74B5-48C1-A7C2-C3994F308A37">
+      <File Id="CoreLicenseFile" Source="$(sys.SOURCEFILEDIR)\..\LICENSE" Name="LICENSE" KeyPath="yes" />
+    </Component>
+    <Component Id="CoreBinary" Directory="INSTALLFOLDER" Guid="DC4E1E31-F649-4239-AF25-227FD37EA3CF">
+      <File Id="CoreExe" Source="$(var.Binary)" KeyPath="yes" />
+      <ServiceInstall Id="CoreService" Name="GnXCore" DisplayName="GnX Core" Description="GnX dedicated Windows/WSL boundary" Arguments="--service" Start="auto" Type="ownProcess" ErrorControl="normal" Account="LocalSystem">
+        <util:ServiceConfig FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart" ResetPeriodInDays="1" RestartServiceDelayInSeconds="30" />
+      </ServiceInstall>
+      <ServiceControl Id="CoreControl" Name="GnXCore" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+      <RegistryKey Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\GnXCore">
+        <RegistryValue Name="EventMessageFile" Type="expandable" Value="[System64Folder]EventCreate.exe" />
+        <RegistryValue Name="TypesSupported" Type="integer" Value="7" />
+      </RegistryKey>
+    </Component>
+    <ComponentGroup Id="OfflinePayload">
+      <Files Include="$(var.Payload)\**" Directory="PAYLOADFOLDER" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>

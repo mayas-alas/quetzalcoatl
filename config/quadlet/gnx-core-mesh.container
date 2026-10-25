@@ -1,0 +1,28 @@
+[Unit]
+Description=GnX Tailscale mesh, independent of local access
+PartOf=gnx-core.target
+
+[Container]
+Image=sha256:c73a613c03ea2c8e5c7f7ca9fa2764877906de26bf01310e9070c678f8bb6ea3
+Pull=never
+ContainerName=gnx-core-mesh
+Network=host
+Tmpfs=/run:rw,nodev,nosuid,noexec,mode=0755
+AddDevice=/dev/net/tun
+AddCapability=NET_ADMIN NET_RAW
+Environment=TS_STATE_DIR=/var/lib/tailscale
+Environment=TS_USERSPACE=false
+Environment=TS_AUTH_ONCE=true
+Environment=TS_EXTRA_ARGS=--accept-dns=false
+Volume=/var/lib/gnx-core/mesh:/var/lib/tailscale
+LogDriver=journald
+StopTimeout=20
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=90s
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=gnx-core.target

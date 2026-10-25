@@ -1,0 +1,21 @@
+# Contrato GnX
+
+1. Leer instrucción actual, `scope.md`, `architecture.md` y diff real. Un agente;
+   sin delegar, restaurar legacy, adoptar recursos ni ampliar alcance sin permiso.
+2. Rust + configuración externa + scripts mínimos. SCM, systemd/Quadlets y PVE
+   gobiernan lifecycle; journal/Visor de eventos gobiernan diagnóstico.
+3. No generar tests, escenarios, mocks ni harnesses. Manual corto solo autorizado.
+   Evidencia fuera de documentación: máximo dos archivos y un script por agente.
+4. No secretos en argv/logs/Git; no tocar WSL, datos ni protecciones ajenos.
+5. Cerrar un recorrido utilizable, no placeholders. Separar compilado, instalado
+   y aceptado. No declarar terminado por reloj ni por build correcto.
+6. **Release obligatoria:** `releases/vX.Y.Z/gnx.exe` y
+   `releases/vX.Y.Z/CHANGELOG.md`. Sin changelog global en la raíz: no recrearlo.
+   No sobrescribir un binario versionado distinto; incrementar versión.
+   `scripts/build.ps1` exige changelog, versión y hash coincidentes; si no, falla.
+7. Commits pequeños `Hector <hector@email.gnx>`; publicar solo con autorización.
+   README = caso de uso; changelog por versión = producto. Sin bitácoras del agente.
+8. Reanudar con `scripts/build.ps1 -Resume`: leer `build/resume.json`, contrastar
+   HEAD/diff, hashes y SCM/journal antes de repetir una operación pendiente.
+   El checkpoint orienta; Git y estado nativo mandan. Guardarlo atómicamente con
+   `-CheckpointOnly` antes/después de operaciones importantes; sin secretos.

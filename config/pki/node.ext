@@ -1,0 +1,4 @@
+subjectAltName=DNS:app.gnx,DNS:compute.gnx
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth

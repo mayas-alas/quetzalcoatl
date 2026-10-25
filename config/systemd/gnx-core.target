@@ -1,0 +1,11 @@
+[Unit]
+Description=GnX Core native node lifecycle
+# Mesh enrollment and compute availability never gate local gateway or DNS.
+DefaultDependencies=no
+After=gnx-core-gateway.service gnx-core-dns.service
+Conflicts=shutdown.target
+Before=shutdown.target
+
+# No Install/WantedBy: Windows applies persisted node intent. Independent boot
+# activation would override a user-requested stop after a WSL restart.
+# Quadlet [Install] supplies the target's Wants links. PartOf propagates stop.
