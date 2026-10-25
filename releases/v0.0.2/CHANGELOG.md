@@ -7,4 +7,4 @@
 - Checkpoint local atómico y reanudación de solo lectura desde el script existente.
 - Versiones de CLI/MSI/EXE alineadas, staging aislado y rechazo de binario MSI ajeno.
 - Código propio bajo AGPLv3; licencia incluida y enlace al código fuente.
-- Base derivada sellada sin actualizador automático, SSH ni Avahi activados.
+- Base derivada sellada sin actualizador automático ni SSH activados.
