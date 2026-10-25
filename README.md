@@ -60,3 +60,8 @@ por descargas silenciosas. Diagnóstico: systemctl/journalctl y SCM/Visor de eve
 
 [Cambios v0.0.1](releases/v0.0.1/CHANGELOG.md) · [Alcance](scope.md) · [Arquitectura](architecture.md) ·
 [Reglas para agentes](.AGENTS)
+
+## Licencia
+
+Código propio de GnX: [GNU AGPLv3](LICENSE), `AGPL-3.0-only`.
+Las imágenes y dependencias de terceros conservan sus respectivas licencias.

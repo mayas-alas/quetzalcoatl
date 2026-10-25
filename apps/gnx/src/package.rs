@@ -11,6 +11,9 @@ use std::{
 struct Manifest {
     version: u16,
     architecture: String,
+    product_version: String,
+    source_commit: String,
+    base_image: String,
     files: Vec<Entry>,
 }
 #[derive(Deserialize)]
@@ -27,7 +30,21 @@ pub fn verify(root: &Path) -> io::Result<()> {
     }
     let manifest: Manifest = serde_json::from_reader(file.take(65537))
         .map_err(|_| io::Error::other("manifiesto inválido"))?;
-    if manifest.version != 1 || manifest.architecture != "x86_64" || manifest.files.len() > 256 {
+    if manifest.version != 1
+        || manifest.architecture != "x86_64"
+        || manifest.files.len() > 256
+        || manifest.product_version != env!("CARGO_PKG_VERSION")
+        || manifest.source_commit.len() != 40
+        || !manifest
+            .source_commit
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit())
+        || !manifest.base_image.starts_with("sha256:")
+        || manifest.base_image.len() != 71
+        || !manifest.base_image[7..]
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit())
+    {
         return Err(io::Error::other("paquete incompatible"));
     }
     let required = [

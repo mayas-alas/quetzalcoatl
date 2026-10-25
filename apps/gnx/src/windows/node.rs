@@ -32,7 +32,15 @@ impl Controller {
             }
         };
         let op = request.operation;
-        match tokio::task::spawn_blocking(move || execute(op)).await {
+        let secret = request
+            .secret
+            .as_ref()
+            .map(|s| zeroize::Zeroizing::new(s.clone()));
+        match tokio::task::spawn_blocking(move || {
+            execute_secret(op, secret.as_deref().map(String::as_str))
+        })
+        .await
+        {
             Ok(Ok((state, message))) => Response::new(request, true, state, &message),
             Ok(Err(error)) if error.kind() == io::ErrorKind::NotFound => Response::new(
                 request,
@@ -45,6 +53,12 @@ impl Controller {
                 false,
                 NodeState::Unknown,
                 "resultado desconocido por timeout; consulta status sin repetir la mutación",
+            ),
+            Ok(Err(error)) if error.kind() == io::ErrorKind::NotConnected => Response::new(
+                request,
+                false,
+                NodeState::Stopped,
+                "nodo detenido; usa start antes de configurar",
             ),
             _ => Response::new(
                 request,
@@ -59,11 +73,17 @@ impl Controller {
         let Ok(_permit) = self.mutation.clone().acquire_owned().await else {
             return;
         };
-        let _ = tokio::task::spawn_blocking(recover).await;
+        if let Ok(Err(error)) = tokio::task::spawn_blocking(recover).await {
+            super::service::report_error(&error);
+        }
     }
 }
 
 fn execute(op: Operation) -> io::Result<(NodeState, String)> {
+    execute_secret(op, None)
+}
+
+fn execute_secret(op: Operation, secret: Option<&str>) -> io::Result<(NodeState, String)> {
     let ownership = Ownership::read()?;
     let identity = Identity::open(&ownership)?;
     // WSL --list --running is read-only and does not wake a stopped distro.
@@ -82,6 +102,36 @@ fn execute(op: Operation) -> io::Result<(NodeState, String)> {
             NodeState::Unknown,
             "WSL propia en ejecución; target, HTTPS, mesh y compute no observados".into(),
         ));
+    }
+    if matches!(op, Operation::Enroll | Operation::Password) {
+        if !running {
+            return Err(io::Error::new(io::ErrorKind::NotConnected, "nodo detenido"));
+        }
+        let secret = secret.ok_or_else(|| crate::protocol::invalid("falta entrada protegida"))?;
+        let mut input = zeroize::Zeroizing::new(Vec::with_capacity(secret.len() + 1));
+        input.extend_from_slice(secret.as_bytes());
+        input.push(b'\n');
+        let kind = if op == Operation::Enroll {
+            "mesh"
+        } else {
+            "compute"
+        };
+        let result = identity.run_secret(
+            &[
+                "--distribution",
+                DISTRO,
+                "--exec",
+                "/usr/bin/bash",
+                "/etc/gnx-core/configure.run",
+                kind,
+            ],
+            &input,
+            Duration::from_secs(150),
+        )?;
+        if result.code != 0 {
+            return Err(io::Error::other("configuración nativa no confirmada"));
+        }
+        return Ok((NodeState::Active, if op == Operation::Enroll { "Tailscale configurado; key descartada, acceso remoto aún no comprobado" } else { "contraseña configurada; Proxmox iniciado mediante su Quadlet, HTTPS aún no comprobado" }.into()));
     }
     if op == Operation::Stop {
         write_intent(false)?;
@@ -114,6 +164,9 @@ fn execute(op: Operation) -> io::Result<(NodeState, String)> {
         )?;
         if result.code != 0 {
             return Err(io::Error::other("systemd no confirmó la operación"));
+        }
+        if op == Operation::Start {
+            super::access::publish(&identity)?;
         }
     }
     let result = identity.run(

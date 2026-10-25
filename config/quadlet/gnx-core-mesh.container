@@ -7,6 +7,7 @@ Image=sha256:c73a613c03ea2c8e5c7f7ca9fa2764877906de26bf01310e9070c678f8bb6ea3
 Pull=never
 ContainerName=gnx-core-mesh
 Network=host
+Tmpfs=/run:rw,nodev,nosuid,noexec,mode=0755
 AddDevice=/dev/net/tun
 AddCapability=NET_ADMIN NET_RAW
 Environment=TS_STATE_DIR=/var/lib/tailscale

@@ -22,6 +22,7 @@ use windows_sys::Win32::{
     Storage::FileSystem::SECURITY_IDENTIFICATION,
     System::Pipes::{GetNamedPipeServerProcessId, ImpersonateNamedPipeClient},
 };
+use zeroize::Zeroizing;
 
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const OP_TIMEOUT: Duration = Duration::from_secs(190);
@@ -150,7 +151,7 @@ async fn connection_task(
     seen: Arc<Mutex<ReplayWindow>>,
     controller: Arc<super::node::Controller>,
 ) -> io::Result<()> {
-    let bytes = timeout(IO_TIMEOUT, read_frame(&mut pipe)).await??;
+    let bytes = Zeroizing::new(timeout(IO_TIMEOUT, read_frame(&mut pipe)).await??);
     authorize(&pipe)?;
     let request = Request::decode(&bytes)?;
     if !seen
@@ -196,6 +197,38 @@ pub async fn client(operation: Operation) -> io::Result<Response> {
             "servicio GnXCore detenido; no se inició ni modificó nada",
         ));
     }
+    super::security::process_is_system(
+        status
+            .process_id
+            .ok_or_else(|| io::Error::other("PID del servicio no disponible"))?,
+    )?;
+    // Human input happens before opening the short-lived connection. The pipe
+    // server is authenticated again before any bytes or credentials are sent.
+    let secret = match operation {
+        Operation::Enroll => Some(rpassword::prompt_password("Key Tailscale (sin eco): ")?),
+        Operation::Password => {
+            let value = Zeroizing::new(rpassword::prompt_password(
+                "Contraseña Proxmox (mínimo 12 bytes): ",
+            )?);
+            let confirmation =
+                Zeroizing::new(rpassword::prompt_password("Confirmar contraseña: ")?);
+            if *value != *confirmation {
+                return Err(protocol::invalid("las contraseñas no coinciden"));
+            }
+            Some(value.to_string())
+        }
+        _ => None,
+    };
+    let mut id = [0u8; 16];
+    super::security::random(&mut id)?;
+    let request = Request {
+        version: VERSION,
+        id,
+        operation,
+        secret,
+    };
+    let bytes = Zeroizing::new(serde_json::to_vec(&request).map_err(io::Error::other)?);
+    let _ = Request::decode(&bytes)?;
     let mut pipe = ClientOptions::new()
         .security_qos_flags(SECURITY_IDENTIFICATION)
         .open(PIPE)
@@ -207,7 +240,7 @@ pub async fn client(operation: Operation) -> io::Result<Response> {
         })?;
     let mut pid = 0;
     if unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle().cast(), &mut pid) } == 0
-        || Some(pid) != status.process_id
+        || Some(pid) != service.query_status().map_err(io::Error::other)?.process_id
     {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -215,14 +248,6 @@ pub async fn client(operation: Operation) -> io::Result<Response> {
         ));
     }
     super::security::process_is_system(pid)?;
-    let mut id = [0u8; 16];
-    super::security::random(&mut id)?;
-    let request = Request {
-        version: VERSION,
-        id,
-        operation,
-    };
-    let bytes = serde_json::to_vec(&request).map_err(io::Error::other)?;
     timeout(IO_TIMEOUT, write_frame(&mut pipe, &bytes)).await??;
     let bytes = timeout(OP_TIMEOUT, read_frame(&mut pipe))
         .await

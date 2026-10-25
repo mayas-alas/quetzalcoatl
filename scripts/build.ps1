@@ -1,5 +1,6 @@
 param(
     [switch]$Package,
+    [switch]$SealBase,
     [switch]$CheckpointOnly,
     [switch]$Resume,
     [ValidateRange(0,720)][int]$BudgetMinutes = 0,
@@ -82,7 +83,42 @@ try {
         if ($sourceHash -ne (Get-FileHash -LiteralPath $releaseBinary).Hash) { throw 'Versioned binary differs; increment version' }
     } else { Copy-Item -LiteralPath 'target/release/gnx.exe' -Destination $releaseBinary }
     if ($sourceHash -ne (Get-FileHash -LiteralPath $releaseBinary).Hash) { throw 'Release binary mismatch' }
+    $output = Join-Path $repo "build/releases/v$version/"
+    New-Item -ItemType Directory -Force $output | Out-Null
+    if ($SealBase) {
+        $crane = Join-Path $repo 'build/tools/crane/crane.exe'
+        if (-not (Test-Path $crane)) { throw 'Pinned crane build tool missing' }
+        $layer = Join-Path $repo "build/seal/v$version/layer"
+        New-Item -ItemType Directory -Force (Join-Path $layer 'etc'),(Join-Path $layer 'usr/share/licenses/gnx') | Out-Null
+        Copy-Item -Recurse -Force config/base/* $layer
+        Copy-Item config/wsl.conf (Join-Path $layer 'etc/wsl.conf') -Force
+        Copy-Item LICENSE (Join-Path $layer 'usr/share/licenses/gnx/LICENSE') -Force
+        $layerTar = Join-Path (Split-Path $layer -Parent) 'layer.tar'
+        # mtree supplies Unix metadata explicitly instead of inheriting Windows
+        # ACL-derived modes into an image that will also run in LXC.
+        $mtree = Join-Path (Split-Path $layer -Parent) 'layer.mtree'
+        $spec = @('#mtree','./ type=dir mode=0755 uid=0 gid=0 time=0')
+        $spec += Get-ChildItem -LiteralPath $layer -Recurse -Force | Sort-Object FullName | ForEach-Object {
+            $relative = ('./'+$_.FullName.Substring($layer.Length+1).Replace('\','/')).Replace(' ','\040')
+            if ($_.PSIsContainer) { "$relative type=dir mode=0755 uid=0 gid=0 time=0" }
+            else { $contents=$_.FullName.Replace('\','/').Replace(' ','\040'); "$relative type=file mode=0644 uid=0 gid=0 time=0 size=$($_.Length) contents=$contents" }
+        }
+        [IO.File]::WriteAllLines($mtree,$spec,[Text.UTF8Encoding]::new($false))
+        Native 'Base image overlay archive' { tar -cf $layerTar "@$mtree" }
+        $base = (Get-Content config/bootc.json -Raw | ConvertFrom-Json).source
+        $image = Join-Path $output 'GnxCoreBase.image.tar'
+        $revision = git rev-parse HEAD
+        Native 'Sealed base OCI' { & $crane mutate $base --platform=linux/amd64 --append $layerTar --label "org.opencontainers.image.version=$version" --label 'org.opencontainers.image.title=GnX Core Base' --label 'org.opencontainers.image.source=https://github.com/mayas-alas/quetzalcoatl-next' --label "org.opencontainers.image.revision=$revision" --output $image }
+        $digest = & $crane digest --tarball $image
+        if ($LASTEXITCODE -ne 0 -or $digest -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Sealed image digest unavailable' }
+        [IO.File]::WriteAllText((Join-Path $output 'base-image.digest'),$digest,[Text.UTF8Encoding]::new($false))
+        $rootfs = Join-Path $repo 'build/payload/rootfs.new.tar'
+        Native 'Sealed rootfs export' { & $env:ComSpec /d /s /c "type `"$image`" | `"$crane`" export - `"$rootfs`"" }
+        Move-Item -LiteralPath $rootfs -Destination (Join-Path $repo 'build/payload/rootfs.tar') -Force
+    }
     if (-not $Package) { return }
+    $baseDigestFile = Join-Path $output 'base-image.digest'
+    if (-not (Test-Path $baseDigestFile)) { throw 'Seal the versioned base first with -SealBase' }
     $head = git rev-parse --short=12 HEAD
     $stage = Join-Path $repo "build/package/v$version-$head/payload"
     New-Item -ItemType Directory -Force $stage,(Join-Path $stage 'images') | Out-Null
@@ -102,10 +138,8 @@ try {
         @{ path=$_.FullName.Substring($stage.Length+1).Replace('\','/'); sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     })
     $manifest = Join-Path $stage 'manifest.json'
-    [IO.File]::WriteAllText($manifest,(@{version=1;architecture='x86_64';files=$entries}|ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($manifest,(@{version=1;architecture='x86_64';product_version=$version;source_commit=(git rev-parse HEAD);base_image=([IO.File]::ReadAllText($baseDigestFile));files=$entries}|ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))
     Native 'Offline payload verification' { & './target/release/gnx.exe' --verify-package $stage }
-    $output = Join-Path $repo "build/releases/v$version/"
-    New-Item -ItemType Directory -Force $output | Out-Null
     Native 'MSI build' { dotnet build installer/GnxCore.wixproj -c Release "-p:OutputPath=$output" "-p:GnxVersion=$version" "-p:GnxPayload=$stage" }
     $windowsInstaller = New-Object -ComObject WindowsInstaller.Installer
     $database = $windowsInstaller.OpenDatabase((Join-Path $output 'GnxCore.msi'),0)

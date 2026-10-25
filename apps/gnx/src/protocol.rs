@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::io;
+use zeroize::Zeroize;
 
 pub const VERSION: u16 = 1;
 pub const MAX_FRAME: usize = 4096;
@@ -15,6 +16,8 @@ pub enum Operation {
     Start,
     Stop,
     Status,
+    Enroll,
+    Password,
 }
 
 impl Operation {
@@ -23,17 +26,29 @@ impl Operation {
             "start" => Some(Self::Start),
             "stop" => Some(Self::Stop),
             "status" => Some(Self::Status),
+            "enroll" => Some(Self::Enroll),
+            "password" => Some(Self::Password),
             _ => None,
         }
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
     pub version: u16,
     pub id: [u8; 16],
     pub operation: Operation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret: Option<String>,
+}
+
+impl Drop for Request {
+    fn drop(&mut self) {
+        if let Some(secret) = &mut self.secret {
+            secret.zeroize();
+        }
+    }
 }
 
 impl Request {
@@ -45,6 +60,25 @@ impl Request {
             serde_json::from_slice(bytes).map_err(|_| invalid("petición inválida"))?;
         if request.version != VERSION || request.id == [0; 16] {
             return Err(invalid("versión o correlación inválida"));
+        }
+        match request.operation {
+            Operation::Enroll | Operation::Password => {
+                let value = request
+                    .secret
+                    .as_deref()
+                    .ok_or_else(|| invalid("falta entrada protegida"))?;
+                if value.is_empty() || value.len() > 1024 || value.chars().any(char::is_control) {
+                    return Err(invalid("entrada protegida inválida"));
+                }
+                if request.operation == Operation::Password && (value.len() < 12 || value == "root")
+                {
+                    return Err(invalid("contraseña debe tener al menos 12 bytes"));
+                }
+            }
+            _ if request.secret.is_some() => {
+                return Err(invalid("esta operación no acepta secretos"));
+            }
+            _ => {}
         }
         Ok(request)
     }

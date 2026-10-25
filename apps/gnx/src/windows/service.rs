@@ -21,6 +21,38 @@ pub fn dispatch() -> io::Result<()> {
     service_dispatcher::start(SERVICE, ffi_main).map_err(io::Error::other)
 }
 
+pub(crate) fn report_error(error: &io::Error) {
+    use windows_sys::Win32::System::EventLog::{
+        DeregisterEventSource, EVENTLOG_ERROR_TYPE, RegisterEventSourceW, ReportEventW,
+    };
+    let source: Vec<u16> = SERVICE.encode_utf16().chain(Some(0)).collect();
+    let message: Vec<u16> = error
+        .to_string()
+        .chars()
+        .take(512)
+        .flat_map(|c| c.to_string().encode_utf16().collect::<Vec<_>>())
+        .chain(Some(0))
+        .collect();
+    unsafe {
+        let handle = RegisterEventSourceW(std::ptr::null(), source.as_ptr());
+        if !handle.is_null() {
+            let strings = [message.as_ptr()];
+            ReportEventW(
+                handle,
+                EVENTLOG_ERROR_TYPE,
+                0,
+                1,
+                std::ptr::null_mut(),
+                1,
+                0,
+                strings.as_ptr(),
+                std::ptr::null(),
+            );
+            DeregisterEventSource(handle);
+        }
+    }
+}
+
 fn service_main(_: Vec<OsString>) {
     let (tx, rx) = tokio::sync::watch::channel(false);
     let published = Arc::new(OnceLock::<ServiceStatusHandle>::new());
@@ -55,6 +87,9 @@ fn service_main(_: Vec<OsString>) {
         .enable_all()
         .build()
         .and_then(|runtime| runtime.block_on(super::pipe::serve(rx)));
+    if let Err(error) = &result {
+        report_error(error);
+    }
     // A failed listener is a failed service, never a misleading SCM Running state.
     let _ = handle.set_service_status(status(
         ServiceState::Stopped,

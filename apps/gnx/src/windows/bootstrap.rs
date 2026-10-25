@@ -382,6 +382,9 @@ pub fn prepare() -> io::Result<()> {
         )?;
     }
     super::access::publish(&identity)?;
+    if !root.join("intent").exists() {
+        write_new(&root.join("intent"), b"running")?;
+    }
     write_new(&root.join("prepared"), b"1")?;
     Ok(())
 }

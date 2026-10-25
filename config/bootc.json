@@ -1,12 +1,7 @@
 {
   "source": "quay.io/fedora/fedora-bootc@sha256:1543ba2788ee2055e0d44a8d879c79a2f527326600eca95a5f673414a48ff73c",
   "architecture": "linux/amd64",
-  "own_image": {
-    "version": "0.0.1",
-    "digest": "sha256:6110bd3c427547a99a61381aae81c74c3fc4d948a21dd4c472b29ba503562a00",
-    "artifact": "GnxCoreBase.image.tar",
-    "derivation": "upstream filesystem with GnX OCI version/source labels; no node identity or application data"
-  },
+  "derivation": "config/base overlay plus canonical config/wsl.conf; version and digest recorded in the built OCI and package manifest",
   "delivery": "OCI filesystem exported as rootfs.tar for WSL2 import",
   "updates": "explicit versioned package only; no bootc switch or automatic update inside WSL"
 }

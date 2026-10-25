@@ -277,6 +277,22 @@ impl Identity {
     }
 
     pub fn run(&self, args: &[&str], limit: Duration) -> io::Result<Output> {
+        self.run_input(args, None, limit)
+    }
+
+    pub fn run_secret(&self, args: &[&str], input: &[u8], limit: Duration) -> io::Result<Output> {
+        if input.len() > 4096 {
+            return Err(invalid("entrada protegida fuera de límite"));
+        }
+        self.run_input(args, Some(input), limit)
+    }
+
+    fn run_input(
+        &self,
+        args: &[&str],
+        input: Option<&[u8]>,
+        limit: Duration,
+    ) -> io::Result<Output> {
         let security = SECURITY_ATTRIBUTES {
             nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: null_mut(),
@@ -289,21 +305,47 @@ impl Identity {
         }
         let read = Handle(read);
         let write = Handle(write);
-        let nul = unsafe {
-            CreateFileW(
-                wide("NUL").as_ptr(),
-                FILE_GENERIC_READ,
-                FILE_SHARE_READ,
-                &security,
-                OPEN_EXISTING,
-                0,
-                null_mut(),
-            )
+        let nul = if let Some(input) = input {
+            let mut input_read = null_mut();
+            let mut input_write = null_mut();
+            if unsafe { CreatePipe(&mut input_read, &mut input_write, &security, 65536) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let input_read = Handle(input_read);
+            let input_write = Handle(input_write);
+            let mut written = 0;
+            if unsafe {
+                windows_sys::Win32::Storage::FileSystem::WriteFile(
+                    input_write.0,
+                    input.as_ptr(),
+                    input.len() as u32,
+                    &mut written,
+                    null_mut(),
+                )
+            } == 0
+                || written as usize != input.len()
+            {
+                return Err(io::Error::last_os_error());
+            }
+            drop(input_write);
+            input_read
+        } else {
+            let nul = unsafe {
+                CreateFileW(
+                    wide("NUL").as_ptr(),
+                    FILE_GENERIC_READ,
+                    FILE_SHARE_READ,
+                    &security,
+                    OPEN_EXISTING,
+                    0,
+                    null_mut(),
+                )
+            };
+            if nul == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+                return Err(io::Error::last_os_error());
+            }
+            Handle(nul)
         };
-        if nul == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
-            return Err(io::Error::last_os_error());
-        }
-        let nul = Handle(nul);
         let mut size = 0;
         unsafe { InitializeProcThreadAttributeList(null_mut(), 1, 0, &mut size) };
         if size == 0 {

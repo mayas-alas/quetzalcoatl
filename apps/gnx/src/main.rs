@@ -18,12 +18,12 @@ fn run() -> std::io::Result<bool> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.as_slice() {
         [] => {
-            println!("gnx start | stop | status");
+            println!("gnx start | stop | status | enroll | password");
             Ok(true)
         }
         [arg] if arg == "--help" || arg == "-h" => {
             println!(
-                "gnx start | stop | status\nControl del nodo propio mediante systemd. No instala ni actualiza."
+                "gnx start | stop | status | enroll | password\nControl nativo del nodo. Enroll/password solicitan entrada sin eco; nunca pongas secretos en argumentos."
             );
             Ok(true)
         }
@@ -43,7 +43,7 @@ fn run() -> std::io::Result<bool> {
         }
         [arg] => {
             let op = protocol::Operation::parse(arg)
-                .ok_or_else(|| protocol::invalid("usa start, stop o status"))?;
+                .ok_or_else(|| protocol::invalid("usa start, stop, status, enroll o password"))?;
             #[cfg(windows)]
             {
                 let response = windows::client(op)?;

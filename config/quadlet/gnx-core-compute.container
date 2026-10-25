@@ -15,7 +15,8 @@ Environment=REQUIRE_KVM=N
 EnvironmentFile=/var/lib/gnx-core/secrets/compute.env
 Volume=/var/lib/gnx-core/compute:/var/lib/vz
 Volume=/var/lib/gnx-core/compute-config:/var/lib/pve-cluster
-Volume=/var/lib/gnx-core/tls:/etc/gnx/tls:ro
+Volume=/var/lib/gnx-core/tls/node.crt:/etc/gnx/tls/node.crt:ro
+Volume=/var/lib/gnx-core/tls/node.key:/etc/gnx/tls/node.key:ro
 Volume=/etc/gnx-core/install-pve-tls.run:/usr/local/libexec/gnx-install-tls:ro
 Volume=/etc/gnx-core/pveproxy.conf:/etc/systemd/system/pveproxy.service.d/gnx.conf:ro
 StopSignal=SIGRTMIN+3
