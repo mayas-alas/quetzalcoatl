@@ -17,12 +17,15 @@ use windows_sys::Win32::{
         UF_NORMAL_ACCOUNT, UF_PASSWD_CANT_CHANGE, UF_SCRIPT, USER_INFO_1, USER_PRIV_USER,
     },
     Security::{
-        Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1},
+        Authorization::{
+            ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW,
+            SDDL_REVISION_1,
+        },
         Cryptography::{
             CRYPT_INTEGER_BLOB, CRYPTPROTECT_LOCAL_MACHINE, CRYPTPROTECT_UI_FORBIDDEN,
             CryptProtectData,
         },
-        LookupAccountNameW, SECURITY_ATTRIBUTES,
+        LookupAccountNameW, LookupAccountSidW, SECURITY_ATTRIBUTES,
     },
     Storage::FileSystem::CreateDirectoryW,
     System::Registry::{
@@ -126,6 +129,53 @@ fn account_sid() -> io::Result<String> {
     security::sid_text(sid.as_mut_ptr().cast())
 }
 
+fn add_to_users_group() -> io::Result<()> {
+    use windows_sys::Win32::NetworkManagement::NetManagement::{
+        LOCALGROUP_MEMBERS_INFO_3, NetLocalGroupAddMembers,
+    };
+    let mut sid = null_mut();
+    if unsafe { ConvertStringSidToSidW(wide("S-1-5-32-545").as_ptr(), &mut sid) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut name = [0u16; 256];
+    let mut name_len = name.len() as u32;
+    let mut domain = [0u16; 256];
+    let mut domain_len = domain.len() as u32;
+    let mut kind = 0;
+    let found = unsafe {
+        LookupAccountSidW(
+            null(),
+            sid,
+            name.as_mut_ptr(),
+            &mut name_len,
+            domain.as_mut_ptr(),
+            &mut domain_len,
+            &mut kind,
+        )
+    };
+    unsafe { LocalFree(sid.cast()) };
+    if found == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let member = wide(&format!(r".\{ACCOUNT}"));
+    let info = LOCALGROUP_MEMBERS_INFO_3 {
+        lgrmi3_domainandname: member.as_ptr().cast_mut(),
+    };
+    let code = unsafe {
+        NetLocalGroupAddMembers(
+            null(),
+            name.as_ptr(),
+            3,
+            (&info as *const LOCALGROUP_MEMBERS_INFO_3).cast(),
+            1,
+        )
+    };
+    if code != 0 && code != 1378 {
+        return Err(io::Error::from_raw_os_error(code as i32));
+    }
+    Ok(())
+}
+
 fn ensure_account(root: &Path) -> io::Result<String> {
     let mut existing = null_mut();
     let status = unsafe { NetUserGetInfo(null(), wide(ACCOUNT).as_ptr(), 1, &mut existing) };
@@ -137,6 +187,7 @@ fn ensure_account(root: &Path) -> io::Result<String> {
         if saved.version != 1 || actual != saved.sid {
             return Err(denied("cuenta existente ajena; no se adopta"));
         }
+        add_to_users_group()?;
         return Ok(actual);
     }
     if status != NERR_UserNotFound {
@@ -189,6 +240,7 @@ fn ensure_account(root: &Path) -> io::Result<String> {
         return Err(denied("no se pudo crear la cuenta dedicada"));
     }
     let sid = account_sid()?;
+    add_to_users_group()?;
     write_new(
         &root.join("account.json"),
         &serde_json::to_vec(&Account {
@@ -314,11 +366,11 @@ pub fn prepare() -> io::Result<()> {
     }
     let destination = identity.profile_dir().join(r"AppData\Local\GnX Core\wsl");
     if registration(&sid, &destination)?.is_none() {
-        let parent = destination
-            .parent()
-            .ok_or_else(|| io::Error::other("ruta WSL inválida"))?;
-        fs::create_dir_all(parent)?;
-        // This parent is inside the SID-verified, dedicated profile. No host WSL.
+        fs::create_dir_all(
+            destination
+                .parent()
+                .ok_or_else(|| io::Error::other("ruta WSL inválida"))?,
+        )?;
         let result = identity.run(
             &[
                 "--import",
@@ -331,10 +383,8 @@ pub fn prepare() -> io::Result<()> {
             Duration::from_secs(600),
         )?;
         if result.code != 0 {
-            // Only this fixed wsl --import result is diagnostic text. It never
-            // receives secrets and must retain the native Windows error code.
-            let text = result.text();
-            let detail: String = text
+            let detail: String = result
+                .text()
                 .chars()
                 .rev()
                 .take(400)

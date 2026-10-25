@@ -16,7 +16,8 @@ use windows_sys::Win32::{
     },
     Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, GetFileInformationByHandle,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        GetFileInformationByHandle,
     },
     System::Threading::{
         GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -247,7 +248,7 @@ fn check_acl(file: &File) -> io::Result<()> {
 fn open_checked(path: &Path, directory: bool) -> io::Result<File> {
     let file = OpenOptions::new()
         .read(true)
-        .share_mode(FILE_SHARE_READ)
+        .share_mode(FILE_SHARE_READ | if directory { FILE_SHARE_WRITE } else { 0 })
         .custom_flags(
             FILE_FLAG_OPEN_REPARSE_POINT
                 | if directory {

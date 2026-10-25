@@ -30,7 +30,8 @@ install -m 0644 "$payload/config/compute/pveproxy.conf" /etc/gnx-core/pveproxy.c
 install -m 0755 "$payload/scripts/install-pve-tls.run" /etc/gnx-core/install-pve-tls.run
 install -m 0755 "$payload/scripts/configure.run" /etc/gnx-core/configure.run
 install -m 0644 "$payload/config/systemd/gnx-core.target" /etc/systemd/system/gnx-core.target
-cp -a "$payload/config/quadlet/." /etc/containers/systemd/
+chmod 0755 /etc/containers/systemd
+install -m 0644 "$payload/config/quadlet/"*.container /etc/containers/systemd/
 bind=$(ip -4 -o addr show dev eth0 | awk '{split($4,a,"/"); print a[1]; exit}')
 [[ "$bind" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
 printf 'GNX_BIND=%s\n' "$bind" > "$root/gateway.env"
@@ -42,5 +43,6 @@ for role in gateway dns mesh compute; do
     podman image exists "$id"
     if [[ "$role" == dns ]]; then systemctl start gnx-core-gateway.service gnx-core-dns.service; fi
 done
+systemctl daemon-reload
 systemctl start gnx-core.target
 phase 'Acceso local preparado. Mesh pendiente de key; compute pendiente de contraseña. Consulta gnx status y el journal nativo.'

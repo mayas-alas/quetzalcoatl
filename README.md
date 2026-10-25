@@ -26,10 +26,14 @@ Obtén la versión desde [Releases](https://github.com/mayas-alas/quetzalcoatl-n
 La instalación nueva usa `GnXCore` / `gnxcoresvc` / `gnx-core`; no migra ni elimina
 el GnX anterior. Un conflicto de puertos, nombres o propiedad se informa.
 
+Abre PowerShell como administrador para operar el pipe de control:
+
 ```powershell
 $gnx = "$env:ProgramFiles\GnX Core\gnx.exe"
 & $gnx status
 & $gnx start
+& $gnx enroll
+& $gnx password
 & $gnx stop
 ```
 
@@ -58,7 +62,7 @@ cargo build --release --locked
 El empaquetado exige inputs locales completos en `build/payload`; no los sustituye
 por descargas silenciosas. Diagnóstico: systemctl/journalctl y SCM/Visor de eventos.
 
-[Cambios v0.0.5](releases/v0.0.5/CHANGELOG.md) · [Alcance](scope.md) · [Arquitectura](architecture.md) ·
+[Cambios v0.0.6](releases/v0.0.6/CHANGELOG.md) · [Alcance](scope.md) · [Arquitectura](architecture.md) ·
 [Reglas para agentes](.AGENTS)
 
 ## Licencia

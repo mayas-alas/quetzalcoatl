@@ -2,17 +2,9 @@
 
 **Estado: contrato 0.7; implementación autorizada.** No es un backlog abierto.
 
-**Instrucción vigente (2026-10-25):** bloque de 23 minutos, Rust + configuración
-externa + scripts mínimos; commits continuos con `Hector <hector@email.gnx>`.
-La fase documental descrita abajo es histórica: ahora se permite implementar y
-compilar, sin convertir decisiones abiertas en aprobadas ni compilar en aceptar.
-
-**Ampliación vigente:** el usuario autoriza un nuevo bloque de 120 minutos y
-reanudación mediante checkpoint local; los tiempos/operaciones van en
-`build/resume.json`, no como bitácora en la documentación.
-El usuario autoriza instalar únicamente los recursos nuevos con elevación,
-sin tocar el legado. Se permiten estas comprobaciones manuales nativas; sigue
-prohibido escribir tests, escenarios, simulaciones o infraestructura de pruebas.
+Rust + configuración externa + scripts mínimos. La autorización de implementar,
+compilar e instalar recursos nuevos no convierte decisiones abiertas en aprobadas
+ni un build correcto en aceptación del producto. El legado permanece intacto.
 
 **Método de entrega:** cerrar un recorrido utilizable antes de abrir otro;
 reusar herramientas nativas y respuestas comprobadas del legacy antes de escribir
@@ -21,7 +13,7 @@ comprobable, no por cantidad de archivos. Una dependencia pendiente no bloquea
 trabajo independiente y no se sustituye por un placeholder. Cortar por reloj,
 declarar límites reales y no extrapolar horas sin medición.
 
-**Convivencia D11 para este bloque:** dejar el legado intacto, sin limpieza ni
+**Convivencia D11:** dejar el legado intacto, sin limpieza ni
 adopción, por instrucción posterior del usuario. Nueva identidad: servicio
 `GnXCore`, pipe `GnX.Core.v1`, cuenta `gnxcoresvc`, distro `gnx-core`, estado en
 `%ProgramData%\GnX Core`. La autorización posterior permite instalar solo estos recursos nuevos.
@@ -336,19 +328,5 @@ el estado y continuar trabajo independiente seguro. No esperar indefinidamente,
 reiniciar desde cero ni declarar entrega completa por agotar el tiempo. Reanudar
 leyendo estos dos documentos y el estado/diff real, no de la memoria del agente.
 
-## 8. Cierre del primer bloque de implementación
-
-```text
-HOY                           PENDIENTE
-CLI/servicio Rust compilados   instalador + inputs offline + preparación
-target y drop-ins externos     Quadlets completos + HTTPS local
-legacy intacto                despliegue LXC + OIDC real
-```
-
-Revisar C/P/A juntos, resolver las decisiones que cambien la arquitectura y
-quitar las opciones descartadas. Entonces `architecture.md` será el plano
-único; este marco conservará las exclusiones y la puerta de decisión.
-[Historias de usuario](historias-de-usuario.md) expresa el recorrido y la
-aceptación derivados, sin convertir P/A en C ni ampliar implementación. La
-compilación no acredita que `app.gnx`/`compute.gnx` ya funcionen. El ejecutable
-actual es una entrega parcial, no el instalador ni el producto terminado.
+[Historias de usuario](historias-de-usuario.md) expresa el recorrido y sus
+criterios de aceptación, sin convertir propuestas en decisiones ni ampliar alcance.

@@ -86,22 +86,20 @@ fn execute(op: Operation) -> io::Result<(NodeState, String)> {
 fn execute_secret(op: Operation, secret: Option<&str>) -> io::Result<(NodeState, String)> {
     let ownership = Ownership::read()?;
     let identity = Identity::open(&ownership)?;
-    // WSL --list --running is read-only and does not wake a stopped distro.
     let running = identity.run(&["--list", "--running", "--quiet"], Duration::from_secs(10))?;
     if running.code != 0 {
         return Err(io::Error::other("no se pudo observar WSL"));
     }
     let running = running.text().lines().any(|line| line.trim() == DISTRO);
-    if op == Operation::Status && !running {
-        return Ok((NodeState::Stopped, "nodo detenido; WSL no se inició".into()));
-    }
     if op == Operation::Status {
-        // Never select a distro for status: it could stop between --list and
-        // --exec, and selecting it would silently wake it back up.
-        return Ok((
-            NodeState::Unknown,
-            "WSL propia en ejecución; target, HTTPS, mesh y compute no observados".into(),
-        ));
+        return Ok(if running {
+            (
+                NodeState::Unknown,
+                "WSL propia en ejecución; HTTPS, mesh y compute no observados".into(),
+            )
+        } else {
+            (NodeState::Stopped, "nodo detenido; WSL no se inició".into())
+        });
     }
     if matches!(op, Operation::Enroll | Operation::Password) {
         if !running {

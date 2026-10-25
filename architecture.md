@@ -10,13 +10,10 @@ Nombres nuevos: servicio `GnXCore`, pipe `\\.\pipe\GnX.Core.v1`, cuenta
 nombres propuestos en el diseño histórico inferior, sin adoptar ni alterar
 `GnXHostAgent` ni su instalación. El desinstalador antiguo fallido queda separado.
 
-**Autorización posterior:** bloque de 120 minutos con checkpoint local atómico
-en `build/resume.json`, sin otro supervisor ni evidencia en documentos.
-Se autoriza instalación elevada solo de
-recursos nuevos. Priorizar un recorrido utilizable y herramientas nativas;
-legacy como evidencia, no restauración. No reemplazar resultados por estructura.
+Se autoriza instalación elevada solo de recursos nuevos. Priorizar un recorrido
+utilizable y herramientas nativas; legacy como evidencia, no restauración.
 
-**Pruebas diferidas por el usuario (2026-10-25):** no añadir código de tests,
+**Pruebas diferidas por el usuario:** no añadir código de tests,
 escenarios, simulaciones ni infraestructura, tampoco en scripts externos.
 El paradigma de pruebas se abstrae fuera de este esfuerzo. Diagnóstico real con
 `systemctl`/`journalctl` y SCM/Visor de eventos; sin logger/observador propio ni
@@ -507,6 +504,5 @@ tener un selector de carpeta o por reutilizar el importador legacy.
 **Trabajo lean:** bloques de hasta 20 minutos con un hito acotado, resultado
 observable y siguiente paso preciso. No es un SLA de producto completo ni de
 login humano. Reanudar desde archivos/configuración/estado real, no empezar otra
-arquitectura ni resetear la instalación. Un impedimento local no paraliza trabajo
-independiente autorizado. **Hoy: implementación parcial compilada, sin instalar
-servicio nuevo ni preparar WSL; no hay aceptación de HTTPS, lifecycle real u OIDC.**
+  arquitectura ni resetear la instalación. Un impedimento local no paraliza trabajo
+  independiente autorizado.

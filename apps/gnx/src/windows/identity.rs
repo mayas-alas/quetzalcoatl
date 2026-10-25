@@ -514,6 +514,11 @@ impl Output {
 }
 
 fn quote(arg: &str) -> String {
+    // WSL parses its options before CommandLineToArgvW; quoted options
+    // are treated as a Linux command. Quote only arguments that need it.
+    if !arg.is_empty() && !arg.chars().any(|c| c.is_whitespace() || c == '"') {
+        return arg.to_owned();
+    }
     let mut output = String::from("\"");
     let mut slashes = 0;
     for c in arg.chars() {

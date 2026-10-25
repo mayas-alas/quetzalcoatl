@@ -170,6 +170,7 @@ async fn connection_task(
 }
 
 pub async fn client(operation: Operation) -> io::Result<Response> {
+    super::security::effective_admin()?;
     let manager = windows_service::service_manager::ServiceManager::local_computer(
         None::<&str>,
         windows_service::service_manager::ServiceManagerAccess::CONNECT,
@@ -205,13 +206,10 @@ pub async fn client(operation: Operation) -> io::Result<Response> {
     // Human input happens before opening the short-lived connection. The pipe
     // server is authenticated again before any bytes or credentials are sent.
     let secret = match operation {
-        Operation::Enroll => Some(rpassword::prompt_password("Key Tailscale (sin eco): ")?),
+        Operation::Enroll => Some(prompt_secret("Key Tailscale (sin eco): ")?),
         Operation::Password => {
-            let value = Zeroizing::new(rpassword::prompt_password(
-                "Contraseña Proxmox (mínimo 12 bytes): ",
-            )?);
-            let confirmation =
-                Zeroizing::new(rpassword::prompt_password("Confirmar contraseña: ")?);
+            let value = Zeroizing::new(prompt_secret("Contraseña Proxmox (mínimo 12 bytes): ")?);
+            let confirmation = Zeroizing::new(prompt_secret("Confirmar contraseña: ")?);
             if *value != *confirmation {
                 return Err(protocol::invalid("las contraseñas no coinciden"));
             }
@@ -260,4 +258,16 @@ pub async fn client(operation: Operation) -> io::Result<Response> {
     let response = Response::decode(&bytes, id)?;
     timeout(IO_TIMEOUT, pipe.write_u8(1)).await??;
     Ok(response)
+}
+
+fn prompt_secret(prompt: &str) -> io::Result<String> {
+    use std::io::{BufRead, IsTerminal};
+    if std::io::stdin().is_terminal() {
+        return rpassword::prompt_password(prompt);
+    }
+    // Redirected stdin is already a private inherited pipe, not a console
+    // whose echo mode needs changing. Never read secrets from arguments.
+    let mut value = String::new();
+    std::io::stdin().lock().read_line(&mut value)?;
+    Ok(value.trim_end_matches(['\r', '\n']).to_owned())
 }
