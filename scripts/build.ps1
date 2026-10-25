@@ -141,8 +141,11 @@ try {
     [IO.File]::WriteAllText($manifest,(@{version=1;architecture='x86_64';product_version=$version;source_commit=(git rev-parse HEAD);base_image=([IO.File]::ReadAllText($baseDigestFile));files=$entries}|ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))
     Native 'Offline payload verification' { & './target/release/gnx.exe' --verify-package $stage }
     Native 'MSI build' { dotnet build installer/GnxCore.wixproj -c Release "-p:OutputPath=$output" "-p:GnxVersion=$version" "-p:GnxPayload=$stage" }
+    $localizedMsi = Join-Path $output 'en-us/GnxCore.msi'
+    $msi = Join-Path $output 'GnxCore.msi'
+    if (Test-Path -LiteralPath $localizedMsi) { Copy-Item -LiteralPath $localizedMsi -Destination $msi -Force }
     $windowsInstaller = New-Object -ComObject WindowsInstaller.Installer
-    $database = $windowsInstaller.OpenDatabase((Join-Path $output 'GnxCore.msi'),0)
+    $database = $windowsInstaller.OpenDatabase($msi,0)
     $query = $database.OpenView("SELECT HashPart1,HashPart2,HashPart3,HashPart4 FROM MsiFileHash WHERE File_='CoreExe'")
     $query.Execute(); $record=$query.Fetch()
     $binaryHash=$windowsInstaller.FileHash((Join-Path $repo 'target/release/gnx.exe'),0)

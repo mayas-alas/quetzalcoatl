@@ -3,6 +3,7 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <OutputName>GnxCore</OutputName>
     <InstallerPlatform>x64</InstallerPlatform>
+    <Cultures>en-us</Cultures>
     <GnxVersion Condition="'$(GnxVersion)' == ''">0.0.1</GnxVersion>
     <GnxPayload Condition="'$(GnxPayload)' == ''">$(MSBuildProjectDirectory)\..\build\package\v$(GnxVersion)\payload</GnxPayload>
     <DefineConstants>Binary=$(MSBuildProjectDirectory)\..\target\release\gnx.exe;Payload=$(GnxPayload);Version=$(GnxVersion)</DefineConstants>

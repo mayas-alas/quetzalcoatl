@@ -1,6 +1,6 @@
 # GnX — qué sí, qué no y cómo decidir
 
-**Estado: diseño 0.6; implementación acotada autorizada el 2026-10-25.** No es un backlog abierto.
+**Estado: contrato 0.7; implementación autorizada.** No es un backlog abierto.
 
 **Instrucción vigente (2026-10-25):** bloque de 23 minutos, Rust + configuración
 externa + scripts mínimos; commits continuos con `Hector <hector@email.gnx>`.
@@ -41,6 +41,13 @@ Objetivo: un MSI/EXE instala el núcleo que entrega `https://app.gnx` y
 Destino final: app recibe archivos o la CLI un path de Quadlets/configuración;
 `Containerfile`/contexto solo si hace falta build. Primer caso real confirmado:
 un LXC con RustFS, Pocket ID y NetBird; Pocket autentica solo a NetBird y RustFS.
+
+**Acuerdos vigentes de despliegue:** app simplificada con información/archivos y
+puente nativo `gnx-core://` con confirmación elevada; misma admisión que CLI.
+NetBird incluye dashboard oficial. El LXC incluye sidecar Tailscale con la misma
+key reusable protegida y estado/identidad independiente por peer. No duplicar
+gateway/DNS ni incluir secretos en imágenes. Orígenes privados del caso:
+`rustfs.gnx`, `pocket.gnx`, `netbird.gnx`.
 
 ## 1. Autoridad y fase
 
@@ -202,8 +209,8 @@ siendo D06; no confundirla con persistir el estado del peer ni con C14.
 | ¿RustFS admite Pocket por configuración? | [OIDC de RustFS](https://docs.rustfs.com/en/security-compliance/oidc) exige discovery, cliente confidencial, PKCE, callbacks y claims/políticas. [Pocket](https://pocket-id.org/docs/setup/connect-an-app) admite clientes OIDC. | Viable por contrato; fijar versiones y comprobar login/permisos reales. No afirmar compatibilidad del viejo digest ni confundir SSO Console con claves S3. |
 | ¿La GUI elimina todos los requisitos humanos? | No: passkey/consentimiento puede requerir presencia del usuario. | API/config primero; si falta vía soportada, skill GUI adecuada. Registrar pendiente sin bloquear núcleo ni simular interacción personal. |
 
-No desplegado ni aceptado todavía. Sin nueva mesh por guest ni otro Caddy/Pi-hole;
-el enrutamiento al LXC y STUN UDP se acuerdan y verifican, no se deducen de HTTPS.
+La instrucción vigente aprueba el sidecar Tailscale por LXC, no otro Caddy/Pi-hole.
+Enrutamiento y STUN UDP se verifican: no se deducen de HTTPS.
 
 ## 5. Decisiones que debemos cerrar juntos (A)
 
@@ -217,15 +224,15 @@ D04 ya quedó resuelta por la instrucción actual; no reabrirla por preferencia.
 | D03 | C14 confirma acceso desde el host sin mesh. ¿Qué clientes tailnet externos entran en la aceptación? | Acordar solo el alcance remoto: ACL, Split DNS y confianza CA del operador. La conectividad remota no condiciona el acceso/avance local confirmado. |
 | D04 — C | ¿Qué DNS entra? **Pi-hole**, elegido por el usuario. | Configurarlo para el namespace requerido y sin resolver abierto. No añadir filtros, productos ni flujos de administración innecesarios. |
 | D05 | ¿Cuál es la imagen Proxmox autorizada y cómo recibe su contraseña? | Evaluar primero la imagen propia de L; fijar fuente/revisión/digest y revisar arranque LXC sin KVM, licencia y secretos. Sin asumir compatibilidad con Dockurr H. |
-| D06 | ¿Key Tailscale de un solo uso o reusable almacenada? | Consumir y eliminar; conservar estado del peer para reinicios. Reusable solo si hay necesidad explícita, custodia y política de borrado. |
+| D06 — C | Key Tailscale reusable para nodo y sidecars LXC. | DPAPI + ACL y entrega efímera protegida; estado/identidad de peer independiente. Nunca en imagen, Git, argv ni navegador. |
 | D07 | ¿Qué Windows/CPU, bases WSL/LXC y versiones soportamos? | Un baseline Windows 11 x64 + WSL2; fijar bases, Podman, dependencias y RAM/disco medidos. C13 obliga inputs locales; no descargas implícitas ni versiones/límites arbitrarios del legacy. |
 | D08 | ¿`gnx status` necesita elevación? | Un solo pipe admin en v1 como opción mínima. Lectura no elevada requiere permiso y esquema público limitados, no acceso al control privilegiado. |
 | D09 | ¿Cómo publica el servicio el HTTPS local? | Forward TCP loopback → WSL sin terminar TLS; elegir Rust o mecanismo Windows por evidencia. Revisar puerto 443 ocupado, cambio IP y ownership; no dos proxies competidores. |
 | D10 | C13 confirma núcleo offline completo. ¿WiX/Burn es aceptado y qué prerrequisitos Windows se incluyen? | MSI completo + Burn EXE que lo contiene, todos los inputs del producto locales. Verificar licencia/condiciones FOSS y redistribución WSL; .NET solo build. Fijar baseline del host y medir tamaño. No confundir instalación offline con enrolamiento Tailscale o build arbitrario sin conectividad. |
 | D11 | ¿Cómo convive la nueva entrega con GnX ya instalado y qué conserva uninstall? | No tocarlo hasta plan explícito. Propuesta: preservar datos por defecto y separar purga confirmada; fijar identidad del producto/UpgradeCodes, ownership y recuperación antes del primer MSI. |
-| D12 | App y CLI son entradas confirmadas. ¿Cuál es el transporte/autorización de la web al mismo despliegue? | El navegador no abre Named Pipe ni manda un path con acceso implícito al host. Resolver puente nativo o receptor Rust del mismo origen, no ambos. No añadir IdP a app ni otro contenedor base por anticipación. |
-| D13 | C15 fija un LXC compartido. ¿Cómo se crea/selecciona, conecta y publica? | PVE + Quadlets nativos; fijar recursos/datos, límites de admisión/build y ruta nodo↔LXC sin sidecar mesh. Build opcional. Caddy/Pi-hole existentes; no escoger VM, registry ni LXC por servicio por defecto. |
-| D14 | ¿Tres aplicaciones con NetBird administrado por API o también dashboard? ¿Qué versiones/orígenes OIDC? | Dashboard oficial separado implica cuarto contenedor. Fijar imágenes, issuer/callbacks/nombres y roles; dos clientes Pocket separados. No abrir red pública ni integrar Pocket con app/PVE/Tailscale. No frenar el núcleo por esta elección del despliegue. |
+| D12 — C | App simplificada: información y entrega segura de archivos con puente nativo. | `gnx-core://` abre confirmación elevada del cliente Rust; no tocar `gnx://` legacy. Una admisión app/CLI, sin keys en web, path implícito del host ni IdP nuevo. |
+| D13 | Un LXC compartido con sidecar Tailscale aprobado. ¿Qué recursos/datos y límites concretos? | PVE + Quadlets; key reusable protegida, peer independiente y gateway/DNS del nodo. Sin VM, registry ni LXC por servicio por defecto. |
+| D14 — parcial C | Dashboard NetBird y orígenes privados aprobados. | Cuatro contenedores de apps más sidecar mesh. Dos clientes Pocket; fijar/verificar imágenes, callbacks y roles. Sin red pública ni Pocket en app/PVE/Tailscale. |
 
 **Orden de conversación:** D01–D03 y D12–D13 fijan la experiencia/destino final;
 D04–D07 sus dependencias; D08–D11 su operación/entrega; D14 el caso OIDC.
@@ -294,6 +301,8 @@ de workflows para aplicar este checklist. Si no hay cambio necesario, decirlo.
 - Si Quadlets/systemd/PVE ya resuelven start, stop, restart o autostart, usarlos;
   no crear el equivalente en Rust ni en un script por workload. Confirmar que
   Stop se propaga y es ordenado; un target con dependencias de arranque no lo prueba.
+- Lifecycle base en cada Quadlet autocontenido según arquitectura, sección 5.
+  Sin `.container.d` preventivos, directorios vacíos ni configuración retirada.
 - Prohibido probar una hipótesis retirando parches/desactivando protecciones o
   purgando datos. El sistema operativo no se modifica para acomodar un check
   inventado por el producto.

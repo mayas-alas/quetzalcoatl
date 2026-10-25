@@ -1,6 +1,6 @@
 # GnX — arquitectura mínima
 
-**Estado: diseño 0.6; implementación acotada autorizada el 2026-10-25.**
+**Estado: contrato 0.7; implementación autorizada.**
 Autoridad de alcance y preguntas: [scope.md](scope.md), incluida la instrucción vigente.
 Las menciones a «solo documentación» abajo describen la fase anterior. Las
 decisiones abiertas y la aceptación no se consideran resueltas por implementar.
@@ -70,11 +70,11 @@ WINDOWS
           v                                  |
       servicio Rust                          |
       seguridad + lifecycle + acceso host    |
-          | token/perfil de gnxnodesvc        |
+          | token/perfil de gnxcoresvc        |
           | wsl.exe + pipes heredados         |
           v                                  |
-  Cuenta dedicada gnxnodesvc                 |
-    +-- WSL2 gnx-node                        |
+  Cuenta dedicada gnxcoresvc                 |
+    +-- WSL2 gnx-core                        |
           +-- systemd                        |
                 +-- Podman / Quadlets        |
                       +-- mesh (Tailscale)   |
@@ -99,10 +99,10 @@ systemd y Podman son infraestructura de ejecución, no servicios de negocio.
 Las aplicaciones enviadas posteriormente viven en LXC de PVE, no como nuevos
 contenedores junto a los cuatro del nodo WSL.
 
-Servicio propuesto: `GnXHostAgent`, automático, bajo `LocalSystem` por las
+Servicio: `GnXCore`, automático, bajo `LocalSystem` por las
 operaciones Windows necesarias. Linux se inicia **bajo la identidad dedicada**,
 no bajo SYSTEM. Revisar privilegios efectivos, SID, perfil y entorno; no hacer a
-`gnxnodesvc` administrador por comodidad. No prometer aislamiento frente a un
+`gnxcoresvc` administrador por comodidad. No prometer aislamiento frente a un
 administrador del propio host.
 
 ## 3. Control Windows y secretos del nodo
@@ -122,7 +122,7 @@ retorno <---------- estado sanitizado <--------- código + fase + acción
 NUNCA: claves en respuesta, logs, argv, URLs, Git o estado público
 ```
 
-- Un Named Pipe de control local; nombre propuesto `\\.\pipe\GnX.Platform.Control`.
+- Un Named Pipe de control local: `\\.\pipe\GnX.Core.v1`.
   DACL restrictiva, rechazo remoto, autorización por token y verificación del
   servidor por la CLI. Acceso de lectura sin elevación: pendiente `D08`.
 - Frames versionados y acotados; operaciones y rutas permitidas explícitamente.
@@ -134,8 +134,10 @@ NUNCA: claves en respuesta, logs, argv, URLs, Git o estado público
   carpetas desde la web es un contrato distinto, aún por resolver en `D12`.
 - Contraseña de la cuenta Windows: aleatoria, DPAPI + ACL; no la elige ni conoce
   el usuario. DPAPI de máquina **no sustituye** la ACL.
-- Key mesh: consumir y descartar por defecto propuesto; preservar la identidad
-  ya inscrita. Retención reusable requiere decisión `D06`.
+- Key mesh reusable aprobada para nodo y sidecar de los LXC. Conservarla con
+  DPAPI + ACL, entregarla por stdin/archivo efímero protegido y nunca distribuirla
+  en la imagen ni en carpetas del usuario. Cada peer mantiene identidad y estado
+  propios: compartir key de alta no significa clonar el estado de Tailscale.
   La CLI la entrega al Tailscale del runtime WSL dedicado, no modifica el rootfs
   distribuido ni reconstruye la imagen OCI. Tailscale documenta auth por archivo
   (`--auth-key=file:...`): el argumento lleva una ruta, nunca el valor. Comprobar
@@ -253,8 +255,10 @@ en `D13`; no inventar un registry, catálogo, CI ni dominios por servicio.
 Ambas entradas usan la misma admisión y aplicación, no dos instaladores. Un
 path de navegador no concede acceso al disco del host: la web entrega archivos;
 la CLI puede resolver un path local con autorización del usuario.
-El receptor/puente concreto es una decisión, no un quinto contenedor base ya
-autorizado. No trasladar claves del nodo a la carpeta ni al navegador.
+Puente nativo aprobado: app simplificada con información y entrega de archivos;
+`gnx-core://` abre el cliente Rust y la confirmación elevada, sin tocar `gnx://`
+del legado. El puente no lleva secretos en la URL y no sustituye la admisión.
+No añade un quinto contenedor base ni traslada claves a la carpeta/navegador.
 
 Quadlets y `Containerfile` pueden ordenar ejecución/mounts: validar nombres/hashes
 no los hace seguros. Rechazar escapes de ruta, enlaces peligrosos y archivos fuera
@@ -278,8 +282,9 @@ WSL: Tailscale + Pi-hole + Caddy + PVE       núcleo, sin duplicarlo en el guest
 
 Son servicios desplegados mediante los mismos Quadlets del usuario, no ramas
 `install-rustfs/pocket/netbird` en Rust ni dependencias del arranque de app.
-Reutilizar Caddy/CA/Pi-hole del nodo para acceso acordado; no añadir otro gateway,
-DNS, sidecar Tailscale por guest ni sustituir Tailscale por NetBird. Pocket ID
+Reutilizar Caddy/CA/Pi-hole del nodo para acceso acordado; no añadir otro gateway
+ni DNS. El sidecar Tailscale del LXC está aprobado con la key reusable protegida
+y estado de peer independiente; no sustituye Tailscale por NetBird. Pocket ID
 no autentica `app.gnx`, PVE ni la CLI. Cada aplicación conserva sus datos/secretos;
 Pocket no necesita almacenar su propia base en RustFS para este caso.
 
@@ -293,11 +298,10 @@ UDP no se sustituyen con un proxy HTTPS genérico. No abrir puertos públicos po
 seguir un quickstart. Passkey/consentimiento personal queda explícitamente pendiente
 si requiere al usuario, sin simular aceptación ni bloquear el núcleo.
 
-**Cabo abierto D14:** tres aplicaciones no garantizan tres contenedores. El OCI
-oficial NetBird combined no incluye dashboard; con UI necesita otro contenedor
-en el mismo LXC. Acordar dashboard o administración sin él; no ocultar un cuarto
-servicio ni reconstruir una imagen multiproceso solo para cumplir un contador.
-Fijar/verificar versiones con OIDC nativo antes de dar la integración por hecha.
+**D14:** dashboard oficial NetBird aprobado: cuatro contenedores de aplicaciones
+(RustFS, Pocket ID, NetBird server y dashboard), más el sidecar Tailscale en el
+mismo LXC. Orígenes privados: `rustfs.gnx`, `pocket.gnx`, `netbird.gnx`.
+Versiones/OIDC y acceso real se comprueban antes de aceptar la integración.
 
 ## 5. WSL y Quadlets, sin requisitos inventados
 
@@ -319,6 +323,15 @@ No eliminar la virtualización que WSL2 sí necesita ni fingir un check KVM verd
   La distro/base, WSL/Podman soportados y recursos mínimos se fijan en `D07`.
 - Quadlets concretos `.container`/`.network` y units solo donde correspondan;
   archivos externos revisables, sin `.in` ni shell incrustado en Rust.
+- Las cuatro unidades base son `gnx-core-{gateway,dns,mesh,compute}.container`;
+  generan sus `.service` homónimos y declaran lifecycle en el mismo archivo.
+  `[Install] WantedBy=gnx-core.target` aporta arranque; `PartOf` propaga stop.
+  No crear carpetas `.container.d` ni `lifecycle.conf` preventivos. Un drop-in
+  solo se añade por una necesidad concreta; no dejar directorios vacíos o archivos
+  retirados. Staging por versión/commit evita arrastrar configuración antigua.
+- `gnx-core.target` evita `After` implícitos de todas las unidades mediante
+  `DefaultDependencies=no`, conserva la relación de shutdown y ordena solo la
+  disponibilidad local. Mesh/compute no bloquean gateway/DNS.
 - Imágenes por digest y archivos por hash. Sin `latest`, upgrades espontáneos
   ni builds OCI al arrancar el usuario.
 - Dependencias de disponibilidad expresadas en systemd; salud real, timeouts,
@@ -338,13 +351,13 @@ No eliminar la virtualización que WSL2 sí necesita ni fingir un check KVM verd
 ```text
 SCM Windows -> recupera el servicio Rust
                          |
-gnx -> pipe -> servicio -> WSL de gnxnodesvc -> systemd
+gnx -> pipe -> servicio -> WSL de gnxcoresvc -> systemd
                                                |
-                                  target GnX (nombre propuesto)
-                                    +-- mesh.service     [Quadlet]
-                                    +-- dns.service      [Quadlet / Pi-hole]
-                                    +-- gateway.service  [Quadlet / Caddy]
-                                    +-- compute.service  [Quadlet / PVE]
+                                  gnx-core.target
+                                    +-- gnx-core-mesh.service     [Quadlet]
+                                    +-- gnx-core-dns.service      [Quadlet]
+                                    +-- gnx-core-gateway.service  [Quadlet]
+                                    +-- gnx-core-compute.service  [Quadlet]
                                                             |
                                                         PVE gestiona LXC
                                                             |
@@ -465,7 +478,7 @@ WSL, datos, certificados y credenciales; activación disruptiva con confirmació
 Desinstalación/purga y convivencia con GnX legacy: `D11`, sin destrucción implícita.
 Ni la instalación "limpia" ni Repair autorizan limpiar datos anteriores.
 
-Layout de implementación; solo `apps/gnx` y parte de `config` existen hoy:
+Layout de implementación:
 
 ```text
 apps/gnx/      un ejecutable Rust: CLI y entrada interna SCM
