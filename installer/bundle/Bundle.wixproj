@@ -1,0 +1,12 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputType>Bundle</OutputType>
+    <OutputName>GnxCoreSetup</OutputName>
+    <DefineConstants>MsiPackage=$(MSBuildProjectDirectory)\..\..\build\releases\v0.0.1\GnxCore.msi</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Bundle.wxs" />
+    <PackageReference Include="WixToolset.Bal.wixext" Version="5.0.2" />
+  </ItemGroup>
+</Project>

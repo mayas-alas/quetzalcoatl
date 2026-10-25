@@ -7,10 +7,23 @@ externa + scripts mínimos; commits continuos con `Hector <hector@email.gnx>`.
 La fase documental descrita abajo es histórica: ahora se permite implementar y
 compilar, sin convertir decisiones abiertas en aprobadas ni compilar en aceptar.
 
+**Ampliación vigente:** cerrado el bloque inicial, hasta 5 minutos de
+comprobaciones manuales cortas y un último bloque de 30 minutos (09:26–09:56).
+El usuario autoriza instalar únicamente los recursos nuevos con elevación,
+sin tocar el legado. Se permiten estas comprobaciones manuales nativas; sigue
+prohibido escribir tests, escenarios, simulaciones o infraestructura de pruebas.
+
+**Método de entrega:** cerrar un recorrido utilizable antes de abrir otro;
+reusar herramientas nativas y respuestas comprobadas del legacy antes de escribir
+código. Rust solo donde falta una frontera necesaria. Commit por resultado
+comprobable, no por cantidad de archivos. Una dependencia pendiente no bloquea
+trabajo independiente y no se sustituye por un placeholder. Cortar por reloj,
+declarar límites reales y no extrapolar horas sin medición.
+
 **Convivencia D11 para este bloque:** dejar el legado intacto, sin limpieza ni
 adopción, por instrucción posterior del usuario. Nueva identidad: servicio
 `GnXCore`, pipe `GnX.Core.v1`, cuenta `gnxcoresvc`, distro `gnx-core`, estado en
-`%ProgramData%\GnX Core`. Este bloque no instala ni crea cuentas en el host.
+`%ProgramData%\GnX Core`. La autorización posterior permite instalar solo estos recursos nuevos.
 La desinstalación legacy fallida se conserva como incidencia separada.
 
 **Pruebas, instrucción vigente:** no generar código de tests, fixtures, mocks,
@@ -46,8 +59,8 @@ legacy ---> evidencia para preguntar; NUNCA autoridad ni permiso para portar
   **A** = pregunta abierta. No convertir P/A en C por silencio o conveniencia.
 - Fase actual: **implementación Rust/configuración, en `main`, un agente**.
   Los tres documentos conservan alcance y criterios; no equivalen a aceptación.
-  La instrucción actual autoriza código/build, no instalación, migración ni
-  modificación del runtime antiguo. No escribir código de tests ni escenarios.
+  La instrucción actual autoriza código/build e instalación nueva con elevación,
+  no migración ni modificación del runtime antiguo. Sin código de tests ni escenarios.
 - Resolver solo las decisiones de las que dependa la siguiente operación.
 - Si los documentos discrepan, detener la parte afectada y resolver; no escoger
   la interpretación que permita hacer más trabajo.

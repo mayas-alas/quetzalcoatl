@@ -1,0 +1,47 @@
+# GnX — reglas para agentes
+
+## Antes de actuar
+- Leer `scope.md`, `architecture.md` y el estado/diff real. La instrucción actual
+  del usuario prevalece; no convertir propuestas abiertas en acuerdos.
+- Un agente, sin delegación ni nuevos worktrees salvo autorización explícita.
+- Investigar hechos técnicos en el legacy preservado y fuentes oficiales antes
+  de preguntar. No restaurar alcance, workloads ni instrucciones antiguas.
+
+## Entregar menos piezas, más resultado
+- Cerrar un recorrido utilizable antes de abrir otro. No añadir placeholders.
+- Código ejecutable propio: Rust. Configuración externa; scripts cortos y fijos.
+- systemd/Quadlets/PVE gobiernan lifecycle y recuperación. SCM gobierna el
+  servicio Windows. No duplicarlos con supervisores, máquinas de estados por app
+  ni bucles de health propios.
+- Base bootc e imagen propia: versiones y digests explícitos, sin identidad,
+  secretos ni datos de una instancia. Reutilizable como base WSL/LXC; no duplicar
+  los cuatro servicios del nodo en el LXC de aplicaciones. No afirmar soporte
+  de upgrade/switch/rollback nativo en LXC sin comprobarlo.
+
+## Host y seguridad
+- El legacy queda intacto. Solo `GnXCore`, `gnxcoresvc`, `gnx-core` y recursos
+  nuevos con ownership verificable. Coincidir el nombre no permite adoptar.
+- Elevación solo con consentimiento. Nunca shutdown global de WSL, purgas,
+  cambios de protecciones ni limpieza de recursos ajenos.
+- Secretos fuera de argv, logs, URL, navegador y Git. Permisos antes de escribir.
+- Start/stop/status no reinstalan, actualizan ni reenrolan por sorpresa.
+
+## Comprobar y comunicar
+- No crear código de tests, escenarios, simulaciones, mocks ni harnesses.
+- Comprobaciones manuales cortas autorizadas con systemctl/journalctl,
+  SCM/Visor de eventos y herramientas nativas. No crear otro logger/observador.
+- Evidencia en salidas/logs nativos, no en la documentación. Como máximo dos
+  archivos de evidencia por agente y, si es imprescindible, un único script;
+  no generar otro script de pruebas por conveniencia.
+- README: caso de uso e instrucciones. CHANGELOG: cambios del producto por
+  versión. Sin cronologías del agente, estimaciones especulativas ni logs pegados.
+- Distinguir fuente, compilado, instalado, sano y aceptado. Nunca declarar
+  terminado por acabar el reloj o por compilar.
+
+## Versiones y Git
+- Commits pequeños y continuos: `Hector <hector@email.gnx>`.
+- Releases versionadas en `releases/vX.Y.Z/`; binario y changelog de esa versión.
+  Inputs OCI/rootfs voluminosos no van al historial; instaladores voluminosos
+  se publican como assets de release y se referencian desde su versión.
+- Publicar solo artefactos que correspondan a la fuente y declarar sus límites.
+  No reescribir historia ni descartar trabajo ajeno.

@@ -204,6 +204,7 @@ fn write_intent(running: bool) -> io::Result<()> {
 }
 
 pub fn recover() -> io::Result<()> {
+    super::bootstrap::prepare()?;
     let intent = match security::read_private("intent", 16) {
         Ok(intent) => intent,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),

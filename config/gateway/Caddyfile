@@ -1,0 +1,25 @@
+{
+    admin off
+    auto_https disable_redirects
+}
+
+app.gnx {
+    bind {$GNX_BIND}
+    tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+    root * /srv/gnx
+    header Cache-Control no-store
+    file_server
+}
+
+compute.gnx {
+    bind {$GNX_BIND}
+    tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+    reverse_proxy https://127.0.0.1:8006 {
+        transport http {
+            tls_server_name compute.gnx
+            tls_trust_pool file {
+                pem_file /etc/gnx/tls/root.crt
+            }
+        }
+    }
+}

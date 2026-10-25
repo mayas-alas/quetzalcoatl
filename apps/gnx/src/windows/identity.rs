@@ -41,6 +41,9 @@ pub struct Ownership {
 
 impl Ownership {
     pub fn read() -> io::Result<Self> {
+        if security::read_private("prepared", 16)? != b"1" {
+            return Err(invalid("preparación incompleta"));
+        }
         let bytes = security::read_private("identity.json", 4096)?;
         let value: Self = serde_json::from_slice(&bytes)
             .map_err(|_| invalid("registro de propiedad inválido"))?;
@@ -96,6 +99,21 @@ impl Drop for Identity {
 
 impl Identity {
     pub fn open(ownership: &Ownership) -> io::Result<Self> {
+        Self::open_inner(ownership, false)
+    }
+
+    pub fn for_setup(sid: &str) -> io::Result<Self> {
+        Self::open_inner(
+            &Ownership {
+                version: 1,
+                sid: sid.into(),
+                distribution_id: String::new(),
+            },
+            true,
+        )
+    }
+
+    fn open_inner(ownership: &Ownership, setup: bool) -> io::Result<Self> {
         let mut encrypted = Zeroizing::new(security::read_private("account.dpapi", 65536)?);
         let input = CRYPT_INTEGER_BLOB {
             cbData: encrypted.len() as u32,
@@ -153,30 +171,36 @@ impl Identity {
         security::require_unprivileged(token.0)?;
         // Reading status may load an existing profile hive, but must never
         // provision a missing profile as an accidental side effect.
-        let mut directory_size = 0;
-        unsafe { GetUserProfileDirectoryW(token.0, null_mut(), &mut directory_size) };
-        if directory_size == 0 || directory_size > 32768 {
-            return Err(denied("perfil dedicado ausente"));
-        }
-        let mut directory = vec![0; directory_size as usize];
-        if unsafe { GetUserProfileDirectoryW(token.0, directory.as_mut_ptr(), &mut directory_size) }
-            == 0
-        {
-            return Err(denied("perfil dedicado ausente"));
-        }
-        let end = directory
-            .iter()
-            .position(|&c| c == 0)
-            .unwrap_or(directory.len());
-        let path = std::path::PathBuf::from(String::from_utf16_lossy(&directory[..end]));
-        use std::os::windows::fs::MetadataExt;
-        let metadata = std::fs::symlink_metadata(&path)?;
-        if !metadata.is_dir()
-            || metadata.file_attributes()
-                & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
-                != 0
-        {
-            return Err(denied("perfil dedicado inválido"));
+        if !setup {
+            let mut directory_size = 0;
+            unsafe { GetUserProfileDirectoryW(token.0, null_mut(), &mut directory_size) };
+            if directory_size == 0 || directory_size > 32768 {
+                return Err(denied("perfil dedicado ausente"));
+            }
+            let mut directory = vec![0; directory_size as usize];
+            if unsafe {
+                GetUserProfileDirectoryW(token.0, directory.as_mut_ptr(), &mut directory_size)
+            } == 0
+            {
+                return Err(denied("perfil dedicado ausente"));
+            }
+            let end = directory
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(directory.len());
+            let path = std::path::PathBuf::from(String::from_utf16_lossy(&directory[..end]));
+            use std::os::windows::fs::MetadataExt;
+            if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+                if !metadata.is_dir()
+                    || metadata.file_attributes()
+                        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+                        != 0
+                {
+                    return Err(denied("perfil dedicado inválido"));
+                }
+            } else {
+                return Err(denied("perfil dedicado ausente"));
+            }
         }
         let mut username = wide(ACCOUNT);
         let mut profile: PROFILEINFOW = unsafe { std::mem::zeroed() };
@@ -207,8 +231,19 @@ impl Identity {
         {
             return Err(io::Error::last_os_error());
         }
-        identity.verify_registration(ownership)?;
+        if !setup {
+            identity.verify_registration(ownership)?;
+        }
         Ok(identity)
+    }
+
+    pub fn profile_dir(&self) -> std::path::PathBuf {
+        let end = self
+            .directory
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(self.directory.len());
+        std::path::PathBuf::from(String::from_utf16_lossy(&self.directory[..end]))
     }
 
     fn verify_registration(&self, ownership: &Ownership) -> io::Result<()> {

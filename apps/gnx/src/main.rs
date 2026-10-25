@@ -1,3 +1,4 @@
+mod package;
 mod protocol;
 #[cfg(windows)]
 mod windows;
@@ -33,6 +34,11 @@ fn run() -> std::io::Result<bool> {
         #[cfg(windows)]
         [arg] if arg == "--service" => {
             windows::service::dispatch()?;
+            Ok(true)
+        }
+        [arg, path] if arg == "--verify-package" => {
+            package::verify(std::path::Path::new(path))?;
+            println!("paquete íntegro; instalación y salud aún no comprobadas");
             Ok(true)
         }
         [arg] => {
