@@ -5,6 +5,14 @@ function Native([scriptblock]$Command) { & $Command; if ($LASTEXITCODE -ne 0) { 
 Push-Location $repo
 try {
     Native { cargo build --release --locked }
+    $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0) { throw 'Cargo metadata failed' }
+    $version = ($metadata.packages | Where-Object name -eq 'gnx').version
+    if ((& './target/release/gnx.exe' --version) -ne "gnx $version") { throw 'Release version mismatch' }
+    $release = Join-Path $repo "releases/v$version"
+    if (-not (Test-Path -LiteralPath (Join-Path $release 'CHANGELOG.md') -PathType Leaf)) { throw 'Release changelog missing' }
+    Copy-Item -LiteralPath 'target/release/gnx.exe' -Destination (Join-Path $release 'gnx.exe') -Force
+    if ((Get-FileHash target/release/gnx.exe).Hash -ne (Get-FileHash (Join-Path $release 'gnx.exe')).Hash) { throw 'Release binary mismatch' }
     if (-not $Package) { return }
     $stage = Join-Path $repo 'build/package/payload'
     New-Item -ItemType Directory -Force $stage,(Join-Path $stage 'images') | Out-Null
