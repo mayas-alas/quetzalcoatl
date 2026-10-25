@@ -143,7 +143,7 @@ try {
     Native 'MSI build' { dotnet build installer/GnxCore.wixproj -c Release "-p:OutputPath=$output" "-p:GnxVersion=$version" "-p:GnxPayload=$stage" }
     $localizedMsi = Join-Path $output 'en-us/GnxCore.msi'
     $msi = Join-Path $output 'GnxCore.msi'
-    if (Test-Path -LiteralPath $localizedMsi) { Copy-Item -LiteralPath $localizedMsi -Destination $msi -Force }
+    if (Test-Path -LiteralPath $localizedMsi) { Move-Item -LiteralPath $localizedMsi -Destination $msi -Force }
     $windowsInstaller = New-Object -ComObject WindowsInstaller.Installer
     $database = $windowsInstaller.OpenDatabase($msi,0)
     $query = $database.OpenView("SELECT HashPart1,HashPart2,HashPart3,HashPart4 FROM MsiFileHash WHERE File_='CoreExe'")
@@ -151,6 +151,9 @@ try {
     $binaryHash=$windowsInstaller.FileHash((Join-Path $repo 'target/release/gnx.exe'),0)
     if ($null -eq $record) { throw 'MSI binary hash missing' }
     foreach ($i in 1..4) { if ($record.IntegerData($i) -ne $binaryHash.IntegerData($i)) { throw 'MSI binary mismatch; refusing bundle/release' } }
+    $productVersion = $database.OpenView("SELECT Value FROM Property WHERE Property='ProductVersion'")
+    $productVersion.Execute(); $versionRecord=$productVersion.Fetch()
+    if ($null -eq $versionRecord -or $versionRecord.StringData(1) -ne $version) { throw 'MSI product version mismatch; refusing bundle/release' }
     [Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) | Out-Null
     Native 'EXE bundle build' { dotnet build installer/bundle/Bundle.wixproj -c Release "-p:OutputPath=$output" "-p:GnxVersion=$version" }
     Copy-Item target/release/gnx.exe $output
