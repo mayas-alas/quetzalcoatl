@@ -7,6 +7,7 @@
 - Admite secretos por stdin heredado, además de la entrada interactiva sin eco.
 - Mantiene una sesión WSL propia mientras el nodo está iniciado; systemd conserva
   el control de los contenedores y `stop` libera la sesión sin apagar otras WSL.
+- Corrige la instalación TLS de Proxmox respetando los permisos de pmxcfs.
 
 La disponibilidad HTTPS, el enrolamiento y la instalación se informan por
 separado; compilar el paquete no acredita esos resultados.
