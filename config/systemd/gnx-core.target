@@ -1,0 +1,8 @@
+[Unit]
+Description=GnX Core native node lifecycle
+# Mesh enrollment and compute availability never gate local gateway or DNS.
+Wants=gnx-gateway.service gnx-dns.service gnx-mesh.service gnx-compute.service
+After=gnx-gateway.service gnx-dns.service
+
+# No Install/WantedBy: Windows applies persisted node intent. Independent boot
+# activation would override a user-requested stop after a WSL restart.
