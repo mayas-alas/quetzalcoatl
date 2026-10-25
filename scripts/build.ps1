@@ -36,6 +36,14 @@ try {
     $output = Join-Path $repo 'build/releases/v0.0.1/'
     New-Item -ItemType Directory -Force $output | Out-Null
     Native { dotnet build installer/GnxCore.wixproj -c Release "-p:OutputPath=$output" }
+    $windowsInstaller = New-Object -ComObject WindowsInstaller.Installer
+    $database = $windowsInstaller.OpenDatabase((Join-Path $output 'GnxCore.msi'),0)
+    $query = $database.OpenView("SELECT HashPart1, HashPart2, HashPart3, HashPart4 FROM MsiFileHash WHERE File_='CoreExe'")
+    $query.Execute()
+    $record = $query.Fetch()
+    $binaryHash = $windowsInstaller.FileHash((Join-Path $repo 'target/release/gnx.exe'),0)
+    if ($null -eq $record) { throw 'MSI binary hash missing' }
+    foreach ($i in 1..4) { if ($record.IntegerData($i) -ne $binaryHash.IntegerData($i)) { throw 'MSI contains a different Rust binary; refusing bundle/release' } }
     Native { dotnet build installer/bundle/Bundle.wixproj -c Release "-p:OutputPath=$output" }
     Copy-Item target/release/gnx.exe $output
 } finally { Pop-Location }
