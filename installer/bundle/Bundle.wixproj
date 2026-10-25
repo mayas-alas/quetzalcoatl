@@ -3,7 +3,8 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <OutputType>Bundle</OutputType>
     <OutputName>GnxCoreSetup</OutputName>
-    <DefineConstants>MsiPackage=$(MSBuildProjectDirectory)\..\..\build\releases\v0.0.1\GnxCore.msi</DefineConstants>
+    <GnxVersion Condition="'$(GnxVersion)' == ''">0.0.1</GnxVersion>
+    <DefineConstants>MsiPackage=$(MSBuildProjectDirectory)\..\..\build\releases\v$(GnxVersion)\GnxCore.msi;Version=$(GnxVersion)</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Bundle.wxs" />

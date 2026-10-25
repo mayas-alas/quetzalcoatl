@@ -27,10 +27,14 @@ La instalación nueva usa `GnXCore` / `gnxcoresvc` / `gnx-core`; no migra ni eli
 el GnX anterior. Un conflicto de puertos, nombres o propiedad se informa.
 
 ```powershell
-gnx status
-gnx start
-gnx stop
+$gnx = "$env:ProgramFiles\GnX Core\gnx.exe"
+& $gnx status
+& $gnx start
+& $gnx stop
 ```
+
+Mientras exista el GnX anterior, usa esta ruta explícita: el instalador no
+reescribe PATH ni hace que el comando antiguo apunte al producto nuevo.
 
 `status` no despierta una distro detenida. `start` no instala ni actualiza.
 `stop` delega en systemd y conserva datos e identidad; no usa `wsl --shutdown`.

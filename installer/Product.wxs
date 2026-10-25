@@ -1,5 +1,5 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
-  <Package Name="GnX Core" Manufacturer="GnX" Version="0.0.1.0" UpgradeCode="7A34F3DC-EA24-4DDF-8ADB-5817BF28BD21" Scope="perMachine">
+  <Package Name="GnX Core" Manufacturer="GnX" Version="$(var.Version)" UpgradeCode="7A34F3DC-EA24-4DDF-8ADB-5817BF28BD21" Scope="perMachine">
     <SummaryInformation Description="GnX Core: Rust control, dedicated WSL and native Quadlets" />
     <MajorUpgrade DowngradeErrorMessage="A newer GnX Core is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="medium" />
@@ -20,7 +20,6 @@
         <util:ServiceConfig FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart" ResetPeriodInDays="1" RestartServiceDelayInSeconds="30" />
       </ServiceInstall>
       <ServiceControl Id="CoreControl" Name="GnXCore" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
-      <Environment Id="CorePath" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="yes" />
     </Component>
     <ComponentGroup Id="OfflinePayload">
       <Files Include="$(var.Payload)\**" Directory="PAYLOADFOLDER" />

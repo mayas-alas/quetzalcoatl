@@ -1,5 +1,6 @@
 [Unit]
 Description=GnX Proxmox VE, LXC baseline without KVM
+PartOf=gnx-core.target
 ConditionPathExists=/var/lib/gnx-core/secrets/compute.env
 
 [Container]
@@ -9,7 +10,7 @@ ContainerName=gnx-core-compute
 HostName=gnx-core-compute
 PublishPort=127.0.0.1:8006:8006
 AddDevice=/dev/fuse
-PodmanArgs=--privileged
+PodmanArgs=--privileged --systemd=always
 Environment=REQUIRE_KVM=N
 EnvironmentFile=/var/lib/gnx-core/secrets/compute.env
 Volume=/var/lib/gnx-core/compute:/var/lib/vz
@@ -18,3 +19,14 @@ Volume=/var/lib/gnx-core/tls:/etc/gnx/tls:ro
 Volume=/etc/gnx-core/install-pve-tls.run:/usr/local/libexec/gnx-install-tls:ro
 Volume=/etc/gnx-core/pveproxy.conf:/etc/systemd/system/pveproxy.service.d/gnx.conf:ro
 StopSignal=SIGRTMIN+3
+LogDriver=journald
+StopTimeout=120
+
+[Service]
+Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=120s
+TimeoutStopSec=130s
+
+[Install]
+WantedBy=gnx-core.target

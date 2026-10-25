@@ -33,7 +33,7 @@ for role in gateway dns mesh compute; do
     id=$(jq -er --arg role "$role" '.[$role].id' "$payload/config/images.json")
     if ! podman image exists "$id"; then podman load -i "$payload/images/$role.oci.tar" >/dev/null; fi
     podman image exists "$id"
-    if [[ "$role" == dns ]]; then systemctl start gnx-gateway.service gnx-dns.service; fi
+    if [[ "$role" == dns ]]; then systemctl start gnx-core-gateway.service gnx-core-dns.service; fi
 done
 systemctl start gnx-core.target
 phase 'Acceso local preparado. Mesh pendiente de key; compute pendiente de contraseña. Consulta gnx status y el journal nativo.'

@@ -1,5 +1,5 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
-  <Bundle Name="GnX Core" Manufacturer="GnX" Version="0.0.1.0" UpgradeCode="E7836E76-E93D-47B6-9B38-9835BBFCE98D" Compressed="yes">
+  <Bundle Name="GnX Core" Manufacturer="GnX" Version="$(var.Version)" UpgradeCode="E7836E76-E93D-47B6-9B38-9835BBFCE98D" Compressed="yes">
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense" LicenseUrl="" SuppressOptionsUI="yes" />
     </BootstrapperApplication>

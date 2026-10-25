@@ -3,7 +3,9 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <OutputName>GnxCore</OutputName>
     <InstallerPlatform>x64</InstallerPlatform>
-    <DefineConstants>Binary=$(MSBuildProjectDirectory)\..\target\release\gnx.exe;Payload=$(MSBuildProjectDirectory)\..\build\package\payload</DefineConstants>
+    <GnxVersion Condition="'$(GnxVersion)' == ''">0.0.1</GnxVersion>
+    <GnxPayload Condition="'$(GnxPayload)' == ''">$(MSBuildProjectDirectory)\..\build\package\v$(GnxVersion)\payload</GnxPayload>
+    <DefineConstants>Binary=$(MSBuildProjectDirectory)\..\target\release\gnx.exe;Payload=$(GnxPayload);Version=$(GnxVersion)</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Product.wxs" />
