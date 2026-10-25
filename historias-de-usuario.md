@@ -7,6 +7,8 @@
 primer bloque de implementación con identidades nuevas y sin tocar el legado.
 Las menciones a fase documental más abajo son históricas; ninguna historia se
 marca aceptada por esta autorización ni por una compilación.
+No generar tests, escenarios ni simulaciones: diagnóstico nativo con
+`systemctl`/`journalctl` y SCM/Visor de eventos, sin infraestructura propia.
 
 ## 1. Para qué sirve este documento
 
@@ -349,5 +351,6 @@ detiene solo la parte dependiente, no trabajo independiente ya autorizado.
 limitaciones e interacción humana pendientes declaradas. Compilar, abrir un
 selector o ver una pantalla de login no demuestra la entrega completa.
 
-**Situación actual:** solo revisión documental. Ninguna historia está marcada
-implementada, probada o aceptada. Este documento no cambia esa autorización.
+**Situación actual:** CLI/servicio Rust parcialmente implementados y compilados;
+sin instalación nueva ni runtime preparado. Ninguna historia completa está
+marcada probada o aceptada. Este documento no amplía la autorización.

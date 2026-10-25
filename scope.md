@@ -10,15 +10,16 @@ compilar, sin convertir decisiones abiertas en aprobadas ni compilar en aceptar.
 **Convivencia D11 para este bloque:** dejar el legado intacto, sin limpieza ni
 adopción, por instrucción posterior del usuario. Nueva identidad: servicio
 `GnXCore`, pipe `GnX.Core.v1`, cuenta `gnxcoresvc`, distro `gnx-core`, estado en
-`%ProgramData%\GnX Core`. No instalar ni crear cuentas durante pruebas de desarrollo.
+`%ProgramData%\GnX Core`. Este bloque no instala ni crea cuentas en el host.
 La desinstalación legacy fallida se conserva como incidencia separada.
 
 **Pruebas, instrucción vigente:** no generar código de tests, fixtures, mocks,
-harnesses ni infraestructura de pruebas por ahora. Su paradigma y ejecución
-quedan fuera de este esfuerzo. Usar únicamente formato, compilación y
-comprobaciones externas mínimas/sintéticas cuando sean necesarias; no ejecutar
-una batería ni desplegar un entorno para probar. No omitir validaciones de
-seguridad del producto ni afirmar aceptación real. Agentes que retomen deben
+harnesses ni infraestructura de pruebas por ahora. No crear escenarios ni
+simulaciones, tampoco como scripts externos. Su paradigma y ejecución quedan
+fuera de este esfuerzo. Formato/compilación no son pruebas de aceptación;
+diagnóstico sobre estado real mediante `systemctl`/`journalctl` y SCM/Visor de
+eventos. No crear un observador/logger propio ni desplegar entornos de prueba.
+No omitir validaciones de seguridad ni afirmar aceptación real. Agentes que retomen deben
 mantener esta restricción hasta nueva instrucción; prevalece sobre las propuestas
 históricas de tests de este documento.
 Objetivo: un MSI/EXE instala el núcleo que entrega `https://app.gnx` y
@@ -43,12 +44,11 @@ legacy ---> evidencia para preguntar; NUNCA autoridad ni permiso para portar
 
 - **C** = confirmado por la petición actual; **P** = propuesta, no aprobada;
   **A** = pregunta abierta. No convertir P/A en C por silencio o conveniencia.
-- Fase actual: **solo documentación, en `main`, un agente**: `scope.md`,
-  `architecture.md` e `historias-de-usuario.md`, este último solicitado como
-  visión 360° del recorrido y sus criterios, no como nueva autoridad de alcance.
-  Sin código, build, instalación, migración, pruebas extensas ni cambios al host.
-- Primero revisar juntos este marco; después consolidar la arquitectura final.
-  Autorizar documentos no autoriza construir ni desplegar.
+- Fase actual: **implementación Rust/configuración, en `main`, un agente**.
+  Los tres documentos conservan alcance y criterios; no equivalen a aceptación.
+  La instrucción actual autoriza código/build, no instalación, migración ni
+  modificación del runtime antiguo. No escribir código de tests ni escenarios.
+- Resolver solo las decisiones de las que dependa la siguiente operación.
 - Si los documentos discrepan, detener la parte afectada y resolver; no escoger
   la interpretación que permita hacer más trabajo.
 
@@ -64,7 +64,7 @@ legacy ---> evidencia para preguntar; NUNCA autoridad ni permiso para portar
 | C06 | systemd + Podman/Quadlets, incluido PVE; lifecycle nativo sin capa propia de workloads. | Docker Desktop obligatorio; APIs `workloads start/stop`, supervisor duplicado o scripts infinitos de reinicio. |
 | C07 | Núcleo: `app.gnx` y Proxmox en `compute.gnx`. El caso C15 tendrá acceso propio acordado por el gateway existente. | Dominios/puertos/IdP nuevos en el núcleo por herencia o sin necesidad aprobada. |
 | C08 | Instalador MSI y EXE; WiX o alternativa FOSS realmente mínima. | Instalador artesanal, migrar de toolchain por gusto o depender de .NET en runtime. |
-| C09 | Alcance estricto, pruebas mínimas relevantes y documentación puntual. | Cero seguridad/verificación, pruebas teatrales o una gran infraestructura de tests. |
+| C09 | Alcance estricto, documentación puntual y diagnóstico nativo. Tests/escenarios fuera de este esfuerzo por instrucción vigente. | Omitir seguridad, inventar escenarios o crear infraestructura de tests/observabilidad. |
 | C10 | Aprender del legacy, preservándolo. | Restaurarlo entero, heredar sus mandatos o rehacer su historia. |
 | C11 | WSL base: **Tailscale, PVE, Caddy y Pi-hole**, bajo systemd/Quadlets. | Sustituir Pi-hole por otro DNS por preferencia; añadir servicios de negocio al nodo. |
 | C12 | App entrega Quadlets/archivos; CLI admite path local. Mismo despliegue a LXC de PVE; `Containerfile`/contexto solo si necesita build. | Dos motores por tener dos entradas; build obligatorio; path de navegador tratado como acceso al host; ejecución SYSTEM/root sin límites. |
@@ -313,18 +313,19 @@ el estado y continuar trabajo independiente seguro. No esperar indefinidamente,
 reiniciar desde cero ni declarar entrega completa por agotar el tiempo. Reanudar
 leyendo estos dos documentos y el estado/diff real, no de la memoria del agente.
 
-## 8. Condición para cerrar esta fase
+## 8. Cierre del primer bloque de implementación
 
 ```text
-HOY                           SIGUIENTE, SOLO TRAS ACUERDO
-3 Markdown                    arquitectura final consolidada
-preguntas + evidencia         autorización de implementación acotada
-0 cambios de producto/host     entrega vertical mínima, no roadmap de plataforma
+HOY                           PENDIENTE
+CLI/servicio Rust compilados   instalador + inputs offline + preparación
+target y drop-ins externos     Quadlets completos + HTTPS local
+legacy intacto                despliegue LXC + OIDC real
 ```
 
 Revisar C/P/A juntos, resolver las decisiones que cambien la arquitectura y
 quitar las opciones descartadas. Entonces `architecture.md` será el plano
 único; este marco conservará las exclusiones y la puerta de decisión.
 [Historias de usuario](historias-de-usuario.md) expresa el recorrido y la
-aceptación derivados, sin convertir P/A en C ni autorizar implementación. Nada de
-esta fase acredita un EXE nuevo ni que `app.gnx`/`compute.gnx` ya funcionen.
+aceptación derivados, sin convertir P/A en C ni ampliar implementación. La
+compilación no acredita que `app.gnx`/`compute.gnx` ya funcionen. El ejecutable
+actual es una entrega parcial, no el instalador ni el producto terminado.

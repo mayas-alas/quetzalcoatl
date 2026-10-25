@@ -10,10 +10,12 @@ Nombres nuevos: servicio `GnXCore`, pipe `\\.\pipe\GnX.Core.v1`, cuenta
 nombres propuestos en el diseño histórico inferior, sin adoptar ni alterar
 `GnXHostAgent` ni su instalación. El desinstalador antiguo fallido queda separado.
 
-**Pruebas diferidas por el usuario (2026-10-25):** no añadir código de tests ni
-infraestructura. El paradigma de pruebas se abstrae fuera de este esfuerzo;
-solo formato, compilación y comprobaciones externas mínimas/sintéticas, sin
-instalaciones de prueba. Las propuestas de tests inferiores no autorizan
+**Pruebas diferidas por el usuario (2026-10-25):** no añadir código de tests,
+escenarios, simulaciones ni infraestructura, tampoco en scripts externos.
+El paradigma de pruebas se abstrae fuera de este esfuerzo. Diagnóstico real con
+`systemctl`/`journalctl` y SCM/Visor de eventos; sin logger/observador propio ni
+instalaciones de prueba. Formato y compilación no acreditan aceptación.
+Las propuestas de tests inferiores no autorizan
 implementarlos ahora. Al retomar, leer esta restricción y `scope.md`; distinguir
 siempre compilado, instalado, comprobado y aceptado.
 Recorrido y criterios derivados: [historias-de-usuario.md](historias-de-usuario.md).
@@ -457,11 +459,10 @@ WSL, datos, certificados y credenciales; activación disruptiva con confirmació
 Desinstalación/purga y convivencia con GnX legacy: `D11`, sin destrucción implícita.
 Ni la instalación "limpia" ni Repair autorizan limpiar datos anteriores.
 
-Layout futuro, no archivos que debamos crear ahora:
+Layout de implementación; solo `apps/gnx` y parte de `config` existen hoy:
 
 ```text
-apps/          CLI Rust + servicio Rust
-crates/        protocolo compartido si evita duplicación real
+apps/gnx/      un ejecutable Rust: CLI y entrada interna SCM
 config/        archivos finales: Windows, WSL, Quadlets, gateway, DNS
 scripts/       instalación/aplicación fija .run/.sh; build Windows mínimo
 installer/     definición MSI/EXE
@@ -488,5 +489,5 @@ tener un selector de carpeta o por reutilizar el importador legacy.
 observable y siguiente paso preciso. No es un SLA de producto completo ni de
 login humano. Reanudar desde archivos/configuración/estado real, no empezar otra
 arquitectura ni resetear la instalación. Un impedimento local no paraliza trabajo
-independiente autorizado. En esta fase el resultado sigue siendo documental.
-**Hoy: solo los tres documentos acordados; sin implementación.**
+independiente autorizado. **Hoy: implementación parcial compilada, sin instalar
+servicio nuevo ni preparar WSL; no hay aceptación de HTTPS, lifecycle real u OIDC.**
