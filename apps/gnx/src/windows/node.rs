@@ -3,18 +3,70 @@ use super::{
     security,
 };
 use crate::protocol::{DISTRO, NodeState, Operation, Request, Response, TARGET};
-use std::{io, sync::Arc, time::Duration};
+use std::{
+    io,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 use tokio::sync::Semaphore;
 
 pub struct Controller {
     mutation: Arc<Semaphore>,
+    session: Mutex<Option<WslSession>>,
+}
+
+struct WslSession {
+    cancel: Arc<AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for WslSession {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
 }
 
 impl Controller {
     pub fn new() -> Self {
         Self {
             mutation: Arc::new(Semaphore::new(1)),
+            session: Mutex::new(None),
         }
+    }
+
+    fn hold_session(&self, running: bool) -> io::Result<()> {
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|_| io::Error::other("sesión no disponible"))?;
+        if !running {
+            session.take();
+            return Ok(());
+        }
+        if session.is_some() {
+            return Ok(());
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
+        let worker = std::thread::spawn(move || {
+            let result = Ownership::read()
+                .and_then(|owner| Identity::open(&owner))
+                .and_then(|identity| identity.keep_alive(&worker_cancel));
+            if let Err(error) = result {
+                super::service::report_error(&error);
+            }
+        });
+        *session = Some(WslSession {
+            cancel,
+            worker: Some(worker),
+        });
+        Ok(())
     }
 
     pub async fn execute(&self, request: &Request) -> Response {
@@ -41,7 +93,20 @@ impl Controller {
         })
         .await
         {
-            Ok(Ok((state, message))) => Response::new(request, true, state, &message),
+            Ok(Ok((state, message))) => {
+                if matches!(op, Operation::Start | Operation::Stop) {
+                    if let Err(error) = self.hold_session(op == Operation::Start) {
+                        super::service::report_error(&error);
+                        return Response::new(
+                            request,
+                            false,
+                            NodeState::Unknown,
+                            "sesión WSL no confirmada",
+                        );
+                    }
+                }
+                Response::new(request, true, state, &message)
+            }
             Ok(Err(error)) if error.kind() == io::ErrorKind::NotFound => Response::new(
                 request,
                 false,
@@ -75,6 +140,10 @@ impl Controller {
         };
         if let Ok(Err(error)) = tokio::task::spawn_blocking(recover).await {
             super::service::report_error(&error);
+        } else if security::read_private("intent", 16).is_ok_and(|value| value == b"running") {
+            if let Err(error) = self.hold_session(true) {
+                super::service::report_error(&error);
+            }
         }
     }
 }

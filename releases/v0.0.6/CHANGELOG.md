@@ -5,7 +5,8 @@
 - Instala Quadlets con permisos deterministas, sin eliminar unidades ajenas.
 - Retira instrumentación temporal y adaptación manual del registro WSL.
 - Admite secretos por stdin heredado, además de la entrada interactiva sin eco.
-- Mantiene la instancia WSL disponible mediante configuración de arranque nativa.
+- Mantiene una sesión WSL propia mientras el nodo está iniciado; systemd conserva
+  el control de los contenedores y `stop` libera la sesión sin apagar otras WSL.
 
 La disponibilidad HTTPS, el enrolamiento y la instalación se informan por
 separado; compilar el paquete no acredita esos resultados.

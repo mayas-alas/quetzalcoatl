@@ -277,14 +277,30 @@ impl Identity {
     }
 
     pub fn run(&self, args: &[&str], limit: Duration) -> io::Result<Output> {
-        self.run_input(args, None, limit)
+        self.run_input(args, None, limit, None)
     }
 
     pub fn run_secret(&self, args: &[&str], input: &[u8], limit: Duration) -> io::Result<Output> {
         if input.len() > 4096 {
             return Err(invalid("entrada protegida fuera de límite"));
         }
-        self.run_input(args, Some(input), limit)
+        self.run_input(args, Some(input), limit, None)
+    }
+
+    pub fn keep_alive(&self, cancel: &std::sync::atomic::AtomicBool) -> io::Result<()> {
+        self.run_input(
+            &[
+                "--distribution",
+                DISTRO,
+                "--exec",
+                "/usr/bin/sleep",
+                "infinity",
+            ],
+            None,
+            Duration::MAX,
+            Some(cancel),
+        )
+        .map(|_| ())
     }
 
     fn run_input(
@@ -292,6 +308,7 @@ impl Identity {
         args: &[&str],
         input: Option<&[u8]>,
         limit: Duration,
+        cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> io::Result<Output> {
         let security = SECURITY_ATTRIBUTES {
             nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
@@ -416,6 +433,16 @@ impl Identity {
         let mut bytes = Vec::new();
         let mut overflow = false;
         loop {
+            if cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)) {
+                unsafe {
+                    TerminateProcess(process_handle.0, 0);
+                    WaitForSingleObject(process_handle.0, 5000);
+                }
+                return Ok(Output {
+                    code: 0,
+                    bytes: Vec::new(),
+                });
+            }
             if start.elapsed() >= limit {
                 // Kill only this client; the systemd transaction may continue.
                 unsafe { TerminateProcess(process_handle.0, 1) };
