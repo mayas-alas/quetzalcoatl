@@ -44,7 +44,8 @@ function Native([string]$Operation, [scriptblock]$Command) {
     $state.pending = [pscustomobject]@{ operation=$Operation; owner_pid=$PID; owner_started_utc=$ownerStarted; boot=$boot; state='pending' }
     Save-Checkpoint
     & $Command
-    if ($LASTEXITCODE -ne 0) { $state.pending.state='failed'; Save-Checkpoint; throw "$Operation failed ($LASTEXITCODE)" }
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) { $state.pending.state='failed'; Save-Checkpoint; throw "$Operation failed ($exitCode)" }
     $state.last_verified = "$Operation : native exit 0"
     $state.pending = $null
     Save-Checkpoint
@@ -142,7 +143,7 @@ try {
     $manifest = Join-Path $stage 'manifest.json'
     [IO.File]::WriteAllText($manifest,(@{version=1;architecture='x86_64';product_version=$version;source_commit=(git rev-parse HEAD);base_image=([IO.File]::ReadAllText($baseDigestFile));files=$entries}|ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))
     Native 'Offline payload verification' { & './target/release/gnx.exe' --verify-package $stage }
-    Native 'MSI build' { dotnet build installer/GnxCore.wixproj -c Release "-p:OutputPath=$output" "-p:GnxVersion=$version" "-p:GnxPayload=$stage" }
+    Native 'MSI build' { dotnet build installer/GnxCore.wixproj -c Release -t:Rebuild "-p:OutputPath=$output" "-p:GnxVersion=$version" "-p:GnxPayload=$stage" }
     $localizedMsi = Join-Path $output 'en-us/GnxCore.msi'
     $msi = Join-Path $output 'GnxCore.msi'
     if (Test-Path -LiteralPath $localizedMsi) { Move-Item -LiteralPath $localizedMsi -Destination $msi -Force }
@@ -157,6 +158,6 @@ try {
     $productVersion.Execute(); $versionRecord=$productVersion.Fetch()
     if ($null -eq $versionRecord -or $versionRecord.StringData(1) -ne $version) { throw 'MSI product version mismatch; refusing bundle/release' }
     [Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) | Out-Null
-    Native 'EXE bundle build' { dotnet build installer/bundle/Bundle.wixproj -c Release "-p:OutputPath=$output" "-p:GnxVersion=$version" }
+    Native 'EXE bundle build' { dotnet build installer/bundle/Bundle.wixproj -c Release -t:Rebuild "-p:OutputPath=$output" "-p:GnxVersion=$version" }
     Copy-Item target/release/gnx.exe $output
 } finally { Pop-Location }
