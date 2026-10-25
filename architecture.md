@@ -10,8 +10,9 @@ Nombres nuevos: servicio `GnXCore`, pipe `\\.\pipe\GnX.Core.v1`, cuenta
 nombres propuestos en el diseño histórico inferior, sin adoptar ni alterar
 `GnXHostAgent` ni su instalación. El desinstalador antiguo fallido queda separado.
 
-**Autorización posterior:** comprobaciones manuales cortas (hasta 5 minutos) y
-último bloque de 30 minutos, 09:26–09:56. Se autoriza instalación elevada solo de
+**Autorización posterior:** bloque de 120 minutos con checkpoint local atómico
+en `build/resume.json`, sin otro supervisor ni evidencia en documentos.
+Se autoriza instalación elevada solo de
 recursos nuevos. Priorizar un recorrido utilizable y herramientas nativas;
 legacy como evidencia, no restauración. No reemplazar resultados por estructura.
 

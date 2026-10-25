@@ -15,3 +15,7 @@
    `scripts/build.ps1` exige changelog, versión y hash coincidentes; si no, falla.
 7. Commits pequeños `Hector <hector@email.gnx>`; publicar solo con autorización.
    README = caso de uso; changelog por versión = producto. Sin bitácoras del agente.
+8. Reanudar con `scripts/build.ps1 -Resume`: leer `build/resume.json`, contrastar
+   HEAD/diff, hashes y SCM/journal antes de repetir una operación pendiente.
+   El checkpoint orienta; Git y estado nativo mandan. Guardarlo atómicamente con
+   `-CheckpointOnly` antes/después de operaciones importantes; sin secretos.

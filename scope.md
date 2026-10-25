@@ -7,8 +7,9 @@ externa + scripts mínimos; commits continuos con `Hector <hector@email.gnx>`.
 La fase documental descrita abajo es histórica: ahora se permite implementar y
 compilar, sin convertir decisiones abiertas en aprobadas ni compilar en aceptar.
 
-**Ampliación vigente:** cerrado el bloque inicial, hasta 5 minutos de
-comprobaciones manuales cortas y un último bloque de 30 minutos (09:26–09:56).
+**Ampliación vigente:** el usuario autoriza un nuevo bloque de 120 minutos y
+reanudación mediante checkpoint local; los tiempos/operaciones van en
+`build/resume.json`, no como bitácora en la documentación.
 El usuario autoriza instalar únicamente los recursos nuevos con elevación,
 sin tocar el legado. Se permiten estas comprobaciones manuales nativas; sigue
 prohibido escribir tests, escenarios, simulaciones o infraestructura de pruebas.
