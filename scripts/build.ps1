@@ -89,8 +89,7 @@ try {
         $crane = Join-Path $repo 'build/tools/crane/crane.exe'
         if (-not (Test-Path $crane)) { throw 'Pinned crane build tool missing' }
         $layer = Join-Path $repo "build/seal/v$version/layer"
-        New-Item -ItemType Directory -Force (Join-Path $layer 'etc'),(Join-Path $layer 'usr/share/licenses/gnx') | Out-Null
-        Copy-Item -Recurse -Force config/base/* $layer
+        New-Item -ItemType Directory -Force (Join-Path $layer 'etc/systemd/system'),(Join-Path $layer 'usr/share/licenses/gnx') | Out-Null
         Copy-Item config/wsl.conf (Join-Path $layer 'etc/wsl.conf') -Force
         Copy-Item LICENSE (Join-Path $layer 'usr/share/licenses/gnx/LICENSE') -Force
         $layerTar = Join-Path (Split-Path $layer -Parent) 'layer.tar'
@@ -103,10 +102,11 @@ try {
             if ($_.PSIsContainer) { "$relative type=dir mode=0755 uid=0 gid=0 time=0" }
             else { $contents=$_.FullName.Replace('\','/').Replace(' ','\040'); "$relative type=file mode=0644 uid=0 gid=0 time=0 size=$($_.Length) contents=$contents" }
         }
+        $spec += Get-Content config/base-masks | ForEach-Object { "./etc/systemd/system/$_ type=link uid=0 gid=0 time=0 link=/dev/null" }
         [IO.File]::WriteAllLines($mtree,$spec,[Text.UTF8Encoding]::new($false))
         Native 'Base image overlay archive' { tar -cf $layerTar "@$mtree" }
         $base = (Get-Content config/bootc.json -Raw | ConvertFrom-Json).source
-        $image = Join-Path $output 'GnxCoreBase.image.tar'
+        $image = Join-Path (Split-Path $layer -Parent) 'base.image.tar'
         $revision = git rev-parse HEAD
         Native 'Sealed base OCI' { & $crane mutate $base --platform=linux/amd64 --append $layerTar --label "org.opencontainers.image.version=$version" --label 'org.opencontainers.image.title=GnX Core Base' --label 'org.opencontainers.image.source=https://github.com/mayas-alas/quetzalcoatl-next' --label "org.opencontainers.image.revision=$revision" --output $image }
         $digest = & $crane digest --tarball $image
@@ -122,7 +122,9 @@ try {
     $head = git rev-parse --short=12 HEAD
     $stage = Join-Path $repo "build/package/v$version-$head/payload"
     New-Item -ItemType Directory -Force $stage,(Join-Path $stage 'images') | Out-Null
-    Copy-Item -Recurse -Force config $stage
+    $runtimeConfig = Join-Path $stage 'config'
+    New-Item -ItemType Directory -Force $runtimeConfig | Out-Null
+    Get-ChildItem config | Where-Object { $_.Name -notin @('base-masks','bootc.json','base') } | Copy-Item -Recurse -Force -Destination $runtimeConfig
     New-Item -ItemType Directory -Force (Join-Path $stage 'scripts') | Out-Null
     Copy-Item scripts/*.run (Join-Path $stage 'scripts') -Force
     $inputs = @{ 'rootfs.tar' = 'build/payload/rootfs.tar' }

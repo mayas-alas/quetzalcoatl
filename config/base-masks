@@ -1,0 +1,6 @@
+avahi-daemon.service
+avahi-daemon.socket
+bootc-fetch-apply-updates.timer
+bootloader-update.service
+rpm-ostree-countme.timer
+sshd.service

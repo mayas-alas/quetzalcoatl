@@ -2,7 +2,7 @@
   <Package Name="GnX Core" Manufacturer="GnX" Version="$(var.Version)" UpgradeCode="7A34F3DC-EA24-4DDF-8ADB-5817BF28BD21" Scope="perMachine">
     <SummaryInformation Description="GnX Core: Rust control, dedicated WSL and native Quadlets" />
     <MajorUpgrade DowngradeErrorMessage="A newer GnX Core is already installed." />
-    <MediaTemplate EmbedCab="yes" CompressionLevel="medium" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="low" />
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="GnX Core">
         <Directory Id="PAYLOADFOLDER" Name="payload" />

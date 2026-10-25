@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# Fixed offline provisioning, not a workload supervisor or test harness.
+# Fixed offline provisioning; systemd owns lifecycle.
 set -euo pipefail
 umask 077
 payload=${1:?payload directory required}
