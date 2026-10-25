@@ -9,8 +9,9 @@
 4. No secretos en argv/logs/Git; no tocar WSL, datos ni protecciones ajenos.
 5. Cerrar un recorrido utilizable, no placeholders. Separar compilado, instalado
    y aceptado. No declarar terminado por reloj ni por build correcto.
-6. **Release obligatoria:** `releases/vX.Y.Z/gnx.exe` + `CHANGELOG.md` de esa versión.
-   El binario debe responder esa versión y coincidir con el build. Ejecutar
-   `scripts/build.ps1`: si falta changelog o no coincide el binario, falla.
+6. **Release obligatoria:** `releases/vX.Y.Z/gnx.exe` y
+   `releases/vX.Y.Z/CHANGELOG.md`. Sin changelog global en la raíz: no recrearlo.
+   No sobrescribir un binario versionado distinto; incrementar versión.
+   `scripts/build.ps1` exige changelog, versión y hash coincidentes; si no, falla.
 7. Commits pequeños `Hector <hector@email.gnx>`; publicar solo con autorización.
-   README = caso de uso; CHANGELOG = producto. Sin bitácoras del agente.
+   README = caso de uso; changelog por versión = producto. Sin bitácoras del agente.

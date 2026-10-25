@@ -11,8 +11,14 @@ try {
     if ((& './target/release/gnx.exe' --version) -ne "gnx $version") { throw 'Release version mismatch' }
     $release = Join-Path $repo "releases/v$version"
     if (-not (Test-Path -LiteralPath (Join-Path $release 'CHANGELOG.md') -PathType Leaf)) { throw 'Release changelog missing' }
-    Copy-Item -LiteralPath 'target/release/gnx.exe' -Destination (Join-Path $release 'gnx.exe') -Force
-    if ((Get-FileHash target/release/gnx.exe).Hash -ne (Get-FileHash (Join-Path $release 'gnx.exe')).Hash) { throw 'Release binary mismatch' }
+    $releaseBinary = Join-Path $release 'gnx.exe'
+    $sourceHash = (Get-FileHash target/release/gnx.exe).Hash
+    if (Test-Path -LiteralPath $releaseBinary) {
+        if ($sourceHash -ne (Get-FileHash -LiteralPath $releaseBinary).Hash) { throw 'Versioned binary already exists with different content; increment the version' }
+    } else {
+        Copy-Item -LiteralPath 'target/release/gnx.exe' -Destination $releaseBinary
+    }
+    if ($sourceHash -ne (Get-FileHash -LiteralPath $releaseBinary).Hash) { throw 'Release binary mismatch' }
     if (-not $Package) { return }
     $stage = Join-Path $repo 'build/package/payload'
     New-Item -ItemType Directory -Force $stage,(Join-Path $stage 'images') | Out-Null

@@ -54,5 +54,5 @@ cargo build --release --locked
 El empaquetado exige inputs locales completos en `build/payload`; no los sustituye
 por descargas silenciosas. Diagnóstico: systemctl/journalctl y SCM/Visor de eventos.
 
-[Cambios](CHANGELOG.md) · [Alcance](scope.md) · [Arquitectura](architecture.md) ·
+[Cambios v0.0.1](releases/v0.0.1/CHANGELOG.md) · [Alcance](scope.md) · [Arquitectura](architecture.md) ·
 [Reglas para agentes](.AGENTS)
