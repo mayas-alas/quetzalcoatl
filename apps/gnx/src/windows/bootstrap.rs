@@ -331,7 +331,21 @@ pub fn prepare() -> io::Result<()> {
             Duration::from_secs(600),
         )?;
         if result.code != 0 {
-            return Err(io::Error::other("importación WSL no confirmada"));
+            // Only this fixed wsl --import result is diagnostic text. It never
+            // receives secrets and must retain the native Windows error code.
+            let text = result.text();
+            let detail: String = text
+                .chars()
+                .rev()
+                .take(400)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            return Err(io::Error::other(format!(
+                "importación WSL: exit {}; {detail}",
+                result.code
+            )));
         }
     }
     let guid = registration(&sid, &destination)?
