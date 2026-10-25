@@ -45,6 +45,12 @@ payload/node/workloads/ai/offline.tar.gz -filter -diff -merge -text
 payload/node/auth/offline.tar.gz -filter -diff -merge -text
 
 # Linux build helpers and runtime entrypoints use POSIX line endings.
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+config/** text eol=lf
+scripts/*.run text eol=lf
+scripts/*.sh text eol=lf
 installer/scripts/*.run text eol=lf
 payload/node/*.run text eol=lf
 payload/node/**/*.run text eol=lf

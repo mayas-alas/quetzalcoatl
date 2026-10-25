@@ -1,7 +1,21 @@
 # GnX — arquitectura mínima
 
-**Estado: borrador 0.6 para discutir; no autoriza implementación.**
-Autoridad de alcance y preguntas: [scope.md](scope.md). Solo documentación en esta etapa.
+**Estado: diseño 0.6; implementación acotada autorizada el 2026-10-25.**
+Autoridad de alcance y preguntas: [scope.md](scope.md), incluida la instrucción vigente.
+Las menciones a «solo documentación» abajo describen la fase anterior. Las
+decisiones abiertas y la aceptación no se consideran resueltas por implementar.
+
+Nombres nuevos: servicio `GnXCore`, pipe `\\.\pipe\GnX.Core.v1`, cuenta
+`gnxcoresvc`, distro `gnx-core`, estado `%ProgramData%\GnX Core`. Sustituyen los
+nombres propuestos en el diseño histórico inferior, sin adoptar ni alterar
+`GnXHostAgent` ni su instalación. El desinstalador antiguo fallido queda separado.
+
+**Pruebas diferidas por el usuario (2026-10-25):** no añadir código de tests ni
+infraestructura. El paradigma de pruebas se abstrae fuera de este esfuerzo;
+solo formato, compilación y comprobaciones externas mínimas/sintéticas, sin
+instalaciones de prueba. Las propuestas de tests inferiores no autorizan
+implementarlos ahora. Al retomar, leer esta restricción y `scope.md`; distinguir
+siempre compilado, instalado, comprobado y aceptado.
 Recorrido y criterios derivados: [historias-de-usuario.md](historias-de-usuario.md).
 Antes de añadir o cambiar contenido, leer la versión vigente de ambos documentos
 y comprobar las versiones/referencias citadas; disciplina en `scope.md`, sección 7.

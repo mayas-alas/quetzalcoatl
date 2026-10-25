@@ -1,6 +1,26 @@
 # GnX — qué sí, qué no y cómo decidir
 
-**Estado: borrador 0.6 para acordar con el usuario.** No es un backlog abierto.
+**Estado: diseño 0.6; implementación acotada autorizada el 2026-10-25.** No es un backlog abierto.
+
+**Instrucción vigente (2026-10-25):** bloque de 23 minutos, Rust + configuración
+externa + scripts mínimos; commits continuos con `Hector <hector@email.gnx>`.
+La fase documental descrita abajo es histórica: ahora se permite implementar y
+compilar, sin convertir decisiones abiertas en aprobadas ni compilar en aceptar.
+
+**Convivencia D11 para este bloque:** dejar el legado intacto, sin limpieza ni
+adopción, por instrucción posterior del usuario. Nueva identidad: servicio
+`GnXCore`, pipe `GnX.Core.v1`, cuenta `gnxcoresvc`, distro `gnx-core`, estado en
+`%ProgramData%\GnX Core`. No instalar ni crear cuentas durante pruebas de desarrollo.
+La desinstalación legacy fallida se conserva como incidencia separada.
+
+**Pruebas, instrucción vigente:** no generar código de tests, fixtures, mocks,
+harnesses ni infraestructura de pruebas por ahora. Su paradigma y ejecución
+quedan fuera de este esfuerzo. Usar únicamente formato, compilación y
+comprobaciones externas mínimas/sintéticas cuando sean necesarias; no ejecutar
+una batería ni desplegar un entorno para probar. No omitir validaciones de
+seguridad del producto ni afirmar aceptación real. Agentes que retomen deben
+mantener esta restricción hasta nueva instrucción; prevalece sobre las propuestas
+históricas de tests de este documento.
 Objetivo: un MSI/EXE instala el núcleo que entrega `https://app.gnx` y
 `https://compute.gnx` desde WSL del usuario dedicado, operado por `gnx`.
 Destino final: app recibe archivos o la CLI un path de Quadlets/configuración;

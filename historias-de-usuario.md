@@ -3,6 +3,11 @@
 **Estado: borrador 0.1 para revisar, 2026-10-24.** Basado en `scope.md` y
 `architecture.md`, borradores 0.6. No acredita implementación ni aceptación.
 
+**Actualización 2026-10-25:** la instrucción vigente de `scope.md` autoriza un
+primer bloque de implementación con identidades nuevas y sin tocar el legado.
+Las menciones a fase documental más abajo son históricas; ninguna historia se
+marca aceptada por esta autorización ni por una compilación.
+
 ## 1. Para qué sirve este documento
 
 Entender el producto desde el recorrido del usuario: qué obtiene, qué puede
