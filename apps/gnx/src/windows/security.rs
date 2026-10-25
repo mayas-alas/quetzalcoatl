@@ -113,6 +113,39 @@ pub fn require_system() -> io::Result<()> {
     Ok(())
 }
 
+pub fn require_unprivileged(token: HANDLE) -> io::Result<()> {
+    use windows_sys::Win32::Security::{TOKEN_GROUPS, TokenGroups};
+    let mut needed = 0;
+    unsafe { GetTokenInformation(token, TokenGroups, null_mut(), 0, &mut needed) };
+    if needed == 0 || needed > 65536 {
+        return Err(denied("grupos de identidad no verificables"));
+    }
+    let mut data = vec![0u64; (needed as usize).div_ceil(8)];
+    if unsafe {
+        GetTokenInformation(
+            token,
+            TokenGroups,
+            data.as_mut_ptr().cast(),
+            needed,
+            &mut needed,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    let groups = unsafe { &*data.as_ptr().cast::<TOKEN_GROUPS>() };
+    let entries =
+        unsafe { std::slice::from_raw_parts(groups.Groups.as_ptr(), groups.GroupCount as usize) };
+    // Reject even a deny-only Administrators SID: a dedicated account must not
+    // become a privileged identity merely because its current token is filtered.
+    for entry in entries {
+        if sid_text(entry.Sid)? == "S-1-5-32-544" {
+            return Err(denied("la identidad dedicada no puede ser administradora"));
+        }
+    }
+    Ok(())
+}
+
 pub fn process_is_system(pid: u32) -> io::Result<()> {
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if process.is_null() {

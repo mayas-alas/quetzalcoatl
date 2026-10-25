@@ -1,12 +1,17 @@
 use crate::protocol::SERVICE;
-use std::{ffi::OsString, io, time::Duration};
+use std::{
+    ffi::OsString,
+    io,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 use windows_service::{
     define_windows_service,
     service::{
         ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
         ServiceType,
     },
-    service_control_handler::{self, ServiceControlHandlerResult},
+    service_control_handler::{self, ServiceControlHandlerResult, ServiceStatusHandle},
     service_dispatcher,
 };
 
@@ -18,8 +23,13 @@ pub fn dispatch() -> io::Result<()> {
 
 fn service_main(_: Vec<OsString>) {
     let (tx, rx) = tokio::sync::watch::channel(false);
+    let published = Arc::new(OnceLock::<ServiceStatusHandle>::new());
+    let control_status = published.clone();
     let handle = match service_control_handler::register(SERVICE, move |control| match control {
         ServiceControl::Stop | ServiceControl::Shutdown => {
+            if let Some(handle) = control_status.get() {
+                let _ = handle.set_service_status(status(ServiceState::StopPending, 0));
+            }
             let _ = tx.send(true);
             ServiceControlHandlerResult::NoError
         }
@@ -29,19 +39,11 @@ fn service_main(_: Vec<OsString>) {
         Ok(handle) => handle,
         Err(_) => return,
     };
-    let status = |state, code| ServiceStatus {
-        service_type: ServiceType::OWN_PROCESS,
-        current_state: state,
-        controls_accepted: if state == ServiceState::Running {
-            ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN
-        } else {
-            ServiceControlAccept::empty()
-        },
-        exit_code: ServiceExitCode::Win32(code),
-        checkpoint: 0,
-        wait_hint: Duration::ZERO,
-        process_id: None,
-    };
+    let _ = published.set(handle);
+    if *rx.borrow() {
+        let _ = handle.set_service_status(status(ServiceState::Stopped, 0));
+        return;
+    }
     if handle
         .set_service_status(status(ServiceState::Running, 0))
         .is_err()
@@ -58,4 +60,28 @@ fn service_main(_: Vec<OsString>) {
         ServiceState::Stopped,
         if result.is_ok() { 0 } else { 1 },
     ));
+}
+
+fn status(state: ServiceState, code: u32) -> ServiceStatus {
+    ServiceStatus {
+        service_type: ServiceType::OWN_PROCESS,
+        current_state: state,
+        controls_accepted: if state == ServiceState::Running {
+            ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN
+        } else {
+            ServiceControlAccept::empty()
+        },
+        exit_code: ServiceExitCode::Win32(code),
+        checkpoint: if state == ServiceState::StopPending {
+            1
+        } else {
+            0
+        },
+        wait_hint: if state == ServiceState::StopPending {
+            Duration::from_secs(190)
+        } else {
+            Duration::ZERO
+        },
+        process_id: None,
+    }
 }

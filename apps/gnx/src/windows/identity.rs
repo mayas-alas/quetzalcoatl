@@ -150,6 +150,34 @@ impl Identity {
         if security::token_sid(token.0)? != ownership.sid {
             return Err(denied("la cuenta no coincide con el SID propio"));
         }
+        security::require_unprivileged(token.0)?;
+        // Reading status may load an existing profile hive, but must never
+        // provision a missing profile as an accidental side effect.
+        let mut directory_size = 0;
+        unsafe { GetUserProfileDirectoryW(token.0, null_mut(), &mut directory_size) };
+        if directory_size == 0 || directory_size > 32768 {
+            return Err(denied("perfil dedicado ausente"));
+        }
+        let mut directory = vec![0; directory_size as usize];
+        if unsafe { GetUserProfileDirectoryW(token.0, directory.as_mut_ptr(), &mut directory_size) }
+            == 0
+        {
+            return Err(denied("perfil dedicado ausente"));
+        }
+        let end = directory
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(directory.len());
+        let path = std::path::PathBuf::from(String::from_utf16_lossy(&directory[..end]));
+        use std::os::windows::fs::MetadataExt;
+        let metadata = std::fs::symlink_metadata(&path)?;
+        if !metadata.is_dir()
+            || metadata.file_attributes()
+                & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+                != 0
+        {
+            return Err(denied("perfil dedicado inválido"));
+        }
         let mut username = wide(ACCOUNT);
         let mut profile: PROFILEINFOW = unsafe { std::mem::zeroed() };
         profile.dwSize = std::mem::size_of::<PROFILEINFOW>() as u32;
@@ -214,7 +242,7 @@ impl Identity {
     }
 
     pub fn run(&self, args: &[&str], limit: Duration) -> io::Result<Output> {
-        let mut security = SECURITY_ATTRIBUTES {
+        let security = SECURITY_ATTRIBUTES {
             nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: null_mut(),
             bInheritHandle: 1,
@@ -231,7 +259,7 @@ impl Identity {
                 wide("NUL").as_ptr(),
                 FILE_GENERIC_READ,
                 FILE_SHARE_READ,
-                &mut security,
+                &security,
                 OPEN_EXISTING,
                 0,
                 null_mut(),
