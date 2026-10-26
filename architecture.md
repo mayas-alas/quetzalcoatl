@@ -289,6 +289,9 @@ WSL: Tailscale + Pi-hole + Caddy + PVE       núcleo, sin duplicarlo en el guest
 
 Son servicios desplegados mediante los mismos Quadlets del usuario, no ramas
 `install-rustfs/pocket/netbird` en Rust ni dependencias del arranque de app.
+El path de este stack es el primer uso del contrato común de despliegue; después
+se reciben otras estructuras por el mismo flujo. La base derivada de bootc se
+prepara como filesystem LXC con systemd/Podman, no como otro motor por aplicación.
 Reutilizar Caddy/CA/Pi-hole del nodo para acceso acordado; no añadir otro gateway
 ni DNS. El sidecar Tailscale del LXC está aprobado con la key reusable protegida
 y estado de peer independiente; no sustituye Tailscale por NetBird. Pocket ID
@@ -484,6 +487,23 @@ Separar transacción MSI del provisioning Linux. Upgrade conserva identidad,
 WSL, datos, certificados y credenciales; activación disruptiva con confirmación.
 Desinstalación/purga y convivencia con GnX legacy: `D11`, sin destrucción implícita.
 Ni la instalación "limpia" ni Repair autorizan limpiar datos anteriores.
+
+### Retirada y purga: contrato, no rutina implementada
+
+- **Desinstalar:** parar el target propio antes de retirar el servicio con SCM/MSI;
+  retirar sus políticas de recuperación, registro de eventos y acceso Windows
+  solo con ownership comprobado. Conservar cuenta, perfil, DPAPI, WSL, CA y datos
+  necesarios para una reinstalación. No dejar Linux activo por quitar solo el EXE.
+- **Purgar:** operación separada, elevada y confirmada que elimina también datos.
+  Verificar SID, GUID, ruta VHDX y ausencia de registros compartidos antes de
+  `wsl --unregister`, ejecutado bajo la identidad dedicada, nunca la del host.
+  Solo después retirar cuenta/perfil y estado propio mediante APIs Windows.
+- Hosts: quitar solo la línea marcada por el producto. Portproxy: comparar recibo
+  y valor actual. CA: identificar certificado exacto, nunca borrar por nombre.
+  No vaciar logs, tareas, registro o directorios por patrones amplios; no borrar
+  reglas Tailscale ni confianza de otros dispositivos implícitamente.
+- Una actualización no activa esta purga. Los recursos legacy quedan fuera de
+  ambas operaciones. La comprobación destructiva requiere autorización aparte.
 
 Layout de implementación:
 

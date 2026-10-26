@@ -41,6 +41,10 @@ key reusable protegida y estado/identidad independiente por peer. No duplicar
 gateway/DNS ni incluir secretos en imágenes. Orígenes privados del caso:
 `rustfs.gnx`, `pocket.gnx`, `netbird.gnx`.
 
+El primer stack entra por el mismo path y contrato que las estructuras aportadas
+después por los usuarios: no es un instalador específico. La base preparada desde
+bootc se adapta a LXC para ejecutar Quadlets; eso no acredita upgrades bootc en LXC.
+
 ## 1. Autoridad y fase
 
 ```text
@@ -221,7 +225,7 @@ D04 ya quedó resuelta por la instrucción actual; no reabrirla por preferencia.
 | D08 | ¿`gnx status` necesita elevación? | Un solo pipe admin en v1 como opción mínima. Lectura no elevada requiere permiso y esquema público limitados, no acceso al control privilegiado. |
 | D09 | ¿Cómo publica el servicio el HTTPS local? | Forward TCP loopback → WSL sin terminar TLS; elegir Rust o mecanismo Windows por evidencia. Revisar puerto 443 ocupado, cambio IP y ownership; no dos proxies competidores. |
 | D10 | C13 confirma núcleo offline completo. ¿WiX/Burn es aceptado y qué prerrequisitos Windows se incluyen? | MSI completo + Burn EXE que lo contiene, todos los inputs del producto locales. Verificar licencia/condiciones FOSS y redistribución WSL; .NET solo build. Fijar baseline del host y medir tamaño. No confundir instalación offline con enrolamiento Tailscale o build arbitrario sin conectividad. |
-| D11 | ¿Cómo convive la nueva entrega con GnX ya instalado y qué conserva uninstall? | No tocarlo hasta plan explícito. Propuesta: preservar datos por defecto y separar purga confirmada; fijar identidad del producto/UpgradeCodes, ownership y recuperación antes del primer MSI. |
+| D11 — parcial C | Diseñar la retirada del núcleo nuevo, sin tocar legacy. | Desinstalación normal conservadora y purga separada con confirmación. Inventariar SCM/persistencia y acceso propio; `unregister` solo bajo la identidad dedicada tras verificar SID/GUID/VHDX sin registros compartidos. Diseñar la rutina no autoriza ejecutarla ni borrar datos ahora. |
 | D12 — C | App simplificada: información y entrega segura de archivos con puente nativo. | `gnx-core://` abre confirmación elevada del cliente Rust; no tocar `gnx://` legacy. Una admisión app/CLI, sin keys en web, path implícito del host ni IdP nuevo. |
 | D13 | Un LXC compartido con sidecar Tailscale aprobado. ¿Qué recursos/datos y límites concretos? | PVE + Quadlets; key reusable protegida, peer independiente y gateway/DNS del nodo. Sin VM, registry ni LXC por servicio por defecto. |
 | D14 — parcial C | Dashboard NetBird y orígenes privados aprobados. | Cuatro contenedores de apps más sidecar mesh. Dos clientes Pocket; fijar/verificar imágenes, callbacks y roles. Sin red pública ni Pocket en app/PVE/Tailscale. |
