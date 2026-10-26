@@ -180,6 +180,15 @@ identidad del nodo. HTTPS por sí solo no autoriza desplegar. No añadir IdP/OAu
 sesiones para el núcleo por inercia; la autorización del envío final se resuelve
 en `D12`, antes de habilitar cualquier mutación desde `app.gnx`.
 
+La CA es identidad persistente: una actualización o un cambio de marca no la
+reemite ni cambia su subject, clave o certificado raíz. Renovar el certificado
+servidor conserva la CA y los SAN acordados. Una rotación explícita distribuye
+primero la confianza nueva y comprueba los navegadores locales y clientes mesh
+antes de retirar la anterior. Compartir clave o nombre no acredita esa continuidad.
+Windows, Firefox con almacén propio y Android pueden requerir importaciones
+independientes. MagicDNS/split DNS y ACL solo resuelven destino y conectividad;
+no cambian confianza TLS ni convierten `.gnx` en un dominio con CA pública.
+
 ### Arranque local primero; enrolamiento después
 
 ```text

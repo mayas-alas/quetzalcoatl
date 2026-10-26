@@ -135,7 +135,7 @@ coincide nombre != ownership
 | Proxmox | Autenticación nativa y TLS backend verificado. | Bypass de login/TLS/licencia o repetir una imagen antigua sin inspección. |
 | Red | Loopback/mesh autorizada; ownership de reglas/nombres/certificados. | Exposición LAN/Internet, DNS abierto, alterar políticas externas sin permiso. |
 | Resiliencia | SCM → servicio; systemd/Quadlets → contenedores; PVE → LXC. Intención mínima de nodo y stop respetado. | Duplicar el lifecycle con un framework de workloads; prometer memoria liberada o disponibilidad no medidas. |
-| Actualizar | Diferenciar paquete instalado de runtime aplicado; preservar estado. | Pull/restart en `status`, auto-upgrade, downgrade/reset oculto. |
+| Actualizar | Diferenciar paquete instalado de runtime aplicado; preservar estado y CA. | Pull/restart en `status`, auto-upgrade, downgrade/reset oculto o reemitir la CA por un cambio de marca. |
 | Retirar | Plan explícito, alcance propio y política de conservación acordada. | `wsl --shutdown`, prune global, unregister/purga sin autorización o borrar respaldos. |
 | Host | Detectar requisitos y explicar el bloqueo. | Tocar BIOS, TPM, Secure Boot, BitLocker, antivirus, parches o reiniciar por sorpresa. |
 

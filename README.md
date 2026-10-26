@@ -44,6 +44,23 @@ reescribe PATH ni hace que el comando antiguo apunte al producto nuevo.
 `stop` delega en systemd y conserva datos e identidad; no usa `wsl --shutdown`.
 No introduzcas keys ni contraseñas en argumentos, navegador o chat.
 
+## HTTPS local y por Tailscale
+
+MagicDNS/split DNS resuelve nombres; no instala certificados. El dominio `gnx`
+debe usar el Pi-hole del nodo y las ACL permitir DNS TCP/UDP 53 y HTTPS TCP 443.
+
+Ambas URLs usan la misma CA privada del nodo, también al acceder por la mesh.
+La instalación publica su certificado en Windows; un navegador con almacén propio
+puede necesitar importarlo por separado. En Android/OPPO, importa la **CA pública**
+como certificado de autoridad en los ajustes de seguridad; el nombre del menú
+depende de Android/ColorOS y el navegador debe admitir esa confianza.
+
+Obtén la CA en [app.gnx/gnx-labs-root.crt](https://app.gnx/gnx-labs-root.crt)
+desde un cliente que ya valide HTTPS, y contrasta su huella SHA-256 por un canal
+confiable antes de instalarla. No distribuyas claves privadas ni uses excepciones
+de certificado como solución. La CA del GnX anterior no acredita la del nodo nuevo;
+cambiar de nodo o de CA exige verificar y distribuir de nuevo la confianza.
+
 ## Base versionada
 
 La base procede de Fedora bootc, fijada por digest. Una imagen propia sellada
@@ -62,7 +79,7 @@ cargo build --release --locked
 El empaquetado exige inputs locales completos en `build/payload`; no los sustituye
 por descargas silenciosas. Diagnóstico: systemctl/journalctl y SCM/Visor de eventos.
 
-[Cambios v0.0.6](releases/v0.0.6/CHANGELOG.md) · [Alcance](scope.md) · [Arquitectura](architecture.md) ·
+[Cambios v0.0.7](releases/v0.0.7/CHANGELOG.md) · [Alcance](scope.md) · [Arquitectura](architecture.md) ·
 [Reglas para agentes](.AGENTS)
 
 ## Licencia
