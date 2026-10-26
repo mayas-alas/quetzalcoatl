@@ -162,10 +162,25 @@ fn execute_secret(op: Operation, secret: Option<&str>) -> io::Result<(NodeState,
     let running = running.text().lines().any(|line| line.trim() == DISTRO);
     if op == Operation::Status {
         return Ok(if running {
-            (
-                NodeState::Unknown,
-                "WSL propia en ejecución; HTTPS, mesh y compute no observados".into(),
-            )
+            // The node publishes its own stage; show it instead of a generic
+            // message. Never wakes a stopped distribution.
+            let phase = identity
+                .run(
+                    &[
+                        "--distribution",
+                        DISTRO,
+                        "--exec",
+                        "/usr/bin/cat",
+                        "/var/lib/gnx-core/web/status.txt",
+                    ],
+                    Duration::from_secs(10),
+                )
+                .ok()
+                .filter(|result| result.code == 0)
+                .map(|result| result.text().trim().to_string())
+                .filter(|text| !text.is_empty())
+                .unwrap_or_else(|| "nodo en ejecución sin fase publicada todavía".into());
+            (NodeState::Unknown, phase)
         } else {
             (NodeState::Stopped, "nodo detenido; WSL no se inició".into())
         });
@@ -198,7 +213,11 @@ fn execute_secret(op: Operation, secret: Option<&str>) -> io::Result<(NodeState,
         if result.code != 0 {
             return Err(io::Error::other("configuración nativa no confirmada"));
         }
-        return Ok((NodeState::Active, if op == Operation::Enroll { "Tailscale configurado; key descartada, acceso remoto aún no comprobado" } else { "contraseña configurada; Proxmox iniciado mediante su Quadlet, HTTPS aún no comprobado" }.into()));
+        return Ok((NodeState::Active, if op == Operation::Enroll {
+            "Tailscale configurado; resolver de malla preparado, comprueba la etapa con status"
+        } else {
+            "contraseña configurada; Proxmox iniciado mediante su Quadlet, HTTPS aún no comprobado"
+        }.into()));
     }
     if op == Operation::Stop {
         write_intent(false)?;
