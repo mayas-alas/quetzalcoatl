@@ -50,8 +50,10 @@ MagicDNS/split DNS resuelve nombres; no instala certificados. El dominio `gnx`
 debe usar el Pi-hole del nodo y las ACL permitir DNS TCP/UDP 53 y HTTPS TCP 443.
 
 Ambas URLs usan la misma CA privada del nodo, también al acceder por la mesh.
-La instalación publica su certificado en Windows; un navegador con almacén propio
-puede necesitar importarlo por separado. En Android/OPPO, importa la **CA pública**
+El servicio importa automáticamente su CA en el almacén raíz de Windows mediante
+`certutil`, igual que en v0.0.6: no se exige importación manual en el host para
+clientes que usan ese almacén. Un navegador con almacén propio puede necesitar
+confianza adicional. En Android/OPPO, si la CA no está ya confiada, importa la **CA pública**
 como certificado de autoridad en los ajustes de seguridad; el nombre del menú
 depende de Android/ColorOS y el navegador debe admitir esa confianza.
 
@@ -60,6 +62,9 @@ desde un cliente que ya valide HTTPS, y contrasta su huella SHA-256 por un canal
 confiable antes de instalarla. No distribuyas claves privadas ni uses excepciones
 de certificado como solución. La CA del GnX anterior no acredita la del nodo nuevo;
 cambiar de nodo o de CA exige verificar y distribuir de nuevo la confianza.
+El HTTPS automático de [Tailscale](https://tailscale.com/kb/1153/enabling-https)
+emite certificados públicos para nombres del tailnet bajo `.ts.net`; no convierte
+una CA privada para `.gnx` en una CA confiada por el dispositivo.
 
 ## Base versionada
 

@@ -186,7 +186,8 @@ servidor conserva la CA y los SAN acordados. Una rotación explícita distribuye
 primero la confianza nueva y comprueba los navegadores locales y clientes mesh
 antes de retirar la anterior. Compartir clave o nombre no acredita esa continuidad.
 Windows, Firefox con almacén propio y Android pueden requerir importaciones
-independientes. MagicDNS/split DNS y ACL solo resuelven destino y conectividad;
+independientes. El servicio realiza la importación Windows automáticamente; no
+delegarla al usuario como requisito normal del host. MagicDNS/split DNS y ACL solo resuelven destino y conectividad;
 no cambian confianza TLS ni convierten `.gnx` en un dominio con CA pública.
 
 ### Arranque local primero; enrolamiento después
