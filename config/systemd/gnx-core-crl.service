@@ -1,0 +1,10 @@
+[Unit]
+Description=Maintain GnX Core certificates and signed CRL
+PartOf=gnx-core.target
+Before=gnx-core-gateway.service
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/bash /etc/gnx-core/tls.run refresh
+TimeoutStartSec=90s

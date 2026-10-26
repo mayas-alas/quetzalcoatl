@@ -19,9 +19,12 @@ LogDriver=journald
 StopTimeout=20
 
 [Service]
+ExecStartPost=/usr/bin/podman exec gnx-core-mesh tailscale wait
+ExecStartPost=/usr/bin/bash /etc/gnx-core/configure.run mesh-access
 Restart=on-failure
 RestartSec=5s
-TimeoutStartSec=90s
+# Native readiness can await the first user key; gateway/target never wait on it.
+TimeoutStartSec=infinity
 TimeoutStopSec=30s
 
 [Install]

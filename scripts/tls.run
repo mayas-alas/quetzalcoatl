@@ -1,0 +1,89 @@
+#!/usr/bin/bash
+# Fixed native PKI operation; never rotate an existing CA or reset its database.
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 ]]
+root=/var/lib/gnx-core
+private=$root/ca-private
+config=/etc/gnx-core/ca.cnf
+mode=${1:?prepare or refresh required}
+[[ "$mode" == prepare || "$mode" == refresh ]]
+for cmd in openssl flock systemctl; do command -v "$cmd" >/dev/null; done
+install -d -m 0700 "$private" "$private/certs" "$root/tls"
+install -d -m 0755 /etc/gnx-core "$root/web" "$root/web/pki"
+exec 9>"$private/lock"
+flock -x -w 30 9
+if [[ "$mode" == prepare ]]; then
+    payload=${2:?verified installed payload required}
+    [[ -f "$payload/config/pki/ca.cnf" && -f "$payload/config/pki/node.ext" ]]
+    if systemctl is-active --quiet gnx-core-gateway.service; then
+        podman exec -i gnx-core-gateway caddy validate --config - --adapter caddyfile < "$payload/config/gateway/Caddyfile"
+    fi
+    if [[ ! -f "$private/root.key" || ! -f "$root/tls/root.crt" ]]; then
+        [[ ! -e "$private/root.key" && ! -e "$root/tls/root.crt" ]]
+        openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$private/root.key" >/dev/null 2>&1
+        openssl req -x509 -key "$private/root.key" -out "$root/tls/root.crt" -days 3650 -subj '/O=GnX Labs/CN=GnX Labs'
+    fi
+    ca_before=$(openssl x509 -in "$root/tls/root.crt" -noout -fingerprint -sha256)
+    install -m 0644 "$payload/config/pki/ca.cnf" "$config"
+    install -m 0644 "$payload/config/pki/node.ext" /etc/gnx-core/node.ext
+    [[ -f "$private/index.txt" ]] || : > "$private/index.txt"
+    [[ -f "$private/serial" ]] || openssl rand -hex 16 > "$private/serial"
+    [[ -f "$private/crlnumber" ]] || printf '01\n' > "$private/crlnumber"
+fi
+changed=false
+renewable=true
+openssl x509 -in "$root/tls/root.crt" -checkend 0 -noout
+if [[ -f "$root/tls/node.crt" ]]; then
+        openssl verify -no_check_time -CAfile "$root/tls/root.crt" -purpose sslserver -verify_hostname app.gnx "$root/tls/node.crt"
+        openssl verify -no_check_time -CAfile "$root/tls/root.crt" -purpose sslserver -verify_hostname compute.gnx "$root/tls/node.crt"
+        serial=$(openssl x509 -in "$root/tls/node.crt" -noout -serial)
+        serial=${serial#serial=}
+        [[ "$serial" =~ ^[[:xdigit:]]+$ ]]
+        if ! awk -F '\t' -v serial="$serial" 'toupper($4)==toupper(serial) {found=1} END {exit !found}' "$private/index.txt"; then
+            openssl ca -config "$config" -valid "$root/tls/node.crt"
+            install -m 0600 "$root/tls/node.crt" "$private/certs/$serial.pem"
+        fi
+        case $(awk -F '\t' -v serial="$serial" 'toupper($4)==toupper(serial) {print $1; exit}' "$private/index.txt") in
+            V|E) ;; # Expiration permits renewal, revocation does not.
+            *) renewable=false ;;
+        esac
+        [[ -f "$root/tls/node.key" ]]
+        cmp <(openssl x509 -in "$root/tls/node.crt" -pubkey -noout) <(openssl pkey -in "$root/tls/node.key" -pubout)
+    elif [[ ! -f "$root/tls/node.key" ]]; then
+        openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$root/tls/node.key" >/dev/null 2>&1
+fi
+if [[ "$renewable" == true ]] && { [[ ! -f "$root/tls/node.crt" ]] || ! openssl x509 -in "$root/tls/node.crt" -checkend 2592000 -noout >/dev/null || ! openssl x509 -in "$root/tls/node.crt" -noout -ext crlDistributionPoints | grep -Fq 'URI:http://app.gnx/pki/root.crl'; }; then
+        openssl req -new -key "$root/tls/node.key" -out "$root/tls/node.csr" -subj '/O=GnX Labs/CN=app.gnx'
+        openssl ca -batch -notext -config "$config" -extfile /etc/gnx-core/node.ext -in "$root/tls/node.csr" -out "$root/tls/node.crt.new"
+        openssl verify -CAfile "$root/tls/root.crt" -purpose sslserver "$root/tls/node.crt.new"
+        chmod 0644 "$root/tls/node.crt.new"
+        changed=true
+fi
+if [[ "$mode" == prepare ]]; then
+    [[ "$(openssl x509 -in "$root/tls/root.crt" -noout -fingerprint -sha256)" == "$ca_before" ]]
+    chmod 0600 "$root/tls/node.key"
+    install -m 0755 "$payload/scripts/tls.run" /etc/gnx-core/tls.run
+    install -m 0644 "$payload/config/systemd/gnx-core-crl.service" "$payload/config/systemd/gnx-core-crl.timer" /etc/systemd/system/
+fi
+openssl ca -config "$config" -gencrl -out "$private/root.crl.pem.new"
+openssl crl -in "$private/root.crl.pem.new" -verify -CAfile "$root/tls/root.crt" -noout
+if [[ "$changed" == true ]]; then
+    openssl verify -CAfile "$root/tls/root.crt" -CRLfile "$private/root.crl.pem.new" -crl_check "$root/tls/node.crt.new"
+    cmp <(openssl x509 -in "$root/tls/node.crt.new" -pubkey -noout) <(openssl pkey -in "$root/tls/node.key" -pubout)
+    mv "$root/tls/node.crt.new" "$root/tls/node.crt"
+fi
+openssl crl -in "$private/root.crl.pem.new" -outform DER -out "$root/web/pki/root.crl.new"
+chmod 0644 "$root/web/pki/root.crl.new"
+mv "$root/web/pki/root.crl.new" "$root/web/pki/root.crl"
+mv "$private/root.crl.pem.new" "$private/root.crl.pem"
+flock -u 9
+exec 9>&-
+[[ "$renewable" == true ]] || { printf 'Certificado revocado/no renovable; CRL publicada.\n' >&2; exit 1; }
+if [[ "$changed" == true && "$mode" == refresh ]] && systemctl is-active --quiet gnx-core.target; then
+    if systemctl is-active --quiet gnx-core-compute.service; then
+        podman exec gnx-core-compute systemctl try-restart pveproxy.service
+    fi
+    # Do not wait for a gateway job ordered after this maintenance unit.
+    systemctl --no-block try-restart gnx-core-gateway.service
+fi

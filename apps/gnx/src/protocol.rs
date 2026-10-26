@@ -18,6 +18,8 @@ pub enum Operation {
     Status,
     Enroll,
     Password,
+    // Internal installer operation, deliberately absent from CLI parsing/help.
+    Retire,
 }
 
 impl Operation {

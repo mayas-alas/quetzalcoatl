@@ -1,0 +1,25 @@
+[ ca ]
+default_ca = gnx
+
+[ gnx ]
+dir = /var/lib/gnx-core/ca-private
+database = $dir/index.txt
+new_certs_dir = $dir/certs
+serial = $dir/serial
+crlnumber = $dir/crlnumber
+certificate = /var/lib/gnx-core/tls/root.crt
+private_key = $dir/root.key
+default_md = sha256
+default_days = 365
+default_crl_hours = 24
+policy = server_subject
+unique_subject = no
+copy_extensions = none
+crl_extensions = crl_extensions
+
+[ server_subject ]
+organizationName = match
+commonName = supplied
+
+[ crl_extensions ]
+authorityKeyIdentifier = keyid:always

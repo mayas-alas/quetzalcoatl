@@ -2,6 +2,12 @@
   <Package Name="GnX Core" Manufacturer="GnX" Version="$(var.Version)" UpgradeCode="7A34F3DC-EA24-4DDF-8ADB-5817BF28BD21" Scope="perMachine">
     <SummaryInformation Description="GnX Core: Rust control, dedicated WSL and native Quadlets" />
     <MajorUpgrade DowngradeErrorMessage="A newer GnX Core is already installed." />
+    <CustomAction Id="RecoverCore" FileRef="CoreExe" ExeCommand="--msi-recover" Execute="rollback" Impersonate="no" Return="check" />
+    <CustomAction Id="RetireCore" FileRef="CoreExe" ExeCommand="--msi-uninstall" Execute="deferred" Impersonate="no" Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="RecoverCore" Before="RetireCore" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="RetireCore" Before="StopServices" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
     <MediaTemplate EmbedCab="yes" CompressionLevel="low" />
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="GnX Core">

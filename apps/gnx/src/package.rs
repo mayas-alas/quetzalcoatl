@@ -56,6 +56,22 @@ pub fn verify(root: &Path) -> io::Result<()> {
         "scripts/install.run",
         "config/wsl.conf",
         "config/images.json",
+        "config/windows-wslconfig",
+        "config/web/index.html",
+        "scripts/configure.run",
+        "scripts/install-pve-tls.run",
+        "config/compute/pveproxy.conf",
+        "config/systemd/gnx-core.target",
+        "config/quadlet/gnx-core-compute.container",
+        "config/quadlet/gnx-core-dns.container",
+        "config/quadlet/gnx-core-mesh.container",
+        "scripts/tls.run",
+        "config/pki/ca.cnf",
+        "config/pki/node.ext",
+        "config/gateway/Caddyfile",
+        "config/quadlet/gnx-core-gateway.container",
+        "config/systemd/gnx-core-crl.service",
+        "config/systemd/gnx-core-crl.timer",
     ];
     for name in required {
         if !manifest.files.iter().any(|entry| entry.path == name) {

@@ -8,6 +8,7 @@ use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
+use windows_sys::Win32::{Foundation::CRYPT_E_NOT_FOUND, Security::Cryptography::*};
 
 fn native(name: &str, args: &[&str]) -> io::Result<()> {
     let windows =
@@ -72,6 +73,7 @@ fn hosts() -> io::Result<()> {
 }
 
 pub fn publish(identity: &Identity) -> io::Result<()> {
+    let _directory = security::private_directory()?;
     let root = security::state_dir()?;
     let output = identity.run(
         &[
@@ -105,10 +107,7 @@ pub fn publish(identity: &Identity) -> io::Result<()> {
         file.write_all(certificate.as_bytes())?;
         file.sync_all()?;
     }
-    native(
-        "certutil.exe",
-        &["-addstore", "-f", "Root", &path.to_string_lossy()],
-    )?;
+    trust(false)?;
     let output = identity.run(
         &[
             "--distribution",
@@ -129,6 +128,13 @@ pub fn publish(identity: &Identity) -> io::Result<()> {
     if output.code != 0 {
         return Err(io::Error::other("IP WSL no confirmada"));
     }
+    hosts()?;
+    forward(&ip, 443, "portproxy")?;
+    forward(&ip, 80, "portproxy-80")?;
+    Ok(())
+}
+
+fn owned_forward(port: u16, receipt: &str) -> io::Result<Option<String>> {
     // Never overwrite a foreign portproxy slot. Compare native state with our
     // protected receipt before updating the WSL address.
     use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
@@ -139,7 +145,7 @@ pub fn publish(identity: &Identity) -> io::Result<()> {
         RegGetValueW(
             HKEY_LOCAL_MACHINE,
             wide(r"SYSTEM\CurrentControlSet\Services\PortProxy\v4tov4\tcp").as_ptr(),
-            wide("127.0.0.1/443").as_ptr(),
+            wide(&format!("127.0.0.1/{port}")).as_ptr(),
             RRF_RT_REG_SZ,
             std::ptr::null_mut(),
             value.as_mut_ptr().cast(),
@@ -150,18 +156,28 @@ pub fn publish(identity: &Identity) -> io::Result<()> {
         let existing = String::from_utf16_lossy(
             &value[..value.iter().position(|&c| c == 0).unwrap_or(value.len())],
         );
-        let saved = security::read_private("portproxy", 256)?;
+        let saved = security::read_private(receipt, 256)?;
         if saved != existing.as_bytes() {
             return Err(io::Error::other("portproxy ajeno; no se modifica"));
         }
+        Ok(Some(existing))
     } else if code == 2 || code == 3 {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 443))
-            .map_err(|_| io::Error::other("puerto local 443 ocupado"))?;
-        drop(listener);
+        Ok(None)
     } else {
-        return Err(io::Error::from_raw_os_error(code as i32));
+        Err(io::Error::from_raw_os_error(code as i32))
     }
-    hosts()?;
+}
+
+fn forward(ip: &str, port: u16, receipt: &str) -> io::Result<()> {
+    let existing = owned_forward(port, receipt)?;
+    if existing.as_deref() == Some(&format!("{ip}/{port}")) {
+        return Ok(());
+    }
+    if existing.is_none() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))
+            .map_err(|_| io::Error::other(format!("puerto local {port} ocupado")))?;
+        drop(listener);
+    }
     native(
         "netsh.exe",
         &[
@@ -170,11 +186,163 @@ pub fn publish(identity: &Identity) -> io::Result<()> {
             "add",
             "v4tov4",
             "listenaddress=127.0.0.1",
-            "listenport=443",
+            &format!("listenport={port}"),
             &format!("connectaddress={ip}"),
-            "connectport=443",
+            &format!("connectport={port}"),
         ],
     )?;
-    fs::write(root.join("portproxy"), format!("{ip}/443"))?;
+    fs::write(security::state_dir()?.join(receipt), format!("{ip}/{port}"))?;
     Ok(())
+}
+
+fn trust(remove: bool) -> io::Result<()> {
+    use std::{
+        os::windows::ffi::OsStrExt,
+        ptr::{null, null_mut},
+    };
+    let path = security::state_dir()?.join("root.crt");
+    let _receipt = security::private_file("root.crt")?;
+    let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut context = null_mut();
+    if unsafe {
+        CryptQueryObject(
+            CERT_QUERY_OBJECT_FILE,
+            name.as_ptr().cast(),
+            CERT_QUERY_CONTENT_FLAG_CERT,
+            CERT_QUERY_FORMAT_FLAG_ALL,
+            0,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            &mut context,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    let certificate = context.cast::<CERT_CONTEXT>();
+    let root: Vec<u16> = "Root".encode_utf16().chain(Some(0)).collect();
+    let store = unsafe {
+        CertOpenStore(
+            CERT_STORE_PROV_SYSTEM_W,
+            0,
+            0,
+            CERT_SYSTEM_STORE_LOCAL_MACHINE | CERT_STORE_OPEN_EXISTING_FLAG,
+            root.as_ptr().cast(),
+        )
+    };
+    let result = (|| {
+        if store.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let existing = unsafe {
+            CertFindCertificateInStore(
+                store,
+                X509_ASN_ENCODING,
+                0,
+                CERT_FIND_EXISTING,
+                certificate.cast(),
+                null(),
+            )
+        };
+        if existing.is_null() {
+            if unsafe { windows_sys::Win32::Foundation::GetLastError() } != CRYPT_E_NOT_FOUND as u32
+            {
+                return Err(io::Error::last_os_error());
+            }
+            if !remove
+                && unsafe {
+                    CertAddCertificateContextToStore(
+                        store,
+                        certificate,
+                        CERT_STORE_ADD_NEW,
+                        null_mut(),
+                    )
+                } == 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            return Ok(());
+        }
+        let same = unsafe {
+            std::slice::from_raw_parts(
+                (*existing).pbCertEncoded,
+                (*existing).cbCertEncoded as usize,
+            ) == std::slice::from_raw_parts(
+                (*certificate).pbCertEncoded,
+                (*certificate).cbCertEncoded as usize,
+            )
+        };
+        let result = if !same {
+            Err(io::Error::other(
+                "certificado raíz existente distinto; no se modifica",
+            ))
+        } else if remove {
+            // CertDeleteCertificateFromStore consumes this context, even on failure.
+            let removed = unsafe { CertDeleteCertificateFromStore(existing) };
+            return if removed != 0 {
+                Ok(())
+            } else {
+                Err(io::Error::last_os_error())
+            };
+        } else {
+            Ok(())
+        };
+        unsafe { CertFreeCertificateContext(existing) };
+        result
+    })();
+    unsafe {
+        if !store.is_null() {
+            CertCloseStore(store, 0);
+        }
+        CertFreeCertificateContext(certificate);
+    }
+    result
+}
+
+pub fn remove() -> io::Result<()> {
+    let _directory = security::private_directory()?;
+    // Validate ownership before the first removal; never delete by name alone.
+    for (port, receipt) in [(443, "portproxy"), (80, "portproxy-80")] {
+        owned_forward(port, receipt)?;
+    }
+    let windows =
+        std::env::var_os("SystemRoot").ok_or_else(|| io::Error::other("SystemRoot ausente"))?;
+    let path = PathBuf::from(windows).join(r"System32\drivers\etc\hosts");
+    let contents = fs::read_to_string(&path)?;
+    let marker = "# GnXCore:7a34f3dc-ea24-4ddf-8adb-5817bf28bd21";
+    let owned = format!("127.0.0.1 app.gnx compute.gnx {marker}");
+    if contents
+        .lines()
+        .any(|line| line.contains(marker) && line != owned)
+    {
+        return Err(io::Error::other(
+            "entrada hosts propia modificada; no se retira",
+        ));
+    }
+    for (port, receipt) in [(443, "portproxy"), (80, "portproxy-80")] {
+        if owned_forward(port, receipt)?.is_some() {
+            native(
+                "netsh.exe",
+                &[
+                    "interface",
+                    "portproxy",
+                    "delete",
+                    "v4tov4",
+                    "listenaddress=127.0.0.1",
+                    &format!("listenport={port}"),
+                ],
+            )?;
+        }
+    }
+    let retained: String = contents
+        .split_inclusive('\n')
+        .filter(|line| line.trim_end_matches(['\r', '\n']) != owned)
+        .collect();
+    if retained != contents {
+        fs::write(path, retained)?;
+    }
+    trust(true)
 }

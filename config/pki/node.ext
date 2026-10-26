@@ -2,3 +2,4 @@ subjectAltName=DNS:app.gnx,DNS:compute.gnx
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
+crlDistributionPoints=URI:http://app.gnx/pki/root.crl

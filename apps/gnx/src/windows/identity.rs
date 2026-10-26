@@ -10,7 +10,7 @@ use windows_sys::Win32::{
     Foundation::{GetLastError, HANDLE, LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT},
     Security::{
         Cryptography::{CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptUnprotectData},
-        LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT, LogonUserW, SECURITY_ATTRIBUTES,
+        LOGON32_LOGON_SERVICE, LOGON32_PROVIDER_DEFAULT, LogonUserW, SECURITY_ATTRIBUTES,
     },
     Storage::FileSystem::{
         CreateFileW, FILE_GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, ReadFile,
@@ -155,7 +155,7 @@ impl Identity {
                 wide(ACCOUNT).as_ptr(),
                 wide(".").as_ptr(),
                 password.as_ptr(),
-                LOGON32_LOGON_INTERACTIVE,
+                LOGON32_LOGON_SERVICE,
                 LOGON32_PROVIDER_DEFAULT,
                 &mut token,
             )

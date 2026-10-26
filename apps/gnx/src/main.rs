@@ -32,6 +32,11 @@ fn run() -> std::io::Result<bool> {
             Ok(true)
         }
         #[cfg(windows)]
+        [arg] if arg == "--msi-uninstall" || arg == "--msi-recover" => {
+            windows::installer(arg == "--msi-uninstall")?;
+            Ok(true)
+        }
+        #[cfg(windows)]
         [arg] if arg == "--service" => {
             windows::service::dispatch()?;
             Ok(true)

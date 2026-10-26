@@ -3,6 +3,33 @@
 set -euo pipefail
 umask 077
 [[ $(id -u) == 0 ]]
+if [[ ${1:-} == access || ${1:-} == mesh-access ]]; then
+    exec 8>/run/gnx-core-access.lock
+    flock -x -w 30 8
+    bind=$(ip -4 -o addr show dev eth0 | awk '{split($4,a,"/"); print a[1]; exit}')
+    [[ "$bind" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    mesh_ip=$(ip -4 -o addr show dev tailscale0 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}' || :)
+    if [[ "$mesh_ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then bind="$bind $mesh_ip"; fi
+    printf 'GNX_BIND=%s\n' "$bind" > /var/lib/gnx-core/gateway.env.new
+    if cmp -s /var/lib/gnx-core/gateway.env.new /var/lib/gnx-core/gateway.env; then
+        rm -f /var/lib/gnx-core/gateway.env.new
+    else
+        mv /var/lib/gnx-core/gateway.env.new /var/lib/gnx-core/gateway.env
+        if [[ "$1" == mesh-access ]]; then systemctl --no-block try-restart gnx-core-gateway.service; fi
+    fi
+    if [[ "$1" == mesh-access ]]; then
+        [[ "$mesh_ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+        printf 'FTLCONF_dns_interface=tailscale0\nFTLCONF_dns_port=53\nFTLCONF_dns_listeningMode=NONE\nFTLCONF_misc_dnsmasq_lines=interface=tailscale0;except-interface=lo;bind-dynamic\nFTLCONF_dns_hosts=%s app.gnx;%s compute.gnx\n' "$mesh_ip" "$mesh_ip" > /var/lib/gnx-core/dns.env.new
+        chmod 0644 /var/lib/gnx-core/dns.env.new
+        if cmp -s /var/lib/gnx-core/dns.env.new /var/lib/gnx-core/dns.env; then
+            rm -f /var/lib/gnx-core/dns.env.new
+        else
+            mv /var/lib/gnx-core/dns.env.new /var/lib/gnx-core/dns.env
+            systemctl --no-block try-restart gnx-core-dns.service
+        fi
+    fi
+    exit 0
+fi
 systemctl is-active --quiet gnx-core.target
 IFS= read -r secret
 [[ -n "$secret" && ${#secret} -le 1024 ]]
@@ -16,15 +43,8 @@ case ${1:-} in
     trap 'podman exec gnx-core-mesh rm -f /run/gnx-auth-key >/dev/null 2>&1 || :; rm -f -- "$temporary/key"; rmdir -- "$temporary"' EXIT
     podman exec gnx-core-mesh chmod 0600 /run/gnx-auth-key >/dev/null 2>&1
     podman exec gnx-core-mesh tailscale up --auth-key=file:/run/gnx-auth-key --accept-dns=false --timeout=120s >/dev/null 2>&1
-    mesh_ip=$(podman exec gnx-core-mesh tailscale ip -4 | head -n 1)
-    [[ "$mesh_ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
-    printf 'FTLCONF_dns_interface=tailscale0\nFTLCONF_dns_port=53\nFTLCONF_dns_listeningMode=NONE\nFTLCONF_misc_dnsmasq_lines=interface=tailscale0;except-interface=lo;bind-dynamic\nFTLCONF_dns_hosts=%s app.gnx;%s compute.gnx\n' "$mesh_ip" "$mesh_ip" > /var/lib/gnx-core/dns.env
-    chmod 0644 /var/lib/gnx-core/dns.env
-    systemctl restart gnx-core-dns.service >/dev/null 2>&1
-    bind=$(ip -4 -o addr show dev eth0 | awk '{split($4,a,"/"); print a[1]; exit}')
-    printf 'GNX_BIND=%s %s\n' "$bind" "$mesh_ip" > /var/lib/gnx-core/gateway.env
-    systemctl restart gnx-core-gateway.service >/dev/null 2>&1
-    printf '%s\n' "DNS configurado en $mesh_ip. Split DNS pendiente en Tailscale; resolución remota y confianza CA pendientes." > /var/lib/gnx-core/web/status.new
+    bash "$0" mesh-access
+    printf '%s\n' 'Tailscale configurado. Diagnóstico en journal; acceso remoto se verifica por separado.' > /var/lib/gnx-core/web/status.new
     chmod 0644 /var/lib/gnx-core/web/status.new
     mv /var/lib/gnx-core/web/status.new /var/lib/gnx-core/web/status.txt
     ;;

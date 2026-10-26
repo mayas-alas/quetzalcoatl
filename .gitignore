@@ -4,6 +4,7 @@
 /.AGENTS/
 *.msi
 *.exe
+!/releases/v*/gnx.exe
 *.wixpdb
 *.wixobj
 *.log

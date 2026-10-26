@@ -94,12 +94,16 @@ impl Controller {
             .as_ref()
             .map(|s| zeroize::Zeroizing::new(s.clone()));
         match tokio::task::spawn_blocking(move || {
-            execute_secret(op, secret.as_deref().map(String::as_str))
+            let result = execute_secret(op, secret.as_deref().map(String::as_str));
+            if let Err(error) = &result {
+                super::service::report_error(error);
+            }
+            result
         })
         .await
         {
             Ok(Ok((state, message))) => {
-                if matches!(op, Operation::Start | Operation::Stop) {
+                if matches!(op, Operation::Start | Operation::Stop | Operation::Retire) {
                     if let Err(error) = self.hold_session(op == Operation::Start) {
                         super::service::report_error(&error);
                         return Response::new(
@@ -143,12 +147,16 @@ impl Controller {
         let Ok(_permit) = self.mutation.clone().acquire_owned().await else {
             return;
         };
-        if let Ok(Err(error)) = tokio::task::spawn_blocking(recover).await {
-            super::service::report_error(&error);
-        } else if security::read_private("intent", 16).is_ok_and(|value| value == b"running") {
-            if let Err(error) = self.hold_session(true) {
-                super::service::report_error(&error);
+        match tokio::task::spawn_blocking(recover).await {
+            Ok(Ok(())) => {
+                if security::read_private("intent", 16).is_ok_and(|value| value == b"running") {
+                    if let Err(error) = self.hold_session(true) {
+                        super::service::report_error(&error);
+                    }
+                }
             }
+            Ok(Err(error)) => super::service::report_error(&error),
+            Err(_) => super::service::report_error(&io::Error::other("recuperación interrumpida")),
         }
     }
 }
@@ -158,6 +166,13 @@ fn execute(op: Operation) -> io::Result<(NodeState, String)> {
 }
 
 fn execute_secret(op: Operation, secret: Option<&str>) -> io::Result<(NodeState, String)> {
+    if op == Operation::Retire {
+        retire()?;
+        return Ok((
+            NodeState::Stopped,
+            "nodo retirado; identidad y datos conservados".into(),
+        ));
+    }
     let ownership = Ownership::read()?;
     let identity = Identity::open(&ownership)?;
     let running = identity.run(&["--list", "--running", "--quiet"], Duration::from_secs(10))?;
@@ -259,28 +274,10 @@ fn execute_secret(op: Operation, secret: Option<&str>) -> io::Result<(NodeState,
             NodeState::Stopped,
             "target detenido; datos conservados, otras WSL intactas".into(),
         )),
-        "active" if op != Operation::Stop => {
-            let message = "target activo; HTTPS, mesh y compute aún no comprobados";
-            if op != Operation::Status {
-                return Ok((NodeState::Active, message.into()));
-            }
-            let phase = identity.run(
-                &[
-                    "--distribution",
-                    DISTRO,
-                    "--exec",
-                    "/usr/bin/cat",
-                    "/var/lib/gnx-core/web/status.txt",
-                ],
-                Duration::from_secs(10),
-            )?;
-            let message = if phase.code == 0 {
-                format!("{message}\nÚltima fase publicada (no es salud en vivo): {}", phase.text().trim())
-            } else {
-                format!("{message}; fase no disponible")
-            };
-            Ok((NodeState::Active, message))
-        }
+        "active" if op != Operation::Stop => Ok((
+            NodeState::Active,
+            "target activo; HTTPS, mesh y compute se verifican por separado".into(),
+        )),
         "activating" => Ok((
             NodeState::Starting,
             "systemd iniciando el target; servicios aún no comprobados".into(),
@@ -357,4 +354,70 @@ pub fn recover() -> io::Result<()> {
             "intención inválida; no se inicia el nodo",
         )),
     }
+}
+
+pub fn retire() -> io::Result<()> {
+    // MSI removal preserves node intent for rollback/reinstallation and all data.
+    let ownership = match Ownership::read() {
+        Ok(value) => value,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let identity = Identity::open(&ownership)?;
+    let running = identity.run(&["--list", "--running", "--quiet"], Duration::from_secs(10))?;
+    if running.code != 0 {
+        return Err(io::Error::other("estado WSL no confirmado"));
+    }
+    if running.text().lines().any(|line| line.trim() == DISTRO) {
+        let stopped = identity.run(
+            &[
+                "--distribution",
+                DISTRO,
+                "--exec",
+                "/usr/bin/systemctl",
+                "stop",
+                TARGET,
+            ],
+            Duration::from_secs(150),
+        )?;
+        if stopped.code != 0 {
+            return Err(io::Error::other(
+                "parada nativa no confirmada; no se desinstala",
+            ));
+        }
+        let state = identity.run(
+            &[
+                "--distribution",
+                DISTRO,
+                "--exec",
+                "/usr/bin/systemctl",
+                "is-active",
+                "--quiet",
+                TARGET,
+                "gnx-core-gateway.service",
+                "gnx-core-dns.service",
+                "gnx-core-mesh.service",
+                "gnx-core-compute.service",
+                "gnx-core-crl.service",
+                "gnx-core-crl.timer",
+            ],
+            Duration::from_secs(10),
+        )?;
+        // Native LSB 3 means no listed unit is active. Do not parse display text
+        // (including warnings/whitespace), or treat arbitrary errors as stopped.
+        if state.code != 3 {
+            return Err(io::Error::other(format!(
+                "parada no confirmada (systemctl {}); no se desinstala",
+                state.code
+            )));
+        }
+    }
+    super::access::remove()?;
+    let root = security::state_dir()?;
+    match security::read_private("applied-version", 64) {
+        Ok(_) => std::fs::remove_file(root.join("applied-version"))?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    Ok(())
 }

@@ -1,0 +1,11 @@
+[Unit]
+Description=Renew the GnX Core CRL every six hours
+PartOf=gnx-core.target
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:00:00
+Persistent=true
+Unit=gnx-core-crl.service
+
+[Install]
+WantedBy=gnx-core.target

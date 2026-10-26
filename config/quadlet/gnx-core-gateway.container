@@ -1,6 +1,8 @@
 [Unit]
 Description=GnX local HTTPS gateway
 PartOf=gnx-core.target
+Wants=gnx-core-crl.service
+After=gnx-core-crl.service
 
 [Quadlet]
 DefaultDependencies=false
@@ -12,9 +14,7 @@ ContainerName=gnx-core-gateway
 Network=host
 EnvironmentFile=/var/lib/gnx-core/gateway.env
 Volume=/etc/gnx-core/Caddyfile:/etc/caddy/Caddyfile:ro
-Volume=/var/lib/gnx-core/tls/root.crt:/etc/gnx/tls/root.crt:ro
-Volume=/var/lib/gnx-core/tls/node.crt:/etc/gnx/tls/node.crt:ro
-Volume=/var/lib/gnx-core/tls/node.key:/etc/gnx/tls/node.key:ro
+Volume=/var/lib/gnx-core/tls:/etc/gnx/tls:ro
 Volume=/var/lib/gnx-core/web:/srv/gnx:ro
 Volume=/var/lib/gnx-core/gateway-data:/data
 Volume=/var/lib/gnx-core/gateway-config:/config
@@ -22,6 +22,7 @@ LogDriver=journald
 StopTimeout=20
 
 [Service]
+ExecStartPre=/usr/bin/bash /etc/gnx-core/configure.run access
 Restart=on-failure
 RestartSec=5s
 TimeoutStartSec=90s
