@@ -8,6 +8,8 @@ Image=sha256:00c9293ff01e249b1997dd222b7cd1766cb175fd84cd90b4282d403d4d7fd8fe
 Pull=never
 ContainerName=gnx-core-compute
 HostName=gnx-core-compute
+# Stable backend address within the sealed base's Podman bridge.
+IP=10.88.0.2
 PublishPort=127.0.0.1:8006:8006
 AddDevice=/dev/fuse
 PodmanArgs=--privileged --systemd=always
