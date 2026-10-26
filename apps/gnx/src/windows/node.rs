@@ -49,9 +49,14 @@ impl Controller {
             session.take();
             return Ok(());
         }
-        if session.is_some() {
+        if session
+            .as_ref()
+            .and_then(|session| session.worker.as_ref())
+            .is_some_and(|worker| !worker.is_finished())
+        {
             return Ok(());
         }
+        session.take();
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
         let worker = std::thread::spawn(move || {
@@ -160,30 +165,8 @@ fn execute_secret(op: Operation, secret: Option<&str>) -> io::Result<(NodeState,
         return Err(io::Error::other("no se pudo observar WSL"));
     }
     let running = running.text().lines().any(|line| line.trim() == DISTRO);
-    if op == Operation::Status {
-        return Ok(if running {
-            // The node publishes its own stage; show it instead of a generic
-            // message. Never wakes a stopped distribution.
-            let phase = identity
-                .run(
-                    &[
-                        "--distribution",
-                        DISTRO,
-                        "--exec",
-                        "/usr/bin/cat",
-                        "/var/lib/gnx-core/web/status.txt",
-                    ],
-                    Duration::from_secs(10),
-                )
-                .ok()
-                .filter(|result| result.code == 0)
-                .map(|result| result.text().trim().to_string())
-                .filter(|text| !text.is_empty())
-                .unwrap_or_else(|| "nodo en ejecución sin fase publicada todavía".into());
-            (NodeState::Unknown, phase)
-        } else {
-            (NodeState::Stopped, "nodo detenido; WSL no se inició".into())
-        });
+    if op == Operation::Status && !running {
+        return Ok((NodeState::Stopped, "nodo detenido; WSL no se inició".into()));
     }
     if matches!(op, Operation::Enroll | Operation::Password) {
         if !running {
@@ -276,10 +259,28 @@ fn execute_secret(op: Operation, secret: Option<&str>) -> io::Result<(NodeState,
             NodeState::Stopped,
             "target detenido; datos conservados, otras WSL intactas".into(),
         )),
-        "active" if op != Operation::Stop => Ok((
-            NodeState::Active,
-            "target activo; HTTPS, mesh y compute aún no comprobados".into(),
-        )),
+        "active" if op != Operation::Stop => {
+            let message = "target activo; HTTPS, mesh y compute aún no comprobados";
+            if op != Operation::Status {
+                return Ok((NodeState::Active, message.into()));
+            }
+            let phase = identity.run(
+                &[
+                    "--distribution",
+                    DISTRO,
+                    "--exec",
+                    "/usr/bin/cat",
+                    "/var/lib/gnx-core/web/status.txt",
+                ],
+                Duration::from_secs(10),
+            )?;
+            let message = if phase.code == 0 {
+                format!("{message}\nÚltima fase publicada (no es salud en vivo): {}", phase.text().trim())
+            } else {
+                format!("{message}; fase no disponible")
+            };
+            Ok((NodeState::Active, message))
+        }
         "activating" => Ok((
             NodeState::Starting,
             "systemd iniciando el target; servicios aún no comprobados".into(),
