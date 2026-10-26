@@ -1,0 +1,142 @@
+name: Windows installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      payload_release:
+        description: 'Release tag containing gnx-offline-inputs.zip in this repository'
+        required: true
+        type: string
+      payload_sha256:
+        description: 'SHA-256 of the complete offline input ZIP'
+        required: true
+        type: string
+      publish_release:
+        description: 'Publish installers as a prerelease (requires matching version tag)'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installers-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Check packaging prerequisites
+        id: version
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $drive = (Get-Item $env:GITHUB_WORKSPACE).PSDrive
+          if ($drive.Free -lt 12GB) { throw 'Packaging requires at least 12 GiB free; no validation will be skipped' }
+          $metadata = cargo metadata --no-deps --locked --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cargo metadata failed' }
+          $version = ($metadata.packages | Where-Object name -eq 'gnx').version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid package version' }
+          foreach ($name in 'gnx.exe', 'CHANGELOG.md') {
+            if (-not (Test-Path -LiteralPath "releases/v$version/$name" -PathType Leaf)) { throw "Versioned release input missing: $name" }
+          }
+          "GNX_VERSION=$version" >> $env:GITHUB_ENV
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Download and verify offline inputs
+        env:
+          PAYLOAD_RELEASE: ${{ inputs.payload_release }}
+          PAYLOAD_SHA256: ${{ inputs.payload_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:PAYLOAD_RELEASE -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._-]*$') { throw 'Invalid input release tag' }
+          if ($env:PAYLOAD_SHA256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Invalid archive SHA256' }
+          $archive = Join-Path $env:RUNNER_TEMP 'gnx-offline-inputs.zip'
+          gh release download $env:PAYLOAD_RELEASE --pattern gnx-offline-inputs.zip --output $archive
+          if ($LASTEXITCODE -ne 0) { throw 'Offline input download failed' }
+          ./scripts/prepare-ci-payload.ps1 -Archive $archive -Sha256 $env:PAYLOAD_SHA256
+          Remove-Item -LiteralPath $archive
+
+      - name: Package the versioned CLI with canonical gates
+        run: ./scripts/build.ps1 -Package -UseVersionedBinary
+
+      - name: Record output hashes
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = "build/releases/v$env:GNX_VERSION"
+          $lines = foreach ($name in 'GnxCore.msi', 'GnxCoreSetup.exe', 'gnx.exe', 'base-image.digest') {
+            $file = Get-Item -LiteralPath (Join-Path $output $name)
+            if ($file.Length -eq 0) { throw "Empty output: $name" }
+            "$((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $name"
+          }
+          [IO.File]::WriteAllLines((Join-Path $PWD "$output/SHA256SUMS.txt"), $lines, [Text.UTF8Encoding]::new($false))
+          Copy-Item -LiteralPath "releases/v$env:GNX_VERSION/CHANGELOG.md" -Destination $output
+          "MSI/EXE packaged from the versioned CLI. Installation and runtime acceptance were not executed." >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload installers
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gnx-core-v${{ env.GNX_VERSION }}-windows-x64
+          path: |
+            build/releases/v${{ env.GNX_VERSION }}/GnxCore.msi
+            build/releases/v${{ env.GNX_VERSION }}/GnxCoreSetup.exe
+            build/releases/v${{ env.GNX_VERSION }}/gnx.exe
+            build/releases/v${{ env.GNX_VERSION }}/base-image.digest
+            build/releases/v${{ env.GNX_VERSION }}/SHA256SUMS.txt
+            build/releases/v${{ env.GNX_VERSION }}/CHANGELOG.md
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  release:
+    if: ${{ inputs.publish_release }}
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: v${{ needs.package.outputs.version }}
+    steps:
+      - name: Download verified build outputs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: gnx-core-v${{ needs.package.outputs.version }}-windows-x64
+          path: installers
+
+      - name: Verify hashes and publish prerelease
+        working-directory: installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum --check SHA256SUMS.txt
+          tag_commit=$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)
+          if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo 'Version tag does not match this workflow commit; refusing publication' >&2
+            exit 1
+          fi
+          printf '\n\n## Entrega\n\nCommit: `%s`\n\n[GitHub Actions](%s/%s/actions/runs/%s).\n\nInstaladores de prueba sin firma Authenticode. El empaquetado CI no acredita instalación ni aceptación en un host nuevo.\n' "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> CHANGELOG.md
+          gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease --title "GnX Core $RELEASE_TAG — Windows x64 (prueba)" --notes-file CHANGELOG.md GnxCore.msi GnxCoreSetup.exe gnx.exe base-image.digest SHA256SUMS.txt
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+          printf 'Instaladores publicados: %s/%s/releases/tag/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"

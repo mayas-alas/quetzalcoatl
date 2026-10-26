@@ -1,32 +1,36 @@
 # GnX Core
 
-Tu nodo privado en Windows, operado con una CLI pequeña y herramientas nativas.
+Nodo privado para Windows con acceso HTTPS local y por Tailscale.
+Una cuenta de servicio y una distribución WSL dedicadas ejecutan **Tailscale,
+Pi-hole, Caddy y Proxmox VE** mediante systemd y Podman Quadlets.
 
-GnX separa el runtime de tu entorno personal: una cuenta Windows y una WSL
-dedicadas ejecutan **Tailscale, Pi-hole, Caddy y Proxmox VE** bajo Quadlets/systemd.
-El servicio Windows mantiene la frontera de identidad y acceso; no es otro
-supervisor de contenedores.
+## Funcionalidad disponible
 
-## Para qué usarlo
+- **https://app.gnx**: información del nodo y última fase de configuración.
+- **https://compute.gnx**: Proxmox con autenticación nativa y TLS verificado.
+- CLI para consultar, iniciar, detener y configurar las credenciales del nodo.
+- Desinstalación conservadora y reinstalación sin eliminar identidad ni datos.
 
-- Abrir **https://app.gnx** para conocer el avance local, sin esperar una key mesh.
-- Acceder a Proxmox mediante **https://compute.gnx**, con TLS y autenticación nativos.
-- Pausar y reanudar el nodo sin borrar datos ni detener tus otras WSL.
-- Como destino del producto: entregar Quadlets/configuración desde app o CLI
-  a un LXC, para RustFS, Pocket ID y NetBird. Este despliegue todavía no está
-  disponible en la versión inicial.
+La página local no requiere enrolar Tailscale ni esperar a que Proxmox esté listo.
+La fase publicada no es un monitor de salud. El despliegue de archivos/Quadlets
+hacia LXC todavía no está implementado.
 
-## Instalar y operar
+## Instalación
 
-Windows x64 con WSL2 disponible. El MSI/EXE incluye filesystem e imágenes OCI;
-la preparación no debe descargar dependencias. El enrolamiento mesh sí necesita
-acceso a su plano de control.
+Requiere Windows x64 con WSL2 y virtualización disponibles. Los instaladores
+incluyen el filesystem Linux y las cuatro imágenes OCI del núcleo; no instalan
+los prerrequisitos Windows que falten. No se garantiza cualquier host limpio.
 
-Obtén la versión desde [Releases](https://github.com/mayas-alas/quetzalcoatl-next/releases).
-La instalación nueva usa `GnXCore` / `gnxcoresvc` / `gnx-core`; no migra ni elimina
-el GnX anterior. Un conflicto de puertos, nombres o propiedad se informa.
+Los MSI y EXE se generan con la Action
+[Windows installers](.github/workflows/installers.yml). Tras una ejecución
+correcta, se descargan desde **Actions → ejecución → Artifacts**. El workflow no
+publica en GitHub Releases solo si se activa `publish_release`, como pre-release
+de prueba y con tag coincidente. Revisa `SHA256SUMS.txt` antes de usar
+los archivos y ejecuta **uno** de los dos instaladores con permisos administrativos.
 
-Abre PowerShell como administrador para operar el pipe de control:
+## Operación
+
+En PowerShell como administrador:
 
 ```powershell
 $gnx = "$env:ProgramFiles\GnX Core\gnx.exe"
@@ -37,57 +41,39 @@ $gnx = "$env:ProgramFiles\GnX Core\gnx.exe"
 & $gnx stop
 ```
 
-Mientras exista el GnX anterior, usa esta ruta explícita: el instalador no
-reescribe PATH ni hace que el comando antiguo apunte al producto nuevo.
+| Comando | Resultado |
+| --- | --- |
+| `status` | Consulta el estado del target sin iniciar una WSL detenida. No certifica HTTPS ni salud de cada servicio. |
+| `start` | Inicia el nodo preparado, sin instalar ni aplicar actualizaciones. |
+| `enroll` | Solicita la key Tailscale sin eco y configura la mesh. Necesita conectividad con Tailscale. |
+| `password` | Solicita sin eco la contraseña de Proxmox y aplica su configuración. |
+| `stop` | Detiene los servicios propios y conserva datos e identidad. La recuperación del servicio Windows respeta esa parada. |
 
-`status` no despierta una distro detenida. `start` no instala ni actualiza.
-`stop` delega en systemd y conserva datos e identidad; no usa `wsl --shutdown`.
-No introduzcas keys ni contraseñas en argumentos, navegador o chat.
+Se usa la ruta explícita porque el instalador no modifica `PATH`. No introduzcas
+keys ni contraseñas en argumentos, navegador, logs o chat.
 
-## HTTPS local y por Tailscale
+## Acceso y conservación
 
-MagicDNS/split DNS resuelve nombres; no instala certificados. El dominio `gnx`
-debe usar el Pi-hole del nodo y las ACL permitir DNS TCP/UDP 53 y HTTPS TCP 443.
+El producto gestiona internamente los certificados y la confianza del host Windows;
+no hay un comando ni un paso habitual de certificados. El acceso desde otros
+dispositivos requiere Split DNS hacia el Pi-hole del nodo, las ACL correspondientes
+y confianza en su CA privada. DNS no concede confianza TLS. Los requisitos técnicos
+están en [Arquitectura](architecture.md).
 
-Ambas URLs usan la misma CA privada del nodo, también al acceder por la mesh.
-El servicio importa automáticamente su CA en el almacén raíz de Windows mediante
-`certutil`, igual que en v0.0.6: no se exige importación manual en el host para
-clientes que usan ese almacén. Un navegador con almacén propio puede necesitar
-confianza adicional. En Android/OPPO, si la CA no está ya confiada, importa la **CA pública**
-como certificado de autoridad en los ajustes de seguridad; el nombre del menú
-depende de Android/ColorOS y el navegador debe admitir esa confianza.
+Desinstalar detiene el nodo y retira el servicio y el acceso Windows propios.
+Conserva cuenta, perfil, WSL, CA, credenciales y datos para reinstalar. **No es una
+purga**. Un conflicto de propiedad o una parada no confirmada bloquean la retirada.
 
-Obtén la CA en [app.gnx/gnx-labs-root.crt](https://app.gnx/gnx-labs-root.crt)
-desde un cliente que ya valide HTTPS, y contrasta su huella SHA-256 por un canal
-confiable antes de instalarla. No distribuyas claves privadas ni uses excepciones
-de certificado como solución. La CA del GnX anterior no acredita la del nodo nuevo;
-cambiar de nodo o de CA exige verificar y distribuir de nuevo la confianza.
-El HTTPS automático de [Tailscale](https://tailscale.com/kb/1153/enabling-https)
-emite certificados públicos para nombres del tailnet bajo `.ts.net`; no convierte
-una CA privada para `.gnx` en una CA confiada por el dispositivo.
+## Desarrollo y documentación
 
-## Base versionada
-
-La base procede de Fedora bootc, fijada por digest. Una imagen propia sellada
-podrá servir como base común para WSL y LXC, con configuración y datos separados.
-En LXC vivirán las aplicaciones, no otra copia de los cuatro servicios del nodo.
-La exportación OCI→WSL no promete capacidades bootc de upgrade/rollback dentro
-de WSL o LXC: cada capacidad se habilita solo cuando sea compatible y comprobada.
-
-## Desarrollo
-
-```powershell
-cargo build --release --locked
-./scripts/build.ps1 -Package
-```
-
-El empaquetado exige inputs locales completos en `build/payload`; no los sustituye
-por descargas silenciosas. Diagnóstico: systemctl/journalctl y SCM/Visor de eventos.
-
-[Cambios v0.0.9](releases/v0.0.9/CHANGELOG.md) · [Alcance](scope.md) · [Arquitectura](architecture.md) ·
-[Reglas para agentes](.AGENTS)
+- [Compilación, inputs offline y GitHub Actions](docs/packaging.md)
+- [Alcance y límites](scope.md)
+- [Arquitectura](architecture.md)
+- [Recorridos de usuario](historias-de-usuario.md)
+- [Contrato para agentes](.AGENTS)
+- [Cambios de 0.0.14](releases/v0.0.14/CHANGELOG.md)
 
 ## Licencia
 
-Código propio de GnX: [GNU AGPLv3](LICENSE), `AGPL-3.0-only`.
+Código propio: [GNU AGPLv3](LICENSE), `AGPL-3.0-only`.
 Las imágenes y dependencias de terceros conservan sus respectivas licencias.

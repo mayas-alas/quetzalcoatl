@@ -1,21 +1,58 @@
-# Contrato GnX
+# Contrato de agentes — GnX Core
 
-1. Leer instrucción actual, `scope.md`, `architecture.md` y diff real. Un agente;
-   sin delegar, restaurar legacy, adoptar recursos ni ampliar alcance sin permiso.
-2. Rust + configuración externa + scripts mínimos. SCM, systemd/Quadlets y PVE
-   gobiernan lifecycle; journal/Visor de eventos gobiernan diagnóstico.
-3. No generar tests, escenarios, mocks ni harnesses. Manual corto solo autorizado.
-   Evidencia fuera de documentación: máximo dos archivos y un script por agente.
-4. No secretos en argv/logs/Git; no tocar WSL, datos ni protecciones ajenos.
-5. Cerrar un recorrido utilizable, no placeholders. Separar compilado, instalado
-   y aceptado. No declarar terminado por reloj ni por build correcto.
-6. **Release obligatoria:** `releases/vX.Y.Z/gnx.exe` y
-   `releases/vX.Y.Z/CHANGELOG.md`. Sin changelog global en la raíz: no recrearlo.
-   No sobrescribir un binario versionado distinto; incrementar versión.
-   `scripts/build.ps1` exige changelog, versión y hash coincidentes; si no, falla.
-7. Commits pequeños `Hector <hector@email.gnx>`; publicar solo con autorización.
-   README = caso de uso; changelog por versión = producto. Sin bitácoras del agente.
-8. Reanudar con `scripts/build.ps1 -Resume`: leer `build/resume.json`, contrastar
-   HEAD/diff, hashes y SCM/journal antes de repetir una operación pendiente.
-   El checkpoint orienta; Git y estado nativo mandan. Guardarlo atómicamente con
-   `-CheckpointOnly` antes/después de operaciones importantes; sin secretos.
+## Autoridad y preparación
+
+1. Leer la petición vigente, `scope.md`, `architecture.md` y el estado/diff real
+   antes de actuar. Para entrega, leer también `docs/packaging.md`.
+2. Trabajar con un agente. No delegar, crear otros worktrees ni ampliar el alcance
+   sin permiso. La autorización previa de una operación no se extiende a otra tarea.
+3. Investigar hechos en código y fuentes oficiales; preguntar por intención o
+   permisos que falten. Una función pendiente no es una orden de implementarla.
+4. Conservar trabajo existente. No restaurar versiones históricas, adoptar recursos
+   por nombre, reescribir historia ni descartar cambios ajenos.
+
+## Implementación y seguridad
+
+5. Rust para fronteras y coordinación; configuración externa y scripts mínimos
+   de operaciones fijas. SCM, systemd/Quadlets y PVE gobiernan lifecycle;
+   journal/Visor de eventos gobiernan diagnóstico. No duplicar esos mecanismos.
+6. Verificar ownership y privilegios antes de mutar. No tocar WSL, cuentas, datos,
+   red o protecciones ajenos. Sin purga, apagado global ni reinicio de host implícitos.
+7. Secretos nunca en argv, URL, logs, Git, documentación o respuestas públicas.
+   No pedir al usuario pegarlos en chat. No desactivar TLS/revocación para validar.
+8. No generar tests, mocks, escenarios, simulaciones o harnesses sin una nueva
+   autorización. Formato, análisis estático y validaciones canónicas no acreditan
+   aceptación. Las comprobaciones manuales que mutan el host requieren permiso.
+
+## Entrega y documentación
+
+9. Cerrar el resultado solicitado antes de abrir otro frente. Separar código,
+   compilado, empaquetado, instalado, aplicado y aceptado; declarar límites reales.
+10. Para una entrega binaria son obligatorios `releases/vX.Y.Z/gnx.exe` y su
+    `CHANGELOG.md`, con versión y hashes coherentes mediante `scripts/build.ps1`.
+    No sobrescribir un CLI versionado distinto: incrementar la versión al cambiarlo.
+    Cambios solo documentales/CI no obligan a reconstruir ni instalar el producto.
+11. CI puede empaquetar el CLI existente con `-Package -UseVersionedBinary`; eso no
+    acredita recompilación de fuentes. Conservar todos los gates de empaquetado.
+    No omitir validación WiX o comprobaciones de integridad por disco/toolchain.
+12. README = uso; scope = alcance; architecture = implementación; historias =
+    recorridos; docs/packaging = entrega; changelog por versión = cambios de producto.
+    Sin bitácoras, instrucciones temporales de un host o funciones inventadas en
+    esos documentos. No recrear un changelog global en la raíz.
+13. Las notas versionadas son históricas, no autoridad sobre la funcionalidad
+    actual. Comprobar enlaces y referencias al editar documentación vigente.
+14. Commits pequeños con identidad `Hector <hector@email.gnx>`. Commit, push,
+    ejecución remota y publicación son acciones distintas: no presumir permiso.
+
+## Continuidad y comunicación
+
+15. Si se interrumpe una operación, usar `scripts/build.ps1 -Resume`, leer
+    `build/resume.json` y contrastar HEAD/diff y estado nativo antes de repetirla.
+    El checkpoint orienta; Git, hashes y SCM/journal mandan. No repetir mutaciones
+    cuyo resultado sea desconocido.
+16. Guardar checkpoints con `-CheckpointOnly` antes/después de operaciones largas
+    o privilegiadas. Evidencia local fuera de docs/Git, sin secretos y acotada a
+    dos archivos y un script temporal por agente. Los scripts del producto/CI no
+    son archivos temporales de evidencia.
+17. Comunicar resultado, comprobación, límite y bloqueo en pocas líneas. No narrar
+    cada lectura ni prolongar iteraciones sin un siguiente resultado concreto.

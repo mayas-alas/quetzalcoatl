@@ -1,5 +1,6 @@
 param(
     [switch]$Package,
+    [switch]$UseVersionedBinary,
     [switch]$SealBase,
     [switch]$CheckpointOnly,
     [switch]$Resume,
@@ -11,6 +12,9 @@ param(
     [string]$PendingOperation
 )
 $ErrorActionPreference = 'Stop'
+if ($UseVersionedBinary -and (-not $Package -or $SealBase)) {
+    throw '-UseVersionedBinary requires -Package and cannot be combined with -SealBase'
+}
 $repo = Split-Path -Parent $PSScriptRoot
 $checkpointPath = Join-Path $repo 'build/resume.json'
 $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')
@@ -50,6 +54,16 @@ function Native([string]$Operation, [scriptblock]$Command) {
     $state.pending = $null
     Save-Checkpoint
 }
+function Remove-IntermediateCopy([string]$Intermediate, [string]$VerifiedOutput) {
+    if (Test-Path -LiteralPath $Intermediate -PathType Leaf) {
+        $item = Get-Item -LiteralPath $Intermediate
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked intermediate artifact' }
+        if ((Get-FileHash -LiteralPath $Intermediate).Hash -ne (Get-FileHash -LiteralPath $VerifiedOutput).Hash) {
+            throw 'Intermediate differs from verified output; nothing removed'
+        }
+        Remove-Item -LiteralPath $Intermediate
+    }
+}
 Push-Location $repo
 try {
     if ($Resume) {
@@ -71,14 +85,20 @@ try {
     if ($NextAction) { $state.next_action=$NextAction }
     if ($PendingOperation) { $state.pending=[pscustomobject]@{ operation=$PendingOperation; owner_pid=$PID; owner_started_utc=$ownerStarted; boot=$boot; state='unknown-until-native-check' } }
     if ($CheckpointOnly) { Save-Checkpoint; return }
-    Native 'Rust release build' { cargo build --release --locked }
+    if (-not $UseVersionedBinary) { Native 'Rust release build' { cargo build --release --locked } }
     $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { throw 'Cargo metadata failed' }
     $version = ($metadata.packages | Where-Object name -eq 'gnx').version
-    if ((& './target/release/gnx.exe' --version) -ne "gnx $version") { throw 'Release version mismatch' }
     $release = Join-Path $repo "releases/v$version"
     if (-not (Test-Path -LiteralPath (Join-Path $release 'CHANGELOG.md') -PathType Leaf)) { throw 'Release changelog missing' }
     $releaseBinary = Join-Path $release 'gnx.exe'
+    if ($UseVersionedBinary) {
+        if (-not (Test-Path -LiteralPath $releaseBinary -PathType Leaf)) { throw 'Versioned CLI missing; build and version it before packaging' }
+        if ((& $releaseBinary --version) -ne "gnx $version" -or $LASTEXITCODE -ne 0) { throw 'Versioned CLI version mismatch' }
+        New-Item -ItemType Directory -Force (Join-Path $repo 'target/release') | Out-Null
+        Copy-Item -LiteralPath $releaseBinary -Destination (Join-Path $repo 'target/release/gnx.exe') -Force
+    }
+    if ((& './target/release/gnx.exe' --version) -ne "gnx $version" -or $LASTEXITCODE -ne 0) { throw 'Release version mismatch' }
     $sourceHash = (Get-FileHash target/release/gnx.exe).Hash
     if (Test-Path -LiteralPath $releaseBinary) {
         if ($sourceHash -ne (Get-FileHash -LiteralPath $releaseBinary).Hash) { throw 'Versioned binary differs; increment version' }
@@ -157,7 +177,27 @@ try {
     $productVersion = $database.OpenView("SELECT Value FROM Property WHERE Property='ProductVersion'")
     $productVersion.Execute(); $versionRecord=$productVersion.Fetch()
     if ($null -eq $versionRecord -or $versionRecord.StringData(1) -ne $version) { throw 'MSI product version mismatch; refusing bundle/release' }
+    # Cabinets are embedded in the verified MSI. Discard only the generated
+    # loose copies, not any versioned installer, before building the large EXE.
+    $media = $database.OpenView('SELECT Cabinet FROM Media')
+    $media.Execute()
+    while ($cabinet = $media.Fetch()) {
+        $name = $cabinet.StringData(1)
+        if ($name -notmatch '^#cab[0-9]+\.cab$') { throw 'Unexpected/non-embedded MSI cabinet; nothing removed' }
+        $stream = $database.OpenView("SELECT Name FROM _Streams WHERE Name='$($name.Substring(1))'")
+        $stream.Execute()
+        if ($null -eq $stream.Fetch()) { throw 'Embedded cabinet missing' }
+        $stream.Close()
+        $loose = Join-Path $repo "installer/obj/Release/en-us/$name"
+        if (Test-Path -LiteralPath $loose -PathType Leaf) {
+            if ((Get-Item -LiteralPath $loose).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked cabinet copy' }
+            Remove-Item -LiteralPath $loose
+        }
+    }
+    $media.Close()
     [Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) | Out-Null
+    Remove-IntermediateCopy (Join-Path $repo 'installer/obj/Release/en-us/GnxCore.msi') $msi
     Native 'EXE bundle build' { dotnet build installer/bundle/Bundle.wixproj -c Release -t:Rebuild "-p:OutputPath=$output" "-p:GnxVersion=$version" }
+    Remove-IntermediateCopy (Join-Path $repo 'installer/bundle/obj/Release/GnxCoreSetup.exe') (Join-Path $output 'GnxCoreSetup.exe')
     Copy-Item target/release/gnx.exe $output
 } finally { Pop-Location }
