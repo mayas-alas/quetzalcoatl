@@ -24,16 +24,29 @@ los prerrequisitos Windows que falten. No se garantiza cualquier host limpio.
 Descarga la [candidata 0.0.14 para Windows x64](https://github.com/mayas-alas/quetzalcoatl-next/releases/tag/v0.0.14).
 Incluye `GnxCoreSetup.exe`, `GnxCore.msi` y `SHA256SUMS.txt`. El repositorio es
 privado: debes iniciar sesión en GitHub con una cuenta que tenga acceso.
+
+| Descarga | Cuándo usarla |
+| --- | --- |
+| **`GnxCoreSetup.exe` — recomendado** | Instalación interactiva mediante Burn, que contiene y ejecuta el MSI. |
+| `GnxCore.msi` | Instalación directa mediante Windows Installer para administración o despliegue gestionado. |
+| `SHA256SUMS.txt` | Verificar la integridad del instalador elegido. No es otro componente que instalar. |
+
+Son dos vías al **mismo producto**, no dos pasos: elige una y usa su entrada de
+mantenimiento en Windows. Ambos incluyen el mismo contenido offline, por eso
+tienen tamaños similares. El EXE no descarga ni instala prerrequisitos Windows.
+La CLI se instala con el producto; no se ofrece como aplicación portable.
+
 Si ya instalaste otra compilación local 0.0.14, desinstálala antes de probar este
 paquete de la misma versión; la retirada normal conserva WSL y datos.
 
 Los MSI y EXE se generan con la Action
 [Windows installers](.github/workflows/installers.yml). Tras una ejecución
-correcta, se descargan desde **Actions → ejecución → Artifacts**. El workflow no
+correcta, se descargan desde **Actions → ejecución → Artifacts**. El workflow
 publica en GitHub Releases solo si se activa `publish_release`, como pre-release
 de prueba y con tag coincidente. Revisa `SHA256SUMS.txt` antes de usar
 los archivos y ejecuta **uno** de los dos instaladores con permisos administrativos.
 La candidata no tiene firma Authenticode; los hashes no sustituyen una firma de código.
+Los enlaces automáticos «Source code» de GitHub son fuentes, no instaladores.
 
 ## Operación
 

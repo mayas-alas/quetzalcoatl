@@ -35,12 +35,12 @@ jobs:
         shell: pwsh
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
           persist-credentials: false
 
       - name: Set up .NET SDK
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0, Node 24
         with:
           dotnet-version: '8.0.x'
 
@@ -79,32 +79,50 @@ jobs:
       - name: Package the versioned CLI with canonical gates
         run: ./scripts/build.ps1 -Package -UseVersionedBinary
 
-      - name: Record output hashes
+      - name: Separate user downloads from build metadata
         run: |
           $ErrorActionPreference = 'Stop'
           $output = "build/releases/v$env:GNX_VERSION"
-          $lines = foreach ($name in 'GnxCore.msi', 'GnxCoreSetup.exe', 'gnx.exe', 'base-image.digest') {
-            $file = Get-Item -LiteralPath (Join-Path $output $name)
+          $installers = Join-Path $PWD "$output/installers"
+          $metadata = Join-Path $PWD "$output/metadata"
+          New-Item -ItemType Directory -Path $installers, $metadata | Out-Null
+          foreach ($name in 'GnxCore.msi', 'GnxCoreSetup.exe') {
+            Move-Item -LiteralPath (Join-Path $output $name) -Destination $installers
+          }
+          $lines = foreach ($name in 'GnxCore.msi', 'GnxCoreSetup.exe') {
+            $file = Get-Item -LiteralPath (Join-Path $installers $name)
             if ($file.Length -eq 0) { throw "Empty output: $name" }
             "$((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $name"
           }
-          [IO.File]::WriteAllLines((Join-Path $PWD "$output/SHA256SUMS.txt"), $lines, [Text.UTF8Encoding]::new($false))
-          Copy-Item -LiteralPath "releases/v$env:GNX_VERSION/CHANGELOG.md" -Destination $output
+          [IO.File]::WriteAllText((Join-Path $installers 'SHA256SUMS.txt'), ($lines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+          foreach ($name in 'gnx.exe', 'base-image.digest') {
+            Copy-Item -LiteralPath (Join-Path $output $name) -Destination $metadata
+          }
+          $head = git rev-parse --short=12 HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify packaged source commit' }
+          Copy-Item -LiteralPath "build/package/v$env:GNX_VERSION-$head/payload/manifest.json" -Destination $metadata
+          Copy-Item -LiteralPath "releases/v$env:GNX_VERSION/CHANGELOG.md" -Destination $metadata
+          $technicalHashes = foreach ($name in 'gnx.exe', 'base-image.digest', 'manifest.json', 'CHANGELOG.md') {
+            "$((Get-FileHash -LiteralPath (Join-Path $metadata $name) -Algorithm SHA256).Hash.ToLowerInvariant())  $name"
+          }
+          [IO.File]::WriteAllText((Join-Path $metadata 'BUILD-SHA256SUMS.txt'), ($technicalHashes -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
           "MSI/EXE packaged from the versioned CLI. Installation and runtime acceptance were not executed." >> $env:GITHUB_STEP_SUMMARY
 
       - name: Upload installers
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, Node 24
         with:
           name: gnx-core-v${{ env.GNX_VERSION }}-windows-x64
-          path: |
-            build/releases/v${{ env.GNX_VERSION }}/GnxCore.msi
-            build/releases/v${{ env.GNX_VERSION }}/GnxCoreSetup.exe
-            build/releases/v${{ env.GNX_VERSION }}/gnx.exe
-            build/releases/v${{ env.GNX_VERSION }}/base-image.digest
-            build/releases/v${{ env.GNX_VERSION }}/SHA256SUMS.txt
-            build/releases/v${{ env.GNX_VERSION }}/CHANGELOG.md
+          path: build/releases/v${{ env.GNX_VERSION }}/installers/*
           if-no-files-found: error
           compression-level: 0
+          retention-days: 7
+
+      - name: Upload technical metadata (not a portable installation)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, Node 24
+        with:
+          name: gnx-core-v${{ env.GNX_VERSION }}-build-metadata
+          path: build/releases/v${{ env.GNX_VERSION }}/metadata/*
+          if-no-files-found: error
           retention-days: 7
 
   release:
@@ -120,23 +138,38 @@ jobs:
       RELEASE_TAG: v${{ needs.package.outputs.version }}
     steps:
       - name: Download verified build outputs
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2, Node 24
         with:
           name: gnx-core-v${{ needs.package.outputs.version }}-windows-x64
           path: installers
+
+      - name: Download release notes and technical provenance
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2, Node 24
+        with:
+          name: gnx-core-v${{ needs.package.outputs.version }}-build-metadata
+          path: build-metadata
 
       - name: Verify hashes and publish prerelease
         working-directory: installers
         shell: bash
         run: |
           set -euo pipefail
-          sha256sum --check SHA256SUMS.txt
+          [[ $(find . -maxdepth 1 -type f | wc -l) -eq 3 ]]
+          [[ $(wc -l < SHA256SUMS.txt) -eq 2 ]]
+          [[ $(grep -c '  GnxCore.msi$' SHA256SUMS.txt) -eq 1 ]]
+          [[ $(grep -c '  GnxCoreSetup.exe$' SHA256SUMS.txt) -eq 1 ]]
+          if grep -Ev '^[0-9a-f]{64}  (GnxCore\.msi|GnxCoreSetup\.exe)$' SHA256SUMS.txt; then
+            echo 'Unexpected entry in user download checksums' >&2
+            exit 1
+          fi
+          sha256sum --check --strict SHA256SUMS.txt
+          (cd ../build-metadata && sha256sum --check --strict BUILD-SHA256SUMS.txt)
           tag_commit=$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)
           if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
             echo 'Version tag does not match this workflow commit; refusing publication' >&2
             exit 1
           fi
-          printf '\n\n## Entrega\n\nCommit: `%s`\n\n[GitHub Actions](%s/%s/actions/runs/%s).\n\nInstaladores de prueba sin firma Authenticode. El empaquetado CI no acredita instalación ni aceptación en un host nuevo.\n' "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> CHANGELOG.md
-          gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease --title "GnX Core $RELEASE_TAG — Windows x64 (prueba)" --notes-file CHANGELOG.md GnxCore.msi GnxCoreSetup.exe gnx.exe base-image.digest SHA256SUMS.txt
+          printf '\n\n## Procedencia\n\nCommit: `%s`\n\n[Empaquetado en GitHub Actions](%s/%s/actions/runs/%s). El empaquetado no acredita aceptación en un host nuevo.\n' "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> ../build-metadata/CHANGELOG.md
+          gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease --title "GnX Core $RELEASE_TAG — Windows x64 (candidata)" --notes-file ../build-metadata/CHANGELOG.md 'GnxCoreSetup.exe#Instalador interactivo — recomendado' 'GnxCore.msi#Paquete MSI — administración' 'SHA256SUMS.txt#SHA-256 de los instaladores'
           gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
           printf 'Instaladores publicados: %s/%s/releases/tag/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"

@@ -129,6 +129,24 @@ WiX 5 produce el MSI y Burn el EXE que lo contiene. .NET es dependencia de build
 no un runtime del producto. La transacción MSI y la preparación Linux son fases
 distintas: instalación finalizada no acredita servicios disponibles.
 
+| Capa | Responsabilidad | Límite |
+| --- | --- | --- |
+| EXE Burn | Entrada interactiva recomendada, presentación y ejecución del MSI incorporado. Burn gestiona su propio registro de mantenimiento y caché. | No prepara WSL, no aplica configuración Linux y no incorpora un segundo instalador del nodo ni prerrequisitos adicionales. |
+| MSI | Única transacción Windows: archivos, registro del servicio y coordinación de su retirada. También permite instalación administrativa directa. | No sustituye al servicio como preparador/supervisor del runtime. |
+| Servicio Rust | Verifica propiedad, prepara cuenta/WSL, aplica el payload y delega la operación en systemd. | No duplica Windows Installer ni el lifecycle de contenedores. |
+
+El EXE contiene el mismo MSI distribuido por separado: son alternativas offline,
+no componentes acumulativos. No se debe instalar una vía sobre la otra para
+completar el producto. Para mantenimiento se utiliza la entrada de Windows de la
+vía elegida; cuando instala Burn, el MSI encadenado se oculta de la lista de apps.
+Cambiar entre vías y el ciclo completo de mantenimiento Burn no se presentan como
+aceptados por haber verificado el empaquetado o el ciclo MSI directo.
+
+La distribución para usuarios publica únicamente `GnxCoreSetup.exe`, `GnxCore.msi`
+y `SHA256SUMS.txt`. CLI, digest base, manifiesto y changelog quedan en un artefacto
+técnico separado de CI. El binario versionado del repositorio sigue siendo
+obligatorio; su presencia no convierte la CLI en un instalador portable.
+
 La retirada explícita (`REMOVE=ALL` sin `UPGRADINGPRODUCTCODE`) llama a una entrada
 interna que usa el pipe/servicio existentes. Confirma la parada antes de retirar
 hosts, forwards y certificado Windows propios; un fallo bloquea la desinstalación.

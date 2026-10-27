@@ -39,6 +39,10 @@
     recorridos; docs/packaging = entrega; changelog por versión = cambios de producto.
     Sin bitácoras, instrucciones temporales de un host o funciones inventadas en
     esos documentos. No recrear un changelog global en la raíz.
+    La release de usuario lleva solo MSI, setup EXE y hashes de esos dos archivos.
+    CLI/digest/manifiesto pertenecen al artefacto técnico; no presentarlos como
+    componentes adicionales o portables. EXE delega en MSI; no duplicar provisioning
+    para diferenciar artificialmente formatos.
 13. Las notas versionadas son históricas, no autoridad sobre la funcionalidad
     actual. Comprobar enlaces y referencias al editar documentación vigente.
 14. Commits pequeños con identidad `Hector <hector@email.gnx>`. Commit, push,

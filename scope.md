@@ -9,7 +9,7 @@ terminal como supervisor.
 
 | Área | Incluido |
 | --- | --- |
-| Entrega | MSI autocontenido y EXE Burn que contiene el mismo MSI. |
+| Entrega | EXE Burn como entrada interactiva recomendada y MSI autocontenido como vía administrativa directa al mismo producto. |
 | Automatización | GitHub Action manual para empaquetar el CLI versionado, entregar artefactos MSI/EXE con hashes y, opcionalmente, publicar una pre-release con tag coincidente. |
 | Identidad | Servicio `GnXCore`, cuenta `gnxcoresvc`, WSL `gnx-core` y estado protegido propio. |
 | Control | `start`, `stop`, `status`, `enroll` y `password` mediante un pipe administrativo local. |
@@ -20,6 +20,12 @@ terminal como supervisor.
 La app es informativa: no recoge credenciales, no recibe archivos y no ejecuta
 operaciones administrativas. `status` observa el target, no un diagnóstico global
 de disponibilidad. Una app accesible no demuestra que mesh o compute estén listos.
+
+El MSI es el único dueño de la transacción de instalación Windows. El EXE delega
+en él, sin otro provisioning ni lógica de retirada del nodo. El servicio prepara
+y opera el runtime mediante sus fronteras existentes. La release para usuarios
+contiene solo MSI, setup EXE y sus hashes; CLI, manifiesto y digest base son
+artefactos técnicos de CI, no descargas adicionales para instalar.
 
 ## Funcionalidad pendiente
 

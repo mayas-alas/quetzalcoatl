@@ -12,6 +12,26 @@ El build canónico es `scripts/build.ps1`. Las salidas quedan en
 `build/releases/v<versión>/`: `GnxCore.msi`, `GnxCoreSetup.exe` y `gnx.exe`.
 El directorio `releases/v<versión>/` conserva CLI y changelog versionados, no MSI/EXE.
 
+## Responsabilidades y distribución
+
+| Pieza | Contrato |
+| --- | --- |
+| `GnxCoreSetup.exe` | Entrada interactiva recomendada. Burn ejecuta el MSI incorporado y gestiona el mantenimiento del bundle; no contiene otro provisioning. |
+| `GnxCore.msi` | Instalación administrativa directa. Es el único paquete dueño de archivos, servicio y transacción Windows. |
+| Servicio `GnXCore` | Preparación y operación de la identidad/WSL y aplicación Linux, fuera de la transacción de copia del MSI. |
+
+Ambas descargas incluyen el mismo payload offline. Un tamaño similar no implica
+dos núcleos distintos ni obliga a instalar ambas. No se añaden descargas,
+prerrequisitos ni lógica en el EXE para justificar artificialmente su existencia.
+El usuario mantiene/desinstala mediante la entrada de Windows de la vía elegida.
+La aceptación MSI no acredita el ciclo completo de mantenimiento Burn.
+
+La release de usuario contiene exactamente tres assets: setup EXE, MSI y
+`SHA256SUMS.txt` con dos entradas. `gnx.exe` no es portable ni se publica suelto
+como una tercera opción. Digest base, manifiesto y CLI permanecen en el artefacto
+técnico; los inputs offline pertenecen a su release de CI, no a la de instalación.
+GitHub añade enlaces «Source code» automáticamente: son fuentes, no instaladores.
+
 ## Compilar el CLI
 
 ```powershell
@@ -124,12 +144,16 @@ asset `gnx-offline-inputs.zip`, SHA-256
 3. Indicar `payload_release` (tag de la release de inputs) y `payload_sha256`
    (hash del ZIP completo). La Action descarga, verifica y extrae solo los archivos permitidos.
 4. Se ejecuta `build.ps1 -Package -UseVersionedBinary`, sin reemplazar el CLI canónico.
-5. Descargar `gnx-core-v<versión>-windows-x64` de **Artifacts**. Incluye MSI, EXE,
-   CLI, changelog, digest base y `SHA256SUMS.txt`. Retención: siete días.
+5. En **Artifacts**, elegir según la finalidad:
+   - `gnx-core-v<versión>-windows-x64`: MSI, setup EXE y `SHA256SUMS.txt`.
+   - `gnx-core-v<versión>-build-metadata`: CLI canónico, digest base, manifiesto,
+     changelog y `BUILD-SHA256SUMS.txt`. No es una instalación portable.
+   Retención: siete días. Los hashes técnicos y los de distribución están separados.
 6. Opcionalmente, activar `publish_release` y ejecutar desde el tag `v<versión>`
    previamente creado sobre el commit elegido. Tras el build, un segundo job
    verifica hashes y coincidencia tag/commit; crea una release borrador con sus
-   assets y solo entonces la publica como pre-release. No sustituye releases existentes.
+   tres assets de usuario y solo entonces la publica como pre-release. No publica
+   archivos técnicos ni sustituye releases existentes.
 
 No se suben resultados parciales si falla el empaquetado. Los instaladores no se
 firman con Authenticode por este workflow. Los hashes no sustituyen una firma de

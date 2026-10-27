@@ -9,11 +9,14 @@ aceptación completa. [Alcance](scope.md) delimita el producto;
 
 **Como administradora, quiero instalar un nodo separado de mi entorno personal.**
 
-- Elegir MSI o EXE; ambos contienen los inputs offline del núcleo.
+- Usar el EXE como entrada interactiva recomendada o el MSI para administración
+  directa. Ambos llevan el mismo núcleo offline; no instalar los dos como pasos.
 - Usar un Windows x64 con WSL2 disponible. Informar requisitos o conflictos sin
   adoptar otra cuenta/distribución ni descargar silenciosamente piezas faltantes.
 - Crear una identidad interna de servicio y WSL propias, sin inicio humano/RDP.
 - No crear aplicaciones ni guests de demostración.
+- Mantener/desinstalar con la entrada de Windows correspondiente a la vía elegida.
+  La comprobación MSI no se presenta como aceptación del mantenimiento Burn.
 - Distinguir el resultado MSI de la preparación Linux y del acceso HTTPS real.
 
 **Como operadora, quiero consultar la app local sin configurar primero la mesh.**
@@ -74,6 +77,8 @@ aceptación completa. [Alcance](scope.md) delimita el producto;
 - Conservar los gates de manifiesto, versión e integridad MSI del build canónico.
 - Entregar instaladores y hashes como artefacto; publicar una pre-release solo
   con opción explícita y tag coincidente con el commit de ejecución.
+- Separar la distribución de tres archivos (setup EXE, MSI y hashes) de la metadata
+  técnica de CI. No ofrecer el CLI suelto como un instalador o portable adicional.
 - No afirmar instalación, aceptación ni firma de código a partir del empaquetado.
 
 ## Recorrido pendiente
