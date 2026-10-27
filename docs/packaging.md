@@ -116,10 +116,12 @@ incompatibilidades del paquete. Los scripts y configuración runtime se toman de
 repositorio, no del ZIP. No incluir el payload de una instalación ni su estado.
 
 Ejemplo en un equipo de preparación, con inputs ya disponibles, desde la raíz
-del repositorio. Sustituir la versión por la indicada en `Cargo.toml`:
+del repositorio. Obtener la versión del workspace, no de una release anterior:
 
 ```powershell
-$version = '0.0.14'
+$metadata = cargo metadata --no-deps --locked --format-version 1 | ConvertFrom-Json
+if ($LASTEXITCODE) { throw 'No se obtuvo la versión del workspace' }
+$version = ($metadata.packages | Where-Object name -eq 'gnx').version
 $archive = Join-Path $PWD 'build/gnx-offline-inputs.zip'
 tar.exe -a -cf $archive -C build/payload rootfs.tar images/mesh.oci.tar images/dns.oci.tar images/gateway.oci.tar images/compute.oci.tar -C "../releases/v$version" base-image.digest -C ../../.. config/images.json config/bootc.json
 if ($LASTEXITCODE) { throw 'No se creó el ZIP de inputs' }
@@ -131,10 +133,13 @@ repositorio. La Action descarga mediante `gh` y su token automático, también e
 repositorios privados. No introducir tokens en parámetros ni hacer público el
 repositorio para habilitar descargas. Conservar el SHA-256 por un canal confiable.
 
-Inputs disponibles para 0.0.14:
+Inputs publicados con el tag
 [offline-inputs-v0.0.14](https://github.com/mayas-alas/quetzalcoatl-next/releases/tag/offline-inputs-v0.0.14),
 asset `gnx-offline-inputs.zip`, SHA-256
 `9ff2b812c5227c7163fbb6f7e92b8e5f9466990914d5c8bed5523f517c84e3a4`.
+Ese tag identifica los inputs, no la versión obligatoria del CLI: también son
+los inputs usados por 0.0.16. Solo se pueden reutilizar mientras coincidan
+configuración, arquitectura, IDs OCI y contrato de integridad del checkout.
 
 ### Ejecutar y descargar
 
@@ -158,12 +163,18 @@ asset `gnx-offline-inputs.zip`, SHA-256
 No se suben resultados parciales si falla el empaquetado. Los instaladores no se
 firman con Authenticode por este workflow. Los hashes no sustituyen una firma de
 código. No se afirma equivalencia byte a byte de MSI/EXE entre ejecuciones.
+Un mismo CLI y payload no demuestran que se haya instalado el MSI/EXE exacto
+publicado: la comprobación local y la del instalador distribuido deben identificarse
+por separado. `source_commit` registra el HEAD al empaquetar, no el diff sin commit;
+contrastar también el árbol de trabajo antes de atribuir un compilado a unas fuentes.
 
 ## Comprobación y limpieza
 
 Empaquetado correcto no acredita instalación, URLs disponibles, login o recuperación.
 Esas comprobaciones requieren un host autorizado y se informan por separado.
 No instalar en el runner para fingir aceptación ni reutilizar un host personal como CI.
+La retirada tiene requisitos propios: [Mantenimiento y desinstalación](uninstall.md).
+No iniciarla como parte implícita de una auditoría de empaquetado.
 
 El build elimina únicamente copias MSI/EXE intermedias idénticas a la salida y
 CAB cuya incorporación se verifica en el MSI. Para setups antiguos,

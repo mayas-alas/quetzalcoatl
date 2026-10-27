@@ -23,11 +23,19 @@
 8. No generar tests, mocks, escenarios, simulaciones o harnesses sin una nueva
    autorización. Formato, análisis estático y validaciones canónicas no acreditan
    aceptación. Las comprobaciones manuales que mutan el host requieren permiso.
+   En una auditoría, observar primero sin detener, desinstalar, reenrolar ni
+   reconfigurar. Tener una shell elevada no autoriza esas operaciones; comprobar
+   la elevación existente antes de pedir intervención UAC al usuario.
 
 ## Entrega y documentación
 
 9. Cerrar el resultado solicitado antes de abrir otro frente. Separar código,
    compilado, empaquetado, instalado, aplicado y aceptado; declarar límites reales.
+   En auditorías, distinguir observación actual, revisión estática y evidencia
+   histórica. Un login abierto no prueba una autenticación nueva; un menú de
+   desinstalación no prueba retirada, rollback ni reinstalación. Registrar defectos
+   no autoriza corregir runtime, reconstruir o publicar otra versión. Un CLI de
+   igual hash no demuestra que se instaló el MSI/EXE exacto publicado por CI.
 10. Para una entrega binaria son obligatorios `releases/vX.Y.Z/gnx.exe` y su
     `CHANGELOG.md`, con versión y hashes coherentes mediante `scripts/build.ps1`.
     No sobrescribir un CLI versionado distinto: incrementar la versión al cambiarlo.
@@ -45,6 +53,10 @@
     para diferenciar artificialmente formatos.
 13. Las notas versionadas son históricas, no autoridad sobre la funcionalidad
     actual. Comprobar enlaces y referencias al editar documentación vigente.
+    Usar lenguaje del producto actual, sin referencias a implementaciones retiradas
+    ni tareas de una sesión. Documentar un límite no lo convierte en una función
+    autorizada o una capacidad aceptada. No reescribir notas históricas para
+    aparentar que una versión publicada ya contiene una corrección.
 14. Commits pequeños con identidad `Hector <hector@email.gnx>`. Commit, push,
     ejecución remota y publicación son acciones distintas: no presumir permiso.
 
@@ -58,5 +70,7 @@
     o privilegiadas. Evidencia local fuera de docs/Git, sin secretos y acotada a
     dos archivos y un script temporal por agente. Los scripts del producto/CI no
     son archivos temporales de evidencia.
+    Un informe de auditoría local cuenta dentro de ese límite; resumir hallazgos,
+    impacto, ubicación y estado, no copiar sesiones del navegador ni logs privados.
 17. Comunicar resultado, comprobación, límite y bloqueo en pocas líneas. No narrar
     cada lectura ni prolongar iteraciones sin un siguiente resultado concreto.
