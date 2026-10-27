@@ -12,7 +12,7 @@ terminal como supervisor.
 | Entrega | EXE Burn como entrada interactiva recomendada y MSI autocontenido como vía administrativa directa al mismo producto. |
 | Automatización | GitHub Action manual para empaquetar el CLI versionado, entregar artefactos MSI/EXE con hashes y, opcionalmente, publicar una pre-release con tag coincidente. |
 | Identidad | Servicio `GnXCore`, cuenta `gnxcoresvc`, WSL `gnx-core` y estado protegido propio. |
-| Control | `start`, `stop`, `status`, `enroll` y `password` mediante un pipe administrativo local. |
+| Control | `start`, `stop`, `status`, `enroll`, `password` y `deploy <carpeta>` mediante un pipe administrativo local. |
 | Acceso | `app.gnx` y `compute.gnx`, HTTPS local y acceso mesh sujeto a DNS, ACL y confianza del cliente. |
 | Certificados | CA persistente, confianza Windows interna, renovación de hoja servidor y CRL mediante systemd. |
 | Conservación | Actualización y reinstalación preservan identidad, CA, credenciales y datos. Desinstalación normal sin purga. |
@@ -27,15 +27,24 @@ y opera el runtime mediante sus fronteras existentes. La release para usuarios
 contiene solo MSI, setup EXE y sus hashes; CLI, manifiesto y digest base son
 artefactos técnicos de CI, no descargas adicionales para instalar.
 
-## Funcionalidad pendiente
+## Despliegue de Quadlets
 
-El objetivo posterior es entregar archivos o un path de Quadlets/configuración
-para desplegar servicios en LXC de Proxmox. **No existen todavía** la admisión de
-esos archivos, un comando de despliegue ni un puente nativo desde la web.
-Su implementación requiere un hito separado: autorización, destino, límites de
-recursos, aislamiento y comprobación del servicio resultante.
+Admisión de una carpeta de Quadlets/configuración
+por la CLI, transferencia por el pipe existente y creación de un LXC nuevo con
+`pct` desde Rust. Aplicación y lifecycle mediante Podman/systemd del guest, sin
+motor de workloads ni ejecución de scripts aportados por el usuario en el nodo.
+No se presenta el envío web o la integración de aplicaciones como terminados por ello.
 
-La presencia de Proxmox no acredita despliegues LXC realizados ni VMs aceleradas.
+Desde 0.0.16, `gnx deploy <carpeta>` permite enviar
+Quadlets/configuración a un LXC nuevo. La admisión, recursos, propiedad y límites
+están en [Despliegue](docs/deployment.md). La carpeta debe estar bajo control del
+administrador, no en una ubicación compartida modificable por terceros.
+
+No existen todavía subida de archivos desde la web, build de imágenes, publicación
+de dominios de aplicaciones ni integración OIDC de servicios. Esas capacidades
+no se presentan como completadas al crear el LXC.
+
+La presencia de Proxmox no acredita por sí sola despliegues ni VMs aceleradas.
 No se incluyen aplicaciones de negocio en el núcleo ni se crean guests al instalar.
 
 ## Límites de seguridad

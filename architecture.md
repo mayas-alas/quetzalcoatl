@@ -161,5 +161,27 @@ en [docs/packaging.md](docs/packaging.md).
 
 SCM/Visor de eventos y systemd/journal son las fuentes de diagnóstico. No se añade
 otro observador ni se presenta una fase histórica como salud actual.
-No hay todavía recepción de archivos, puente web nativo o despliegue Quadlet a
-LXC. Los componentes de terceros no acreditan por sí solos esa integración.
+La candidata incorpora una entrada CLI de despliegue a LXC; todavía no existe
+recepción web ni puente nativo desde la página. El contrato y estado de aceptación
+se detallan en [Despliegue](docs/deployment.md). Las integraciones de aplicaciones
+no se acreditan por iniciar sus contenedores.
+
+## Despliegue por Rust y PVE
+
+La CLI recoge una carpeta administrativa y transmite un bundle acotado por el
+pipe existente. SYSTEM no resuelve paths aportados por el cliente. La admisión se
+repite en el servicio; se rechazan enlaces, escapes y directivas de host fuera del
+subconjunto admitido. No hay scripts suministrados por el usuario en el nodo.
+
+Rust verifica almacenamiento y base del runtime, reserva VMID/recibo antes de
+mutar y llama a `pct create` con argumentos fijos. El guest es no privilegiado,
+con CPU/RAM/disco acotados. Un fallo preserva el recibo y el guest parcial, sin
+asignar otro identificador silenciosamente. Propiedad se comprueba por SID,
+digest de la entrada, VMID, descripción PVE y flag no privilegiado.
+
+Los archivos llegan por stdin a operaciones fijas de `pct exec`. Se preparan
+directorios privados, bind mounts de datos y configuración; los Quadlets los
+aplica systemd del guest. No se añade un segundo supervisor ni se instalan las
+aplicaciones en el núcleo. El caso de servicios incluye RustFS, Pocket ID y
+NetBird con su dashboard oficial, pero requiere configuración propia y no implica
+autenticación Pocket ID integrada ni acceso remoto aceptado.

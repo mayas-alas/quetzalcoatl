@@ -1,0 +1,6 @@
+{
+  "cores": 2,
+  "memory_mb": 4096,
+  "swap_mb": 512,
+  "disk_gb": 12
+}

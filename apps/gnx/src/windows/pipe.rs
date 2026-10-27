@@ -170,6 +170,13 @@ async fn connection_task(
 }
 
 pub async fn client(operation: Operation) -> io::Result<Response> {
+    client_bundle(operation, None).await
+}
+
+pub async fn client_bundle(
+    operation: Operation,
+    bundle: Option<crate::deployment::Bundle>,
+) -> io::Result<Response> {
     super::security::effective_admin()?;
     let manager = windows_service::service_manager::ServiceManager::local_computer(
         None::<&str>,
@@ -224,6 +231,7 @@ pub async fn client(operation: Operation) -> io::Result<Response> {
         id,
         operation,
         secret,
+        bundle,
     };
     let bytes = Zeroizing::new(serde_json::to_vec(&request).map_err(io::Error::other)?);
     let _ = Request::decode(&bytes)?;
@@ -247,14 +255,17 @@ pub async fn client(operation: Operation) -> io::Result<Response> {
     }
     super::security::process_is_system(pid)?;
     timeout(IO_TIMEOUT, write_frame(&mut pipe, &bytes)).await??;
-    let bytes = timeout(OP_TIMEOUT, read_frame(&mut pipe))
-        .await
-        .map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::TimedOut,
-                "resultado desconocido; consulta status, no repitas una mutación a ciegas",
-            )
-        })??;
+    let limit = if operation == Operation::Deploy {
+        Duration::from_secs(1200)
+    } else {
+        OP_TIMEOUT
+    };
+    let bytes = timeout(limit, read_frame(&mut pipe)).await.map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            "resultado desconocido; consulta status, no repitas una mutación a ciegas",
+        )
+    })??;
     let response = Response::decode(&bytes, id)?;
     timeout(IO_TIMEOUT, pipe.write_u8(1)).await??;
     Ok(response)

@@ -3,7 +3,7 @@ use std::io;
 use zeroize::Zeroize;
 
 pub const VERSION: u16 = 1;
-pub const MAX_FRAME: usize = 4096;
+pub const MAX_FRAME: usize = 512 * 1024;
 pub const SERVICE: &str = "GnXCore";
 pub const PIPE: &str = r"\\.\pipe\GnX.Core.v1";
 pub const DISTRO: &str = "gnx-core";
@@ -20,6 +20,7 @@ pub enum Operation {
     Password,
     // Internal installer operation, deliberately absent from CLI parsing/help.
     Retire,
+    Deploy,
 }
 
 impl Operation {
@@ -43,6 +44,8 @@ pub struct Request {
     pub operation: Operation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<crate::deployment::Bundle>,
 }
 
 impl Drop for Request {
@@ -62,6 +65,12 @@ impl Request {
             serde_json::from_slice(bytes).map_err(|_| invalid("petición inválida"))?;
         if request.version != VERSION || request.id == [0; 16] {
             return Err(invalid("versión o correlación inválida"));
+        }
+        match (request.operation, &request.bundle) {
+            (Operation::Deploy, Some(bundle)) => bundle.validate()?,
+            (Operation::Deploy, None) => return Err(invalid("faltan Quadlets")),
+            (_, Some(_)) => return Err(invalid("operación no admite archivos")),
+            _ => {}
         }
         match request.operation {
             Operation::Enroll | Operation::Password => {

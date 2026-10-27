@@ -81,9 +81,18 @@ aceptación completa. [Alcance](scope.md) delimita el producto;
   técnica de CI. No ofrecer el CLI suelto como un instalador o portable adicional.
 - No afirmar instalación, aceptación ni firma de código a partir del empaquetado.
 
-## Recorrido pendiente
+## Despliegue CLI
 
-Entregar archivos o un path de Quadlets/configuración para desplegar a LXC es un
-objetivo posterior, **no disponible**. No se documenta sintaxis, selector, upload ni
-puente nativo como si existieran. Destino, admisión, permisos y validación del
-servicio desplegado requieren un hito específico antes de implementarse.
+**Como administradora, quiero enviar una carpeta de Quadlets/configuración para
+crear un LXC separado sin convertir el núcleo en otro supervisor.**
+
+- `gnx deploy <carpeta>` transmite archivos admitidos por el pipe administrativo.
+- Rust crea un guest nuevo no privilegiado y conserva recibos verificables de propiedad.
+- systemd/Quadlets del guest aplican los servicios; no se ejecutan scripts de la
+  carpeta en Windows o en el nodo WSL.
+- Un fallo conserva el guest parcial; una entrada idéntica ya aplicada no duplica
+  LXC ni borra datos. No existe actualización automática de carpetas modificadas.
+- Distinguir transferencia y unidades activas de salud HTTP, acceso, login y OIDC.
+
+Disponible desde 0.0.16. Subida web, puente nativo, builds e integración de
+aplicaciones no se presentan como implementados.

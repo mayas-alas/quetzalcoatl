@@ -287,6 +287,13 @@ impl Identity {
         self.run_input(args, Some(input), limit, None)
     }
 
+    pub fn run_payload(&self, args: &[&str], input: &[u8], limit: Duration) -> io::Result<Output> {
+        if input.len() > 32768 {
+            return Err(invalid("archivo fuera de límite"));
+        }
+        self.run_input(args, Some(input), limit, None)
+    }
+
     pub fn keep_alive(&self, cancel: &std::sync::atomic::AtomicBool) -> io::Result<()> {
         self.run_input(
             &[

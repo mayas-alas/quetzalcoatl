@@ -56,6 +56,8 @@ pub fn verify(root: &Path) -> io::Result<()> {
         "scripts/install.run",
         "config/wsl.conf",
         "config/images.json",
+        "config/lxc.json",
+        "scripts/prepare-lxc.run",
         "config/windows-wslconfig",
         "config/web/index.html",
         "scripts/configure.run",

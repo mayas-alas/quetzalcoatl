@@ -89,12 +89,17 @@ impl Controller {
             }
         };
         let op = request.operation;
+        let bundle = request.bundle.clone();
         let secret = request
             .secret
             .as_ref()
             .map(|s| zeroize::Zeroizing::new(s.clone()));
         match tokio::task::spawn_blocking(move || {
-            let result = execute_secret(op, secret.as_deref().map(String::as_str));
+            let result = if let Some(bundle) = bundle {
+                super::deploy::apply(&bundle).map(|message| (NodeState::Active, message))
+            } else {
+                execute_secret(op, secret.as_deref().map(String::as_str))
+            };
             if let Err(error) = &result {
                 super::service::report_error(error);
             }

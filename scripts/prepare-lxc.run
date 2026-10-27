@@ -1,0 +1,10 @@
+#!/usr/bin/bash
+# Fixed guest-only preparation, not a user-supplied script.
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 ]]
+systemd-detect-virt --container --quiet
+command -v podman >/dev/null
+install -d -m 0700 /etc/gnx-app/config /var/lib/gnx-app
+install -d -m 0755 /etc/containers/systemd
+systemctl start NetworkManager.service

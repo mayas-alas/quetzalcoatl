@@ -1,5 +1,6 @@
 mod access;
 mod bootstrap;
+mod deploy;
 mod identity;
 mod node;
 mod pipe;
@@ -31,4 +32,14 @@ pub fn client(op: crate::protocol::Operation) -> std::io::Result<crate::protocol
         .enable_all()
         .build()?
         .block_on(pipe::client(op))
+}
+
+pub fn deploy(bundle: crate::deployment::Bundle) -> std::io::Result<crate::protocol::Response> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(pipe::client_bundle(
+            crate::protocol::Operation::Deploy,
+            Some(bundle),
+        ))
 }
