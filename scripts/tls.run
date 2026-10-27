@@ -22,7 +22,7 @@ if [[ "$mode" == prepare ]]; then
     if [[ ! -f "$private/root.key" || ! -f "$root/tls/root.crt" ]]; then
         [[ ! -e "$private/root.key" && ! -e "$root/tls/root.crt" ]]
         openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$private/root.key" >/dev/null 2>&1
-        openssl req -x509 -key "$private/root.key" -out "$root/tls/root.crt" -days 3650 -subj '/O=GnX Labs/CN=GnX Labs'
+        openssl req -x509 -key "$private/root.key" -out "$root/tls/root.crt" -days 3650 -subj '/O=GnX Labs/CN=GnX Labs' -addext 'basicConstraints=critical,CA:TRUE' -addext 'keyUsage=critical,keyCertSign,cRLSign'
     fi
     ca_before=$(openssl x509 -in "$root/tls/root.crt" -noout -fingerprint -sha256)
     install -m 0644 "$payload/config/pki/ca.cnf" "$config"
@@ -32,11 +32,15 @@ if [[ "$mode" == prepare ]]; then
     [[ -f "$private/crlnumber" ]] || printf '01\n' > "$private/crlnumber"
 fi
 changed=false
+names_changed=false
 renewable=true
 openssl x509 -in "$root/tls/root.crt" -checkend 0 -noout
 if [[ -f "$root/tls/node.crt" ]]; then
         openssl verify -no_check_time -CAfile "$root/tls/root.crt" -purpose sslserver -verify_hostname app.gnx "$root/tls/node.crt"
         openssl verify -no_check_time -CAfile "$root/tls/root.crt" -purpose sslserver -verify_hostname compute.gnx "$root/tls/node.crt"
+        for name in pocket.gnx rustfs.gnx s3.gnx netbird.gnx; do
+            if ! openssl verify -no_check_time -CAfile "$root/tls/root.crt" -purpose sslserver -verify_hostname "$name" "$root/tls/node.crt" >/dev/null 2>&1; then names_changed=true; fi
+        done
         serial=$(openssl x509 -in "$root/tls/node.crt" -noout -serial)
         serial=${serial#serial=}
         [[ "$serial" =~ ^[[:xdigit:]]+$ ]]
@@ -53,7 +57,7 @@ if [[ -f "$root/tls/node.crt" ]]; then
     elif [[ ! -f "$root/tls/node.key" ]]; then
         openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$root/tls/node.key" >/dev/null 2>&1
 fi
-if [[ "$renewable" == true ]] && { [[ ! -f "$root/tls/node.crt" ]] || ! openssl x509 -in "$root/tls/node.crt" -checkend 2592000 -noout >/dev/null || ! openssl x509 -in "$root/tls/node.crt" -noout -ext crlDistributionPoints | grep -Fq 'URI:http://app.gnx/pki/root.crl'; }; then
+if [[ "$renewable" == true ]] && { [[ ! -f "$root/tls/node.crt" ]] || [[ "$names_changed" == true ]] || ! openssl x509 -in "$root/tls/node.crt" -checkend 2592000 -noout >/dev/null || ! openssl x509 -in "$root/tls/node.crt" -noout -ext crlDistributionPoints | grep -Fq 'URI:http://app.gnx/pki/root.crl'; }; then
         openssl req -new -key "$root/tls/node.key" -out "$root/tls/node.csr" -subj '/O=GnX Labs/CN=app.gnx'
         openssl ca -batch -notext -config "$config" -extfile /etc/gnx-core/node.ext -in "$root/tls/node.csr" -out "$root/tls/node.crt.new"
         openssl verify -CAfile "$root/tls/root.crt" -purpose sslserver "$root/tls/node.crt.new"

@@ -91,6 +91,12 @@ verificando nombre y CA del backend. La app es HTML estático con `status.txt`:
 la última fase de configuración, no salud en vivo ni una API administrativa.
 La escucha del gateway se limita a sus IP NAT y mesh, no a una publicación LAN.
 
+El stack privado registrado añade `pocket.gnx`, `rustfs.gnx`, `s3.gnx` y
+`netbird.gnx` al mismo gateway y certificado. Windows gestiona los seis nombres
+locales; las rutas Caddy de aplicaciones se importan solo después de registrar
+el stack. DNS PVE incluye sus nombres y una reserva DHCP para la MAC registrada.
+Una ruta `/32` lleva el tráfico al guest, no sustituye el gateway general del nodo.
+
 El gateway obtiene su IP NAT mediante `ExecStartPre`. El Quadlet mesh espera
 interfaz/IP con `tailscale wait`, luego reconcilia DNS y bindings mediante el
 script existente. `flock` serializa el acceso; solo se reemplaza configuración o
@@ -150,7 +156,11 @@ obligatorio; su presencia no convierte la CLI en un instalador portable.
 La retirada explícita (`REMOVE=ALL` sin `UPGRADINGPRODUCTCODE`) llama a una entrada
 interna que usa el pipe/servicio existentes. Confirma la parada antes de retirar
 hosts, forwards y certificado Windows propios; un fallo bloquea la desinstalación.
-La acción de rollback conserva la intención previa. Después MSI retira el servicio.
+La acción de rollback intenta aplicar la intención previa mediante el mismo pipe;
+su presencia no prueba recuperación completa. Después MSI retira el servicio.
+La retirada requiere `GnXCore` en ejecución y sin otra operación en curso: no
+inicia automáticamente el servicio Windows si está detenido. Los requisitos y
+recursos conservados están en [Mantenimiento y desinstalación](docs/uninstall.md).
 
 Cuenta, perfil, WSL, DPAPI, CA y datos permanecen para reinstalar. Las actualizaciones
 no reemplazan una WSL existente con el rootfs de primera instalación. No existe
@@ -161,7 +171,7 @@ en [docs/packaging.md](docs/packaging.md).
 
 SCM/Visor de eventos y systemd/journal son las fuentes de diagnóstico. No se añade
 otro observador ni se presenta una fase histórica como salud actual.
-La candidata incorpora una entrada CLI de despliegue a LXC; todavía no existe
+Desde 0.0.16 existe una entrada CLI de despliegue a LXC; no existe
 recepción web ni puente nativo desde la página. El contrato y estado de aceptación
 se detallan en [Despliegue](docs/deployment.md). Las integraciones de aplicaciones
 no se acreditan por iniciar sus contenedores.
@@ -182,6 +192,37 @@ digest de la entrada, VMID, descripción PVE y flag no privilegiado.
 Los archivos llegan por stdin a operaciones fijas de `pct exec`. Se preparan
 directorios privados, bind mounts de datos y configuración; los Quadlets los
 aplica systemd del guest. No se añade un segundo supervisor ni se instalan las
-aplicaciones en el núcleo. El caso de servicios incluye RustFS, Pocket ID y
-NetBird con su dashboard oficial, pero requiere configuración propia y no implica
-autenticación Pocket ID integrada ni acceso remoto aceptado.
+aplicaciones en el núcleo. Se admiten `.container` y `.network` bridge, con alias
+DNS y comprobación de referencias de red presentes en el bundle. No se compilan
+Containerfiles ni se admiten todas las clases de Quadlet.
+
+El cierre consulta `ActiveState` por cada unidad solicitada, también después de
+la configuración OIDC del stack. No prueba salud funcional. Al reenviar una entrada completada solo se
+consulta `pct status`, sin reconciliar archivos ni comprobar otra vez las unidades.
+La preparación enmascara ajuste de reloj y montajes de host incompatibles con el
+guest no privilegiado; no se describe como una plantilla LXC mínima o libre de fallos.
+
+### Stack privado
+
+El marcador `config/private-stack.json` selecciona una operación fija. El guest
+usa `172.30.0.100/24`, configurada en PVE y NetworkManager, y los cuatro contenedores
+comparten una red Podman bridge definida por `private.network`, no la red host.
+Los bind mounts conservan datos bajo `/var/lib/gnx-app/`. Las imágenes oficiales
+están fijadas por digest en [las definiciones](stacks/private-services/README.md).
+
+`stack-access.run` vincula VMID, digest y MAC; verifica descripción y propiedad
+PVE antes de reconciliar la ruta y publicar Caddy. El arranque compute reconcilia
+ese estado mediante `ExecStartPost`, después de `Notify=healthy` y un healthcheck
+nativo de la API PVE, sin otro daemon. No reemplaza una instancia
+registrada para aceptar una entrada diferente.
+
+`enroll-stack.run` se ejecuta en el guest y usa las APIs Pocket ID/NetBird. Guarda
+estado privado antes de mutar, crea clientes separados y configura RustFS con
+`readwrite`, no administración global. No restablece un propietario NetBird ajeno.
+El guest recibe solo la CA pública; la preparación verifica nombre/cadena TLS y
+la CRL firmada vigente sin rotar la raíz existente. El operador registra su passkey
+real en Pocket ID. Preparar clientes OIDC no acredita autenticación humana.
+
+Caddy transporta HTTP/2 gRPC y relay NetBird; no transporta STUN UDP. El puerto
+3478 se publica en la IP del guest, no mediante el portproxy TCP Windows. Acceso
+externo y conexión entre peers requieren su comprobación independiente.

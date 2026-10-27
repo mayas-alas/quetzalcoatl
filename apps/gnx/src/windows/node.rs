@@ -125,7 +125,7 @@ impl Controller {
                 request,
                 false,
                 NodeState::NotPrepared,
-                "núcleo no preparado; falta instalación nueva verificada, no se adopta el legacy",
+                "falta un recurso requerido; comprueba instalación, recibos y diagnóstico nativo",
             ),
             Ok(Err(error)) if error.kind() == io::ErrorKind::TimedOut => Response::new(
                 request,

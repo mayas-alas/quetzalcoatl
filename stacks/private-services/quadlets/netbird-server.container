@@ -1,0 +1,25 @@
+[Unit]
+Description=NetBird combined server
+After=pocket-id.service
+
+[Container]
+Image=docker.io/netbirdio/netbird-server@sha256:6799c37020ff70b9708d0e13bfe7b7a5004084caad86ba165ffe5ea1c84c0ea2
+ContainerName=netbird-server
+Network=private.network
+NetworkAlias=netbird-server
+PublishPort=172.30.0.100:8081:8081
+PublishPort=172.30.0.100:3478:3478/udp
+Pull=missing
+Environment=NB_DISABLE_GEOLOCATION=true
+Environment=NB_SETUP_PAT_ENABLED=true
+Environment=SSL_CERT_FILE=/etc/gnx/root.crt
+Volume=/var/lib/gnx-app/netbird:/var/lib/netbird
+Volume=/etc/gnx-app/config/netbird.yaml:/etc/netbird/config.yaml:ro
+Volume=/etc/gnx-app/config/root.crt:/etc/gnx/root.crt:ro
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=180s
+
+[Install]
+WantedBy=multi-user.target

@@ -40,3 +40,5 @@ compute.gnx {
         }
     }
 }
+
+import /etc/gnx-stack-gateway/*.caddy

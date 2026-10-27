@@ -83,6 +83,22 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
         return Err(io::Error::new(io::ErrorKind::NotConnected, "nodo detenido"));
     }
     let digest = bundle.digest()?;
+    let private_stack = bundle.private_stack();
+    if private_stack {
+        let public = bundle
+            .files
+            .iter()
+            .find(|file| file.path == "config/root.crt")
+            .ok_or_else(|| invalid("falta CA pública del nodo"))?;
+        let trusted = security::read_private("root.crt", 16384)?;
+        if public.contents.trim()
+            != std::str::from_utf8(&trusted)
+                .map_err(|_| invalid("CA pública inválida"))?
+                .trim()
+        {
+            return Err(invalid("la CA del stack no coincide con la del nodo"));
+        }
+    }
     let receipt_name = format!("deploy-{digest}.json");
     let path = security::state_dir()?.join(&receipt_name);
     let payload = std::env::current_exe()?
@@ -132,6 +148,65 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
         }
         receipt
     } else {
+        if private_stack {
+            let present = identity.run(
+                &[
+                    "--distribution",
+                    DISTRO,
+                    "--exec",
+                    "/usr/bin/test",
+                    "-e",
+                    "/var/lib/gnx-core/private-stack.json",
+                ],
+                Duration::from_secs(15),
+            )?;
+            if present.code != 1 {
+                return Err(invalid(
+                    "ya existe un stack privado registrado o su estado no es verificable; no se reemplaza",
+                ));
+            }
+            let guests: serde_json::Value = serde_json::from_str(&command(
+                &identity,
+                &[
+                    "pvesh",
+                    "get",
+                    "/cluster/resources",
+                    "--type",
+                    "vm",
+                    "--output-format",
+                    "json",
+                ],
+                None,
+                15,
+            )?)
+            .map_err(io::Error::other)?;
+            let guests = guests
+                .as_array()
+                .ok_or_else(|| invalid("inventario PVE inválido"))?;
+            if guests.len() > 256 {
+                return Err(invalid("inventario PVE fuera de límite"));
+            }
+            for guest in guests {
+                let vmid = guest["vmid"]
+                    .as_u64()
+                    .filter(|id| (100..=999999999).contains(id))
+                    .ok_or_else(|| invalid("VMID inválido"))?;
+                if guest["type"] == "lxc" {
+                    let endpoint = format!("/nodes/gnx-core-compute/lxc/{vmid}/config");
+                    let conf = command(
+                        &identity,
+                        &["pvesh", "get", &endpoint, "--output-format", "json"],
+                        None,
+                        15,
+                    )?;
+                    if conf.contains("172.30.0.100") {
+                        return Err(invalid(
+                            "dirección del stack ya asignada; no se adopta ni reemplaza el guest",
+                        ));
+                    }
+                }
+            }
+        }
         crate::package::verify(&payload)?;
         let storage: serde_json::Value = serde_json::from_str(&command(
             &identity,
@@ -236,7 +311,13 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
                 "--swap",
                 &resources.swap_mb.to_string(),
                 "--net0",
-                "name=eth0,bridge=vmbr0,ip=dhcp,type=veth",
+                if private_stack {
+                    "name=eth0,bridge=vmbr0,ip=172.30.0.100/24,gw=172.30.0.1,type=veth"
+                } else {
+                    "name=eth0,bridge=vmbr0,ip=dhcp,type=veth"
+                },
+                "--nameserver",
+                "172.30.0.1",
                 "--ostype",
                 "fedora",
                 "--onboot",
@@ -280,14 +361,29 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
     let preparation = fs::read(payload.join("scripts/prepare-lxc.run"))?;
     command(
         &identity,
-        &["pct", "exec", &id, "--", "/usr/bin/bash", "-s"],
+        &[
+            "pct",
+            "exec",
+            &id,
+            "--",
+            "/usr/bin/bash",
+            "-s",
+            "--",
+            if private_stack {
+                "private-stack"
+            } else {
+                "dhcp"
+            },
+        ],
         Some(&preparation),
         60,
     )?;
     let mut units = Vec::new();
     for file in &bundle.files {
-        let destination = if file.path.ends_with(".container") && !file.path.contains('/') {
-            units.push(file.path.replace(".container", ".service"));
+        let destination = if !file.path.contains('/') {
+            if let Some(name) = file.path.strip_suffix(".container") {
+                units.push(format!("{name}.service"));
+            }
             format!("/etc/containers/systemd/{}", file.path)
         } else {
             format!("/etc/gnx-app/{}", file.path)
@@ -334,7 +430,11 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
                 &id,
                 "--",
                 "/usr/bin/chmod",
-                "0600",
+                if private_stack && file.path == "config/root.crt" {
+                    "0644"
+                } else {
+                    "0600"
+                },
                 &destination,
             ],
             None,
@@ -395,8 +495,82 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
     let mut args = vec!["pct", "exec", &id, "--", "/usr/bin/systemctl", "start"];
     args.extend(units.iter().map(String::as_str));
     command(&identity, &args, None, 600)?;
-    args[5] = "is-active";
-    command(&identity, &args, None, 30)?;
+    for unit in &units {
+        let state = command(
+            &identity,
+            &[
+                "pct",
+                "exec",
+                &id,
+                "--",
+                "/usr/bin/systemctl",
+                "show",
+                "--property=ActiveState",
+                "--value",
+                unit,
+            ],
+            None,
+            15,
+        )?;
+        if state.trim() != "active" {
+            return Err(io::Error::other(
+                "no están activas todas las unidades solicitadas; consultar journal del guest",
+            ));
+        }
+    }
+    if private_stack {
+        let input = serde_json::to_vec(
+            &serde_json::json!({"vmid": receipt.vmid, "digest": receipt.digest}),
+        )
+        .map_err(io::Error::other)?;
+        let output = identity.run_payload(
+            &[
+                "--distribution",
+                DISTRO,
+                "--exec",
+                "/usr/bin/bash",
+                "/etc/gnx-core/stack-access.run",
+                "register",
+            ],
+            &input,
+            Duration::from_secs(60),
+        )?;
+        if output.code != 0 {
+            return Err(io::Error::other(
+                "publicación del stack no confirmada; conservar recibo y consultar journal",
+            ));
+        }
+        let enrollment = fs::read(payload.join("scripts/enroll-stack.run"))?;
+        command(
+            &identity,
+            &["pct", "exec", &id, "--", "/usr/bin/python3", "-"],
+            Some(&enrollment),
+            360,
+        )?;
+        for unit in &units {
+            let state = command(
+                &identity,
+                &[
+                    "pct",
+                    "exec",
+                    &id,
+                    "--",
+                    "/usr/bin/systemctl",
+                    "show",
+                    "--property=ActiveState",
+                    "--value",
+                    unit,
+                ],
+                None,
+                15,
+            )?;
+            if state.trim() != "active" {
+                return Err(io::Error::other(
+                    "servicio del stack no activo tras configurar OIDC",
+                ));
+            }
+        }
+    }
     let completed = Receipt {
         complete: true,
         ..receipt

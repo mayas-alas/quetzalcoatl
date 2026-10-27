@@ -13,7 +13,7 @@ terminal como supervisor.
 | Automatización | GitHub Action manual para empaquetar el CLI versionado, entregar artefactos MSI/EXE con hashes y, opcionalmente, publicar una pre-release con tag coincidente. |
 | Identidad | Servicio `GnXCore`, cuenta `gnxcoresvc`, WSL `gnx-core` y estado protegido propio. |
 | Control | `start`, `stop`, `status`, `enroll`, `password` y `deploy <carpeta>` mediante un pipe administrativo local. |
-| Acceso | `app.gnx` y `compute.gnx`, HTTPS local y acceso mesh sujeto a DNS, ACL y confianza del cliente. |
+| Acceso | `app.gnx` y `compute.gnx`; el stack privado registrado añade Pocket ID, RustFS/S3 y NetBird por HTTPS. Acceso mesh sujeto a DNS, ACL y confianza del cliente. |
 | Certificados | CA persistente, confianza Windows interna, renovación de hoja servidor y CRL mediante systemd. |
 | Conservación | Actualización y reinstalación preservan identidad, CA, credenciales y datos. Desinstalación normal sin purga. |
 
@@ -33,16 +33,28 @@ Admisión de una carpeta de Quadlets/configuración
 por la CLI, transferencia por el pipe existente y creación de un LXC nuevo con
 `pct` desde Rust. Aplicación y lifecycle mediante Podman/systemd del guest, sin
 motor de workloads ni ejecución de scripts aportados por el usuario en el nodo.
-No se presenta el envío web o la integración de aplicaciones como terminados por ello.
+No se presenta el envío web como terminado por ello.
 
 Desde 0.0.16, `gnx deploy <carpeta>` permite enviar
 Quadlets/configuración a un LXC nuevo. La admisión, recursos, propiedad y límites
 están en [Despliegue](docs/deployment.md). La carpeta debe estar bajo control del
 administrador, no en una ubicación compartida modificable por terceros.
 
-No existen todavía subida de archivos desde la web, build de imágenes, publicación
-de dominios de aplicaciones ni integración OIDC de servicios. Esas capacidades
-no se presentan como completadas al crear el LXC.
+La candidata 0.0.18 admite `.container` y `.network`, verifica cada unidad e incluye
+el caso fijo [stack privado](stacks/private-services/README.md): RustFS, Pocket ID
+y NetBird con dashboard, red bridge, publicación HTTPS condicional e integración
+OIDC mediante las APIs nativas. Conserva datos, CA y credenciales; no añade un
+catálogo, otro supervisor ni imágenes reconstruidas. El alta humana usa la passkey
+real del operador. No se acredita login ni conectividad entre peers por configurar OIDC.
+El arranque compute espera disponibilidad de PVE mediante su healthcheck nativo
+antes de reconciliar la publicación del stack.
+
+No existen todavía subida web, build por Containerfile ni soporte de todas las
+clases de Quadlet (`.volume`, `.pod`, `.build`). La publicación no es genérica:
+solo el stack privado registrado tiene los dominios y rutas fijos del producto.
+La admisión no valida toda la semántica de Quadlet ni todas las referencias de
+configuración antes de crear. Un recibo completado no es una comprobación de salud.
+En 0.0.16, el cierre agregado tampoco confirma que todas las unidades estén activas.
 
 La presencia de Proxmox no acredita por sí sola despliegues ni VMs aceleradas.
 No se incluyen aplicaciones de negocio en el núcleo ni se crean guests al instalar.
@@ -72,6 +84,9 @@ La compilación, el empaquetado, la instalación, la configuración aplicada y l
 aceptación son resultados distintos. La comprobación realizada en un host no
 demuestra instalación en Windows limpio, recuperación tras reboot, vencimiento
 futuro de certificados, login humano Proxmox ni acceso desde dispositivos externos.
+Una sesión Proxmox ya abierta tampoco demuestra una autenticación nueva.
+Desinstalación, rollback y reinstalación requieren comprobar su ciclo propio;
+revisar su registro Windows o sus acciones MSI no equivale a ejecutarlo.
 
 ## Fuera de alcance
 

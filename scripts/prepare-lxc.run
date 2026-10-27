@@ -5,6 +5,17 @@ umask 077
 [[ $(id -u) == 0 ]]
 systemd-detect-virt --container --quiet
 command -v podman >/dev/null
+# These host facilities cannot operate inside this unprivileged guest.
+systemctl mask chronyd.service sys-kernel-tracing.mount var-lib-nfs-rpc_pipefs.mount
+systemctl reset-failed chronyd.service sys-kernel-tracing.mount var-lib-nfs-rpc_pipefs.mount
 install -d -m 0700 /etc/gnx-app/config /var/lib/gnx-app
 install -d -m 0755 /etc/containers/systemd
 systemctl start NetworkManager.service
+if [[ ${1:-dhcp} == private-stack ]]; then
+    connection=$(nmcli -g GENERAL.CONNECTION device show eth0)
+    [[ -n "$connection" && "$connection" != -- ]]
+    nmcli connection modify "$connection" ipv4.method manual ipv4.addresses 172.30.0.100/24 ipv4.gateway 172.30.0.1 ipv4.dns 172.30.0.1 ipv4.ignore-auto-dns yes
+    nmcli connection up "$connection"
+else
+    [[ ${1:-dhcp} == dhcp ]]
+fi

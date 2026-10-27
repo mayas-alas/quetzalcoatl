@@ -1,0 +1,61 @@
+#!/usr/bin/bash
+# Fixed ingress for the requested private stack; no application process supervisor.
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 ]]
+root=/var/lib/gnx-core
+mode=${1:?register, reconcile or dns required}
+[[ "$mode" == register || "$mode" == reconcile || "$mode" == dns ]]
+install -d -m 0755 "$root/stack-dns" "$root/stack-gateway"
+if [[ "$mode" == register ]]; then
+    input=$(cat)
+    jq -e 'keys == ["digest","vmid"] and (.vmid|type == "number") and .vmid >= 100 and .vmid <= 999999999 and (.digest|test("^[a-f0-9]{64}$"))' <<< "$input" >/dev/null
+    id=$(jq -r .vmid <<< "$input")
+    digest=$(jq -r .digest <<< "$input")
+    conf=$(podman exec gnx-core-compute pvesh get "/nodes/gnx-core-compute/lxc/$id/config" --output-format json)
+    jq -e --arg owner "GnX.Core:$digest" '.unprivileged == 1 and (.description|rtrimstr("\n")) == $owner and (.net0|contains("ip=172.30.0.100/24"))' <<< "$conf" >/dev/null
+    mac=$(jq -r '.net0|capture("hwaddr=(?<mac>[0-9A-Fa-f:]{17})").mac' <<< "$conf")
+    input=$(jq --arg mac "$mac" '. + {mac:$mac}' <<< "$input")
+    if [[ -e "$root/private-stack.json" ]]; then
+        [[ ! -L "$root/private-stack.json" && $(stat -c %u "$root/private-stack.json") == 0 ]]
+        jq -e --argjson id "$id" --arg digest "$digest" '.vmid == $id and .digest == $digest' "$root/private-stack.json" >/dev/null
+    else
+        (set -o noclobber; printf '%s\n' "$input" > "$root/private-stack.json")
+        chmod 0600 "$root/private-stack.json"
+    fi
+fi
+[[ -f "$root/private-stack.json" ]] || exit 0
+[[ ! -L "$root/private-stack.json" && $(stat -c %u "$root/private-stack.json") == 0 && $(stat -c %a "$root/private-stack.json") == 600 ]]
+jq -e '(.vmid|type == "number") and .vmid >= 100 and .vmid <= 999999999 and (.digest|test("^[a-f0-9]{64}$")) and (.mac|test("^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$"))' "$root/private-stack.json" >/dev/null
+id=$(jq -r .vmid "$root/private-stack.json")
+digest=$(jq -r .digest "$root/private-stack.json")
+mac=$(jq -r .mac "$root/private-stack.json")
+bind=$(ip -4 -o addr show dev eth0 | awk '{split($4,a,"/"); print a[1]; exit}')
+[[ "$bind" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+temporary="$root/stack-dns/hosts.conf.new"
+{
+    printf '# GnX Core private stack: public origins resolve to the existing gateway.\n'
+    printf 'dhcp-host=%s,172.30.0.100\n' "$mac"
+    for name in app.gnx compute.gnx pocket.gnx rustfs.gnx s3.gnx netbird.gnx; do printf 'address=/%s/%s\n' "$name" "$bind"; done
+} > "$temporary"
+chmod 0644 "$temporary"
+if [[ -f "$root/stack-dns/hosts.conf" ]] && cmp -s "$temporary" "$root/stack-dns/hosts.conf"; then
+    rm -- "$temporary"
+else
+    mv -- "$temporary" "$root/stack-dns/hosts.conf"
+    if [[ "$mode" != dns ]]; then podman exec gnx-core-compute systemctl restart dnsmasq.service; fi
+fi
+[[ "$mode" != dns ]] || exit 0
+# A container being started is not the same as its PVE config store being ready.
+podman exec gnx-core-compute systemctl start pve-cluster.service
+podman exec gnx-core-compute pvesh get "/nodes/gnx-core-compute/lxc/$id/config" --output-format json |
+    jq -e --arg owner "GnX.Core:$digest" --arg mac "$mac" '.unprivileged == 1 and (.description|rtrimstr("\n")) == $owner and (.net0|contains("ip=172.30.0.100/24")) and (.net0|ascii_downcase|contains("hwaddr=" + ($mac|ascii_downcase)))' >/dev/null
+# Claim only this exact host route, never another subnet or a default route.
+existing=$(ip -j -4 route show exact 172.30.0.100/32)
+jq -e 'length == 0 or (length == 1 and .[0].gateway == "10.88.0.2" and .[0].dev == "podman0" and .[0].protocol == "static")' <<< "$existing" >/dev/null
+ip route replace 172.30.0.100/32 via 10.88.0.2 dev podman0 proto static
+if ! cmp -s /etc/gnx-core/private-stack.caddy "$root/stack-gateway/private-stack.caddy"; then
+    install -m 0644 /etc/gnx-core/private-stack.caddy "$root/stack-gateway/private-stack.caddy.new"
+    mv -- "$root/stack-gateway/private-stack.caddy.new" "$root/stack-gateway/private-stack.caddy"
+fi
+systemctl --no-block try-restart gnx-core-gateway.service

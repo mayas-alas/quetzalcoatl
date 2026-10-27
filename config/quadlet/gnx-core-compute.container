@@ -1,6 +1,7 @@
 [Unit]
 Description=GnX Proxmox VE, LXC baseline without KVM
 PartOf=gnx-core.target
+After=gnx-core-gateway.service
 ConditionPathExists=/var/lib/gnx-core/secrets/compute.env
 
 [Container]
@@ -20,11 +21,20 @@ Volume=/var/lib/gnx-core/compute-config:/var/lib/pve-cluster
 Volume=/var/lib/gnx-core/tls:/etc/gnx/tls:ro
 Volume=/etc/gnx-core/install-pve-tls.run:/usr/local/libexec/gnx-install-tls:ro
 Volume=/etc/gnx-core/pveproxy.conf:/etc/systemd/system/pveproxy.service.d/gnx.conf:ro
+Volume=/etc/gnx-core/stack-dns.conf:/etc/dnsmasq.d/gnx-stack.conf:ro
+Volume=/var/lib/gnx-core/stack-dns:/etc/gnx-stack-dns:ro
 StopSignal=SIGRTMIN+3
 LogDriver=journald
+HealthCmd=/usr/bin/pvesh get /cluster/resources --type vm --output-format json
+HealthInterval=5s
+HealthTimeout=5s
+HealthRetries=20
+HealthStartPeriod=10s
+Notify=healthy
 StopTimeout=120
 
 [Service]
+ExecStartPost=/usr/bin/bash /etc/gnx-core/stack-access.run reconcile
 Restart=on-failure
 RestartSec=10s
 TimeoutStartSec=120s

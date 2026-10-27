@@ -67,6 +67,11 @@ aceptación completa. [Alcance](scope.md) delimita el producto;
 - Desinstalar confirma la parada y retira únicamente servicio y acceso Windows propios.
 - No continuar silenciosamente ante un conflicto de propiedad o parada fallida.
 - La desinstalación no es una purga ni autoriza borrar perfiles, VHDX o respaldos.
+- La retirada requiere el servicio Windows disponible y sin una operación en curso;
+  `gnx stop` no equivale a detener ese servicio. Un servicio no disponible se
+  diagnostica, no se elude borrando archivos o registros.
+- La revisión del MSI, su menú o una actualización no acreditan retirada, rollback
+  ni reinstalación. Véase [Mantenimiento y desinstalación](docs/uninstall.md).
 
 ## Obtener instaladores desde CI
 
@@ -93,6 +98,20 @@ crear un LXC separado sin convertir el núcleo en otro supervisor.**
 - Un fallo conserva el guest parcial; una entrada idéntica ya aplicada no duplica
   LXC ni borra datos. No existe actualización automática de carpetas modificadas.
 - Distinguir transferencia y unidades activas de salud HTTP, acceso, login y OIDC.
+- Comprobar cada unidad, no solo el resultado agregado de `is-active` de 0.0.16.
+  Desde 0.0.17 se consulta cada `ActiveState`; el recibo no certifica salud.
+  Reenviar una entrada completada es una consulta,
+  no una reparación del guest.
 
-Disponible desde 0.0.16. Subida web, puente nativo, builds e integración de
-aplicaciones no se presentan como implementados.
+Disponible desde 0.0.16. Subida web, puente nativo y builds no se presentan como implementados.
+
+**Como operadora, quiero utilizar los servicios privados con identidad propia.**
+
+- Desplegar el stack versionado en una red bridge Quadlet, sin `Network=host`.
+- Acceder a Pocket ID, RustFS/S3 y NetBird/dashboard por HTTPS del gateway existente.
+- Conservar CA, datos y credenciales; no reemplazar una instancia registrada.
+- Preparar clientes OIDC distintos para RustFS y NetBird mediante sus APIs nativas.
+- Registrar una passkey real del operador y comprobar autenticación/autorización;
+  no sustituir ese recorrido por un autenticador simulado o una página de login.
+- Comprobar escritura/lectura S3 real y conectividad entre peers por separado.
+  El proxy HTTPS no reemplaza el transporte STUN UDP.

@@ -55,8 +55,9 @@ fn run() -> std::io::Result<bool> {
             Ok(response.ok)
         }
         [arg] => {
-            let op = protocol::Operation::parse(arg)
-                .ok_or_else(|| protocol::invalid("usa start, stop, status, enroll o password"))?;
+            let op = protocol::Operation::parse(arg).ok_or_else(|| {
+                protocol::invalid("usa start, stop, status, enroll, password o deploy <carpeta>")
+            })?;
             #[cfg(windows)]
             {
                 let response = windows::client(op)?;
@@ -73,7 +74,7 @@ fn run() -> std::io::Result<bool> {
             }
         }
         _ => Err(protocol::invalid(
-            "no se admiten comandos, rutas ni secretos como argumentos",
+            "argumentos no admitidos; consulta gnx --help y no pases secretos por argumentos",
         )),
     }
 }

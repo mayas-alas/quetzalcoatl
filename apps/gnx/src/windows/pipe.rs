@@ -196,7 +196,7 @@ pub async fn client_bundle(
         .map_err(|_| {
             io::Error::new(
                 io::ErrorKind::NotFound,
-                "GnXCore no instalado; el servicio legacy no se utiliza",
+                "GnXCore no instalado o no accesible",
             )
         })?;
     let status = service.query_status().map_err(io::Error::other)?;

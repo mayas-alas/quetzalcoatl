@@ -10,6 +10,15 @@ use std::{
 };
 use windows_sys::Win32::{Foundation::CRYPT_E_NOT_FOUND, Security::Cryptography::*};
 
+const NAMES: [&str; 6] = [
+    "app.gnx",
+    "compute.gnx",
+    "pocket.gnx",
+    "rustfs.gnx",
+    "s3.gnx",
+    "netbird.gnx",
+];
+
 fn native(name: &str, args: &[&str]) -> io::Result<()> {
     let windows =
         std::env::var_os("SystemRoot").ok_or_else(|| io::Error::other("SystemRoot ausente"))?;
@@ -52,7 +61,7 @@ fn hosts() -> io::Result<()> {
             continue;
         };
         for name in parts {
-            if ["app.gnx", "compute.gnx"].contains(&name) {
+            if NAMES.contains(&name) {
                 if ip != "127.0.0.1" {
                     return Err(io::Error::other(
                         "nombre local existente en conflicto; no se modifica",
@@ -62,10 +71,10 @@ fn hosts() -> io::Result<()> {
             }
         }
     }
-    if present.len() != 2 {
+    if present.len() != NAMES.len() {
         let mut file = fs::OpenOptions::new().append(true).open(path)?;
         file.write_all(
-            b"\r\n127.0.0.1 app.gnx compute.gnx # GnXCore:7a34f3dc-ea24-4ddf-8adb-5817bf28bd21\r\n",
+            b"\r\n127.0.0.1 app.gnx compute.gnx pocket.gnx rustfs.gnx s3.gnx netbird.gnx # GnXCore:7a34f3dc-ea24-4ddf-8adb-5817bf28bd21\r\n",
         )?;
         file.sync_all()?;
     }
@@ -314,9 +323,10 @@ pub fn remove() -> io::Result<()> {
     let contents = fs::read_to_string(&path)?;
     let marker = "# GnXCore:7a34f3dc-ea24-4ddf-8adb-5817bf28bd21";
     let owned = format!("127.0.0.1 app.gnx compute.gnx {marker}");
+    let stack_owned = format!("127.0.0.1 {} {marker}", NAMES.join(" "));
     if contents
         .lines()
-        .any(|line| line.contains(marker) && line != owned)
+        .any(|line| line.contains(marker) && line != owned && line != stack_owned)
     {
         return Err(io::Error::other(
             "entrada hosts propia modificada; no se retira",
@@ -339,7 +349,10 @@ pub fn remove() -> io::Result<()> {
     }
     let retained: String = contents
         .split_inclusive('\n')
-        .filter(|line| line.trim_end_matches(['\r', '\n']) != owned)
+        .filter(|line| {
+            let line = line.trim_end_matches(['\r', '\n']);
+            line != owned && line != stack_owned
+        })
         .collect();
     if retained != contents {
         fs::write(path, retained)?;

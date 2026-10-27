@@ -108,6 +108,7 @@ impl Bundle {
         for file in &self.files {
             total += file.contents.len();
             if file.path.len() > 160
+                || file.path.split('/').count() > 5
                 || !file
                     .path
                     .bytes()
@@ -125,16 +126,65 @@ impl Bundle {
             if !file.path.contains('/') && file.path.ends_with(".container") {
                 validate_quadlet(&file.contents)?;
                 containers += 1;
+            } else if !file.path.contains('/') && file.path.ends_with(".network") {
+                validate_network(&file.contents)?;
             } else if !file.path.starts_with("config/") {
                 return Err(invalid(
-                    "solo se admiten .container y archivos bajo config/",
+                    "solo se admiten .container, .network y archivos bajo config/",
                 ));
             }
         }
         if total > MAX_TOTAL || containers == 0 || containers > 8 {
             return Err(invalid("tamaño o cantidad de Quadlets fuera de límite"));
         }
+        for file in &self.files {
+            if !file.path.contains('/') && file.path.ends_with(".container") {
+                for line in file.contents.lines() {
+                    if let Some(network) = line.trim().strip_prefix("Network=") {
+                        let network = network.trim();
+                        if network.ends_with(".network")
+                            && !self.files.iter().any(|entry| entry.path == network)
+                        {
+                            return Err(invalid("falta el archivo .network referenciado"));
+                        }
+                    }
+                }
+            }
+        }
+        if self.private_stack() {
+            let marker = self
+                .files
+                .iter()
+                .find(|file| file.path == "config/private-stack.json")
+                .ok_or_else(|| invalid("falta marcador de stack"))?;
+            let value: serde_json::Value = serde_json::from_str(&marker.contents)
+                .map_err(|_| invalid("marcador de stack inválido"))?;
+            if value != serde_json::json!({"version":1}) {
+                return Err(invalid("marcador de stack incompatible"));
+            }
+            for path in [
+                "private.network",
+                "pocket-id.container",
+                "rustfs.container",
+                "netbird-server.container",
+                "netbird-dashboard.container",
+                "config/root.crt",
+                "config/pocket.env",
+                "config/rustfs.env",
+                "config/netbird.yaml",
+            ] {
+                if !self.files.iter().any(|file| file.path == path) {
+                    return Err(invalid("stack privado incompleto"));
+                }
+            }
+        }
         Ok(())
+    }
+
+    pub fn private_stack(&self) -> bool {
+        self.files
+            .iter()
+            .any(|file| file.path == "config/private-stack.json")
     }
 
     pub fn digest(&self) -> io::Result<String> {
@@ -173,6 +223,7 @@ fn validate_quadlet(text: &str) -> io::Result<()> {
                 "Image"
                     | "ContainerName"
                     | "Network"
+                    | "NetworkAlias"
                     | "PublishPort"
                     | "Volume"
                     | "EnvironmentFile"
@@ -228,8 +279,23 @@ fn validate_quadlet(text: &str) -> io::Result<()> {
                     return Err(invalid("escape en mount/archivo"));
                 }
             }
-            "Network" if !matches!(value, "host" | "none" | "bridge") => {
+            "Network"
+                if !matches!(value, "host" | "none" | "bridge")
+                    && !(value.ends_with(".network")
+                        && !value.contains('/')
+                        && value.bytes().all(|b| {
+                            b.is_ascii_lowercase() || b.is_ascii_digit() || b"-._".contains(&b)
+                        })) =>
+            {
                 return Err(invalid("red no admitida"));
+            }
+            "NetworkAlias"
+                if value.len() > 63
+                    || !value.bytes().all(|b| {
+                        b.is_ascii_lowercase() || b.is_ascii_digit() || b"-.".contains(&b)
+                    }) =>
+            {
+                return Err(invalid("alias de red inválido"));
             }
             "Pull" if !matches!(value, "missing" | "never") => {
                 return Err(invalid("política de imagen no admitida"));
@@ -244,6 +310,41 @@ fn validate_quadlet(text: &str) -> io::Result<()> {
     }
     if !image || !install {
         return Err(invalid("Quadlet sin imagen o instalación nativa"));
+    }
+    Ok(())
+}
+
+fn validate_network(text: &str) -> io::Result<()> {
+    let mut section = "";
+    for line in text.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with(['#', ';']) {
+            continue;
+        }
+        if line == "[Network]" {
+            section = "Network";
+            continue;
+        }
+        if section != "Network" || line.ends_with('\\') || line.contains('%') {
+            return Err(invalid("sección o escape de red no admitido"));
+        }
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| invalid("directiva de red inválida"))?;
+        let value = value.trim();
+        match key {
+            "Driver" if value == "bridge" => {}
+            "NetworkName"
+                if value.starts_with("gnx-app-")
+                    && value.len() <= 63
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') => {}
+            "Internal" | "IPv6" if matches!(value, "true" | "false") => {}
+            _ => return Err(invalid("directiva de red fuera del subconjunto admitido")),
+        }
+    }
+    if section != "Network" {
+        return Err(invalid("falta sección Network"));
     }
     Ok(())
 }

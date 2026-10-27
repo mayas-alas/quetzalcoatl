@@ -1,4 +1,4 @@
-subjectAltName=DNS:app.gnx,DNS:compute.gnx
+subjectAltName=DNS:app.gnx,DNS:compute.gnx,DNS:pocket.gnx,DNS:rustfs.gnx,DNS:s3.gnx,DNS:netbird.gnx
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth

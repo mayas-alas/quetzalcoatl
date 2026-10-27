@@ -1,0 +1,28 @@
+[Unit]
+Description=NetBird dashboard
+After=netbird-server.service
+
+[Container]
+Image=docker.io/netbirdio/dashboard@sha256:3d6adfee19dd8d34d795af51daee69d27d2081d2076a5a304cfdd14acc67d6f4
+ContainerName=netbird-dashboard
+Network=private.network
+NetworkAlias=netbird-dashboard
+PublishPort=172.30.0.100:8080:80
+Pull=missing
+Environment=NETBIRD_MGMT_API_ENDPOINT=https://netbird.gnx
+Environment=NETBIRD_MGMT_GRPC_API_ENDPOINT=https://netbird.gnx
+Environment=AUTH_AUTHORITY=https://netbird.gnx/oauth2
+Environment=AUTH_CLIENT_ID=netbird-dashboard
+Environment=AUTH_AUDIENCE=netbird-dashboard
+Environment="AUTH_SUPPORTED_SCOPES=openid profile email groups"
+Environment=AUTH_REDIRECT_URI=/nb-auth
+Environment=AUTH_SILENT_REDIRECT_URI=/nb-silent-auth
+Environment=USE_AUTH0=false
+Environment=LETSENCRYPT_DOMAIN=none
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=180s
+
+[Install]
+WantedBy=multi-user.target

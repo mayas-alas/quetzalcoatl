@@ -22,7 +22,7 @@ Requiere Windows x64 con WSL2 y virtualización disponibles. Los instaladores
 incluyen el filesystem Linux y las cuatro imágenes OCI del núcleo; no instalan
 los prerrequisitos Windows que falten. No se garantiza cualquier host limpio.
 
-Descarga la [candidata 0.0.16 para Windows x64](https://github.com/mayas-alas/quetzalcoatl-next/releases/tag/v0.0.16).
+Descarga la [candidata 0.0.18 para Windows x64](https://github.com/mayas-alas/quetzalcoatl-next/releases/tag/v0.0.18).
 Incluye `GnxCoreSetup.exe`, `GnxCore.msi` y `SHA256SUMS.txt`. El repositorio es
 privado: debes iniciar sesión en GitHub con una cuenta que tenga acceso.
 
@@ -37,8 +37,10 @@ mantenimiento en Windows. Ambos incluyen el mismo contenido offline, por eso
 tienen tamaños similares. El EXE no descarga ni instala prerrequisitos Windows.
 La CLI se instala con el producto; no se ofrece como aplicación portable.
 
-Si ya instalaste otra compilación local de la misma versión, desinstálala antes de probar este
-paquete de la misma versión; la retirada normal conserva WSL y datos.
+No superpongas compilaciones distintas con el mismo número de versión ni cambies
+entre MSI directo y Burn como si fueran pasos complementarios. Consulta
+[mantenimiento y desinstalación](docs/uninstall.md) para los requisitos de retirada
+y los datos que se conservan.
 
 Los MSI y EXE se generan con la Action
 [Windows installers](.github/workflows/installers.yml). Tras una ejecución
@@ -76,8 +78,15 @@ keys ni contraseñas en argumentos, navegador, logs o chat.
 
 El [contrato de despliegue](docs/deployment.md) define archivos, límites, recursos
 y conservación. Las imágenes de aplicaciones requieren conectividad a sus
-registros. La operación no publica dominios ni configura OIDC de las aplicaciones;
-salud y acceso se verifican por separado del estado de sus unidades.
+registros. La candidata 0.0.18 incluye `.network` y el caso fijo de
+[servicios privados](stacks/private-services/README.md): bridge, HTTPS y clientes
+OIDC de Pocket ID para RustFS y NetBird. No es una publicación genérica de cualquier
+aplicación. Salud, login humano y conectividad entre peers se verifican por separado.
+
+Para el primer acceso humano, abre `https://pocket.gnx/setup`, crea tu cuenta y
+registra una passkey real. La preparación de OIDC no crea esa cuenta. STUN UDP
+no atraviesa el portproxy TCP de Windows; no se acredita conectividad entre peers
+externos por abrir el dashboard de NetBird.
 
 ## Acceso y conservación
 
@@ -87,9 +96,12 @@ dispositivos requiere Split DNS hacia el Pi-hole del nodo, las ACL correspondien
 y confianza en su CA privada. DNS no concede confianza TLS. Los requisitos técnicos
 están en [Arquitectura](architecture.md).
 
-Desinstalar detiene el nodo y retira el servicio y el acceso Windows propios.
-Conserva cuenta, perfil, WSL, CA, credenciales y datos para reinstalar. **No es una
-purga**. Un conflicto de propiedad o una parada no confirmada bloquean la retirada.
+La retirada normal solicita la parada del nodo y elimina archivos instalados,
+servicio y acceso Windows propios. Conserva cuenta, perfil, WSL, CA, credenciales,
+LXC y datos para reinstalar. **No es una purga ni libera todo el espacio usado**.
+La acción requiere `GnXCore` en ejecución y su pipe disponible; un conflicto,
+una operación ocupada o una parada no confirmada bloquean la retirada. Detener el
+nodo con `gnx stop` no es lo mismo que detener el servicio Windows.
 
 ## Desarrollo y documentación
 
@@ -98,7 +110,8 @@ purga**. Un conflicto de propiedad o una parada no confirmada bloquean la retira
 - [Arquitectura](architecture.md)
 - [Recorridos de usuario](historias-de-usuario.md)
 - [Contrato para agentes](.AGENTS)
-- [Cambios de 0.0.16](releases/v0.0.16/CHANGELOG.md)
+- [Mantenimiento y desinstalación](docs/uninstall.md)
+- [Cambios de 0.0.18](releases/v0.0.18/CHANGELOG.md)
 
 ## Licencia
 

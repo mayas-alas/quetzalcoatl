@@ -1,0 +1,29 @@
+pocket.gnx {
+    bind {$GNX_BIND}
+    tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+    reverse_proxy 172.30.0.100:1411
+}
+
+s3.gnx {
+    bind {$GNX_BIND}
+    tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+    reverse_proxy 172.30.0.100:9000
+}
+
+rustfs.gnx {
+    bind {$GNX_BIND}
+    tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+    @admin path /rustfs/admin/*
+    reverse_proxy @admin 172.30.0.100:9000
+    reverse_proxy 172.30.0.100:9001
+}
+
+netbird.gnx {
+    bind {$GNX_BIND}
+    tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+    @grpc header Content-Type application/grpc*
+    reverse_proxy @grpc h2c://172.30.0.100:8081
+    @backend path /relay* /ws-proxy/* /api/* /oauth2/*
+    reverse_proxy @backend 172.30.0.100:8081
+    reverse_proxy 172.30.0.100:8080
+}

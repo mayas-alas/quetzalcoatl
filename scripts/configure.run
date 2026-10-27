@@ -8,6 +8,7 @@ if [[ ${1:-} == access || ${1:-} == mesh-access ]]; then
     flock -x -w 30 8
     bind=$(ip -4 -o addr show dev eth0 | awk '{split($4,a,"/"); print a[1]; exit}')
     [[ "$bind" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    bash /etc/gnx-core/stack-access.run dns
     mesh_ip=$(ip -4 -o addr show dev tailscale0 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}' || :)
     if [[ "$mesh_ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then bind="$bind $mesh_ip"; fi
     printf 'GNX_BIND=%s\n' "$bind" > /var/lib/gnx-core/gateway.env.new
@@ -19,7 +20,12 @@ if [[ ${1:-} == access || ${1:-} == mesh-access ]]; then
     fi
     if [[ "$1" == mesh-access ]]; then
         [[ "$mesh_ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
-        printf 'FTLCONF_dns_interface=tailscale0\nFTLCONF_dns_port=53\nFTLCONF_dns_listeningMode=NONE\nFTLCONF_misc_dnsmasq_lines=interface=tailscale0;except-interface=lo;bind-dynamic\nFTLCONF_dns_hosts=%s app.gnx;%s compute.gnx\n' "$mesh_ip" "$mesh_ip" > /var/lib/gnx-core/dns.env.new
+        {
+            printf 'FTLCONF_dns_interface=tailscale0\nFTLCONF_dns_port=53\nFTLCONF_dns_listeningMode=NONE\nFTLCONF_misc_dnsmasq_lines=interface=tailscale0;except-interface=lo;bind-dynamic\nFTLCONF_dns_hosts='
+            separator=''
+            for name in app.gnx compute.gnx pocket.gnx rustfs.gnx s3.gnx netbird.gnx; do printf '%s%s %s' "$separator" "$mesh_ip" "$name"; separator=';'; done
+            printf '\n'
+        } > /var/lib/gnx-core/dns.env.new
         chmod 0644 /var/lib/gnx-core/dns.env.new
         if cmp -s /var/lib/gnx-core/dns.env.new /var/lib/gnx-core/dns.env; then
             rm -f /var/lib/gnx-core/dns.env.new

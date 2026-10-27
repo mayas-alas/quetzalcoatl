@@ -19,6 +19,12 @@ install -m 0644 "$payload/config/gateway/Caddyfile" /etc/gnx-core/Caddyfile
 install -m 0644 "$payload/config/compute/pveproxy.conf" /etc/gnx-core/pveproxy.conf
 install -m 0755 "$payload/scripts/install-pve-tls.run" /etc/gnx-core/install-pve-tls.run
 install -m 0755 "$payload/scripts/configure.run" /etc/gnx-core/configure.run
+install -m 0755 "$payload/scripts/stack-access.run" /etc/gnx-core/stack-access.run
+install -m 0644 "$payload/config/compute/stack-dns.conf" /etc/gnx-core/stack-dns.conf
+install -m 0644 "$payload/config/gateway/private-stack.caddy" /etc/gnx-core/private-stack.caddy
+install -d -m 0755 "$root/stack-dns" "$root/stack-gateway"
+if [[ ! -e "$root/stack-dns/hosts.conf" ]]; then printf '# No private stack registered.\n' > "$root/stack-dns/hosts.conf"; fi
+chmod 0644 "$root/stack-dns/hosts.conf"
 install -m 0644 "$payload/config/systemd/gnx-core.target" /etc/systemd/system/gnx-core.target
 chmod 0755 /etc/containers/systemd
 install -m 0644 "$payload/config/quadlet/"*.container /etc/containers/systemd/

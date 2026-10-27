@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""Fixed, guest-local initial OIDC configuration; never simulate a user's passkey."""
+import json
+import base64
+import os
+from pathlib import Path
+import secrets
+import ssl
+import stat
+import subprocess
+import time
+import urllib.error
+import urllib.request
+
+BASE = Path('/etc/gnx-app/config')
+STATE = BASE / 'enrollment.json'
+CA = BASE / 'root.crt'
+os.umask(0o077)
+TLS = None
+
+
+def initialize_tls():
+    global TLS
+    # Explicit private-CA trust: keep certificate and hostname verification, and
+    # require a signed, current CRL. Existing node roots are never reissued here.
+    with urllib.request.urlopen('http://app.gnx/pki/root.crl', timeout=10) as response:
+        der = response.read(65537)
+    if not der or len(der) > 65536:
+        fail('STACK_CRL_INVALID')
+    pem = '-----BEGIN X509 CRL-----\n' + base64.encodebytes(der).decode() + '-----END X509 CRL-----\n'
+    bundle = BASE / 'public-ca-crl.pem'
+    if bundle.is_symlink():
+        fail('STACK_CA_BUNDLE_INVALID')
+    bundle.write_text(CA.read_text() + '\n' + pem)
+    bundle.chmod(0o644)
+    TLS = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    TLS.load_verify_locations(cafile=bundle)
+    TLS.verify_flags |= ssl.VERIFY_CRL_CHECK_LEAF
+
+
+def fail(code):
+    raise RuntimeError(code)
+
+
+def read_private(path):
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 16384:
+        fail('STACK_PRIVATE_FILE_INVALID')
+    return path.read_text()
+
+
+def save(value):
+    temporary = STATE.with_suffix('.new')
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w') as stream:
+        json.dump(value, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, STATE)
+
+
+def request(service, method, path, value=None, token=None, timeout=10):
+    origin = 'https://pocket.gnx' if service == 'pocket' else 'https://netbird.gnx'
+    headers = {'Content-Type': 'application/json'}
+    if token:
+        headers['X-API-Key' if service == 'pocket' else 'Authorization'] = token if service == 'pocket' else 'Token ' + token
+    body = json.dumps(value).encode() if value is not None else None
+    req = urllib.request.Request(origin + path, data=body, headers=headers, method=method)
+    with urllib.request.urlopen(req, context=TLS, timeout=timeout) as response:
+        data = response.read(262145)
+        if len(data) > 262144:
+            fail('STACK_API_RESPONSE_TOO_LARGE')
+        return json.loads(data) if data else None
+
+
+def main():
+    if os.geteuid() != 0:
+        fail('STACK_REQUIRES_GUEST_ROOT')
+    pocket = dict(line.split('=', 1) for line in read_private(BASE / 'pocket.env').splitlines() if line and not line.startswith('#'))
+    key = pocket.get('STATIC_API_KEY')
+    if not key:
+        fail('STACK_POCKET_API_KEY_REQUIRED')
+    initialize_tls()
+    for attempt in range(20):
+        try:
+            discovery = request('pocket', 'GET', '/.well-known/openid-configuration', timeout=3)
+            instance = request('netbird', 'GET', '/api/instance', timeout=3)
+            break
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            if attempt == 19:
+                fail('STACK_HTTPS_NOT_READY')
+            time.sleep(1)
+    if discovery.get('issuer') != 'https://pocket.gnx':
+        fail('STACK_POCKET_ISSUER_MISMATCH')
+    if STATE.exists():
+        state = json.loads(read_private(STATE))
+    else:
+        if not instance.get('setup_required'):
+            fail('STACK_NETBIRD_EXISTING_OWNER_NOT_ADOPTED')
+        state = {'version': 1, 'owner': {'email': 'admin@gnx.local', 'password': secrets.token_urlsafe(40)},
+                 'nonce': secrets.token_hex(16), 'clients': {}}
+        save(state)
+    if state.get('version') != 1:
+        fail('STACK_ENROLLMENT_VERSION_INVALID')
+    if instance.get('setup_required'):
+        owner = request('netbird', 'POST', '/api/setup', {
+            **state['owner'], 'name': 'GnX recovery administrator', 'create_pat': True, 'pat_expire_in': 1})
+        state['owner_id'] = owner['user_id']
+        state['token'] = owner['personal_access_token']
+        save(state)
+    if not state.get('token'):
+        fail('STACK_NETBIRD_SETUP_RESULT_UNKNOWN')
+    for name, callback in [('netbird', 'https://netbird.gnx/oauth2/callback'),
+                           ('rustfs', 'https://rustfs.gnx/rustfs/admin/v3/oidc/callback/default')]:
+        client_id = 'gnx-' + name
+        description = 'GnX private stack ' + state['nonce']
+        entry = state['clients'].get(name)
+        if entry is None:
+            entry = {'id': client_id, 'secret': secrets.token_urlsafe(40)}
+            state['clients'][name] = entry
+            save(state)
+        try:
+            client = request('pocket', 'GET', '/api/oidc/clients/' + client_id, token=key)
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise
+            client = request('pocket', 'POST', '/api/oidc/clients', {
+                'id': client_id, 'name': 'GnX ' + name, 'description': description,
+                'isPublic': False, 'pkceEnabled': name == 'rustfs', 'skipConsent': False,
+                'callbackURLs': [callback], 'launchURL': 'https://' + name + '.gnx'}, key)
+            # The upstream auto-created secret is unused; its value is not exported.
+            if client.get('createdSecret'):
+                entry['auto_secret_id'] = client['createdSecret']['id']
+                save(state)
+        if client.get('description') != description or client.get('callbackURLs') != [callback] or client.get('isPublic'):
+            fail('STACK_POCKET_CLIENT_NOT_OWNED')
+        if not entry.get('secret_id'):
+            result = request('pocket', 'POST', '/api/oidc/clients/' + client_id + '/secrets', {'secret': entry['secret']}, key)
+            entry['secret_id'] = result['id']
+            save(state)
+        if entry.get('auto_secret_id'):
+            request('pocket', 'DELETE', '/api/oidc/clients/' + client_id + '/secrets/' + entry['auto_secret_id'], token=key)
+            del entry['auto_secret_id']
+            save(state)
+    if not state.get('provider_id'):
+        client = state['clients']['netbird']
+        provider = request('netbird', 'POST', '/api/identity-providers', {
+            'type': 'pocketid', 'name': 'Pocket ID', 'issuer': 'https://pocket.gnx',
+            'client_id': client['id'], 'client_secret': client['secret']}, state['token'])
+        state['provider_id'] = provider['id']
+        save(state)
+    client = state['clients']['rustfs']
+    values = dict(line.split('=', 1) for line in read_private(BASE / 'rustfs.env').splitlines() if line and not line.startswith('#'))
+    current = values.get('RUSTFS_IDENTITY_OPENID_CLIENT_ID')
+    if current and current != client['id']:
+        fail('STACK_RUSTFS_EXISTING_PROVIDER_NOT_ADOPTED')
+    values.update({'RUSTFS_IDENTITY_OPENID_ENABLE': 'on', 'RUSTFS_IDENTITY_OPENID_CONFIG_URL': 'https://pocket.gnx',
+                   'RUSTFS_IDENTITY_OPENID_CLIENT_ID': client['id'], 'RUSTFS_IDENTITY_OPENID_CLIENT_SECRET': client['secret'],
+                   'RUSTFS_IDENTITY_OPENID_SCOPES': 'openid,profile,email',
+                   'RUSTFS_IDENTITY_OPENID_REDIRECT_URI': 'https://rustfs.gnx/rustfs/admin/v3/oidc/callback/default',
+                   'RUSTFS_IDENTITY_OPENID_REDIRECT_URI_DYNAMIC': 'off', 'RUSTFS_IDENTITY_OPENID_DISPLAY_NAME': 'Pocket ID',
+                   'RUSTFS_IDENTITY_OPENID_ROLE_POLICY': 'readwrite'})
+    rendered = ''.join(key + '=' + value + '\n' for key, value in values.items())
+    destination = BASE / 'rustfs.env'
+    if read_private(destination) != rendered:
+        temporary = BASE / 'rustfs.env.new'
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as stream:
+            stream.write(rendered)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+        subprocess.run(['/usr/bin/systemctl', 'restart', 'rustfs.service'], check=True)
+    state['configured'] = True
+    save(state)
+    print('Stack OIDC configured; a real operator passkey is still required for human sign-in.')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except urllib.error.HTTPError as error:
+        print('Stack API operation not confirmed (HTTP ' + str(error.code) + '); inspect owned enrollment state, do not reset it.', file=__import__('sys').stderr)
+        raise SystemExit(1)
+    except RuntimeError as error:
+        print(str(error), file=__import__('sys').stderr)
+        raise SystemExit(1)
+    except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
+        print('Stack enrollment not confirmed (' + type(error).__name__ + '); preserve credentials and inspect native diagnostics.', file=__import__('sys').stderr)
+        raise SystemExit(1)
