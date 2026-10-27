@@ -111,6 +111,11 @@ repositorio. La Action descarga mediante `gh` y su token automático, también e
 repositorios privados. No introducir tokens en parámetros ni hacer público el
 repositorio para habilitar descargas. Conservar el SHA-256 por un canal confiable.
 
+Inputs disponibles para 0.0.14:
+[offline-inputs-v0.0.14](https://github.com/mayas-alas/quetzalcoatl-next/releases/tag/offline-inputs-v0.0.14),
+asset `gnx-offline-inputs.zip`, SHA-256
+`9ff2b812c5227c7163fbb6f7e92b8e5f9466990914d5c8bed5523f517c84e3a4`.
+
 ### Ejecutar y descargar
 
 1. Asegurar que el ref elegido contiene CLI y changelog de la versión del workspace,

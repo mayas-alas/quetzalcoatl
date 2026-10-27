@@ -21,12 +21,19 @@ Requiere Windows x64 con WSL2 y virtualización disponibles. Los instaladores
 incluyen el filesystem Linux y las cuatro imágenes OCI del núcleo; no instalan
 los prerrequisitos Windows que falten. No se garantiza cualquier host limpio.
 
+Descarga la [candidata 0.0.14 para Windows x64](https://github.com/mayas-alas/quetzalcoatl-next/releases/tag/v0.0.14).
+Incluye `GnxCoreSetup.exe`, `GnxCore.msi` y `SHA256SUMS.txt`. El repositorio es
+privado: debes iniciar sesión en GitHub con una cuenta que tenga acceso.
+Si ya instalaste otra compilación local 0.0.14, desinstálala antes de probar este
+paquete de la misma versión; la retirada normal conserva WSL y datos.
+
 Los MSI y EXE se generan con la Action
 [Windows installers](.github/workflows/installers.yml). Tras una ejecución
 correcta, se descargan desde **Actions → ejecución → Artifacts**. El workflow no
 publica en GitHub Releases solo si se activa `publish_release`, como pre-release
 de prueba y con tag coincidente. Revisa `SHA256SUMS.txt` antes de usar
 los archivos y ejecuta **uno** de los dos instaladores con permisos administrativos.
+La candidata no tiene firma Authenticode; los hashes no sustituyen una firma de código.
 
 ## Operación
 
