@@ -10,7 +10,7 @@ terminal como supervisor.
 | Área | Incluido |
 | --- | --- |
 | Entrega | EXE Burn como entrada interactiva recomendada y MSI autocontenido como vía administrativa directa al mismo producto. |
-| Automatización | GitHub Action manual para empaquetar el CLI versionado, entregar artefactos MSI/EXE con hashes y, opcionalmente, publicar una pre-release con tag coincidente. |
+| Automatización | GitHub Action manual para compilar una versión nueva desde fuentes o empaquetar el CLI versionado, entregar MSI/EXE con hashes y, opcionalmente, publicar una pre-release con tag coincidente. |
 | Identidad | Servicio `GnXCore`, cuenta `gnxcoresvc`, WSL `gnx-core` y estado protegido propio. |
 | Control | `start`, `stop`, `status`, `enroll`, `password` y `deploy <carpeta>` mediante un pipe administrativo local. |
 | Acceso | `app.gnx` y `compute.gnx`; el stack privado registrado añade Pocket ID, RustFS/S3 y NetBird por HTTPS. Acceso mesh sujeto a DNS, ACL y confianza del cliente. |
@@ -59,6 +59,29 @@ En 0.0.16, el cierre agregado tampoco confirma que todas las unidades estén act
 La presencia de Proxmox no acredita por sí sola despliegues ni VMs aceleradas.
 No se incluyen aplicaciones de negocio en el núcleo ni se crean guests al instalar.
 
+Las fuentes admiten seguimiento explícito de tags de aplicaciones con
+`Pull=newer` en [la política de imagen](docs/deployment.md#política-de-imagen-al-arrancar).
+La descarga queda a cargo de Podman al crear cada contenedor, sin otro supervisor
+ni timer. No selecciona canales, migra guests existentes ni activa actualizaciones
+del núcleo: este conserva sus imágenes offline fijadas.
+
+## Requisitos pendientes autorizados
+
+- **R-IMG-01 — Imágenes al iniciar:** extender la actualización al arranque tanto
+  a aplicaciones como a los cuatro servicios del núcleo, con canales explícitos,
+  semilla offline verificada e intención de parada respetada. No incluye actualizar
+  automáticamente el CLI/MSI ni reemplazar el filesystem WSL.
+- **R-LXC-01 — Base recuperable:** disponer de una base bootc versionada y
+  recreable para los LXC, con retorno a la base anterior si una actualización
+  falla. Verificar primero qué mecanismo bootc es compatible con el LXC no
+  privilegiado; exportar un rootfs desde una imagen bootc no demuestra rollback
+  transaccional dentro del guest. Conservar propiedad, identidad y datos; separar
+  el rollback de la base del de imágenes Podman y de migraciones de datos.
+
+Sus [criterios de cierre](historias-de-usuario.md#requisitos-pendientes) no son
+funcionalidad implementada ni aceptación. No autorizan recrear un guest existente
+ni aplicar una nueva política a la instalación sin confirmación separada.
+
 ## Límites de seguridad
 
 - Coincidir en nombre no demuestra propiedad: verificar SID, registro WSL,
@@ -90,7 +113,8 @@ revisar su registro Windows o sus acciones MSI no equivale a ejecutarlo.
 
 ## Fuera de alcance
 
-Purga de datos; migración automática de otras instalaciones; auto-updater;
+Purga de datos; migración automática de otras instalaciones; auto-updater del
+CLI/MSI o del filesystem WSL;
 multiusuario/multinodo; catálogo de aplicaciones; motor genérico de pipelines;
 otro backend de control; IdP para la app; telemetría remota; cambios BIOS, TPM,
 Secure Boot, BitLocker o antivirus. La Action de instaladores no es un motor de

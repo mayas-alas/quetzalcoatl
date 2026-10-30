@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [".AGENTS"],
+  "compaction": { "auto": true, "keep": { "tokens": 15000 } },
+  "permissions": [
+    { "action": "skill", "resource": "*", "effect": "deny" },
+    { "action": "skill", "resource": "gnx-vector", "effect": "allow" },
+    { "action": "skill", "resource": "gnx-friccion", "effect": "allow" },
+    { "action": "skill", "resource": "gnx-umbral", "effect": "allow" },
+    { "action": "skill", "resource": "orchestration", "effect": "allow" },
+    { "action": "skill", "resource": "orca-cli", "effect": "allow" },
+    { "action": "skill", "resource": "computer-use", "effect": "allow" },
+    { "action": "skill", "resource": "opencode", "effect": "allow" },
+    { "action": "skill", "resource": "find-skills", "effect": "allow" },
+    { "action": "skill", "resource": "report", "effect": "allow" }
+  ]
+}

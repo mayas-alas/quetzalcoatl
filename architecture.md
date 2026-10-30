@@ -196,6 +196,19 @@ aplicaciones en el núcleo. Se admiten `.container` y `.network` bridge, con ali
 DNS y comprobación de referencias de red presentes en el bundle. No se compilan
 Containerfiles ni se admiten todas las clases de Quadlet.
 
+`images.rs` valida la pareja `Image`/`Pull` en la admisión de aplicaciones.
+Conserva pins por digest con `missing`/`never` y permite un tag explícito plenamente
+calificado solo con `newer`. No interpreta tags implícitos ni añade un supervisor:
+Quadlet entrega la descarga al `podman run` generado. Esto no cambia las imágenes
+del núcleo ni reconcilia guests ya completados. Los límites están en
+[la política de imagen](docs/deployment.md#política-de-imagen-al-arrancar).
+
+El filesystem LXC actual procede del mismo rootfs preparado para WSL. No contiene
+por ello un despliegue bootc transaccional ni acredita rollback de la base. La base
+bootc recreable con recuperación para LXC es un
+[requisito pendiente](scope.md#requisitos-pendientes-autorizados), distinto de
+cambiar la imagen de un contenedor Podman.
+
 El cierre consulta `ActiveState` por cada unidad solicitada, también después de
 la configuración OIDC del stack. No prueba salud funcional. Al reenviar una entrada completada solo se
 consulta `pct status`, sin reconciliar archivos ni comprobar otra vez las unidades.

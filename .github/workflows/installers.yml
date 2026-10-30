@@ -3,6 +3,14 @@ name: Windows installers
 on:
   workflow_dispatch:
     inputs:
+      cli_mode:
+        description: 'CLI origin: reuse the immutable versioned binary or compile a new version from source'
+        required: true
+        default: versioned
+        type: choice
+        options:
+          - versioned
+          - source
       payload_release:
         description: 'Release tag containing gnx-offline-inputs.zip in this repository'
         required: true
@@ -33,6 +41,8 @@ jobs:
     defaults:
       run:
         shell: pwsh
+    env:
+      CLI_MODE: ${{ inputs.cli_mode }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
@@ -54,8 +64,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Cargo metadata failed' }
           $version = ($metadata.packages | Where-Object name -eq 'gnx').version
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid package version' }
-          foreach ($name in 'gnx.exe', 'CHANGELOG.md') {
-            if (-not (Test-Path -LiteralPath "releases/v$version/$name" -PathType Leaf)) { throw "Versioned release input missing: $name" }
+          if ($env:CLI_MODE -notin @('versioned', 'source')) { throw 'Invalid CLI mode' }
+          if (-not (Test-Path -LiteralPath "releases/v$version/CHANGELOG.md" -PathType Leaf)) { throw 'Versioned changelog missing' }
+          $binary = "releases/v$version/gnx.exe"
+          if ($env:CLI_MODE -eq 'versioned' -and -not (Test-Path -LiteralPath $binary -PathType Leaf)) {
+            throw 'Versioned CLI missing; select source for a new version'
+          }
+          if ($env:CLI_MODE -eq 'source' -and (Test-Path -LiteralPath $binary)) {
+            throw 'Source mode requires a new version without an existing canonical CLI; never replace an immutable version'
           }
           "GNX_VERSION=$version" >> $env:GITHUB_ENV
           "version=$version" >> $env:GITHUB_OUTPUT
@@ -76,7 +92,20 @@ jobs:
           ./scripts/prepare-ci-payload.ps1 -Archive $archive -Sha256 $env:PAYLOAD_SHA256
           Remove-Item -LiteralPath $archive
 
-      - name: Package the versioned CLI with canonical gates
+      - name: Check Rust sources
+        if: ${{ inputs.cli_mode == 'source' }}
+        run: |
+          cargo fmt --all -- --check
+          if ($LASTEXITCODE -ne 0) { throw 'Rust formatting failed' }
+          cargo clippy --locked -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw 'Rust static analysis failed' }
+
+      - name: Compile and package a new CLI with canonical gates
+        if: ${{ inputs.cli_mode == 'source' }}
+        run: ./scripts/build.ps1 -Package
+
+      - name: Package the immutable versioned CLI with canonical gates
+        if: ${{ inputs.cli_mode == 'versioned' }}
         run: ./scripts/build.ps1 -Package -UseVersionedBinary
 
       - name: Separate user downloads from build metadata
@@ -102,11 +131,32 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Cannot identify packaged source commit' }
           Copy-Item -LiteralPath "build/package/v$env:GNX_VERSION-$head/payload/manifest.json" -Destination $metadata
           Copy-Item -LiteralPath "releases/v$env:GNX_VERSION/CHANGELOG.md" -Destination $metadata
-          $technicalHashes = foreach ($name in 'gnx.exe', 'base-image.digest', 'manifest.json', 'CHANGELOG.md') {
+          $commit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify build commit' }
+          $rustc = rustc --version --verbose
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify Rust toolchain' }
+          $cargo = cargo --version
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify Cargo toolchain' }
+          $provenance = @{
+            version = $env:GNX_VERSION
+            source_commit = $commit
+            cli_mode = $env:CLI_MODE
+            compiled_from_source = ($env:CLI_MODE -eq 'source')
+            workflow_run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            runner_rustc = ($rustc -join "`n")
+            runner_cargo = $cargo
+          }
+          [IO.File]::WriteAllText((Join-Path $metadata 'build-provenance.json'), ($provenance | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+          $technicalHashes = foreach ($name in 'gnx.exe', 'base-image.digest', 'manifest.json', 'CHANGELOG.md', 'build-provenance.json') {
             "$((Get-FileHash -LiteralPath (Join-Path $metadata $name) -Algorithm SHA256).Hash.ToLowerInvariant())  $name"
           }
           [IO.File]::WriteAllText((Join-Path $metadata 'BUILD-SHA256SUMS.txt'), ($technicalHashes -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
-          "MSI/EXE packaged from the versioned CLI. Installation and runtime acceptance were not executed." >> $env:GITHUB_STEP_SUMMARY
+          if ($env:CLI_MODE -eq 'source') {
+            "CLI compiled from source and MSI/EXE packaged with canonical gates. Preserve the generated canonical CLI from technical metadata for local reuse." >> $env:GITHUB_STEP_SUMMARY
+          } else {
+            "MSI/EXE packaged from the immutable versioned CLI; source recompilation was not executed." >> $env:GITHUB_STEP_SUMMARY
+          }
+          "CLI mode: $env:CLI_MODE. Installation and runtime acceptance were not executed." >> $env:GITHUB_STEP_SUMMARY
 
       - name: Upload installers
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, Node 24
@@ -164,12 +214,23 @@ jobs:
           fi
           sha256sum --check --strict SHA256SUMS.txt
           (cd ../build-metadata && sha256sum --check --strict BUILD-SHA256SUMS.txt)
+          jq -e --arg commit "$GITHUB_SHA" --arg version "${RELEASE_TAG#v}" '
+            .source_commit == $commit and .version == $version and
+            ((.cli_mode == "source" and .compiled_from_source == true) or
+             (.cli_mode == "versioned" and .compiled_from_source == false))
+          ' ../build-metadata/build-provenance.json >/dev/null
           tag_commit=$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)
           if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
             echo 'Version tag does not match this workflow commit; refusing publication' >&2
             exit 1
           fi
           printf '\n\n## Procedencia\n\nCommit: `%s`\n\n[Empaquetado en GitHub Actions](%s/%s/actions/runs/%s). El empaquetado no acredita aceptación en un host nuevo.\n' "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> ../build-metadata/CHANGELOG.md
+          mode=$(jq -er .cli_mode ../build-metadata/build-provenance.json)
+          if [[ "$mode" == source ]]; then
+            printf '\nCLI compilado desde fuentes en esta ejecución.\n' >> ../build-metadata/CHANGELOG.md
+          else
+            printf '\nCLI versionado reutilizado; esta ejecución no recompiló las fuentes.\n' >> ../build-metadata/CHANGELOG.md
+          fi
           gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease --title "GnX Core $RELEASE_TAG — Windows x64 (candidata)" --notes-file ../build-metadata/CHANGELOG.md 'GnxCoreSetup.exe#Instalador interactivo — recomendado' 'GnxCore.msi#Paquete MSI — administración' 'SHA256SUMS.txt#SHA-256 de los instaladores'
           gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
           printf 'Instaladores publicados: %s/%s/releases/tag/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"

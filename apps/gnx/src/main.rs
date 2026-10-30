@@ -1,4 +1,5 @@
 mod deployment;
+mod images;
 mod package;
 mod protocol;
 #[cfg(windows)]

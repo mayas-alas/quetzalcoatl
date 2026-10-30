@@ -1,11 +1,24 @@
 # Contrato de agentes — GnX Core
 
+## Marco custom (v2)
+
+- Este contrato contiene las reglas comunes; `AGENTS.md` orienta y las skills
+  describen procedimientos. Ni una skill ni un plan amplían la autorización.
+- Elegir la acción y herramienta más simples que cierren la petición. Sin
+  refactors oportunistas, nuevas dependencias o documentación redundante.
+- Si hay contradicción, detener solo la operación afectada y resolverla con la
+  autoridad correspondiente; no borrar una protección para hacer encajar una skill.
+- Cargar contexto por necesidad. Reutilizar lo ya leído mientras siga vigente;
+  comprobar cambios al retomar. El marco coordina agentes fuera del runtime GNX.
+
 ## Autoridad y preparación
 
 1. Leer la petición vigente, `scope.md`, `architecture.md` y el estado/diff real
    antes de actuar. Para entrega, leer también `docs/packaging.md`.
-2. Trabajar con un agente. No delegar, crear otros worktrees ni ampliar el alcance
-   sin permiso. La autorización previa de una operación no se extiende a otra tarea.
+2. Un agente por defecto. Delegar solo con autorización para la tarea vigente,
+   mediante el protocolo nativo `orchestration`; cada worker recibe este contrato,
+   el alcance y los permisos de su encargo. Delegar no autoriza crear worktrees ni subdelegar.
+   La autorización previa de una operación no se extiende a otra tarea.
 3. Investigar hechos en código y fuentes oficiales; preguntar por intención o
    permisos que falten. Una función pendiente no es una orden de implementarla.
 4. Conservar trabajo existente. No restaurar versiones históricas, adoptar recursos
@@ -40,8 +53,11 @@
     `CHANGELOG.md`, con versión y hashes coherentes mediante `scripts/build.ps1`.
     No sobrescribir un CLI versionado distinto: incrementar la versión al cambiarlo.
     Cambios solo documentales/CI no obligan a reconstruir ni instalar el producto.
-11. CI puede empaquetar el CLI existente con `-Package -UseVersionedBinary`; eso no
-    acredita recompilación de fuentes. Conservar todos los gates de empaquetado.
+11. Elegir explícitamente la vía de entrega: CI online o host con inputs locales.
+    Ambas usan `scripts/build.ps1` y generan instaladores autocontenidos, no productos
+    distintos. CI puede compilar una versión nueva desde fuentes con `-Package`
+    o empaquetar el CLI existente con `-Package -UseVersionedBinary`; esta última
+    vía no acredita recompilación. Conservar CLI canónico, procedencia y todos los gates.
     No omitir validación WiX o comprobaciones de integridad por disco/toolchain.
 12. README = uso; scope = alcance; architecture = implementación; historias =
     recorridos; docs/packaging = entrega; changelog por versión = cambios de producto.
@@ -62,15 +78,30 @@
 
 ## Continuidad y comunicación
 
-15. Si se interrumpe una operación, usar `scripts/build.ps1 -Resume`, leer
+15. Para retomar build/entrega, usar `scripts/build.ps1 -Resume`, leer
     `build/resume.json` y contrastar HEAD/diff y estado nativo antes de repetirla.
-    El checkpoint orienta; Git, hashes y SCM/journal mandan. No repetir mutaciones
-    cuyo resultado sea desconocido.
-16. Guardar checkpoints con `-CheckpointOnly` antes/después de operaciones largas
-    o privilegiadas. Evidencia local fuera de docs/Git, sin secretos y acotada a
+    Para coordinación, contrastar el checkpoint con Run/Task/Dispatch y liveness
+    de Orca. El checkpoint orienta; las fuentes nativas mandan. Timeout, silencio
+    o fallo de API no prueban salida ni autorizan repetir una mutación desconocida.
+16. En build/entrega, guardar checkpoints con `-CheckpointOnly` antes/después de
+    operaciones largas o privilegiadas. En coordinación, actualizar evidencia
+    local al cambiar el estado o confirmar hallazgos, sin tocar el checkpoint del
+    producto. Evidencia fuera de docs/Git, sin secretos y acotada a
     dos archivos y un script temporal por agente. Los scripts del producto/CI no
     son archivos temporales de evidencia.
     Un informe de auditoría local cuenta dentro de ese límite; resumir hallazgos,
     impacto, ubicación y estado, no copiar sesiones del navegador ni logs privados.
 17. Comunicar resultado, comprobación, límite y bloqueo en pocas líneas. No narrar
     cada lectura ni prolongar iteraciones sin un siguiente resultado concreto.
+18. Presupuestar tiempo, intentos y contexto para coordinador y workers; no esperar
+    al último turno para guardar avances. Con métrica de contexto, reservar al menos
+    25% para síntesis/cierre: antes de 75% guardar y compactar por el mecanismo nativo
+    o entregar parcial. Sin métrica, no inventar tokens; usar el presupuesto del encargo.
+    El checkpoint mínimo conserva objetivo, revisión/diff, evidencia y pendientes,
+    IDs activos, tiempos, permisos y próximo paso seguro. Distinguir contexto lleno,
+    rate limit y cuota agotada: compactar no repone cuota. Respetar `Retry-After`
+    cuando exista y como máximo un reintento acotado de lectura/inferencia transitoria;
+    cuota agotada o error repetido: escalar y preservar parcial, sin bucles ni cambios
+    silenciosos de modelo. Reintentos de mutaciones siguen la regla 15 y el protocolo
+    nativo. Tras compactar o recuperar, releer contrato y checkpoint y verificar estado;
+    no crear otra sesión, Dispatch ni repetir trabajo solo por perder contexto.

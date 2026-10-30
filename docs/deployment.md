@@ -36,7 +36,10 @@ No usar una carpeta compartida o modificable por otros usuarios durante la lectu
 - Nombres en minúsculas ASCII: letras, números, guion, punto y guion bajo;
   `/` separa directorios. No se admiten segmentos ocultos, vacíos, `.` ni `..`.
 - Configuración adicional solo bajo `config/`, hasta cuatro niveles.
-- Imágenes fijadas con `Image=registro/imagen@sha256:<digest>`.
+- Imágenes fijadas con `Image=registro/imagen@sha256:<digest>` y `Pull=missing`
+  (valor por defecto) o `Pull=never`. La admisión en fuentes también permite
+  seguimiento explícito de un tag como se describe abajo; no cambia los pins
+  del stack privado distribuido.
 - `[Install] WantedBy=multi-user.target` para el autostart nativo.
 - Mounts y `EnvironmentFile` limitados a `/var/lib/gnx-app/` y
   `/etc/gnx-app/config/` dentro del guest. Los orígenes bajo `/var/lib/gnx-app/`
@@ -56,6 +59,30 @@ comillas, escapes, dependencias, puertos o rutas de montaje. El operador debe
 aportar una carpeta coherente y archivos de configuración existentes. La revisión
 de prefijos no prueba por sí sola que cada referencia pertenezca a un archivo del
 bundle. Una entrada admitida puede fallar al generarse o arrancarse en el guest.
+
+### Política de imagen al arrancar
+
+La admisión Rust en fuentes permite optar por `Image=registro/repositorio:tag`
+junto con `Pull=newer`; no se atribuye esta ampliación al CLI 0.0.18 versionado.
+El registro debe ser un nombre DNS ASCII explícito (con punto, `localhost` o
+puerto explícito); el repositorio usa minúsculas y el tag debe estar presente.
+No se admiten URLs, credenciales en la referencia, nombres cortos ni un tag sin
+esta política. Tampoco `Image`/`Pull` duplicados ni `Pull=newer` con un digest:
+volver a consultar el mismo pin no permite adoptar otra versión.
+
+Quadlet pasa esa política a Podman: al crear el contenedor compara el digest del
+tag en el registro y descarga si difiere. También puede ocurrir en un reinicio del
+servicio, no solo al arrancar el nodo. No actualiza un contenedor que sigue activo,
+no añade un timer y no fuerza el inicio de servicios detenidos. Según la
+[política nativa](https://docs.podman.io/en/stable/markdown/podman-run.1.html#pull-policy),
+un error de descarga permite usar una imagen local existente; sin ella puede
+fallar el arranque. Los límites de tiempo de la unidad siguen aplicándose.
+
+Esto no selecciona canales automáticamente, no garantiza que un digest diferente
+sea una versión posterior y no ofrece rollback automático ni reversión de
+migraciones de datos. Journal y el estado nativo siguen siendo el diagnóstico.
+No actualiza por sí solo los LXC ya registrados: reenviar otra carpeta sigue
+solicitando otro despliegue, no una migración de la instancia existente.
 
 ## Aplicación
 

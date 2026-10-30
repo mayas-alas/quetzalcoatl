@@ -195,7 +195,8 @@ impl Bundle {
 
 fn validate_quadlet(text: &str) -> io::Result<()> {
     let mut section = "";
-    let mut image = false;
+    let mut image = None;
+    let mut pull = None;
     let mut install = false;
     for line in text.lines() {
         let line = line.trim();
@@ -254,20 +255,14 @@ fn validate_quadlet(text: &str) -> io::Result<()> {
         }
         match key {
             "Image" => {
-                let (name, digest) = value
-                    .split_once("@sha256:")
-                    .ok_or_else(|| invalid("imagen sin digest fijado"))?;
-                if image
-                    || name.is_empty()
-                    || !name
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b".-_/:".contains(&b))
-                    || digest.len() != 64
-                    || !digest.bytes().all(|b| b.is_ascii_hexdigit())
-                {
-                    return Err(invalid("referencia de imagen inválida"));
+                if image.replace(value).is_some() {
+                    return Err(invalid("Image repetido"));
                 }
-                image = true;
+            }
+            "Pull" => {
+                if pull.replace(value).is_some() {
+                    return Err(invalid("Pull repetido"));
+                }
             }
             "Volume" | "EnvironmentFile" => {
                 if !value.starts_with("/etc/gnx-app/config/")
@@ -297,9 +292,6 @@ fn validate_quadlet(text: &str) -> io::Result<()> {
             {
                 return Err(invalid("alias de red inválido"));
             }
-            "Pull" if !matches!(value, "missing" | "never") => {
-                return Err(invalid("política de imagen no admitida"));
-            }
             "NoNewPrivileges" if value != "true" => {
                 return Err(invalid("privilegios adicionales no admitidos"));
             }
@@ -308,7 +300,9 @@ fn validate_quadlet(text: &str) -> io::Result<()> {
             _ => {}
         }
     }
-    if !image || !install {
+    let image = image.ok_or_else(|| invalid("Quadlet sin imagen"))?;
+    crate::images::validate(image, pull)?;
+    if !install {
         return Err(invalid("Quadlet sin imagen o instalación nativa"));
     }
     Ok(())

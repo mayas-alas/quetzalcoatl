@@ -1,6 +1,7 @@
 # Recorridos de usuario
 
-Estos criterios describen el comportamiento esperado del núcleo implementado.
+Estos criterios describen el comportamiento esperado del núcleo implementado,
+salvo la sección explícita de requisitos pendientes.
 No son un registro de ejecuciones ni convierten una comprobación parcial en
 aceptación completa. [Alcance](scope.md) delimita el producto;
 [Arquitectura](architecture.md) describe sus mecanismos.
@@ -79,6 +80,10 @@ aceptación completa. [Alcance](scope.md) delimita el producto;
 
 - Ejecutar manualmente la Action con una release de inputs confiables y SHA-256 conocido.
 - Empaquetar el CLI versionado sin sobrescribirlo con una compilación diferente.
+- Elegir `cli_mode=source` para compilar una versión nueva en CI, o `versioned`
+  para reutilizar el CLI canónico; conservar los hashes y la procedencia técnica.
+- Poder empaquetar en el host con los mismos inputs locales y CLI canónico, sin
+  presentar esa vía como un producto distinto ni una instalación verificada.
 - Conservar los gates de manifiesto, versión e integridad MSI del build canónico.
 - Entregar instaladores y hashes como artefacto; publicar una pre-release solo
   con opción explícita y tag coincidente con el commit de ejecución.
@@ -115,3 +120,34 @@ Disponible desde 0.0.16. Subida web, puente nativo y builds no se presentan como
   no sustituir ese recorrido por un autenticador simulado o una página de login.
 - Comprobar escritura/lectura S3 real y conectividad entre peers por separado.
   El proxy HTTPS no reemplaza el transporte STUN UDP.
+
+## Requisitos pendientes
+
+Estos recorridos corresponden a R-IMG-01 y R-LXC-01 en
+[alcance](scope.md#requisitos-pendientes-autorizados); no están aceptados ni
+descritos como capacidades del instalador publicado.
+
+**Como operadora, quiero adoptar nuevas imágenes al iniciar el nodo, incluido el
+núcleo, sin perder la capacidad de arrancar offline.**
+
+- Seleccionar canales explícitos por imagen; no convertir un pin en `latest`
+  silenciosamente ni confundir digest diferente con versión más reciente.
+- Conservar una semilla offline verificada y no reemplazar una imagen promovida
+  por la semilla durante la recuperación o aplicación de un paquete.
+- Respetar `stop`; `status` no descarga ni inicia servicios. Mantener la coordinación
+  en Rust y el lifecycle/descarga en mecanismos nativos.
+- Informar qué actualización se comprobó, aplicó, falló o quedó desconocida, sin
+  convertir una unidad activa en prueba de salud funcional.
+
+**Como administradora, quiero recrear la base bootc de un LXC y poder volver a
+una base anterior si necesito recuperar el guest.**
+
+- Identificar origen, versión/digest, base vigente y base recuperable; comprobar
+  compatibilidad real con PVE y el LXC no privilegiado antes de elegir mecanismo.
+- Conservar propiedad verificable, identidad, CA, credenciales y datos persistentes
+  al recrear o recuperar; no adoptar otro guest ni crear un reemplazo silencioso.
+- Distinguir retorno de la base, retorno de imágenes Podman y recuperación de
+  datos: bootc no demuestra que una migración de aplicación sea reversible.
+- No presentar un rootfs exportado como prueba de rollback bootc dentro del LXC.
+  Comprobar recuperación y límites antes de declarar aceptación, con autorización
+  específica para las operaciones que muten la instalación.

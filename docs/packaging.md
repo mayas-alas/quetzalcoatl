@@ -88,12 +88,46 @@ del CLI incorporado al MSI antes de construir el EXE. WiX mantiene sus validacio
 La segunda ruta evita confundir una recompilación con otro toolchain con el binario
 canónico; no demuestra que las fuentes actuales se hayan recompilado.
 
+### CI online y host con inputs locales
+
+Son dos lugares de construcción del mismo producto: ambos generan MSI/EXE
+autocontenidos mediante el build canónico, no un instalador web y otro producto
+offline. La ruta CI descarga inputs publicados y verificados; la ruta del host
+consume los archivos locales descritos arriba. Ejecutar ambas vías no implica
+que los instaladores sean idénticos byte a byte.
+
+Para construir sin red en el host también deben estar disponibles el toolchain,
+las dependencias Cargo y las de .NET/WiX/Burn. Tener los archivos OCI/rootfs no
+prepara esas cachés. No omitir un gate porque falte una dependencia o espacio.
+
+Si CI ya compiló el CLI canónico de una versión nueva, conservar el artefacto
+técnico, verificar sus hashes, versión y procedencia, y recuperar `gnx.exe` como
+`releases/v<versión>/gnx.exe` solo si no existe o coincide exactamente. Después el
+host puede empaquetarlo con `-Package -UseVersionedBinary`. No sobrescribir uno
+distinto ni exigir que una recompilación local con otro toolchain produzca el
+mismo binario. La adopción en Git, el push y la publicación siguen siendo acciones
+explícitas; CI no los hace automáticamente.
+
 ## GitHub Actions
 
 [Windows installers](../.github/workflows/installers.yml) se ejecuta manualmente
 con `workflow_dispatch`, en `windows-2022`. No se activa por pull requests ni instala
 el producto. El job de empaquetado usa solo lectura. El job opcional de publicación
 requiere escritura y publica únicamente una pre-release tras completar los gates.
+
+`cli_mode` distingue dos rutas:
+
+- **`versioned`** (predeterminada): exige el CLI canónico y changelog del checkout;
+  ejecuta `-Package -UseVersionedBinary`, sin recompilar Rust.
+- **`source`**: exige una versión nueva y su changelog, sin CLI canónico existente
+  en esa ruta. Comprueba formato y Clippy, y ejecuta `-Package`, que compila con
+  Cargo y genera `releases/v<versión>/gnx.exe` antes de empaquetar. No sustituye
+  binarios versionados para acomodar otro toolchain.
+
+El artefacto técnico conserva el CLI, los hashes y `build-provenance.json` con
+commit, modo y toolchain del runner. En modo `versioned`, ese toolchain no se
+atribuye a la compilación del CLI reutilizado. La procedencia no acredita
+instalación, aceptación ni que el binario generado haya sido incorporado a Git.
 
 ### Preparar el ZIP de inputs
 
@@ -143,16 +177,17 @@ configuración, arquitectura, IDs OCI y contrato de integridad del checkout.
 
 ### Ejecutar y descargar
 
-1. Asegurar que el ref elegido contiene CLI y changelog de la versión del workspace,
-   la configuración compatible y todos los scripts runtime.
+1. Asegurar que el ref elegido contiene el changelog de la versión del workspace,
+   la configuración compatible y todos los scripts runtime. Para `versioned`,
+   también el CLI canónico; para `source`, una versión nueva sin CLI previo.
 2. En GitHub, abrir **Actions → Windows installers → Run workflow**.
-3. Indicar `payload_release` (tag de la release de inputs) y `payload_sha256`
+3. Elegir `cli_mode` e indicar `payload_release` (tag de la release de inputs) y `payload_sha256`
    (hash del ZIP completo). La Action descarga, verifica y extrae solo los archivos permitidos.
-4. Se ejecuta `build.ps1 -Package -UseVersionedBinary`, sin reemplazar el CLI canónico.
+4. Se ejecuta la ruta canónica seleccionada, sin reemplazar un CLI versionado distinto.
 5. En **Artifacts**, elegir según la finalidad:
    - `gnx-core-v<versión>-windows-x64`: MSI, setup EXE y `SHA256SUMS.txt`.
    - `gnx-core-v<versión>-build-metadata`: CLI canónico, digest base, manifiesto,
-     changelog y `BUILD-SHA256SUMS.txt`. No es una instalación portable.
+      changelog, `build-provenance.json` y `BUILD-SHA256SUMS.txt`. No es una instalación portable.
    Retención: siete días. Los hashes técnicos y los de distribución están separados.
 6. Opcionalmente, activar `publish_release` y ejecutar desde el tag `v<versión>`
    previamente creado sobre el commit elegido. Tras el build, un segundo job
