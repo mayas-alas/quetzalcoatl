@@ -216,3 +216,4 @@ CAB cuya incorporación se verifica en el MSI. Para setups antiguos,
 `scripts/clean-release-exes.ps1` muestra el plan; `-Apply` conserva el setup más
 reciente verificado, todos los MSI y CLI versionados. No limpia datos ni cachés
 de Windows Installer.
+"- Build local (host): usa recursos locales \`build/payload/\` (rootfs.tar, images/*.oci.tar) sin descargar offline-inputs." 
