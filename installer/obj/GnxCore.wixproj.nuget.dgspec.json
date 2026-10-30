@@ -1,0 +1,50 @@
+{
+  "format": 1,
+  "restore": {
+    "C:\\Users\\mayas\\quetzalcoatl\\installer\\GnxCore.wixproj": {}
+  },
+  "projects": {
+    "C:\\Users\\mayas\\quetzalcoatl\\installer\\GnxCore.wixproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "C:\\Users\\mayas\\quetzalcoatl\\installer\\GnxCore.wixproj",
+        "projectName": "GnxCore",
+        "projectPath": "C:\\Users\\mayas\\quetzalcoatl\\installer\\GnxCore.wixproj",
+        "packagesPath": "C:\\Users\\mayas\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\mayas\\quetzalcoatl\\installer\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\mayas\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "native"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "native": {
+            "targetAlias": "native",
+            "projectReferences": {}
+          }
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        }
+      },
+      "frameworks": {
+        "native": {
+          "targetAlias": "native",
+          "dependencies": {
+            "WixToolset.Util.wixext": {
+              "target": "Package",
+              "version": "[5.0.2, )"
+            }
+          }
+        }
+      }
+    }
+  }
+}

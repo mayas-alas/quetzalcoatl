@@ -1,0 +1,79 @@
+{
+  "version": 3,
+  "targets": {
+    "native,Version=v0.0": {
+      "WixToolset.Util.wixext/5.0.2": {
+        "type": "package",
+        "build": {
+          "build/WixToolset.Util.wixext.targets": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "WixToolset.Util.wixext/5.0.2": {
+      "sha512": "sr3GNWr9bTcuALh58lvzLQrwWTuwcQTHkHXhPwFHNrg3GlUrY9arm3fRLWGo3RN739NhUrFEB8dguVsO/gVb9Q==",
+      "type": "package",
+      "path": "wixtoolset.util.wixext/5.0.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "build/WixToolset.Util.wixext.targets",
+        "wix.png",
+        "wixext5/WixToolset.Util.wixext.dll",
+        "wixtoolset.util.wixext.5.0.2.nupkg.sha512",
+        "wixtoolset.util.wixext.nuspec"
+      ]
+    }
+  },
+  "projectFileDependencyGroups": {
+    "native,Version=v0.0": [
+      "WixToolset.Util.wixext >= 5.0.2"
+    ]
+  },
+  "packageFolders": {
+    "C:\\Users\\mayas\\.nuget\\packages\\": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "C:\\Users\\mayas\\quetzalcoatl\\installer\\GnxCore.wixproj",
+      "projectName": "GnxCore",
+      "projectPath": "C:\\Users\\mayas\\quetzalcoatl\\installer\\GnxCore.wixproj",
+      "packagesPath": "C:\\Users\\mayas\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\mayas\\quetzalcoatl\\installer\\obj\\",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "C:\\Users\\mayas\\AppData\\Roaming\\NuGet\\NuGet.Config"
+      ],
+      "originalTargetFrameworks": [
+        "native"
+      ],
+      "sources": {
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "native": {
+          "targetAlias": "native",
+          "projectReferences": {}
+        }
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      }
+    },
+    "frameworks": {
+      "native": {
+        "targetAlias": "native",
+        "dependencies": {
+          "WixToolset.Util.wixext": {
+            "target": "Package",
+            "version": "[5.0.2, )"
+          }
+        }
+      }
+    }
+  }
+}
