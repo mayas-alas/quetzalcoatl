@@ -3,5 +3,6 @@
   "version_target": "v0.0.19",
   "skills_path": ".opencode/skills",
   "goose_cli": "C:/Program Files/Goose-win32-x64/dist-windows/resources/bin/goose.exe",
-  "notes": "Integración goose-driven. Las skills locales se enlazan/copian al directorio de Goose o se configuran para lectura directa. Usuario host Windows; no aplica a cuenta dedicada gnxcoresvc."
+  "notes": "Integración goose-driven. Usuario host Windows; no aplica a gnxcoresvc. Política de inputs: el host construye exe offline con inputs locales (offline-inputs); CI publica MSI/EXE online; cada instalación debe traer inputs para completar gates (-SealBase, -Package).",
+  "policy": "host-offline-build + ci-online-release; inputs-required-per-install"
 }
