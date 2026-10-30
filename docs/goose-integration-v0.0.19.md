@@ -16,7 +16,9 @@ para integrar las skills `.opencode/skills/` en el framework agentic de Quetzalc
 - Las skills del repo (`.opencode/skills/`) no están en el directorio de Goose.
 - `goose skills list` muestra solo las locales; `goose-doc-guide` es builtin.
 - Para hacerlas aparecer: enlazar/copiar `.opencode/skills/` al directorio local
-  o configurar Goose para leer `.opencode/skills/`.
+  o configurar Goose para leer `.opencode/skills/`. **Nota**: este mod aplica al
+  usuario host de Windows (`mayas`), no al usuario dedicado `gnxcoresvc` ni al
+  runtime WSL del servicio.
 
 ## Features de browser/navegador
 
