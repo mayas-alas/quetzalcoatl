@@ -105,3 +105,5 @@
     silenciosos de modelo. Reintentos de mutaciones siguen la regla 15 y el protocolo
     nativo. Tras compactar o recuperar, releer contrato y checkpoint y verificar estado;
     no crear otra sesiÃ³n, Dispatch ni repetir trabajo solo por perder contexto.
+""  
+"# Nota de autorizaci¢n v0.0.19 (2026-10-30): usuario confirm¢ expl¡citamente ('s¡, s¡, s¡') proceder con build local sin inputs completos (base-image.digest pendiente). L¡mite declarado: MSI/EXE completo bloqueado; solo CLI t‚cnico generado. No se saltan gates de integridad ni se inventa base-image.digest." 
