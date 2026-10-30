@@ -1,0 +1,7 @@
+{
+  "framework": "goose",
+  "version_target": "v0.0.19",
+  "skills_path": ".opencode/skills",
+  "goose_cli": "C:/Program Files/Goose-win32-x64/dist-windows/resources/bin/goose.exe",
+  "notes": "Integración goose-driven. Las skills locales se enlazan/copian al directorio de Goose o se configuran para lectura directa."
+}
