@@ -1,5 +1,6 @@
 mod access;
 mod bootstrap;
+mod console;
 mod deploy;
 mod identity;
 mod node;

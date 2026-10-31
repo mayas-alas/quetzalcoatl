@@ -222,7 +222,7 @@ fn execute_secret(op: Operation, secret: Option<&str>) -> io::Result<(NodeState,
         return Ok((NodeState::Active, if op == Operation::Enroll {
             "Tailscale configurado; resolver de malla preparado, comprueba la etapa con status"
         } else {
-            "contraseña configurada; Proxmox iniciado mediante su Quadlet, HTTPS aún no comprobado"
+            "contraseña de root@pam configurada y persistida; comprueba el login en https://compute.gnx (Linux PAM)"
         }.into()));
     }
     if op == Operation::Stop {

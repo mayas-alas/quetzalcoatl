@@ -221,12 +221,22 @@ pub async fn client_request(
     // Human input happens before opening the short-lived connection. The pipe
     // server is authenticated again before any bytes or credentials are sent.
     let secret = match operation {
-        Operation::Enroll => Some(prompt_secret("Key Tailscale (sin eco): ")?),
+        Operation::Enroll => Some(prompt_secret("Key Tailscale (sin eco): ", false)?),
         Operation::Password => {
-            let value = Zeroizing::new(prompt_secret("Contraseña Proxmox (mínimo 12 bytes): ")?);
-            let confirmation = Zeroizing::new(prompt_secret("Confirmar contraseña: ")?);
+            let value = Zeroizing::new(prompt_secret(
+                "Nueva contraseña PVE root@pam (mín. 12 bytes; Esc cancela): ",
+                true,
+            )?);
+            if value.len() < 12 || value.len() > 1024 || value.chars().any(char::is_control) {
+                return Err(protocol::invalid(
+                    "contraseña inválida: usa de 12 a 1024 bytes sin caracteres de control; no se enviaron cambios",
+                ));
+            }
+            let confirmation = Zeroizing::new(prompt_secret("Repite la nueva contraseña: ", true)?);
             if *value != *confirmation {
-                return Err(protocol::invalid("las contraseñas no coinciden"));
+                return Err(protocol::invalid(
+                    "las contraseñas no coinciden; no se enviaron cambios",
+                ));
             }
             Some(value.to_string())
         }
@@ -283,9 +293,13 @@ pub async fn client_request(
     Ok(response)
 }
 
-fn prompt_secret(prompt: &str) -> io::Result<String> {
+fn prompt_secret(prompt: &str, masked: bool) -> io::Result<String> {
     use std::io::{BufRead, IsTerminal};
     if std::io::stdin().is_terminal() {
+        if masked {
+            return super::console::read_masked(prompt)
+                .map(|mut value| std::mem::take(&mut *value));
+        }
         return rpassword::prompt_password(prompt);
     }
     // Redirected stdin is already a private inherited pipe, not a console
