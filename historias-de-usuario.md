@@ -36,6 +36,23 @@ aceptación completa. [Alcance](scope.md) delimita el producto;
 - Un resultado de configuración no acredita acceso remoto ni login humano.
 - Compute o mesh pendientes no impiden consultar la app local.
 
+**Como administradora, quiero establecer o cambiar la contraseña de PVE sin
+confundirla con mis credenciales Windows.**
+
+- Usar `gnx password` en consola elevada con el nodo iniciado. Establece una nueva
+  contraseña de `root@pam`, no solicita la anterior ni cambia la cuenta Windows.
+- Introducirla y confirmarla sin eco; documentar el mínimo de 12 bytes y que no
+  se revela el texto. Las fuentes 0.0.23 añaden asteriscos, retroceso y cancelación
+  con Esc/Ctrl+C en consola interactiva. Mantener la entrada por stdin sin eco
+  para automatización y no aceptar secretos como argumentos.
+- Persistir el hash protegido y aplicarlo a compute. Distinguir rechazo de entrada,
+  fallo de aplicación y resultado desconocido sin presentar estos dos últimos
+  como garantía de que la contraseña anterior sigue vigente.
+- Usar el mismo comando para un cambio persistente; cambiar root únicamente
+  dentro de PVE no actualiza la configuración que se reaplica al recrear compute.
+- Comprobar el login real en `https://compute.gnx`, como `root@pam` o `root` en
+  Linux PAM, sin imprimir, recuperar ni registrar la contraseña.
+
 **Como operadora, quiero acceder a Proxmox con su autenticación nativa.**
 
 - Abrir `https://compute.gnx` mediante el gateway con TLS backend verificado.
@@ -123,9 +140,54 @@ Disponible desde 0.0.16. Subida web, puente nativo y builds no se presentan como
 
 ## Requisitos pendientes
 
-Estos recorridos corresponden a R-IMG-01 y R-LXC-01 en
+Estos recorridos corresponden a R-IMG-01, R-LXC-01, R-UPD-01, R-REC-01 y R-VAL-01 en
 [alcance](scope.md#requisitos-pendientes-autorizados); no están aceptados ni
 descritos como capacidades del instalador publicado.
+
+**Como administradora, quiero instalar una vez con MSI o EXE y actualizar el
+producto instalado mediante `gnx update --apply`.**
+
+- Seleccionar una release pública de producto, incluidos candidatos publicados,
+  desde el origen administrativo configurado; excluir borradores e inputs técnicos.
+- Verificar versión, hashes e identidad del instalador antes de ejecutarlo.
+  Un origen privado o inaccesible devuelve fallo controlado sin instalar ni
+  recurrir a otro origen o a una sesión de desarrollo autenticada.
+- Conservar el mantenimiento nativo MSI/Burn y separar la sustitución del CLI/servicio
+  de la aplicación del catálogo. Confirmar cada fase y no repetir una instalación
+  cuyo resultado sea desconocido. Sin `--force`, respetar volúmenes, datos,
+  identidad, configuración declarada y paradas explícitas. Los LXC del usuario
+  y del sistema permanecen disponibles después de la actualización.
+- Observar la ventana de compute antes de interrumpirlo; no detener guests por
+  iniciativa propia. Comprobar el instalador exacto de CI, no solo un CLI equivalente.
+
+**Como operadora, quiero recrear un entorno propio y compartir su operación con
+un agente sin compartir la cuenta Windows de servicio.**
+
+- La forma prevista `gnx update --apply --force` retira el estado anterior del
+  sistema GnX y lo prepara desde cero, con identidad nueva y el bootstrap
+  configurado. Aprobar antes el inventario de recursos y datos que se perderán,
+  incluidos los guests del almacenamiento administrado;
+  no extender ese alcance a Windows, otras WSL o recursos ajenos. Reponer solo
+  un contenedor conservando sus volúmenes no satisface este recorrido.
+- Usar el lifecycle nativo. Una actualización normal no retira guests; la
+  recreación completa retira el almacenamiento del nodo identificado según el
+  inventario aprobado. No convierte recursos externos en recursos del producto
+  ni omite comprobaciones por recibir un flag de fuerza.
+- Configurar la clave PVE acordada mediante `gnx password`, sin crear otro flujo
+  de bootstrap ni publicar una variable global Windows con la contraseña.
+  Comprobar una autenticación humana real, sin publicar secretos ni recuperar
+  contraseñas desde hashes o usar un login abierto como prueba de autenticación nueva.
+- Mantener `PASSWORD`/`PASSWORD_HASH` de la configuración protegida como fuente
+  de verdad. Recrear compute reaplica esa credencial, también si se conserva su
+  almacenamiento durante un update normal. Cambiar root solo dentro del contenedor
+  no cambia esa configuración; no se introduce un sincronizador ni recuperación
+  de la contraseña privada para el agente.
+- Operar la misma instancia por UI humana y CLI/pipe del producto para el agente.
+  El mantenimiento nativo PVE/Podman requiere recursos y permisos concretos;
+  no se obtiene acceso usando la WSL personal o el login de la cuenta de servicio.
+- Separar la aceptación manual de primera preparación, la recreación y el upgrade
+  con estado existente. Conservar una ficha local sin secretos para otro modelo;
+  documentar estos criterios no autoriza ejecutarlos sin identificar el entorno.
 
 **Como operadora, quiero adoptar nuevas imágenes al iniciar el nodo, incluido el
 núcleo, sin perder la capacidad de arrancar offline.**

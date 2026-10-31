@@ -22,9 +22,9 @@ Requiere Windows x64 con WSL2 y virtualización disponibles. Los instaladores
 incluyen el filesystem Linux y las cuatro imágenes OCI del núcleo; no instalan
 los prerrequisitos Windows que falten. No se garantiza cualquier host limpio.
 
-Descarga la [candidata 0.0.18 para Windows x64](https://github.com/mayas-alas/quetzalcoatl-next/releases/tag/v0.0.18).
-Incluye `GnxCoreSetup.exe`, `GnxCore.msi` y `SHA256SUMS.txt`. El repositorio es
-privado: debes iniciar sesión en GitHub con una cuenta que tenga acceso.
+Descarga la [candidata 0.0.22 para Windows x64](https://github.com/mayas-alas/quetzalcoatl/releases/tag/v0.0.22).
+Incluye `GnxCoreSetup.exe`, `GnxCore.msi` y `SHA256SUMS.txt`. La release es pública;
+no requiere una sesión GitHub para descargar esos archivos.
 
 | Descarga | Cuándo usarla |
 | --- | --- |
@@ -44,8 +44,8 @@ y los datos que se conservan.
 
 Los MSI y EXE se generan con la Action
 [Windows installers](.github/workflows/installers.yml). Tras una ejecución
-correcta, se descargan desde **Actions → ejecución → Artifacts**. El workflow
-publica en GitHub Releases solo si se activa `publish_release`, como pre-release
+correcta y con `publish_release` activado, se descargan desde **GitHub Releases**.
+El workflow entrega una pre-release
 de prueba y con tag coincidente. Revisa `SHA256SUMS.txt` antes de usar
 los archivos y ejecuta **uno** de los dos instaladores con permisos administrativos.
 La candidata no tiene firma Authenticode; los hashes no sustituyen una firma de código.
@@ -69,14 +69,46 @@ $gnx = "$env:ProgramFiles\GnX Core\gnx.exe"
 | `status` | Consulta el estado del target sin iniciar una WSL detenida. No certifica HTTPS ni salud de cada servicio. |
 | `start` | Inicia el nodo preparado, sin instalar ni aplicar actualizaciones. |
 | `enroll` | Solicita la key Tailscale sin eco y configura la mesh. Necesita conectividad con Tailscale. |
-| `password` | Solicita sin eco la contraseña de Proxmox y aplica su configuración. |
+| `password` | Establece una nueva contraseña de `root@pam` en PVE, con confirmación sin eco, y conserva su hash en la configuración protegida. |
 | `stop` | Detiene los servicios propios y conserva datos e identidad. La recuperación del servicio Windows respeta esa parada. |
 | `deploy <carpeta>` | Envía Quadlets admitidos por el pipe administrativo y crea un LXC no privilegiado nuevo. Una entrada idéntica ya aplicada no duplica el guest. |
 | `update --check [catalogo.json]` | En las fuentes 0.0.20: compara las ocho imágenes con un catálogo aprobado por digest, sin descargar, reiniciar ni iniciar recursos detenidos. |
 | `update --apply [catalogo.json]` | En las fuentes 0.0.20: descarga primero las candidatas y aplica cambios a las unidades existentes. Puede interrumpir acceso; no revierte migraciones. |
 
 Se usa la ruta explícita porque el instalador no modifica `PATH`. No introduzcas
-keys ni contraseñas en argumentos, navegador, logs o chat.
+keys ni contraseñas en argumentos, la app informativa, logs o chat. Los formularios
+de autenticación nativos de PVE se usan únicamente con HTTPS confiable.
+
+### Contraseña de PVE
+
+`gnx password` establece o cambia la contraseña de **`root@pam` en Proxmox**;
+no pide la contraseña anterior ni cambia la cuenta Windows del operador o del
+servicio. Con el nodo iniciado, ejecutar desde PowerShell elevado:
+
+```powershell
+$gnx = "$env:ProgramFiles\GnX Core\gnx.exe"
+& $gnx password
+```
+
+1. Introducir la nueva contraseña: mínimo 12 bytes; 12 caracteres ASCII cumplen
+   ese mínimo. Las fuentes 0.0.23 muestran asteriscos en consola interactiva,
+   permiten borrar con retroceso y cancelar con Esc/Ctrl+C, sin mostrar la clave.
+   La candidata 0.0.22 no muestra caracteres ni asteriscos.
+2. Repetirla cuando se solicite. Una confirmación diferente rechaza la operación.
+3. Comprobar el resultado del comando y acceder a `https://compute.gnx` como
+   `root@pam` —o usuario `root` con realm **Linux PAM**— usando esa contraseña.
+
+El comando persiste `PASSWORD_HASH` y actualiza root en compute, o inicia compute
+si estaba detenido dentro de un nodo activo. No imprime ni permite recuperar la
+contraseña guardada. Si el nodo está detenido, iniciarlo explícitamente antes.
+Un timeout es resultado desconocido: revisar estado y diagnóstico antes de repetir.
+
+Usar este mismo comando para cambios que deban persistir. Cambiar root solo desde
+PVE modifica el contenedor, no la configuración protegida de GnX: al recrearlo,
+el entrypoint vuelve a aplicar la credencial declarada. El éxito del comando no
+sustituye una comprobación de login. Nunca pasar la contraseña como argumento.
+La automatización por stdin conserva dos líneas, contraseña y confirmación,
+desde una fuente protegida, sin máscaras ni eco en la salida del proceso.
 
 Las actualizaciones se describen en [Actualización de componentes](docs/updates.md).
 El catálogo no es un canal remoto ni descubre versiones nuevas automáticamente:

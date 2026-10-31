@@ -54,6 +54,16 @@ se protege con DPAPI y ACL. La credencial Proxmox se conserva en un archivo Linu
 protegido que consume su contenedor; administradores/root pueden acceder al
 entorno del runtime. No se afirma que el secreto nunca exista en variables de entorno.
 
+La imagen compute fijada admite `PASSWORD` y `PASSWORD_HASH`. Su entrypoint
+prioriza un `PASSWORD_HASH` no vacío y establece la contraseña de root en cada
+arranque del contenedor; no limita esa operación al primer bootstrap.
+El comando `password` transmite la entrada sin eco al servicio. La operación
+compute de GnX genera un hash y conserva `PASSWORD_HASH` en el archivo Linux
+protegido que consume el Quadlet; no ofrece una contraseña en claro recuperable
+para el login web. La identidad Windows dedicada es distinta de la credencial PVE.
+Recrear el contenedor compute conservando sus bind mounts tampoco equivale a
+retirar sus datos o a preparar un nodo nuevo: esos recursos tienen lifecycle separado.
+
 El estado persistente Tailscale es la identidad del peer. Conservarlo evita
 reenrolar en cada inicio; no equivale a implementar una distribución de keys
 para futuros LXC.

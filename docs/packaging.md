@@ -190,7 +190,7 @@ repositorios privados. No introducir tokens en parámetros ni hacer público el
 repositorio para habilitar descargas. Conservar el SHA-256 por un canal confiable.
 
 Los inputs correspondientes a esta configuración se identifican con el tag
-[offline-inputs-v0.0.22](https://github.com/mayas-alas/quetzalcoatl-next/releases/tag/offline-inputs-v0.0.22),
+[offline-inputs-v0.0.22](https://github.com/mayas-alas/quetzalcoatl/releases/tag/offline-inputs-v0.0.22),
 asset `gnx-offline-inputs.zip`, SHA-256
 `0ce6e8842caa14321b73e3c1ca38016f1425a49452190a71871c0cf213ea5a11`. La generación
 con múltiples archivos usa `tar.exe -a`; un empaquetador por plataforma que escriba

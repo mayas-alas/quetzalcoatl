@@ -87,6 +87,51 @@ actualizador: dependen de una entrega instalada y comprobaciones independientes.
   privilegiado; exportar un rootfs desde una imagen bootc no demuestra rollback
   transaccional dentro del guest. Conservar propiedad, identidad y datos; separar
   el rollback de la base del de imágenes Podman y de migraciones de datos.
+- **R-UPD-01 — Actualización explícita del producto:** unificar en
+  `gnx update --apply` la selección de una release pública, incluidos candidatos
+  publicados, su verificación, la actualización nativa Windows y la aplicación
+  explícita del catálogo de componentes. El origen y nombre del MSI se configuran
+  administrativamente mediante `GNX_UPDATE_REPOSITORY` y `GNX_UPDATE_MSI_ASSET`
+  de ámbito máquina. Un origen privado o inaccesible falla sin instalar,
+  solicitar credenciales ni cambiar de repositorio. Conservar MSI/Burn como
+  dueños de instalación y mantenimiento; no reemplazar el servicio desde su
+  propia operación bloqueante ni reiniciar el host o detener guests implícitamente.
+- **R-REC-01 — Actualización o recreación explícita:** sin fuerza,
+  `gnx update --apply` actualiza imágenes conservando volúmenes, identidad y
+  configuración declarada; los LXC del usuario y del sistema siguen disponibles.
+  La forma prevista `gnx update --apply --force` vuelve a preparar el
+  sistema GnX desde cero, retirando su estado persistente e identidades anteriores
+  y aplicando el bootstrap configurado. El borrado del almacenamiento administrado
+  incluye sus guests, también los creados por el usuario. No significa reiniciar
+  Windows, purgar otras WSL ni retirar recursos externos al nodo. Antes de ejecutar,
+  el inventario debe mostrar los datos y guests afectados y la autorización cubrir
+  su pérdida; no se adopta por ello el control de guests ajenos en otros recorridos.
+  La implementación debe delegar en mecanismos nativos, sin omitir integridad,
+  ownership o control de resultados desconocidos. Ninguno de los flags
+  `--force`, `--force-recreate` o `--remove-orphans` existe hoy en esa CLI.
+- **R-VAL-01 — Aceptación manual recreada y compartida:** distinguir la
+  preparación de un entorno nuevo de producto y su operación posterior por
+  humano y agente sobre la misma instancia. Mantener `gnx password` como vía
+  explícita de configuración y cambio de la credencial PVE, con entrada y
+  confirmación sin eco y persistencia del hash protegido. No añadir otro gestor
+  de contraseñas, una clave global Windows ni recuperación de secretos.
+  `PASSWORD`/`PASSWORD_HASH` declarados son la fuente de verdad del
+  entrypoint: al recrear el contenedor, incluso durante una actualización de
+  compute sin fuerza, se reaplica esa credencial. Cambiar root solo dentro del
+  contenedor no modifica la configuración persistente. No añadir sincronización
+  de contraseñas ni prometer que ese cambio local sobreviva a la recreación.
+  Un cambio persistente se realiza con `gnx password`; revisar su UX diferenciando
+  nueva contraseña de `root@pam`, credenciales Windows, confirmación, errores
+  previos a la aplicación y resultados desconocidos.
+  Conservar privada la identidad Windows de servicio
+  y usar CLI/pipe como recorrido normal del agente. El acceso nativo PVE/Podman
+  se acota al entorno y recursos autorizados. Registrar fuera de Git la ficha
+  de ejecución y contrastarla al retomar; no introduce ejecución de pruebas
+  automáticas, simulaciones ni un segundo nodo paralelo en el mismo Windows.
+
+R-UPD-01, R-REC-01 y R-VAL-01 son objetivos del trabajo para 0.0.23, no capacidades
+ya incorporadas ni aceptadas. La recreación no es un requisito de cada actualización
+y no se usa para simular que se conservó estado durante un upgrade.
 
 Sus [criterios de cierre](historias-de-usuario.md#requisitos-pendientes) no son
 funcionalidad implementada ni aceptación. No autorizan recrear un guest existente
@@ -123,8 +168,9 @@ revisar su registro Windows o sus acciones MSI no equivale a ejecutarlo.
 
 ## Fuera de alcance
 
-Purga de datos; migración automática de otras instalaciones; auto-updater del
-CLI/MSI o del filesystem WSL;
+Purga genérica de datos; migración automática de otras instalaciones;
+actualización automática del CLI/MSI sin petición administrativa y actualización
+del filesystem WSL;
 multiusuario/multinodo; catálogo de aplicaciones; motor genérico de pipelines;
 otro backend de control; IdP para la app; telemetría remota; cambios BIOS, TPM,
 Secure Boot, BitLocker o antivirus. La Action de instaladores no es un motor de

@@ -40,6 +40,35 @@
    reconfigurar. Tener una shell elevada no autoriza esas operaciones; comprobar
    la elevación existente antes de pedir intervención UAC al usuario.
 
+### Entornos de aceptación y acceso compartido
+
+- Distinguir instalación nueva de producto, recreación de runtime y actualización
+  de una instancia con estado. No llamar Windows limpio a un nodo recreado sobre
+  un host usado, ni presentar un nuevo LXC como prueba de instalación MSI/EXE.
+- Antes de una comprobación que mute, registrar fuera de Git el entorno, versión
+  y hashes, SID/registro WSL y VMID cuando correspondan, recursos afectados,
+  intención de parada, política de datos, permisos y próximo paso. No registrar
+  valores de credenciales. Esa ficha se contrasta con el estado nativo al retomar;
+  cambiar de modelo o perder contexto no renueva ni amplía la autorización.
+- Humano y agente pueden operar la misma instancia autorizada. El recorrido
+  normal del agente usa la CLI y el pipe del producto; diagnóstico o mantenimiento
+  nativo PVE/Podman requiere el alcance acordado. La cuenta Windows de servicio
+  no se comparte como login humano ni se sustituye por la WSL personal.
+- Un acceso GUI abierto no demuestra autenticación nueva. Credenciales nuevas
+  se generan y entregan mediante un almacén protegido acordado, nunca por chat,
+  argv o Git. Verificar la imagen y su contrato de PASSWORD/PASSWORD_HASH sin
+  volcar el entorno; un hash no es una contraseña recuperable. Al recrear compute
+  se reaplica la credencial declarada; cambiar root solo dentro del contenedor
+  no modifica esa configuración ni autoriza recuperar su contraseña para el agente.
+- Recrear un contenedor, cambiar su imagen y retirar datos son operaciones
+  distintas. Antes de retirar estado, enumerar recursos propios y ajenos, qué
+  se conserva, qué se pierde y si habrá recuperación. Recrear el nodo completo
+  retira también los guests de su almacenamiento administrado: el alcance
+  aprobado debe incluirlos. Un flag de fuerza no omite ownership ni autoriza
+  afectar recursos externos o hacer prune global.
+  No inventar flags de Docker/Compose en la CLI GnX. Mantener la reposición en
+  mecanismos nativos y operaciones Rust acotadas, sin otro supervisor.
+
 ## Entrega y documentación
 
 9. Cerrar el resultado solicitado antes de abrir otro frente. Separar código,
@@ -106,4 +135,4 @@
     nativo. Tras compactar o recuperar, releer contrato y checkpoint y verificar estado;
     no crear otra sesión, Dispatch ni repetir trabajo solo por perder contexto.
 ""  
-"# Nota de autorizaci�n v0.0.19 (2026-10-30): usuario confirm� expl�citamente ('s�, s�, s�') proceder con build local sin inputs completos (base-image.digest pendiente). L�mite declarado: MSI/EXE completo bloqueado; solo CLI t�cnico generado. No se saltan gates de integridad ni se inventa base-image.digest." 
+"# Nota de autorizaci�n v0.0.19 (2026-10-30): usuario confirm� expl�citamente ('s�, s�, s�') proceder con build local sin inputs completos (base-image.digest pendiente). L�mite declarado: MSI/EXE completo bloqueado; solo CLI t�cnico generado. No se saltan gates de integridad ni se inventa base-image.digest."
