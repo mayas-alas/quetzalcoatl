@@ -240,6 +240,7 @@ cat "$p"
         {
             return Err(invalid("propiedad del LXC cambió; no se modifica"));
         }
+        ensure_guest_tag(self.identity, &id, &conf)?;
         let status = super::deploy::command(self.identity, &["pct", "status", &id], None, 15)?;
         if status.trim() != "status: running" {
             return Err(io::Error::new(
@@ -251,6 +252,42 @@ cat "$p"
         guest.extend(args);
         super::deploy::command(self.identity, &guest, Some(OPERATIONS), seconds)
     }
+}
+
+// Ownership was validated by this caller: description GnX.Core:<digest>,
+// unprivileged and the recorded MAC. Only then add our tag, preserving any
+// user-created entries such as a manual cluster tag. Guests owned by nobody
+// of ours never reach this function, so user deployments are never touched.
+fn ensure_guest_tag(
+    identity: &Identity,
+    id: &str,
+    conf: &serde_json::Value,
+) -> io::Result<()> {
+    const GUEST_TAG: &str = "gnx";
+    let current = conf["tags"].as_str().unwrap_or_default();
+    if current
+        .split(',')
+        .any(|tag| tag.trim().eq_ignore_ascii_case(GUEST_TAG))
+    {
+        return Ok(());
+    }
+    let mut tags: Vec<&str> = current.split(',').map(str::trim).collect();
+    tags.retain(|tag| !tag.is_empty());
+    tags.push(GUEST_TAG);
+    let joined = tags.join(",");
+    super::deploy::command(
+        identity,
+        &[
+            "pvesh",
+            "set",
+            &format!("/nodes/gnx-core-compute/lxc/{id}/config"),
+            "--tags",
+            &joined,
+        ],
+        None,
+        15,
+    )
+    .map(|_| ())
 }
 
 fn save_catalog(catalog: &Catalog) -> io::Result<()> {

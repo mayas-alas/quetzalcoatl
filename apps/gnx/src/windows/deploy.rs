@@ -324,6 +324,8 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
                 "1",
                 "--description",
                 &description,
+                "--tags",
+                "gnx",
             ],
             None,
             180,
