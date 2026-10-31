@@ -20,3 +20,7 @@ C:\Users\mayas\quetzalcoatl\build\releases\v0.0.17\en-us\GnxCore.msi
 C:\Users\mayas\quetzalcoatl\build\releases\v0.0.17\en-us\GnxCore.wixpdb
 C:\Users\mayas\quetzalcoatl\build\releases\v0.0.18\en-us\GnxCore.msi
 C:\Users\mayas\quetzalcoatl\build\releases\v0.0.18\en-us\GnxCore.wixpdb
+C:\Users\mayas\quetzalcoatl\build\releases\v0.0.19\en-us\GnxCore.msi
+C:\Users\mayas\quetzalcoatl\build\releases\v0.0.19\en-us\GnxCore.wixpdb
+C:\Users\mayas\quetzalcoatl\build\releases\v0.0.20\en-us\GnxCore.msi
+C:\Users\mayas\quetzalcoatl\build\releases\v0.0.20\en-us\GnxCore.wixpdb

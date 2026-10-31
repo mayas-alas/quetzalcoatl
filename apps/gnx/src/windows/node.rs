@@ -90,12 +90,15 @@ impl Controller {
         };
         let op = request.operation;
         let bundle = request.bundle.clone();
+        let catalog = request.catalog.clone();
         let secret = request
             .secret
             .as_ref()
             .map(|s| zeroize::Zeroizing::new(s.clone()));
         match tokio::task::spawn_blocking(move || {
-            let result = if let Some(bundle) = bundle {
+            let result = if matches!(op, Operation::UpdateCheck | Operation::UpdateApply) {
+                super::updates::execute(op == Operation::UpdateApply, catalog)
+            } else if let Some(bundle) = bundle {
                 super::deploy::apply(&bundle).map(|message| (NodeState::Active, message))
             } else {
                 execute_secret(op, secret.as_deref().map(String::as_str))
@@ -119,7 +122,7 @@ impl Controller {
                         );
                     }
                 }
-                Response::new(request, true, state, &message)
+                Response::new(request, state != NodeState::Degraded, state, &message)
             }
             Ok(Err(error)) if error.kind() == io::ErrorKind::NotFound => Response::new(
                 request,
@@ -256,6 +259,9 @@ fn execute_secret(op: Operation, secret: Option<&str>) -> io::Result<(NodeState,
         }
         if op == Operation::Start {
             super::access::publish(&identity)?;
+            // A bounded, local catalog comparison only. No network discovery,
+            // downloads, service restarts or implicit application at startup.
+            super::updates::check_on_start(&identity, &ownership);
         }
     }
     let result = identity.run(

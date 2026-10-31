@@ -6,6 +6,7 @@ mod node;
 mod pipe;
 mod security;
 pub mod service;
+mod updates;
 
 pub fn installer(remove: bool) -> std::io::Result<()> {
     // MSI uses the existing authenticated service boundary, not another token/
@@ -42,4 +43,14 @@ pub fn deploy(bundle: crate::deployment::Bundle) -> std::io::Result<crate::proto
             crate::protocol::Operation::Deploy,
             Some(bundle),
         ))
+}
+
+pub fn update(
+    operation: crate::protocol::Operation,
+    catalog: Option<crate::updates::Catalog>,
+) -> std::io::Result<crate::protocol::Response> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(pipe::client_request(operation, None, catalog))
 }

@@ -21,6 +21,8 @@ pub enum Operation {
     // Internal installer operation, deliberately absent from CLI parsing/help.
     Retire,
     Deploy,
+    UpdateCheck,
+    UpdateApply,
 }
 
 impl Operation {
@@ -46,6 +48,8 @@ pub struct Request {
     pub secret: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle: Option<crate::deployment::Bundle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<crate::updates::Catalog>,
 }
 
 impl Drop for Request {
@@ -70,6 +74,13 @@ impl Request {
             (Operation::Deploy, Some(bundle)) => bundle.validate()?,
             (Operation::Deploy, None) => return Err(invalid("faltan Quadlets")),
             (_, Some(_)) => return Err(invalid("operación no admite archivos")),
+            _ => {}
+        }
+        match (request.operation, &request.catalog) {
+            (Operation::UpdateCheck | Operation::UpdateApply, Some(catalog)) => {
+                catalog.validate()?
+            }
+            (_, Some(_)) => return Err(invalid("esta operación no admite catálogos")),
             _ => {}
         }
         match request.operation {
@@ -134,7 +145,7 @@ impl Response {
         }
         let response: Self =
             serde_json::from_slice(bytes).map_err(|_| invalid("respuesta inválida"))?;
-        if response.version != VERSION || response.id != id || response.message.len() > 512 {
+        if response.version != VERSION || response.id != id || response.message.len() > 8192 {
             return Err(invalid("respuesta no correlacionada"));
         }
         Ok(response)

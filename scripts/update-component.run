@@ -1,0 +1,94 @@
+#!/usr/bin/bash
+# Fixed per-component operations; Rust owns planning/order, systemd owns lifecycle.
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 ]]
+role=${1:?component}; mode=${2:?inspect, stage or apply}; desired=${3:?pinned image}; seed=${4:?owned baseline}
+[[ "$mode" == inspect || "$mode" == stage || "$mode" == apply ]]
+[[ "$desired" =~ ^[a-z0-9./-]+@sha256:[a-f0-9]{64}$ ]]
+case "$role" in
+ mesh|dns|gateway|compute) name=gnx-core-$role; root=/var/lib/gnx-core; ;;
+ pocket-id|rustfs|netbird-server|netbird-dashboard) name=$role; root=/var/lib/gnx-app; ;;
+ *) exit 2 ;;
+esac
+unit=$name.service
+quadlet=/etc/containers/systemd/$name.container
+[[ -f "$quadlet" && ! -L "$quadlet" && $(stat -c %u "$quadlet") == 0 ]]
+[[ $(grep -c '^Image=' "$quadlet") == 1 && $(grep -c '^Pull=' "$quadlet") == 1 ]]
+grep -Fxq "ContainerName=$name" "$quadlet"
+configured=$(sed -n 's/^Image=//p' "$quadlet")
+state=$root/updates
+for dir in "$root" "$state" "$state/$role"; do
+ if [[ -e "$dir" ]]; then [[ -d "$dir" && ! -L "$dir" && $(stat -c %u "$dir") == 0 ]]; fi
+done
+receipt=$state/$role/last.json
+pending=$state/$role/pending.json
+approved=$seed
+if [[ -e "$receipt" ]]; then
+ [[ -f "$receipt" && ! -L "$receipt" && $(stat -c %u "$receipt") == 0 && $(stat -c %s "$receipt") -le 4096 ]]
+ approved=$(jq -er .image "$receipt")
+fi
+owned=false
+[[ "$configured" == "$seed" || "$configured" == "$approved" ]] && owned=true
+active=$(systemctl show "$unit" --property=ActiveState --value)
+snapshot=$(podman container inspect "$name" 2>/dev/null | jq -ce '.[0] | {image:.Image,imageName:.ImageName,status:.State.Status}' || printf null)
+local_id=$(podman image inspect "$desired" 2>/dev/null | jq -er '.[0].Id // empty' || true)
+waiting=false
+if [[ -e "$pending" ]]; then [[ -f "$pending" && ! -L "$pending" && $(stat -c %u "$pending") == 0 ]]; waiting=true; fi
+if [[ "$snapshot" != null ]]; then
+ configured_id=$(podman image inspect "$configured" 2>/dev/null | jq -er '.[0].Id // empty' || true)
+ running_id=$(jq -er .image <<< "$snapshot")
+ [[ -n "$configured_id" && "${running_id#sha256:}" == "${configured_id#sha256:}" ]] || owned=false
+fi
+guests=0
+if [[ "$role" == compute && "$active" == active ]]; then
+ guests=$(podman exec "$name" pvesh get /cluster/resources --type vm --output-format json | jq '[.[]|select(.status=="running")]|length')
+fi
+if [[ "$mode" == inspect ]]; then
+ hash=$(sha256sum "$quadlet" | cut -d ' ' -f1)
+ jq -cn --arg name "$role" --arg configured "$configured" --arg active "$active" --arg localId "$local_id" --arg sourceHash "$hash" --argjson owned "$owned" --argjson pending "$waiting" --argjson running "$snapshot" --argjson runningGuests "$guests" \
+  '{name:$name,configured:$configured,active:$active,owned:$owned,pending:$pending,running:$running,local_id:$localId,source_hash:$sourceHash,running_guests:$runningGuests}'
+ exit 0
+fi
+[[ "$owned" == true && "$waiting" == false && "$active" == active && "$snapshot" != null ]]
+jq -e '.status == "running"' <<< "$snapshot" >/dev/null
+[[ "$role" != compute || "$guests" == 0 ]]
+if [[ "$mode" == stage ]]; then
+ install -d -m 0700 "$state" "$state/$role"
+ jq -cn --arg image "$desired" '{image:$image,phase:"downloading"}' > "$pending"
+ if podman pull --quiet --platform linux/amd64 "$desired" >/dev/null; then
+  :
+ else
+  code=$?
+  # A returned download failure is known; an interrupted shell leaves the
+  # pending marker intact and prevents silently repeating an unknown pull.
+  jq -cn --arg image "$desired" --argjson code "$code" '{image:$image,phase:"download-failed",exit:$code}' > "$state/$role/download-failure.json"
+  rm -- "$pending"
+  exit "$code"
+ fi
+ podman image inspect "$desired" | jq -e '.[0] | .Architecture=="amd64" and .Os=="linux"' >/dev/null
+ rm -- "$pending"
+ exit 0
+fi
+expected_hash=${5:?observed quadlet hash}
+[[ "$expected_hash" =~ ^[a-f0-9]{64}$ && $(sha256sum "$quadlet" | cut -d ' ' -f1) == "$expected_hash" ]]
+[[ -n "$local_id" ]]
+podman image inspect "$desired" | jq -e '.[0] | .Architecture=="amd64" and .Os=="linux"' >/dev/null
+install -d -m 0700 "$state" "$state/$role"
+backup=$state/$role/$expected_hash.container
+if [[ -e "$backup" ]]; then cmp "$quadlet" "$backup"; else cp -p "$quadlet" "$backup"; fi
+[[ ! -e "$quadlet.update-new" ]]
+jq -cn --arg image "$desired" --arg previous "$configured" --arg sourceHash "$expected_hash" '{image:$image,previous:$previous,source_hash:$sourceHash,phase:"applying"}' > "$pending"
+sed -E "s|^Image=.*$|Image=$desired|;s|^Pull=.*$|Pull=never|" "$quadlet" > "$quadlet.update-new"
+chmod 0644 "$quadlet.update-new"
+mv "$quadlet.update-new" "$quadlet"
+systemctl daemon-reload
+systemctl restart "$unit"
+systemctl is-active --quiet "$unit"
+actual=$(podman inspect "$name" | jq -er '.[0].Image')
+[[ "${actual#sha256:}" == "${local_id#sha256:}" ]]
+health=$(podman inspect "$name" | jq -r '.[0].State.Health.Status // "not-configured"')
+[[ "$health" != unhealthy && "$health" != starting ]]
+jq -cn --arg image "$desired" --arg imageId "$actual" --arg sourceHash "$expected_hash" '{image:$image,image_id:$imageId,previous_source_hash:$sourceHash,phase:"applied"}' > "$state/$role/last.new"
+mv "$state/$role/last.new" "$receipt"
+rm -- "$pending"

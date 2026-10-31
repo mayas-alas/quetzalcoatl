@@ -177,6 +177,14 @@ pub async fn client_bundle(
     operation: Operation,
     bundle: Option<crate::deployment::Bundle>,
 ) -> io::Result<Response> {
+    client_request(operation, bundle, None).await
+}
+
+pub async fn client_request(
+    operation: Operation,
+    bundle: Option<crate::deployment::Bundle>,
+    catalog: Option<crate::updates::Catalog>,
+) -> io::Result<Response> {
     super::security::effective_admin()?;
     let manager = windows_service::service_manager::ServiceManager::local_computer(
         None::<&str>,
@@ -232,6 +240,7 @@ pub async fn client_bundle(
         operation,
         secret,
         bundle,
+        catalog,
     };
     let bytes = Zeroizing::new(serde_json::to_vec(&request).map_err(io::Error::other)?);
     let _ = Request::decode(&bytes)?;
@@ -255,8 +264,11 @@ pub async fn client_bundle(
     }
     super::security::process_is_system(pid)?;
     timeout(IO_TIMEOUT, write_frame(&mut pipe, &bytes)).await??;
-    let limit = if operation == Operation::Deploy {
-        Duration::from_secs(1200)
+    let limit = if matches!(
+        operation,
+        Operation::Deploy | Operation::UpdateCheck | Operation::UpdateApply
+    ) {
+        Duration::from_secs(3600)
     } else {
         OP_TIMEOUT
     };

@@ -2,6 +2,7 @@ mod deployment;
 mod images;
 mod package;
 mod protocol;
+mod updates;
 #[cfg(windows)]
 mod windows;
 
@@ -20,12 +21,14 @@ fn run() -> std::io::Result<bool> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.as_slice() {
         [] => {
-            println!("gnx start | stop | status | enroll | password | deploy <carpeta>");
+            println!(
+                "gnx start | stop | status | enroll | password | deploy <carpeta> | update --check|--apply [catalogo.json]"
+            );
             Ok(true)
         }
         [arg] if arg == "--help" || arg == "-h" => {
             println!(
-                "gnx start | stop | status | enroll | password | deploy <carpeta>\nControl nativo del nodo. Deploy crea un LXC nuevo desde Quadlets/config. Enroll/password solicitan entrada sin eco."
+                "gnx start | stop | status | enroll | password | deploy <carpeta>\ngnx update --check|--apply [catalogo.json]\nUpdate compara/aplica digests aprobados a recursos existentes; no sigue latest. Apply puede interrumpir servicios y no revierte migraciones. Enroll/password solicitan entrada sin eco."
             );
             Ok(true)
         }
@@ -47,6 +50,31 @@ fn run() -> std::io::Result<bool> {
             package::verify(std::path::Path::new(path))?;
             println!("paquete íntegro; instalación y salud aún no comprobadas");
             Ok(true)
+        }
+        [arg, path] if arg == "--verify-update-catalog" => {
+            updates::Catalog::builtin()?;
+            updates::Catalog::read(std::path::Path::new(path))?;
+            println!("catálogo válido; compatibilidad, instalación y salud no comprobadas");
+            Ok(true)
+        }
+        #[cfg(windows)]
+        [arg, mode, rest @ ..] if arg == "update" && rest.len() <= 1 => {
+            let operation = match mode.as_str() {
+                "--check" => protocol::Operation::UpdateCheck,
+                "--apply" => protocol::Operation::UpdateApply,
+                _ => {
+                    return Err(protocol::invalid(
+                        "usa update --check|--apply [catalogo.json]",
+                    ));
+                }
+            };
+            let catalog = rest
+                .first()
+                .map(|path| updates::Catalog::read(std::path::Path::new(path)))
+                .transpose()?;
+            let response = windows::update(operation, catalog)?;
+            println!("{}", response.message);
+            Ok(response.ok)
         }
         #[cfg(windows)]
         [arg, path] if arg == "deploy" => {

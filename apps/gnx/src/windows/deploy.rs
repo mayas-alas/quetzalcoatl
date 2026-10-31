@@ -33,7 +33,7 @@ struct Receipt {
     complete: bool,
 }
 
-fn command(
+pub(super) fn command(
     identity: &Identity,
     args: &[&str],
     input: Option<&[u8]>,

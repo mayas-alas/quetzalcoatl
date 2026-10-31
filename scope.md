@@ -12,7 +12,7 @@ terminal como supervisor.
 | Entrega | EXE Burn como entrada interactiva recomendada y MSI autocontenido como vía administrativa directa al mismo producto. |
 | Automatización | GitHub Action manual para compilar una versión nueva desde fuentes o empaquetar el CLI versionado, entregar MSI/EXE con hashes y, opcionalmente, publicar una pre-release con tag coincidente. |
 | Identidad | Servicio `GnXCore`, cuenta `gnxcoresvc`, WSL `gnx-core` y estado protegido propio. |
-| Control | `start`, `stop`, `status`, `enroll`, `password` y `deploy <carpeta>` mediante un pipe administrativo local. |
+| Control | `start`, `stop`, `status`, `enroll`, `password` y `deploy <carpeta>` mediante un pipe administrativo local; las fuentes 0.0.20 añaden `update --check|--apply [catalogo.json]`. |
 | Acceso | `app.gnx` y `compute.gnx`; el stack privado registrado añade Pocket ID, RustFS/S3 y NetBird por HTTPS. Acceso mesh sujeto a DNS, ACL y confianza del cliente. |
 | Certificados | CA persistente, confianza Windows interna, renovación de hoja servidor y CRL mediante systemd. |
 | Conservación | Actualización y reinstalación preservan identidad, CA, credenciales y datos. Desinstalación normal sin purga. |
@@ -67,6 +67,16 @@ del núcleo: este conserva sus imágenes offline fijadas.
 
 ## Requisitos pendientes autorizados
 
+Las fuentes 0.0.20 implementan la [comparación y aplicación explícita](docs/updates.md)
+de un catálogo administrativo por digest sobre las ocho unidades conocidas, sin
+recrear el stack. Incluyen la consola oficial RustFS v0.1.38 como recurso offline.
+La comparación al iniciar es local y no aplica cambios. Esto no cierra descubrimiento
+remoto, selección automática de versiones compatibles ni aceptación runtime del
+actualizador: dependen de una entrega instalada y comprobaciones independientes.
+
+- La priorización de actualizaciones y los nuevos frontends se registran en
+  [features.md](features.md): **OpenUI** es el estándar; **Appless** es referencia
+  para clientes móviles. No son capacidades ya incorporadas a `app.gnx`.
 - **R-IMG-01 — Imágenes al iniciar:** extender la actualización al arranque tanto
   a aplicaciones como a los cuatro servicios del núcleo, con canales explícitos,
   semilla offline verificada e intención de parada respetada. No incluye actualizar

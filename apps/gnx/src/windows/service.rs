@@ -22,12 +22,20 @@ pub fn dispatch() -> io::Result<()> {
 }
 
 pub(crate) fn report_error(error: &io::Error) {
+    report_event(&error.to_string(), true);
+}
+
+pub(crate) fn report_information(message: &str) {
+    report_event(message, false);
+}
+
+fn report_event(message: &str, error: bool) {
     use windows_sys::Win32::System::EventLog::{
-        DeregisterEventSource, EVENTLOG_ERROR_TYPE, RegisterEventSourceW, ReportEventW,
+        DeregisterEventSource, EVENTLOG_ERROR_TYPE, EVENTLOG_INFORMATION_TYPE,
+        RegisterEventSourceW, ReportEventW,
     };
     let source: Vec<u16> = SERVICE.encode_utf16().chain(Some(0)).collect();
-    let message: Vec<u16> = error
-        .to_string()
+    let message: Vec<u16> = message
         .chars()
         .take(512)
         .flat_map(|c| c.to_string().encode_utf16().collect::<Vec<_>>())
@@ -39,7 +47,11 @@ pub(crate) fn report_error(error: &io::Error) {
             let strings = [message.as_ptr()];
             ReportEventW(
                 handle,
-                EVENTLOG_ERROR_TYPE,
+                if error {
+                    EVENTLOG_ERROR_TYPE
+                } else {
+                    EVENTLOG_INFORMATION_TYPE
+                },
                 0,
                 1,
                 std::ptr::null_mut(),

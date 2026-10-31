@@ -12,6 +12,9 @@ for cmd in podman systemctl openssl jq ip; do command -v "$cmd" >/dev/null; done
 install -d -m 0700 "$root" "$root/secrets" "$root/tls" "$root/ca-private" "$root/mesh" "$root/dns" "$root/compute" "$root/compute-config" "$root/gateway-data" "$root/gateway-config"
 install -d -m 0755 /etc/gnx-core "$root/web" /etc/containers/systemd
 install -m 0644 "$payload/config/web/index.html" "$root/web/index.html"
+install -m 0755 "$payload/scripts/install-console.run" /etc/gnx-core/install-console.run
+install -m 0755 "$payload/scripts/update-component.run" /etc/gnx-core/update-component.run
+bash /etc/gnx-core/install-console.run "$payload/console/rustfs-console-v0.1.38.zip" install
 phase() { printf '%s\n' "$1" > "$root/web/status.new"; chmod 0644 "$root/web/status.new"; mv "$root/web/status.new" "$root/web/status.txt"; }
 phase 'Preparando acceso local; mesh y compute no condicionan esta página.'
 bash "$payload/scripts/tls.run" prepare "$payload"
@@ -27,7 +30,38 @@ if [[ ! -e "$root/stack-dns/hosts.conf" ]]; then printf '# No private stack regi
 chmod 0644 "$root/stack-dns/hosts.conf"
 install -m 0644 "$payload/config/systemd/gnx-core.target" /etc/systemd/system/gnx-core.target
 chmod 0755 /etc/containers/systemd
-install -m 0644 "$payload/config/quadlet/"*.container /etc/containers/systemd/
+declare -A approved_images
+for role in gateway dns mesh compute; do
+    target=/etc/containers/systemd/gnx-core-$role.container
+    receipt=$root/updates/$role/last.json
+    for directory in "$root/updates" "$root/updates/$role"; do
+        if [[ -e "$directory" ]]; then [[ -d "$directory" && ! -L "$directory" && $(stat -c %u "$directory") == 0 ]]; fi
+    done
+    if [[ -e "$target" ]]; then [[ -f "$target" && ! -L "$target" && $(stat -c %u "$target") == 0 ]]; fi
+    if [[ -e "$root/updates/$role/pending.json" ]]; then
+        printf 'Actualizacion de %s pendiente; inspeccionar antes de aplicar otro paquete.\n' "$role" >&2
+        exit 1
+    fi
+    if [[ "$mode" == update && -e "$receipt" ]]; then
+        [[ -f "$receipt" && ! -L "$receipt" && $(stat -c %u "$receipt") == 0 && $(stat -c %s "$receipt") -le 4096 ]]
+        [[ -f "$target" && ! -L "$target" && $(stat -c %u "$target") == 0 ]]
+        approved=$(jq -er '.image | select(test("^[a-z0-9./-]+@sha256:[a-f0-9]{64}$"))' "$receipt")
+        [[ $(sed -n 's/^Image=//p' "$target") == "$approved" ]]
+        podman image exists "$approved"
+        approved_images[$role]=$approved
+    fi
+done
+for role in gateway dns mesh compute; do
+    target=/etc/containers/systemd/gnx-core-$role.container
+    [[ ! -e "$target.package-new" ]]
+    if [[ -n "${approved_images[$role]:-}" ]]; then
+        sed -E "s|^Image=.*$|Image=${approved_images[$role]}|;s|^Pull=.*$|Pull=never|" "$payload/config/quadlet/gnx-core-$role.container" > "$target.package-new"
+        chmod 0644 "$target.package-new"
+    else
+        install -m 0644 "$payload/config/quadlet/gnx-core-$role.container" "$target.package-new"
+    fi
+    mv "$target.package-new" "$target"
+done
 bash /etc/gnx-core/configure.run access
 if [[ ! -f "$root/dns.env" ]]; then
     printf 'FTLCONF_dns_interface=lo\nFTLCONF_dns_port=5353\nFTLCONF_dns_listeningMode=BIND\nFTLCONF_dns_hosts=127.0.0.1 app.gnx;127.0.0.1 compute.gnx\n' > "$root/dns.env"

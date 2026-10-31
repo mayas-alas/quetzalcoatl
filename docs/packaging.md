@@ -54,6 +54,7 @@ build/payload/images/mesh.oci.tar
 build/payload/images/dns.oci.tar
 build/payload/images/gateway.oci.tar
 build/payload/images/compute.oci.tar
+build/payload/console/rustfs-console-v0.1.38.zip
 build/releases/v<versión>/base-image.digest
 ```
 
@@ -68,6 +69,14 @@ del mismo repositorio, independiente de los instaladores. Deben proceder de base
 limpias, no de una WSL enrolada. Antes de distribuir, comprobar origen, licencias,
 arquitectura e IDs OCI frente a la configuración del checkout. Los hashes prueban
 integridad, no que un filesystem sea seguro o esté libre de secretos.
+
+Desde las fuentes 0.0.20 se incluye también el ZIP oficial de consola definido en
+`config/console.json`. El mantenedor lo prepara en la ruta indicada y contrasta su
+SHA-256; el build local no lo descarga. CI lo obtiene del release HTTPS oficial y
+verifica el pin en un paso explícito. Se copia sin modificar al payload y su hash
+forma parte del manifiesto; no es un asset adicional de la release de usuario.
+El ZIP de inputs de ocho archivos descrito abajo conserva su formato: CI prepara
+la consola aparte desde el pin del checkout.
 
 `-SealBase` es una operación de mantenimiento existente: exige
 `build/tools/crane/crane.exe`, usa `config/bootc.json` y prepara la base sellada.

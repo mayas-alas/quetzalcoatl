@@ -13,9 +13,33 @@ s3.gnx {
 rustfs.gnx {
     bind {$GNX_BIND}
     tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+
+    @browserEntry {
+        path /
+        method GET HEAD
+        header Accept *text/html*
+        not header Authorization *
+    }
+    redir @browserEntry /rustfs/console/ 302
+    redir /rustfs/console /rustfs/console/ 308
+
     @admin path /rustfs/admin/*
-    reverse_proxy @admin 172.30.0.100:9000
-    reverse_proxy 172.30.0.100:9001
+    handle @admin {
+        reverse_proxy 172.30.0.100:9000
+    }
+    @consoleRuntime path /rustfs/console/version /rustfs/console/license /rustfs/console/health /rustfs/console/health/*
+    handle @consoleRuntime {
+        reverse_proxy 172.30.0.100:9001
+    }
+    handle_path /rustfs/console/* {
+        root * /srv/gnx/rustfs-console-v0.1.38
+        header X-GnX-RustFS-Console v0.1.38
+        header Cache-Control no-cache
+        file_server
+    }
+    handle {
+        reverse_proxy 172.30.0.100:9001
+    }
 }
 
 netbird.gnx {

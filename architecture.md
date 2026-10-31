@@ -217,6 +217,20 @@ guest no privilegiado; no se describe como una plantilla LXC mínima o libre de 
 
 ### Stack privado
 
+Las fuentes 0.0.20 incorporan `updates.rs` y `windows/updates.rs`: validan un catálogo
+cerrado para ocho componentes, reutilizan el pipe administrativo y su exclusión de
+mutaciones, contrastan ownership y coordinan operaciones fijas por unidad con
+`update-component.run`. Este script opera Podman/systemd sin gestionar otro lifecycle.
+El catálogo aprobado vive en estado Windows protegido; recibos y Quadlets anteriores
+quedan en `updates/` del estado Linux correspondiente. Comparar al arrancar no consulta
+la red ni aplica imágenes. El contrato operativo está en [Actualizaciones](docs/updates.md).
+
+`install-console.run` verifica y extrae el ZIP oficial Console v0.1.38 incluido en
+el payload. Caddy sirve sus recursos estáticos bajo `/rustfs/console/`, conservando
+API/callback/S3 en RustFS. La imagen del servidor y sus volúmenes no se reconstruyen.
+La versión del frontend se identifica separadamente mediante una cabecera; el endpoint
+nativo `/rustfs/console/version` continúa informando la versión del servidor.
+
 El marcador `config/private-stack.json` selecciona una operación fija. El guest
 usa `172.30.0.100/24`, configurada en PVE y NetworkManager, y los cuatro contenedores
 comparten una red Podman bridge definida por `private.network`, no la red host.

@@ -428,7 +428,7 @@ fn registration(sid: &str, expected: &Path) -> io::Result<Option<String>> {
     result
 }
 
-fn linux_path(path: &Path) -> io::Result<String> {
+pub(super) fn linux_path(path: &Path) -> io::Result<String> {
     let value = path.to_string_lossy().replace('\\', "/");
     if value.len() < 3 || value.as_bytes()[1] != b':' {
         return Err(io::Error::other("payload debe estar en unidad local"));

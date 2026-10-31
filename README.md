@@ -72,9 +72,17 @@ $gnx = "$env:ProgramFiles\GnX Core\gnx.exe"
 | `password` | Solicita sin eco la contraseña de Proxmox y aplica su configuración. |
 | `stop` | Detiene los servicios propios y conserva datos e identidad. La recuperación del servicio Windows respeta esa parada. |
 | `deploy <carpeta>` | Envía Quadlets admitidos por el pipe administrativo y crea un LXC no privilegiado nuevo. Una entrada idéntica ya aplicada no duplica el guest. |
+| `update --check [catalogo.json]` | En las fuentes 0.0.20: compara las ocho imágenes con un catálogo aprobado por digest, sin descargar, reiniciar ni iniciar recursos detenidos. |
+| `update --apply [catalogo.json]` | En las fuentes 0.0.20: descarga primero las candidatas y aplica cambios a las unidades existentes. Puede interrumpir acceso; no revierte migraciones. |
 
 Se usa la ruta explícita porque el instalador no modifica `PATH`. No introduzcas
 keys ni contraseñas en argumentos, navegador, logs o chat.
+
+Las actualizaciones se describen en [Actualización de componentes](docs/updates.md).
+El catálogo no es un canal remoto ni descubre versiones nuevas automáticamente:
+un administrador debe revisar y aportar los digests. Al iniciar se compara el
+último catálogo aprobado, sin aplicación automática. La base WSL/LXC y el MSI/CLI
+se mantienen por separado; un build no instala los nuevos comandos en el servicio.
 
 El [contrato de despliegue](docs/deployment.md) define archivos, límites, recursos
 y conservación. Las imágenes de aplicaciones requieren conectividad a sus

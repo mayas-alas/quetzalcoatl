@@ -99,6 +99,7 @@ try {
         Copy-Item -LiteralPath $releaseBinary -Destination (Join-Path $repo 'target/release/gnx.exe') -Force
     }
     if ((& './target/release/gnx.exe' --version) -ne "gnx $version" -or $LASTEXITCODE -ne 0) { throw 'Release version mismatch' }
+    Native 'Update catalog consistency' { & './target/release/gnx.exe' --verify-update-catalog config/update-catalog.json }
     $sourceHash = (Get-FileHash target/release/gnx.exe).Hash
     if (Test-Path -LiteralPath $releaseBinary) {
         if ($sourceHash -ne (Get-FileHash -LiteralPath $releaseBinary).Hash) { throw 'Versioned binary differs; increment version' }
@@ -106,6 +107,13 @@ try {
     if ($sourceHash -ne (Get-FileHash -LiteralPath $releaseBinary).Hash) { throw 'Release binary mismatch' }
     $output = Join-Path $repo "build/releases/v$version/"
     New-Item -ItemType Directory -Force $output | Out-Null
+    $sourcePaths = @(git ls-files --cached --others --exclude-standard -- Cargo.toml Cargo.lock apps/gnx config scripts README.md architecture.md scope.md docs .github/workflows/installers.yml "releases/v$version/CHANGELOG.md")
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot record source inventory' }
+    $sourceFiles = @($sourcePaths | Sort-Object -Unique | ForEach-Object {
+        if (Test-Path -LiteralPath $_ -PathType Leaf) { @{path=$_;sha256=(Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()} }
+    })
+    $provenance = @{version=$version;source_commit=(git rev-parse HEAD);source_tree_dirty=(@(git status --porcelain).Count -ne 0);compiled_from_source=(-not $UseVersionedBinary);cli_sha256=$sourceHash.ToLowerInvariant();source_files=$sourceFiles;acceptance='not-established-by-build'}
+    [IO.File]::WriteAllText((Join-Path $output 'build-provenance.json'),($provenance|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
     if ($SealBase) {
         $crane = Join-Path $repo 'build/tools/crane/crane.exe'
         if (-not (Test-Path $crane)) { throw 'Pinned crane build tool missing' }
@@ -149,12 +157,21 @@ try {
     New-Item -ItemType Directory -Force (Join-Path $stage 'scripts') | Out-Null
     Copy-Item scripts/*.run (Join-Path $stage 'scripts') -Force
     $inputs = @{ 'rootfs.tar' = 'build/payload/rootfs.tar' }
+    $console = Get-Content config/console.json -Raw | ConvertFrom-Json
+    $consoleSource = Join-Path $repo "build/payload/$($console.path)"
+    if (-not (Test-Path -LiteralPath $consoleSource -PathType Leaf)) { throw "Pinned offline console asset missing: $consoleSource" }
+    if ((Get-FileHash -LiteralPath $consoleSource -Algorithm SHA256).Hash.ToLowerInvariant() -ne $console.sha256) { throw 'Pinned console SHA-256 mismatch' }
+    $inputs[$console.path] = "build/payload/$($console.path)"
     foreach ($role in 'gateway','dns','mesh','compute') { $inputs["images/$role.oci.tar"] = "build/payload/images/$role.oci.tar" }
     foreach ($relative in $inputs.Keys) {
         $source = Join-Path $repo $inputs[$relative]
         $destination = Join-Path $stage $relative
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Offline input missing: $source" }
-        if (-not (Test-Path -LiteralPath $destination)) { New-Item -ItemType HardLink -Path $destination -Target $source | Out-Null }
+        if (-not (Test-Path -LiteralPath $destination)) {
+            $destDir = Split-Path -Parent $destination
+            New-Item -ItemType Directory -Force $destDir | Out-Null
+            Copy-Item -LiteralPath $source -Destination $destination -Force
+        }
         if ((Get-FileHash $source).Hash -ne (Get-FileHash $destination).Hash) { throw "Stale staged input: $relative" }
     }
     $entries = @(Get-ChildItem -LiteralPath $stage -Recurse -File | Where-Object Name -ne 'manifest.json' | Sort-Object FullName | ForEach-Object {

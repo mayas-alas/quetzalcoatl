@@ -1,0 +1,79 @@
+#!/usr/bin/bash
+# Install only the pinned public frontend; no RustFS data or IAM operations.
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 ]]
+archive=${1:?verified offline console archive}
+mode=${2:-install}
+[[ "$mode" == install || "$mode" == apply ]]
+expected=1877193e802632d2f0e2b2995a06b26e01d7f077d624e5917826ed05b5f7d635
+[[ -f "$archive" && $(stat -c %s "$archive") -le 16777216 ]]
+printf '%s  %s\n' "$expected" "$archive" | sha256sum -c - >/dev/null
+root=/var/lib/gnx-core
+dest=$root/web/rustfs-console-v0.1.38
+for p in "$root" "$root/web"; do [[ -d "$p" && ! -L "$p" && $(stat -c %u "$p") == 0 ]]; done
+if [[ "$mode" == apply ]]; then
+ ingress_hash=${3:?approved ingress hash}
+ [[ "$ingress_hash" =~ ^[a-f0-9]{64}$ ]]
+ [[ $(sha256sum /etc/gnx-core/private-stack.caddy | cut -d ' ' -f1) == "$ingress_hash" ]]
+ cmp /etc/gnx-core/private-stack.caddy "$root/stack-gateway/private-stack.caddy"
+ systemctl is-active --quiet gnx-core-gateway.service
+fi
+python3 - "$archive" "$dest" "$expected" <<'PY'
+import hashlib, json, os, pathlib, stat, sys, zipfile
+archive, name, expected = sys.argv[1:]
+dest = pathlib.Path(name)
+with zipfile.ZipFile(archive) as z:
+    entries = z.infolist()
+    if len(entries) > 20000 or sum(i.file_size for i in entries) > 250 * 1024 * 1024:
+        raise SystemExit('Console archive exceeds asset limits')
+    for i in entries:
+        p = pathlib.PurePosixPath(i.filename)
+        if p.is_absolute() or '..' in p.parts or '\\' in i.filename or stat.S_ISLNK(i.external_attr >> 16):
+            raise SystemExit('Unsafe console archive member')
+    required = {'index.html','browser/index.html','auth/login/index.html','auth/oidc-callback/index.html'}
+    files = {i.filename: i for i in entries if not i.is_dir()}
+    if not required.issubset(files):
+        raise SystemExit('Missing console exported routes')
+    if dest.exists():
+        if dest.is_symlink() or not dest.is_dir() or dest.stat().st_uid != 0:
+            raise SystemExit('Foreign frontend destination')
+        # A previous local remedy is accepted only when its entire asset set
+        # matches this exact upstream archive, not merely its directory name.
+        actual = set()
+        for root, dirs, names in os.walk(dest):
+            for entry in dirs + names:
+                p = pathlib.Path(root, entry)
+                if p.is_symlink() or p.stat().st_uid != 0:
+                    raise SystemExit('Foreign console asset')
+            for entry in names:
+                relative = pathlib.Path(root, entry).relative_to(dest).as_posix()
+                if relative != '.gnx-console.json':
+                    actual.add(relative)
+        if actual != set(files):
+            raise SystemExit('Existing frontend asset set differs; preserve and inspect')
+        for relative, item in files.items():
+            if hashlib.sha256((dest / relative).read_bytes()).digest() != hashlib.sha256(z.read(item)).digest():
+                raise SystemExit('Existing frontend content differs; preserve and inspect')
+    else:
+        os.mkdir(dest, 0o755)
+        z.extractall(dest)
+        for root, dirs, names in os.walk(dest):
+            os.chmod(root, 0o755)
+            for entry in names:
+                os.chmod(os.path.join(root, entry), 0o644)
+metadata = {'version':'v0.1.38','sha256':expected}
+marker = dest / '.gnx-console.json'
+if marker.exists():
+    if marker.is_symlink() or json.loads(marker.read_text()) != metadata:
+        raise SystemExit('Console metadata differs; preserve and inspect')
+else:
+    with marker.open('x') as f:
+        json.dump(metadata, f)
+    os.chmod(marker, 0o644)
+print('Console v0.1.38: official asset integrity verified')
+PY
+if [[ "$mode" == apply ]]; then
+ systemctl restart gnx-core-gateway.service
+ systemctl is-active --quiet gnx-core-gateway.service
+fi

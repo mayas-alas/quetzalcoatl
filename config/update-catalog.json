@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "architecture": "linux/amd64",
+  "components": [
+    {"name":"mesh","image":"docker.io/tailscale/tailscale@sha256:2667499ed87ae29218f292556ba062918402dd5e92e93637af14867e4df12dd3"},
+    {"name":"dns","image":"docker.io/pihole/pihole@sha256:5b9c8cf51de7d6d3f2240dbe72baf5f06e1fd39cb4d77a99fab4fa13e23bd1be"},
+    {"name":"gateway","image":"docker.io/library/caddy@sha256:14a9c00d4e833ebc2b65d36515b37bde3b73f0b323a2663aaafc88953d8c4e3f"},
+    {"name":"compute","image":"ghcr.io/mayas-alas/tailnet-proxmox@sha256:3da7e2c7056c6fd80a5995e3486698c0a7c2563a09e3f7d3996e0f3027d7d28e"},
+    {"name":"pocket-id","image":"ghcr.io/pocket-id/pocket-id@sha256:f085157f0b6ea4b2e8aa5ecfd99eada0d83a4960f3a3dcfd46014097d0ef7ab5"},
+    {"name":"rustfs","image":"docker.io/rustfs/rustfs@sha256:ed9210d6411d77ffceb70d94b964a3cb7d225983368bc25bebe01e995293dcc2"},
+    {"name":"netbird-server","image":"docker.io/netbirdio/netbird-server@sha256:6799c37020ff70b9708d0e13bfe7b7a5004084caad86ba165ffe5ea1c84c0ea2"},
+    {"name":"netbird-dashboard","image":"docker.io/netbirdio/dashboard@sha256:3d6adfee19dd8d34d795af51daee69d27d2081d2076a5a304cfdd14acc67d6f4"}
+  ]
+}
