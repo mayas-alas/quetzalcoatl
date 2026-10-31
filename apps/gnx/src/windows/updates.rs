@@ -258,11 +258,7 @@ cat "$p"
 // unprivileged and the recorded MAC. Only then add our tag, preserving any
 // user-created entries such as a manual cluster tag. Guests owned by nobody
 // of ours never reach this function, so user deployments are never touched.
-fn ensure_guest_tag(
-    identity: &Identity,
-    id: &str,
-    conf: &serde_json::Value,
-) -> io::Result<()> {
+fn ensure_guest_tag(identity: &Identity, id: &str, conf: &serde_json::Value) -> io::Result<()> {
     const GUEST_TAG: &str = "gnx";
     let current = conf["tags"].as_str().unwrap_or_default();
     if current
