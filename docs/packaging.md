@@ -70,6 +70,17 @@ limpias, no de una WSL enrolada. Antes de distribuir, comprobar origen, licencia
 arquitectura e IDs OCI frente a la configuración del checkout. Los hashes prueban
 integridad, no que un filesystem sea seguro o esté libre de secretos.
 
+El catálogo incorporado debe coincidir con las fuentes de `config/images.json`
+y los Quadlets del stack privado. Los IDs de las cuatro imágenes del núcleo
+también deben coincidir con sus Quadlets y con los archivos OCI linux/amd64.
+Cambiar un pin del núcleo exige preparar su nuevo archivo OCI y un ZIP de inputs
+coherente; conservar la misma base no permite reutilizar un ZIP con imágenes
+anteriores. El build comprueba esa coherencia sin omitir gates.
+
+Los cuatro archivos OCI del ZIP son la semilla offline del núcleo. Las imágenes
+del [stack privado](../stacks/private-services/README.md) se fijan por digest en
+sus Quadlets y requieren conectividad a sus registros; no forman parte de ese ZIP.
+
 Desde las fuentes 0.0.20 se incluye también el ZIP oficial de consola definido en
 `config/console.json`. El mantenedor lo prepara en la ruta indicada y contrasta su
 SHA-256; el build local no lo descarga. CI lo obtiene del release HTTPS oficial y
@@ -178,10 +189,10 @@ repositorio. La Action descarga mediante `gh` y su token automático, también e
 repositorios privados. No introducir tokens en parámetros ni hacer público el
 repositorio para habilitar descargas. Conservar el SHA-256 por un canal confiable.
 
-Inputs publicados con el tag
-[offline-inputs-v0.0.20](https://github.com/mayas-alas/quetzalcoatl-next/releases/tag/offline-inputs-v0.0.20),
+Los inputs correspondientes a esta configuración se identifican con el tag
+[offline-inputs-v0.0.22](https://github.com/mayas-alas/quetzalcoatl-next/releases/tag/offline-inputs-v0.0.22),
 asset `gnx-offline-inputs.zip`, SHA-256
-`43bb3977aa2bdd328a73b4ff4ab744fbd941b01e709a65e86c55a9dcf67a2941`. La generación
+`0ce6e8842caa14321b73e3c1ca38016f1425a49452190a71871c0cf213ea5a11`. La generación
 con múltiples archivos usa `tar.exe -a`; un empaquetador por plataforma que escriba
 separadores Windows (`config\...`) produce entradas rechazadas por el verificador.
 Ese tag identifica los inputs, no la versión obligatoria del CLI: solo se pueden
