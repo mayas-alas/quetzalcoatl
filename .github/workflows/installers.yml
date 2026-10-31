@@ -36,6 +36,9 @@ jobs:
   package:
     runs-on: windows-2022
     timeout-minutes: 60
+    permissions:
+      actions: write
+      contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
     defaults:
@@ -171,9 +174,6 @@ jobs:
 
       - name: Prune artifacts from previous runs to keep Actions storage clean
         if: always()
-        permissions:
-          actions: write
-          contents: read
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
