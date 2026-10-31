@@ -8,7 +8,7 @@ After=gnx-core-crl.service
 DefaultDependencies=false
 
 [Container]
-Image=sha256:2d8b1708bf8008935c0e2a9b6564f7f080cf9a73af3b27718f286230449b7101
+Image=sha256:3067cc4e02c091399edbd5d65f85a3ff4d511574aecadb47f280c3761e68852e
 Pull=never
 ContainerName=gnx-core-gateway
 Network=host

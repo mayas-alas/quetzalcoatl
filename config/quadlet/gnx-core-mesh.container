@@ -3,7 +3,7 @@ Description=GnX Tailscale mesh, independent of local access
 PartOf=gnx-core.target
 
 [Container]
-Image=sha256:c73a613c03ea2c8e5c7f7ca9fa2764877906de26bf01310e9070c678f8bb6ea3
+Image=sha256:9cb91ed119a2c502813cfef5a14430944163dfb2b290ccfc69d671d1469ec09d
 Pull=never
 ContainerName=gnx-core-mesh
 Network=host

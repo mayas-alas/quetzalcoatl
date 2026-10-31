@@ -196,7 +196,23 @@ cat "$p"
                 .ok_or_else(|| invalid("semilla de imagen inválida"))?
                 .to_owned()
         } else {
-            baseline.get(&component.name).image.clone()
+            let current = &baseline.get(&component.name).image;
+            // Registered v0.0.20 stacks can still have their original Quadlets
+            // without an update receipt. Keep only these reviewed prior pins;
+            // guest ownership is checked independently before every operation.
+            let previous = match component.name.as_str() {
+                "netbird-server" => Some(
+                    "docker.io/netbirdio/netbird-server@sha256:6799c37020ff70b9708d0e13bfe7b7a5004084caad86ba165ffe5ea1c84c0ea2",
+                ),
+                "netbird-dashboard" => Some(
+                    "docker.io/netbirdio/dashboard@sha256:3d6adfee19dd8d34d795af51daee69d27d2081d2076a5a304cfdd14acc67d6f4",
+                ),
+                _ => None,
+            };
+            match previous {
+                Some(previous) => format!("{current};{previous}"),
+                None => current.clone(),
+            }
         };
         let mut args = vec![
             component.name.as_str(),
@@ -240,13 +256,15 @@ cat "$p"
         {
             return Err(invalid("propiedad del LXC cambió; no se modifica"));
         }
-        ensure_guest_tag(self.identity, &id, &conf)?;
         let status = super::deploy::command(self.identity, &["pct", "status", &id], None, 15)?;
         if status.trim() != "status: running" {
             return Err(io::Error::new(
                 io::ErrorKind::NotConnected,
                 "LXC detenido; no se inicia",
             ));
+        }
+        if verb == "apply" {
+            ensure_guest_tag(self.identity, &id, &conf)?;
         }
         let mut guest = vec!["pct", "exec", &id, "--", "/usr/bin/bash", "-s", "--"];
         guest.extend(args);
@@ -256,21 +274,23 @@ cat "$p"
 
 // Ownership was validated by this caller: description GnX.Core:<digest>,
 // unprivileged and the recorded MAC. Only then add our tag, preserving any
-// user-created entries such as a manual cluster tag. Guests owned by nobody
-// of ours never reach this function, so user deployments are never touched.
+// user-created entries. Inspection and download never change PVE tags.
 fn ensure_guest_tag(identity: &Identity, id: &str, conf: &serde_json::Value) -> io::Result<()> {
     const GUEST_TAG: &str = "gnx";
     let current = conf["tags"].as_str().unwrap_or_default();
     if current
-        .split(',')
+        .split([';', ','])
         .any(|tag| tag.trim().eq_ignore_ascii_case(GUEST_TAG))
     {
         return Ok(());
     }
-    let mut tags: Vec<&str> = current.split(',').map(str::trim).collect();
+    let mut tags: Vec<&str> = current.split([';', ',']).map(str::trim).collect();
     tags.retain(|tag| !tag.is_empty());
     tags.push(GUEST_TAG);
-    let joined = tags.join(",");
+    let joined = tags.join(";");
+    let digest = conf["digest"]
+        .as_str()
+        .ok_or_else(|| invalid("digest de configuración PVE ausente; no se cambian tags"))?;
     super::deploy::command(
         identity,
         &[
@@ -279,6 +299,8 @@ fn ensure_guest_tag(identity: &Identity, id: &str, conf: &serde_json::Value) -> 
             &format!("/nodes/gnx-core-compute/lxc/{id}/config"),
             "--tags",
             &joined,
+            "--digest",
+            digest,
         ],
         None,
         15,

@@ -3,7 +3,7 @@
 set -euo pipefail
 umask 077
 [[ $(id -u) == 0 ]]
-role=${1:?component}; mode=${2:?inspect, stage or apply}; desired=${3:?pinned image}; seed=${4:?owned baseline}
+role=${1:?component}; mode=${2:?inspect, stage or apply}; desired=${3:?pinned image}; seed=${4:?owned baselines}
 [[ "$mode" == inspect || "$mode" == stage || "$mode" == apply ]]
 [[ "$desired" =~ ^[a-z0-9./-]+@sha256:[a-f0-9]{64}$ ]]
 case "$role" in
@@ -23,13 +23,16 @@ for dir in "$root" "$state" "$state/$role"; do
 done
 receipt=$state/$role/last.json
 pending=$state/$role/pending.json
-approved=$seed
+IFS=';' read -r -a seeds <<< "$seed"
+approved=''
 if [[ -e "$receipt" ]]; then
  [[ -f "$receipt" && ! -L "$receipt" && $(stat -c %u "$receipt") == 0 && $(stat -c %s "$receipt") -le 4096 ]]
  approved=$(jq -er .image "$receipt")
 fi
 owned=false
-[[ "$configured" == "$seed" || "$configured" == "$approved" ]] && owned=true
+for baseline in "${seeds[@]}" "$approved"; do
+ if [[ -n "$baseline" && "$configured" == "$baseline" ]]; then owned=true; fi
+done
 active=$(systemctl show "$unit" --property=ActiveState --value)
 snapshot=$(podman container inspect "$name" 2>/dev/null | jq -ce '.[0] | {image:.Image,imageName:.ImageName,status:.State.Status}' || printf null)
 local_id=$(podman image inspect "$desired" 2>/dev/null | jq -er '.[0].Id // empty' || true)

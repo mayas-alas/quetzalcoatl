@@ -3,7 +3,7 @@ Description=NetBird combined server
 After=pocket-id.service
 
 [Container]
-Image=docker.io/netbirdio/netbird-server@sha256:6799c37020ff70b9708d0e13bfe7b7a5004084caad86ba165ffe5ea1c84c0ea2
+Image=docker.io/netbirdio/netbird-server@sha256:7b5b53b2dc8bc25639f791cf72d47cf86911894ff3f8a97cb79bab9be958109c
 ContainerName=netbird-server
 Network=private.network
 NetworkAlias=netbird-server

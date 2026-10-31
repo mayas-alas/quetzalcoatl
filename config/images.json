@@ -1,6 +1,6 @@
 {
-  "mesh": {"source":"docker.io/tailscale/tailscale@sha256:2667499ed87ae29218f292556ba062918402dd5e92e93637af14867e4df12dd3","id":"sha256:c73a613c03ea2c8e5c7f7ca9fa2764877906de26bf01310e9070c678f8bb6ea3"},
-  "dns": {"source":"docker.io/pihole/pihole@sha256:5b9c8cf51de7d6d3f2240dbe72baf5f06e1fd39cb4d77a99fab4fa13e23bd1be","id":"sha256:15d302c0f85902d6378e159b906b3ffc7b5ef2af079e1d296d1dcf3f5f217e29"},
-  "gateway": {"source":"docker.io/library/caddy@sha256:14a9c00d4e833ebc2b65d36515b37bde3b73f0b323a2663aaafc88953d8c4e3f","id":"sha256:2d8b1708bf8008935c0e2a9b6564f7f080cf9a73af3b27718f286230449b7101"},
+  "mesh": {"source":"docker.io/tailscale/tailscale@sha256:ed6480b33c6eb67c9cbd203ed42b9fb57e361986725b6856def71b7a3d9e276c","id":"sha256:9cb91ed119a2c502813cfef5a14430944163dfb2b290ccfc69d671d1469ec09d"},
+  "dns": {"source":"docker.io/pihole/pihole@sha256:30f803ad5dd60ff96cc0a63008a2e9271af481c1b0399a182192b2e91152c1f9","id":"sha256:c3c5f5b1ba1fdadb0095bc3985ff3de599fd51317b8d5efe6001f9d704723e80"},
+  "gateway": {"source":"docker.io/library/caddy@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e","id":"sha256:3067cc4e02c091399edbd5d65f85a3ff4d511574aecadb47f280c3761e68852e"},
   "compute": {"source":"ghcr.io/mayas-alas/tailnet-proxmox@sha256:3da7e2c7056c6fd80a5995e3486698c0a7c2563a09e3f7d3996e0f3027d7d28e","id":"sha256:00c9293ff01e249b1997dd222b7cd1766cb175fd84cd90b4282d403d4d7fd8fe"}
 }

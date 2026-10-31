@@ -6,7 +6,7 @@ PartOf=gnx-core.target
 DefaultDependencies=false
 
 [Container]
-Image=sha256:15d302c0f85902d6378e159b906b3ffc7b5ef2af079e1d296d1dcf3f5f217e29
+Image=sha256:c3c5f5b1ba1fdadb0095bc3985ff3de599fd51317b8d5efe6001f9d704723e80
 Pull=never
 ContainerName=gnx-core-dns
 Network=host

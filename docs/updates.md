@@ -25,7 +25,7 @@ El formato está en [config/update-catalog.json](../config/update-catalog.json):
 `name` e `image`. Se permiten únicamente los repositorios de esos componentes,
 referencias por `@sha256:` y digests hexadecimales minúsculos; no tags, URLs con
 credenciales, comandos, rutas de host ni repositorios alternativos. El catálogo
-incorporado en 0.0.21 refresca los pins a las últimas estables del momento de la
+incorporado en 0.0.22 refresca los pins a las últimas estables del momento de la
 release (verificadas contra los registros: netbird-server 0.82.0, netbird-dashboard
 v2.96.0, mesh v1.104.4, dns 2026.10.1, gateway Caddy 2.11.7; pocket-id, rustfs y
 compute sin cambio). No descubre ni adopta automáticamente `latest`.
@@ -62,8 +62,10 @@ guests ni se reinicia el host por iniciativa del actualizador.
 Un fallo de aplicación puede dejar componentes anteriores ya actualizados. Se
 detiene el resto, devuelve fallo y conserva `pending.json` por componente. Un
 timeout no demuestra salida; `--check`, estado systemd, Podman y journal orientan
-la resolución antes de repetir. No hay rollback automático de imágenes ni de datos:
-volver a un digest anterior puede ser incompatible con una migración ya realizada.
+la resolución antes de repetir. No hay retorno automático a la imagen anterior.
+Por arquitectura, selección de imagen y estado persistente son capas separadas:
+los datos se conservan al cambiar de imagen y la reversibilidad de una migración
+se evalúa por aplicación. Volver a un digest anterior requiere esa compatibilidad.
 
 En cada inicio solicitado o recuperado del nodo se compara el catálogo local y se
 registra el resultado en el Visor de eventos (`GnXCore`). No se consulta Internet,
@@ -72,12 +74,14 @@ un canal firmado y ventanas de aplicación automática siguen pendientes.
 
 ## Etiqueta PVE de guests
 
-Los guests creados por el producto llevan desde 0.0.21 el tag PVE `gnx` desde su
-creación. `update --apply` añade el tag solo después de validar ownership del
-guest (description `GnX.Core:<digest>`, sin privilegios y MAC registrada),
-conservando los demás tags existentes. Un guest que no pasa esa validación —
-incluidos los LXC creados por el operador fuera del producto, como los presentes
-antes de esta versión— no se modifica; retirar un tag aplicado externamente es
+Los guests creados por el producto llevan desde 0.0.22 el tag PVE `gnx` desde su
+creación. Al aplicar una imagen al stack privado, `update --apply` añade el tag
+solo después de validar ownership del guest (description `GnX.Core:<digest>`,
+sin privilegios y MAC registrada),
+conservando los demás tags existentes y comprobando el digest de configuración
+PVE para no sobrescribir cambios concurrentes. `--check` no escribe tags.
+Un guest que no pasa esa validación —incluidos los LXC creados por el operador
+fuera del producto— no se modifica; retirar un tag aplicado externamente es
 una operación manual del administrador en PVE.
 
 ## Consola RustFS

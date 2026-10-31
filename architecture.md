@@ -209,6 +209,12 @@ bootc recreable con recuperación para LXC es un
 [requisito pendiente](scope.md#requisitos-pendientes-autorizados), distinto de
 cambiar la imagen de un contenedor Podman.
 
+La base del sistema, la configuración y los datos persistentes son capas
+distintas. Recuperar una versión de la base no implica deshacer el estado de
+las aplicaciones: identidad, credenciales y datos se conservan, y cada migración
+define su compatibilidad con versiones anteriores. Esta separación guía la
+recuperación prevista para WSL y LXC; no acredita que ya esté implementada.
+
 El cierre consulta `ActiveState` por cada unidad solicitada, también después de
 la configuración OIDC del stack. No prueba salud funcional. Al reenviar una entrada completada solo se
 consulta `pct status`, sin reconciliar archivos ni comprobar otra vez las unidades.
