@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 60
     permissions:
       actions: write
-      contents: read
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
     defaults:
@@ -171,6 +171,9 @@ jobs:
             "MSI/EXE packaged from the immutable versioned CLI; source recompilation was not executed." >> $env:GITHUB_STEP_SUMMARY
           }
           "CLI mode: $env:CLI_MODE. Installation and runtime acceptance were not executed." >> $env:GITHUB_STEP_SUMMARY
+          "## Technical build hashes (not user downloads)" >> $env:GITHUB_STEP_SUMMARY
+          [IO.File]::ReadAllText((Join-Path $metadata 'BUILD-SHA256SUMS.txt')).TrimEnd() >> $env:GITHUB_STEP_SUMMARY
+          [IO.File]::ReadAllText((Join-Path $metadata 'build-provenance.json')) >> $env:GITHUB_STEP_SUMMARY
 
       - name: Prune artifacts from previous runs to keep Actions storage clean
         if: always()
@@ -199,22 +202,45 @@ jobs:
           Write-Host $pruned
           $pruned >> $env:GITHUB_STEP_SUMMARY
 
-      - name: Upload installers
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, Node 24
-        with:
-          name: gnx-core-v${{ env.GNX_VERSION }}-windows-x64
-          path: build/releases/v${{ env.GNX_VERSION }}/installers/*
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-
-      - name: Upload technical metadata (not a portable installation)
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, Node 24
-        with:
-          name: gnx-core-v${{ env.GNX_VERSION }}-build-metadata
-          path: build/releases/v${{ env.GNX_VERSION }}/metadata/*
-          if-no-files-found: error
-          retention-days: 7
+      - name: Stage user draft release (installers and checksums only)
+        if: ${{ inputs.publish_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v${{ env.GNX_VERSION }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Artifact storage is account-scoped and limited; the ~3 GB installers do
+          # not fit the included quota. Staging hands over through a draft release,
+          # whose assets do not count against Actions artifact storage.
+          $stale = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Listing releases failed' }
+          foreach ($candidate in $stale) {
+            if ($candidate.draft -and $candidate.tag_name -eq $env:RELEASE_TAG) {
+              gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/releases/$($candidate.id)" | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw 'A stale draft release could not be removed; refusing to stage a duplicate' }
+              Write-Host "Removed stale draft $($candidate.id)"
+            }
+          }
+          $installers = Join-Path $PWD "build/releases/v$env:GNX_VERSION/installers"
+          foreach ($name in 'GnxCore.msi', 'GnxCoreSetup.exe', 'SHA256SUMS.txt') {
+            $file = Get-Item -LiteralPath (Join-Path $installers $name)
+            if ($file.Length -eq 0) { throw "Empty draft asset: $name" }
+          }
+          $changelog = [IO.File]::ReadAllText("releases/v$env:GNX_VERSION/CHANGELOG.md")
+          $notes = "$changelog`n`n## Procedencia`n`nCommit: ``$env:GITHUB_SHA```n`n[Empaquetado en GitHub Actions]($env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID). El empaquetado no acredita aceptacion en un host nuevo.`n"
+          if ($env:CLI_MODE -eq 'source') {
+            $notes += "`nCLI compilado desde fuentes en esta ejecucion.`n"
+          } else {
+            $notes += "`nCLI versionado reutilizado; esta ejecucion no recompilo las fuentes.`n"
+          }
+          $notesFile = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          [IO.File]::WriteAllText($notesFile, $notes, [Text.UTF8Encoding]::new($false))
+          gh release create $env:RELEASE_TAG --verify-tag --draft --prerelease --target $env:GITHUB_SHA `
+            --title "GnX Core $env:RELEASE_TAG — Windows x64 (candidata)" --notes-file $notesFile `
+            "$installers/GnxCoreSetup.exe#Instalador interactivo — recomendado" `
+            "$installers/GnxCore.msi#Paquete MSI — administracion" `
+            "$installers/SHA256SUMS.txt#SHA-256 de los instaladores"
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release staging failed' }
 
   release:
     if: ${{ inputs.publish_release }}
@@ -228,23 +254,29 @@ jobs:
       GH_REPO: ${{ github.repository }}
       RELEASE_TAG: v${{ needs.package.outputs.version }}
     steps:
-      - name: Download verified build outputs
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2, Node 24
-        with:
-          name: gnx-core-v${{ needs.package.outputs.version }}-windows-x64
-          path: installers
-
-      - name: Download release notes and technical provenance
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2, Node 24
-        with:
-          name: gnx-core-v${{ needs.package.outputs.version }}-build-metadata
-          path: build-metadata
-
-      - name: Verify hashes and publish prerelease
-        working-directory: installers
+      - name: Verify staged draft assets, tag and publish
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          draft=$(gh api "repos/$GH_REPO/releases" --jq ".[] | select(.draft and .tag_name == \"$RELEASE_TAG\") | .id" | head -n1)
+          if [[ -z "$draft" ]]; then
+            echo 'No staged draft release for this version; nothing to publish' >&2
+            exit 1
+          fi
+          meta=$(gh api "repos/$GH_REPO/releases/$draft")
+          echo "$meta" | jq -e --arg tag "$RELEASE_TAG" --arg commit "$GITHUB_SHA" \
+            '.draft == true and .tag_name == $tag and .target_commitish == $commit' >/dev/null
+          echo "$meta" | jq -e '.assets | length == 3' >/dev/null
+          names=$(echo "$meta" | jq -r '[.assets[].name] | sort | join("\n")')
+          [[ "$names" == "$(printf 'GnxCore.msi\nGnxCoreSetup.exe\nSHA256SUMS.txt' | sort)" ]]
+          mkdir installers
+          echo "$meta" | jq -r '.assets[] | [.id, .name] | @tsv' |
+          while IFS=$'\t' read -r id asset; do
+            gh api -H 'Accept: application/octet-stream' "repos/$GH_REPO/releases/assets/$id" > "installers/$asset"
+          done
+          cd installers
           [[ $(find . -maxdepth 1 -type f | wc -l) -eq 3 ]]
           [[ $(wc -l < SHA256SUMS.txt) -eq 2 ]]
           [[ $(grep -c '  GnxCore.msi$' SHA256SUMS.txt) -eq 1 ]]
@@ -254,24 +286,14 @@ jobs:
             exit 1
           fi
           sha256sum --check --strict SHA256SUMS.txt
-          (cd ../build-metadata && sha256sum --check --strict BUILD-SHA256SUMS.txt)
-          jq -e --arg commit "$GITHUB_SHA" --arg version "${RELEASE_TAG#v}" '
-            .source_commit == $commit and .version == $version and
-            ((.cli_mode == "source" and .compiled_from_source == true) or
-             (.cli_mode == "versioned" and .compiled_from_source == false))
-          ' ../build-metadata/build-provenance.json >/dev/null
+          for f in GnxCore.msi GnxCoreSetup.exe; do
+            [[ $(stat -c %s "$f") -gt 0 ]]
+          done
           tag_commit=$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)
           if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
             echo 'Version tag does not match this workflow commit; refusing publication' >&2
             exit 1
           fi
-          printf '\n\n## Procedencia\n\nCommit: `%s`\n\n[Empaquetado en GitHub Actions](%s/%s/actions/runs/%s). El empaquetado no acredita aceptación en un host nuevo.\n' "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> ../build-metadata/CHANGELOG.md
-          mode=$(jq -er .cli_mode ../build-metadata/build-provenance.json)
-          if [[ "$mode" == source ]]; then
-            printf '\nCLI compilado desde fuentes en esta ejecución.\n' >> ../build-metadata/CHANGELOG.md
-          else
-            printf '\nCLI versionado reutilizado; esta ejecución no recompiló las fuentes.\n' >> ../build-metadata/CHANGELOG.md
-          fi
-          gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease --title "GnX Core $RELEASE_TAG — Windows x64 (candidata)" --notes-file ../build-metadata/CHANGELOG.md 'GnxCoreSetup.exe#Instalador interactivo — recomendado' 'GnxCore.msi#Paquete MSI — administración' 'SHA256SUMS.txt#SHA-256 de los instaladores'
-          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+          cd ..
+          gh api -X PATCH "repos/$GH_REPO/releases/$draft" -F draft=false -f prerelease=true -F latest=false > /dev/null
           printf 'Instaladores publicados: %s/%s/releases/tag/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"

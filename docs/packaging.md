@@ -121,8 +121,10 @@ explícitas; CI no los hace automáticamente.
 
 [Windows installers](../.github/workflows/installers.yml) se ejecuta manualmente
 con `workflow_dispatch`, en `windows-2022`. No se activa por pull requests ni instala
-el producto. El job de empaquetado usa solo lectura. El job opcional de publicación
-requiere escritura y publica únicamente una pre-release tras completar los gates.
+el producto. El job de empaquetado requiere escritura: crea la release borrador de
+usuario y purga siempre los artifacts de runs anteriores (ver cuota abajo). El job
+opcional de publicación requiere escritura y publica únicamente una pre-release
+tras completar los gates.
 
 `cli_mode` distingue dos rutas:
 
@@ -177,12 +179,14 @@ repositorios privados. No introducir tokens en parámetros ni hacer público el
 repositorio para habilitar descargas. Conservar el SHA-256 por un canal confiable.
 
 Inputs publicados con el tag
-[offline-inputs-v0.0.14](https://github.com/mayas-alas/quetzalcoatl-next/releases/tag/offline-inputs-v0.0.14),
+[offline-inputs-v0.0.20](https://github.com/mayas-alas/quetzalcoatl-next/releases/tag/offline-inputs-v0.0.20),
 asset `gnx-offline-inputs.zip`, SHA-256
-`9ff2b812c5227c7163fbb6f7e92b8e5f9466990914d5c8bed5523f517c84e3a4`.
-Ese tag identifica los inputs, no la versión obligatoria del CLI: también son
-los inputs usados por 0.0.16. Solo se pueden reutilizar mientras coincidan
-configuración, arquitectura, IDs OCI y contrato de integridad del checkout.
+`43bb3977aa2bdd328a73b4ff4ab744fbd941b01e709a65e86c55a9dcf67a2941`. La generación
+con múltiples archivos usa `tar.exe -a`; un empaquetador por plataforma que escriba
+separadores Windows (`config\...`) produce entradas rechazadas por el verificador.
+Ese tag identifica los inputs, no la versión obligatoria del CLI: solo se pueden
+reutilizar mientras coincidan configuración, arquitectura, IDs OCI y contrato de
+integridad del checkout.
 
 ### Ejecutar y descargar
 
@@ -193,16 +197,18 @@ configuración, arquitectura, IDs OCI y contrato de integridad del checkout.
 3. Elegir `cli_mode` e indicar `payload_release` (tag de la release de inputs) y `payload_sha256`
    (hash del ZIP completo). La Action descarga, verifica y extrae solo los archivos permitidos.
 4. Se ejecuta la ruta canónica seleccionada, sin reemplazar un CLI versionado distinto.
-5. En **Artifacts**, elegir según la finalidad:
-   - `gnx-core-v<versión>-windows-x64`: MSI, setup EXE y `SHA256SUMS.txt`.
-   - `gnx-core-v<versión>-build-metadata`: CLI canónico, digest base, manifiesto,
-      changelog, `build-provenance.json` y `BUILD-SHA256SUMS.txt`. No es una instalación portable.
-   Retención: siete días. Los hashes técnicos y los de distribución están separados.
+5. Entrega sin artifacts: la corrida purga los artifacts de runs anteriores (el
+   almacenamiento de artifacts es compartido por cuenta y limitado; los
+   instaladores por corrida suelen agotar esa cuota). El job de empaquetado crea
+   la release borrador `v<versión>` con exactamente tres assets de usuario: MSI,
+   setup EXE y `SHA256SUMS.txt`. El CLI canónico, `build-provenance.json`,
+   `BUILD-SHA256SUMS.txt` y los hashes técnicos se registran solo en el resumen
+   del run correspondiente; no son descargas ni componentes adicionales.
 6. Opcionalmente, activar `publish_release` y ejecutar desde el tag `v<versión>`
-   previamente creado sobre el commit elegido. Tras el build, un segundo job
-   verifica hashes y coincidencia tag/commit; crea una release borrador con sus
-   tres assets de usuario y solo entonces la publica como pre-release. No publica
-   archivos técnicos ni sustituye releases existentes.
+   previamente creado sobre el commit elegido. El segundo job descarga los tres
+   assets del borrador, verifica hashes y coincidencia tag/commit (que sean del
+   mismo run) y solo entonces la publica como pre-release. Si esa verificación
+   falla, la release queda borrador y se puede repetir el job sin recompilar.
 
 No se suben resultados parciales si falla el empaquetado. Los instaladores no se
 firman con Authenticode por este workflow. Los hashes no sustituyen una firma de
