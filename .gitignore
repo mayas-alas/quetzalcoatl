@@ -18,6 +18,5 @@
 /installer/bin/
 /installer/bundle/bin/
 /installer/bundle/obj/
-".aider.chat.history.md"  
-".aider.input.history"  
-".aider.tags.cache.v4/" 
+.aider*
+
