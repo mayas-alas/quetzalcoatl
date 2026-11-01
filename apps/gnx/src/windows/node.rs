@@ -96,13 +96,17 @@ impl Controller {
             .as_ref()
             .map(|s| zeroize::Zeroizing::new(s.clone()));
         match tokio::task::spawn_blocking(move || {
-            let result = if matches!(op, Operation::UpdateCheck | Operation::UpdateApply) {
-                super::updates::execute(op == Operation::UpdateApply, catalog)
-            } else if let Some(bundle) = bundle {
-                super::deploy::apply(&bundle).map(|message| (NodeState::Active, message))
-            } else {
-                execute_secret(op, secret.as_deref().map(String::as_str))
-            };
+            let result = (|| {
+                let _lease = super::maintenance::lease()?;
+                super::product_update::permit(Some(op))?;
+                if matches!(op, Operation::UpdateCheck | Operation::UpdateApply) {
+                    super::updates::execute(op == Operation::UpdateApply, catalog)
+                } else if let Some(bundle) = bundle {
+                    super::deploy::apply(&bundle).map(|message| (NodeState::Active, message))
+                } else {
+                    execute_secret(op, secret.as_deref().map(String::as_str))
+                }
+            })();
             if let Err(error) = &result {
                 super::service::report_error(error);
             }
@@ -352,6 +356,8 @@ fn write_intent(running: bool) -> io::Result<()> {
 }
 
 pub fn recover() -> io::Result<()> {
+    let _lease = super::maintenance::lease()?;
+    super::product_update::permit(None)?;
     super::bootstrap::prepare()?;
     let intent = match security::read_private("intent", 16) {
         Ok(intent) => intent,

@@ -20,6 +20,53 @@ se usa el incorporado en el CLI. `--check` con archivo solo previsualiza: no gua
 la aprobación. Después de verificar las descargas, `--apply` conserva el catálogo
 en estado Windows protegido. Un cambio del CLI no reemplaza esa aprobación.
 
+Las fuentes 0.0.23 añaden, antes de esa comparación, descubrimiento público de
+releases cuando `--check` no recibe un catálogo. El origen se toma de
+`GNX_UPDATE_REPOSITORY` y el nombre MSI de `GNX_UPDATE_MSI_ASSET`, de ámbito
+máquina; sus valores predeterminados son `mayas-alas/quetzalcoatl` y `GnxCore.msi`.
+Se incluyen pre-releases con tag numérico de producto, no borradores ni releases
+de inputs. Se verifica `SHA256SUMS.txt` contra su digest publicado y la coherencia
+con los digests de ambos instaladores; no se descargan los instaladores.
+Un origen inaccesible o metadatos incoherentes devuelven error, sin autenticación
+ni cambio de origen. Para comprobar solo componentes sin red, aportar un catálogo
+explícito.
+
+## Actualización del producto en 0.0.23
+
+Sin catálogo, `gnx update --apply` selecciona la release pública numéricamente
+mayor, incluidos candidatos publicados, y rechaza downgrades. Si la versión ya
+coincide, aplica explícitamente el catálogo incorporado. Para una versión mayor
+descarga MSI y hashes; cuando la instalación pertenece a Burn, conserva esa vía
+mediante el EXE de la misma release. Una identidad/versionado MSI o Burn ambiguos
+bloquean la operación, sin adoptar recursos por nombre.
+
+Un worker SCM temporal verifica el inventario y bloquea la instalación normal
+con guests activos. La CLI sale antes de que el worker detenga el servicio e
+invoque el instalador nativo; después recupera `GnXCore` y aplica el catálogo del
+payload instalado. La entrega al worker no confirma su finalización. Consultar
+`gnx update --check`, el recibo Windows protegido y el Visor de eventos. Un fallo
+tras iniciar mantenimiento, timeout o reinicio requerido bloquea reintentos
+automáticos: resolver el estado nativo antes de continuar. No hay reboot implícito
+ni rollback automático de migraciones.
+
+El CLI de 0.0.22 no descarga MSI: la primera instalación de 0.0.23 requiere ejecutar
+su MSI o EXE publicado respetando la vía de mantenimiento existente.
+
+## Recreación explícita en 0.0.23
+
+`gnx update --force` recrea la versión instalada, sin descubrimiento remoto.
+`gnx update --apply --force` selecciona primero la release pública y después
+recrea. Ambas formas requieren consola interactiva, inventario verificado y
+escribir `RECREAR`; cancelar no autoriza instalación ni borrado.
+
+Se retiran la WSL propia, sus datos, CA, identidad mesh, credencial/configuración
+PVE y todos los guests del almacenamiento administrado, incluidos los del usuario.
+No hay recuperación automática. Se conserva la cuenta Windows privada de servicio
+y la transacción, no el nodo anterior. El payload instalado prepara un nodo vacío;
+volver a configurar `gnx password`, `gnx enroll` y los despliegues deseados.
+Almacenamiento externo, estado no reconocido o un inventario que cambió bloquean
+la recreación. Windows, otras WSL y recursos externos no se purgan.
+
 El formato está en [config/update-catalog.json](../config/update-catalog.json):
 `schema: 1`, `architecture: linux/amd64` y exactamente ocho componentes con
 `name` e `image`. Se permiten únicamente los repositorios de esos componentes,

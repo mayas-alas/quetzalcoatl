@@ -172,10 +172,27 @@ La retirada requiere `GnXCore` en ejecución y sin otra operación en curso: no
 inicia automáticamente el servicio Windows si está detenido. Los requisitos y
 recursos conservados están en [Mantenimiento y desinstalación](docs/uninstall.md).
 
-Cuenta, perfil, WSL, DPAPI, CA y datos permanecen para reinstalar. Las actualizaciones
+Cuenta, perfil, WSL, DPAPI, CA y datos permanecen tras la desinstalación normal para reinstalar. Las actualizaciones
 no reemplazan una WSL existente con el rootfs de primera instalación. No existe
-una función de purga. El empaquetado local y CI, sus inputs y gates se describen
+una función de purga genérica. El empaquetado local y CI, sus inputs y gates se describen
 en [docs/packaging.md](docs/packaging.md).
+
+Las fuentes 0.0.23 añaden `release_source.rs`, `installer_package.rs`,
+`product_update.rs`, `maintenance.rs` y `recreation.rs`. El descubrimiento HTTPS
+es público y no usa sesiones de desarrollo; la inspección MSI contrasta identidad
+y versión nativas. Un worker SCM temporal LocalSystem usa una copia protegida del
+ejecutable para esperar la salida de la CLI y ejecutar MSI/Burn fuera de `GnXCore`.
+El recibo protegido registra las fases antes de las mutaciones; un lease de archivo
+serializa pipe, recuperación y worker. La entrega al worker no significa éxito.
+Reinicio requerido y resultado desconocido se conservan sin repetir instaladores.
+
+La recreación exige inventario y confirmación interactiva, revalida SID, GUID WSL,
+guests, almacenamiento y recibos, retira publicación propia y usa únicamente
+`wsl --unregister` bajo la identidad dedicada verificada. No elimina directorios
+externos por nombre. Conserva el scaffold de cuenta Windows y la transacción;
+prepara WSL vacía desde el payload instalado, sin CA/mesh/credencial PVE anteriores.
+La operación vuelve a requerir `password` y `enroll`; no es una actualización
+conservadora ni una prueba de aceptación de ese recorrido.
 
 ## Diagnóstico y límites
 

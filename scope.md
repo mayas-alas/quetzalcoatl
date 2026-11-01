@@ -99,7 +99,7 @@ actualizador: dependen de una entrega instalada y comprobaciones independientes.
 - **R-REC-01 — Actualización o recreación explícita:** sin fuerza,
   `gnx update --apply` actualiza imágenes conservando volúmenes, identidad y
   configuración declarada; los LXC del usuario y del sistema siguen disponibles.
-  La forma prevista `gnx update --apply --force` vuelve a preparar el
+  `gnx update --apply --force` vuelve a preparar el
   sistema GnX desde cero, retirando su estado persistente e identidades anteriores
   y aplicando el bootstrap configurado. El borrado del almacenamiento administrado
   incluye sus guests, también los creados por el usuario. No significa reiniciar
@@ -107,8 +107,11 @@ actualizador: dependen de una entrega instalada y comprobaciones independientes.
   el inventario debe mostrar los datos y guests afectados y la autorización cubrir
   su pérdida; no se adopta por ello el control de guests ajenos en otros recorridos.
   La implementación debe delegar en mecanismos nativos, sin omitir integridad,
-  ownership o control de resultados desconocidos. Ninguno de los flags
-  `--force`, `--force-recreate` o `--remove-orphans` existe hoy en esa CLI.
+  ownership o control de resultados desconocidos. Las fuentes 0.0.23 añaden
+  también `gnx update --force` para recrear la versión instalada sin otra descarga.
+  Conservan la cuenta Windows privada de servicio y el estado de transacción;
+  renuevan el nodo WSL y su almacenamiento, CA, mesh y configuración PVE.
+  No existen `--force-recreate` ni `--remove-orphans`.
 - **R-VAL-01 — Aceptación manual recreada y compartida:** distinguir la
   preparación de un entorno nuevo de producto y su operación posterior por
   humano y agente sobre la misma instancia. Mantener `gnx password` como vía
@@ -129,8 +132,8 @@ actualizador: dependen de una entrega instalada y comprobaciones independientes.
   de ejecución y contrastarla al retomar; no introduce ejecución de pruebas
   automáticas, simulaciones ni un segundo nodo paralelo en el mismo Windows.
 
-R-UPD-01, R-REC-01 y R-VAL-01 son objetivos del trabajo para 0.0.23, no capacidades
-ya incorporadas ni aceptadas. La recreación no es un requisito de cada actualización
+Las fuentes 0.0.23 implementan los recorridos R-UPD-01 y R-REC-01; su compilación,
+entrega y aceptación R-VAL-01 deben comprobarse por separado. La recreación no es un requisito de cada actualización
 y no se usa para simular que se conservó estado durante un upgrade.
 
 Sus [criterios de cierre](historias-de-usuario.md#requisitos-pendientes) no son

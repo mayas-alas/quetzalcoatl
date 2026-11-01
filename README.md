@@ -72,8 +72,10 @@ $gnx = "$env:ProgramFiles\GnX Core\gnx.exe"
 | `password` | Establece una nueva contraseña de `root@pam` en PVE, con confirmación sin eco, y conserva su hash en la configuración protegida. |
 | `stop` | Detiene los servicios propios y conserva datos e identidad. La recuperación del servicio Windows respeta esa parada. |
 | `deploy <carpeta>` | Envía Quadlets admitidos por el pipe administrativo y crea un LXC no privilegiado nuevo. Una entrada idéntica ya aplicada no duplica el guest. |
-| `update --check [catalogo.json]` | En las fuentes 0.0.20: compara las ocho imágenes con un catálogo aprobado por digest, sin descargar, reiniciar ni iniciar recursos detenidos. |
-| `update --apply [catalogo.json]` | En las fuentes 0.0.20: descarga primero las candidatas y aplica cambios a las unidades existentes. Puede interrumpir acceso; no revierte migraciones. |
+| `update --check [catalogo.json]` | En 0.0.23 sin catálogo consulta releases públicas, muestra la transacción y compara componentes. Con catálogo solo compara componentes localmente. No instala. |
+| `update --apply [catalogo.json]` | En 0.0.23 sin catálogo selecciona la release pública y entrega MSI/Burn a un worker SCM; con catálogo solo aplica componentes. Bloquea instalación normal con guests activos. |
+| `update --force` | En 0.0.23 recrea el nodo de la versión instalada, con inventario y confirmación interactiva de pérdida de datos y guests. |
+| `update --apply --force` | Selecciona primero la release pública y recrea después el nodo. No reinicia Windows ni purga otras WSL. |
 
 Se usa la ruta explícita porque el instalador no modifica `PATH`. No introduzcas
 keys ni contraseñas en argumentos, la app informativa, logs o chat. Los formularios

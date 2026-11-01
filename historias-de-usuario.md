@@ -141,8 +141,9 @@ Disponible desde 0.0.16. Subida web, puente nativo y builds no se presentan como
 ## Requisitos pendientes
 
 Estos recorridos corresponden a R-IMG-01, R-LXC-01, R-UPD-01, R-REC-01 y R-VAL-01 en
-[alcance](scope.md#requisitos-pendientes-autorizados); no están aceptados ni
-descritos como capacidades del instalador publicado.
+[alcance](scope.md#requisitos-pendientes-autorizados). Las fuentes 0.0.23 implementan
+R-UPD-01 y R-REC-01; su aceptación manual sigue pendiente. R-IMG-01 y R-LXC-01
+continúan como evolución pendiente, no como capacidades del instalador.
 
 **Como administradora, quiero instalar una vez con MSI o EXE y actualizar el
 producto instalado mediante `gnx update --apply`.**
@@ -163,12 +164,15 @@ producto instalado mediante `gnx update --apply`.**
 **Como operadora, quiero recrear un entorno propio y compartir su operación con
 un agente sin compartir la cuenta Windows de servicio.**
 
-- La forma prevista `gnx update --apply --force` retira el estado anterior del
+- `gnx update --apply --force` retira el estado anterior del
   sistema GnX y lo prepara desde cero, con identidad nueva y el bootstrap
   configurado. Aprobar antes el inventario de recursos y datos que se perderán,
   incluidos los guests del almacenamiento administrado;
   no extender ese alcance a Windows, otras WSL o recursos ajenos. Reponer solo
   un contenedor conservando sus volúmenes no satisface este recorrido.
+- `gnx update --force` permite recrear solo la versión instalada. Se conserva la
+  cuenta Windows privada de servicio y la transacción, no el nodo WSL, CA, mesh,
+  configuración PVE ni guests anteriores. Reconfigurar `password` y `enroll`.
 - Usar el lifecycle nativo. Una actualización normal no retira guests; la
   recreación completa retira el almacenamiento del nodo identificado según el
   inventario aprobado. No convierte recursos externos en recursos del producto

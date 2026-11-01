@@ -3,11 +3,34 @@ mod bootstrap;
 mod console;
 mod deploy;
 mod identity;
+mod installer_package;
+mod maintenance;
 mod node;
 mod pipe;
+mod product_update;
+mod recreation;
+mod release_source;
 mod security;
 pub mod service;
 mod updates;
+
+pub fn check_product_release() -> std::io::Result<String> {
+    security::effective_admin()?;
+    if let Some(receipt) = product_update::receipt()? {
+        println!("{receipt}");
+    }
+    release_source::check()
+}
+
+pub fn apply_product(force: bool, discover: bool) -> std::io::Result<bool> {
+    product_update::apply(force, discover)
+}
+pub fn product_worker() -> std::io::Result<()> {
+    product_update::dispatch()
+}
+pub fn product_recreate() -> std::io::Result<()> {
+    product_update::recreate_installed()
+}
 
 pub fn installer(remove: bool) -> std::io::Result<()> {
     // MSI uses the existing authenticated service boundary, not another token/

@@ -268,10 +268,69 @@ impl Identity {
                 &mut size,
             )
         };
+        let base = if code == 0 {
+            let mut value = [0u16; 32768];
+            let mut size = std::mem::size_of_val(&value) as u32;
+            let result = unsafe {
+                RegGetValueW(
+                    handle,
+                    null(),
+                    wide("BasePath").as_ptr(),
+                    RRF_RT_REG_SZ,
+                    null_mut(),
+                    value.as_mut_ptr().cast(),
+                    &mut size,
+                )
+            };
+            if result != 0 {
+                None
+            } else {
+                let length = value.iter().position(|&c| c == 0).unwrap_or(value.len());
+                String::from_utf16(&value[..length]).ok()
+            }
+        } else {
+            None
+        };
         unsafe { RegCloseKey(handle) };
         let length = data.iter().position(|&n| n == 0).unwrap_or(data.len());
         if code != 0 || String::from_utf16_lossy(&data[..length]) != DISTRO {
             return Err(denied("la distro no coincide con su registro propio"));
+        }
+        let expected = self.profile_dir().join(r"AppData\Local\GnX Core\wsl");
+        let normalize = |value: &str| {
+            value
+                .trim_start_matches(r"\\?\")
+                .trim_end_matches(['\\', '/'])
+                .to_lowercase()
+        };
+        if base
+            .as_ref()
+            .is_none_or(|value| normalize(value) != normalize(&expected.to_string_lossy()))
+        {
+            return Err(denied(
+                "BasePath WSL no coincide con el almacenamiento dedicado",
+            ));
+        }
+        use std::os::windows::fs::MetadataExt;
+        let mut directory = self.profile_dir();
+        for part in ["AppData", "Local", "GnX Core", "wsl"] {
+            directory.push(part);
+            let metadata = std::fs::symlink_metadata(&directory)?;
+            if !metadata.is_dir()
+                || metadata.file_attributes()
+                    & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+                    != 0
+            {
+                return Err(denied("ruta WSL enlazada o inválida; no se adopta"));
+            }
+        }
+        let disk = std::fs::symlink_metadata(expected.join("ext4.vhdx"))?;
+        if !disk.is_file()
+            || disk.file_attributes()
+                & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+                != 0
+        {
+            return Err(denied("disco WSL no es un archivo propio directo"));
         }
         Ok(())
     }

@@ -22,13 +22,13 @@ fn run() -> std::io::Result<bool> {
     match args.as_slice() {
         [] => {
             println!(
-                "gnx start | stop | status | enroll | password | deploy <carpeta> | update --check|--apply [catalogo.json]"
+                "gnx start | stop | status | enroll | password | deploy <carpeta> | update --check|--apply [catalogo.json] | update --force"
             );
             Ok(true)
         }
         [arg] if arg == "--help" || arg == "-h" => {
             println!(
-                "gnx start | stop | status | enroll | password | deploy <carpeta>\ngnx update --check|--apply [catalogo.json]\nUpdate compara/aplica digests aprobados a recursos existentes; no sigue latest. Apply puede interrumpir servicios y no revierte migraciones. Enroll/password solicitan entrada sin eco."
+                "gnx start | stop | status | enroll | password | deploy <carpeta>\ngnx update --check|--apply [catalogo.json]\ngnx update --force\ngnx update --apply --force\nCheck sin catálogo consulta releases públicas y muestra la transacción. Apply sin catálogo actualiza el producto por MSI/Burn y luego sus componentes; con catálogo solo aplica componentes. Force recrea el nodo instalado: borra datos, identidades y guests administrados tras inventario y confirmación interactiva. Apply --force selecciona primero la release pública. No reinicia Windows ni purga otras WSL. La entrega al worker no confirma finalización; consulta --check y eventos. Enroll/password solicitan entrada sin eco."
             );
             Ok(true)
         }
@@ -39,6 +39,16 @@ fn run() -> std::io::Result<bool> {
         #[cfg(windows)]
         [arg] if arg == "--msi-uninstall" || arg == "--msi-recover" => {
             windows::installer(arg == "--msi-uninstall")?;
+            Ok(true)
+        }
+        #[cfg(windows)]
+        [arg] if arg == "--product-update-worker" => {
+            windows::product_worker()?;
+            Ok(true)
+        }
+        #[cfg(windows)]
+        [arg] if arg == "--product-recreate" => {
+            windows::product_recreate()?;
             Ok(true)
         }
         #[cfg(windows)]
@@ -58,6 +68,14 @@ fn run() -> std::io::Result<bool> {
             Ok(true)
         }
         #[cfg(windows)]
+        [arg, mode] if arg == "update" && (mode == "--apply" || mode == "--force") => {
+            windows::apply_product(mode == "--force", mode == "--apply")
+        }
+        #[cfg(windows)]
+        [arg, mode, force] if arg == "update" && mode == "--apply" && force == "--force" => {
+            windows::apply_product(true, true)
+        }
+        #[cfg(windows)]
         [arg, mode, rest @ ..] if arg == "update" && rest.len() <= 1 => {
             let operation = match mode.as_str() {
                 "--check" => protocol::Operation::UpdateCheck,
@@ -68,6 +86,9 @@ fn run() -> std::io::Result<bool> {
                     ));
                 }
             };
+            if mode == "--check" && rest.is_empty() {
+                println!("{}", windows::check_product_release()?);
+            }
             let catalog = rest
                 .first()
                 .map(|path| updates::Catalog::read(std::path::Path::new(path)))

@@ -52,7 +52,7 @@ struct Account {
     sid: String,
 }
 
-fn private_root() -> io::Result<PathBuf> {
+pub(super) fn private_root() -> io::Result<PathBuf> {
     let root = security::state_dir()?;
     let mut descriptor = null_mut();
     if unsafe {
@@ -181,7 +181,7 @@ fn add_to_users_group() -> io::Result<()> {
     Ok(())
 }
 
-fn owned_account_sid() -> io::Result<String> {
+pub(super) fn owned_account_sid() -> io::Result<String> {
     let saved: Account = serde_json::from_slice(&security::read_private("account.json", 4096)?)
         .map_err(|_| denied("propiedad de cuenta inválida"))?;
     let actual = account_sid()?;
