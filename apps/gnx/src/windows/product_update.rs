@@ -853,15 +853,12 @@ fn worker() -> io::Result<()> {
                 ));
             }
         }
-        phase(
-            &mut transaction,
-            "complete",
-            if transaction.force {
-                "nodo recreado vacío; configura de nuevo password y enroll; login y salud no aceptados"
-            } else {
-                "instalación y aplicación nativas terminadas; salud/login y rollback de migraciones no acreditados"
-            },
-        )
+        let message = if transaction.force {
+            "nodo recreado vacío; configura de nuevo password y enroll; login y salud no aceptados"
+        } else {
+            "instalación y aplicación nativas terminadas; salud/login y rollback de migraciones no acreditados"
+        };
+        phase(&mut transaction, "complete", message)
     })();
     if let Err(error) = &result {
         let before =
