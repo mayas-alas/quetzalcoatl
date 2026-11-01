@@ -99,7 +99,7 @@ impl Drop for Identity {
 
 impl Identity {
     pub fn open(ownership: &Ownership) -> io::Result<Self> {
-        Self::open_inner(ownership, false)
+        Self::open_inner(ownership, false, true)
     }
 
     pub fn for_setup(sid: &str) -> io::Result<Self> {
@@ -110,10 +110,27 @@ impl Identity {
                 distribution_id: String::new(),
             },
             true,
+            false,
         )
     }
 
-    fn open_inner(ownership: &Ownership, setup: bool) -> io::Result<Self> {
+    pub(super) fn after_removal(ownership: &Ownership) -> io::Result<Self> {
+        if !valid_sid(&ownership.sid) || !valid_guid(&ownership.distribution_id) {
+            return Err(invalid("identidad anterior inválida"));
+        }
+        // Load only the existing dedicated profile, never provision another one.
+        let identity = Self::open_inner(ownership, false, false)?;
+        identity.verify_unregistered(ownership)?;
+        let path = identity.profile_dir().join(r"AppData\Local\GnX Core\wsl");
+        if super::bootstrap::registration(&ownership.sid, &path)?.is_some() {
+            return Err(denied(
+                "otra WSL GnX ya está registrada; no se adopta ni borra",
+            ));
+        }
+        Ok(identity)
+    }
+
+    fn open_inner(ownership: &Ownership, setup: bool, registration: bool) -> io::Result<Self> {
         let mut encrypted = Zeroizing::new(security::read_private("account.dpapi", 65536)?);
         let input = CRYPT_INTEGER_BLOB {
             cbData: encrypted.len() as u32,
@@ -231,7 +248,7 @@ impl Identity {
         {
             return Err(io::Error::last_os_error());
         }
-        if !setup {
+        if registration {
             identity.verify_registration(ownership)?;
         }
         Ok(identity)
@@ -340,6 +357,21 @@ impl Identity {
     }
 
     pub(super) fn verify_unregistered(&self, ownership: &Ownership) -> io::Result<()> {
+        use std::os::windows::fs::MetadataExt;
+        let mut directory = self.profile_dir();
+        for part in ["AppData", "Local", "GnX Core", "wsl"] {
+            directory.push(part);
+            match std::fs::symlink_metadata(&directory) {
+                Ok(metadata)
+                    if metadata.is_dir()
+                        && metadata.file_attributes()
+                            & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+                            == 0 => {}
+                Err(error) if part == "wsl" && error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+                _ => return Err(denied("ruta WSL enlazada o inválida tras retirada")),
+            }
+        }
         let key = wide(&format!(
             r"{}\Software\Microsoft\Windows\CurrentVersion\Lxss\{}",
             ownership.sid, ownership.distribution_id
@@ -361,7 +393,7 @@ impl Identity {
             .try_exists()?
         {
             return Err(denied(
-                "el VHD anterior sigue presente; no se declara nodo nuevo",
+                "hay un VHD en la ruta dedicada; no se declara nodo ausente",
             ));
         }
         Ok(())

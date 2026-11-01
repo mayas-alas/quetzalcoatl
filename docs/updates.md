@@ -80,6 +80,16 @@ confirmar. Tras verificar la retirada nativa del registro y del VHD, se prepara
 la base desde el payload instalado. No se recupera el nodo anterior si falla el
 bootstrap; se conserva el resultado y el diagnóstico nativos, sin reintento ciego.
 
+Desde 0.0.26, una retirada interrumpida sin MSI pendiente puede continuar con
+`gnx update --force` **de la versión nueva ya instalada** sin repetir el borrado,
+solo si el recibo, SID y perfil propios coinciden y se comprueba que no quedan
+GUID/VHD anteriores, otro registro GnX ni estado de nodo. La consola distingue
+esta continuación y exige `PREPARAR`, no `RECREAR`. Solo aplica el bootstrap del
+payload instalado. Si apareció otro disco, registro o estado parcial, se bloquea:
+no se adopta ni se retira ese recurso. Instalar no completa este paso por sí solo.
+La cuenta se incorpora al grupo Usuarios por SID; una pertenencia existente es
+válida. No editar recibos ni usar la CLI de una versión anterior para continuar.
+
 El formato está en [config/update-catalog.json](../config/update-catalog.json):
 `schema: 1`, `architecture: linux/amd64` y exactamente ocho componentes con
 `name` e `image`. Se permiten únicamente los repositorios de esos componentes,

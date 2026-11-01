@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use std::{
     ffi::OsString,
     fs::{self, File, OpenOptions},
-    io::{self, IsTerminal, Read, Write},
+    io::{self, IsTerminal, Read},
     os::windows::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -298,11 +298,17 @@ fn clean_previous(force: bool, binary: &Path) -> io::Result<(Option<Inventory>, 
                     .inventory
                     .as_ref()
                     .ok_or_else(|| invalid("falta identidad de la retirada anterior"))?;
-                let owner = super::identity::Ownership::read()?;
-                if owner.sid != expected.sid || owner.distribution_id != expected.distribution {
+                if super::bootstrap::owned_account_sid()? != expected.sid {
                     return Err(invalid(
                         "la instancia anterior cambió; no se adopta otra para borrar",
                     ));
+                }
+                match super::identity::Ownership::read() {
+                    Ok(owner)
+                        if owner.sid == expected.sid
+                            && owner.distribution_id == expected.distribution => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {} // Worker must prove removal before offering bootstrap only.
+                    _ => return Err(invalid("propiedad del nodo divergente; no se continúa")),
                 }
                 let service = manager(ServiceManagerAccess::CONNECT)?
                     .open_service(SERVICE, ServiceAccess::QUERY_STATUS)
@@ -313,7 +319,7 @@ fn clean_previous(force: bool, binary: &Path) -> io::Result<(Option<Inventory>, 
                     service.query_status().map_err(io::Error::other)?.process_id,
                 )?;
                 println!(
-                    "La retirada anterior falló. Esta solicitud requiere un nuevo inventario y confirmar el borrado completo; no se reanuda ni se revierte automáticamente."
+                    "La operación anterior no se completó. Se comprobará si el nodo sigue presente o si solo falta prepararlo; requiere otra confirmación, sin reintento automático."
                 );
             }
             for asset in &previous.assets {
@@ -502,33 +508,7 @@ pub fn apply(force: bool, discover: bool) -> io::Result<bool> {
             .inventory
             .as_ref()
             .ok_or_else(|| invalid("falta inventario"))?;
-        println!(
-            "RECREACIÓN SIN RECUPERACIÓN AUTOMÁTICA: WSL {} (SID {}).",
-            inventory.distribution, inventory.sid
-        );
-        println!(
-            "Se pierden datos, CA, identidad mesh, credencial PVE, configuración y TODOS los guests del almacenamiento administrado:"
-        );
-        println!(
-            "Se elimina el VHD de la WSL propia mediante --unregister; no se conserva copia ni se vuelve al nodo anterior."
-        );
-        if !inventory.guests_observed {
-            println!(
-                "PVE no proporcionó una lista actual. La lista siguiente es la última confirmada o está vacía; la autorización incluye TODO el contenido del VHD, también guests no observables ahora."
-            );
-        }
-        for guest in &inventory.guests {
-            println!("  {} {}: {}", guest.kind, guest.vmid, guest.status);
-        }
-        println!(
-            "Recibos Windows retirados: {}. Se conserva solo la cuenta Windows privada de servicio y los archivos de esta transacción. No Windows, otras WSL ni recursos externos.",
-            inventory.retired_files.join(", ")
-        );
-        print!("Escribe RECREAR para autorizar la pérdida indicada: ");
-        io::stdout().flush()?;
-        let mut confirmation = String::new();
-        io::stdin().read_line(&mut confirmation)?;
-        if confirmation.trim_end_matches(['\r', '\n']) != "RECREAR" {
+        if !recreation::confirm(inventory)? {
             let message = if transaction.unresolved_recreation {
                 "nueva solicitud cancelada; la recreación anterior sigue sin resolver y bloquea otras mutaciones"
             } else {
@@ -690,7 +670,10 @@ fn worker() -> io::Result<()> {
         }
         let lease = maintenance::lease()?;
         let inventory = if transaction.force {
-            recreation::force_inventory(transaction.inventory.as_ref())?
+            recreation::force_inventory(
+                transaction.inventory.as_ref(),
+                transaction.unresolved_recreation,
+            )?
         } else {
             recreation::inventory()?
         };
@@ -865,11 +848,16 @@ fn worker() -> io::Result<()> {
                     .as_ref()
                     .ok_or_else(|| invalid("falta destino confirmado"))?,
             )?;
-            phase(
-                &mut transaction,
-                "recreating",
-                "retirada exclusiva de la WSL verificada y su estado; sin rollback de datos",
-            )?;
+            let message = if transaction
+                .inventory
+                .as_ref()
+                .is_some_and(|inventory| inventory.removed)
+            {
+                "continuación de bootstrap; WSL anterior ausente, sin repetir unregister"
+            } else {
+                "retirada exclusiva de la WSL verificada y su estado; sin rollback de datos"
+            };
+            phase(&mut transaction, "recreating", message)?;
             let code = native(&binary, &["--product-recreate"], 1800)?;
             if code != 0 {
                 return Err(invalid(&format!(

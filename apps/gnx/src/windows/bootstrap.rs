@@ -134,9 +134,9 @@ fn account_sid() -> io::Result<String> {
     security::sid_text(sid.as_mut_ptr().cast())
 }
 
-fn add_to_users_group() -> io::Result<()> {
+fn add_to_users_group(account_sid: &str) -> io::Result<()> {
     use windows_sys::Win32::NetworkManagement::NetManagement::{
-        LOCALGROUP_MEMBERS_INFO_3, NetLocalGroupAddMembers,
+        LOCALGROUP_MEMBERS_INFO_0, NetLocalGroupAddMembers,
     };
     let mut sid = null_mut();
     if unsafe { ConvertStringSidToSidW(wide("S-1-5-32-545").as_ptr(), &mut sid) } == 0 {
@@ -162,19 +162,22 @@ fn add_to_users_group() -> io::Result<()> {
     if found == 0 {
         return Err(io::Error::last_os_error());
     }
-    let member = wide(&format!(r".\{ACCOUNT}"));
-    let info = LOCALGROUP_MEMBERS_INFO_3 {
-        lgrmi3_domainandname: member.as_ptr().cast_mut(),
-    };
+    // Use the verified SID, not a relative name that SYSTEM may not resolve.
+    let mut member = null_mut();
+    if unsafe { ConvertStringSidToSidW(wide(account_sid).as_ptr(), &mut member) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let info = LOCALGROUP_MEMBERS_INFO_0 { lgrmi0_sid: member };
     let code = unsafe {
         NetLocalGroupAddMembers(
             null(),
             name.as_ptr(),
-            3,
-            (&info as *const LOCALGROUP_MEMBERS_INFO_3).cast(),
+            0,
+            (&info as *const LOCALGROUP_MEMBERS_INFO_0).cast(),
             1,
         )
     };
+    unsafe { LocalFree(member) };
     if code != 0 && code != 1378 {
         return Err(io::Error::from_raw_os_error(code as i32));
     }
@@ -279,7 +282,7 @@ fn ensure_account(root: &Path) -> io::Result<String> {
         unsafe { NetApiBufferFree(existing.cast()) };
         let actual = owned_account_sid()?;
         configure_service_account(&actual)?;
-        add_to_users_group()?;
+        add_to_users_group(&actual)?;
         return Ok(actual);
     }
     if status != NERR_UserNotFound {
@@ -335,7 +338,7 @@ fn ensure_account(root: &Path) -> io::Result<String> {
         return Err(denied("no se pudo crear la cuenta dedicada"));
     }
     let sid = account_sid()?;
-    add_to_users_group()?;
+    add_to_users_group(&sid)?;
     write_new(
         &root.join("account.json"),
         &serde_json::to_vec(&Account {
@@ -348,9 +351,9 @@ fn ensure_account(root: &Path) -> io::Result<String> {
     Ok(sid)
 }
 
-fn registration(sid: &str, expected: &Path) -> io::Result<Option<String>> {
+pub(super) fn registration(sid: &str, expected: &Path) -> io::Result<Option<String>> {
     let mut root = null_mut();
-    if unsafe {
+    let code = unsafe {
         RegOpenKeyExW(
             HKEY_USERS,
             wide(&format!(
@@ -361,9 +364,12 @@ fn registration(sid: &str, expected: &Path) -> io::Result<Option<String>> {
             KEY_READ,
             &mut root,
         )
-    } != 0
-    {
+    };
+    if code == 2 {
         return Ok(None);
+    }
+    if code != 0 {
+        return Err(io::Error::from_raw_os_error(code as i32));
     }
     let result = (|| {
         for index in 0..256 {
@@ -382,7 +388,7 @@ fn registration(sid: &str, expected: &Path) -> io::Result<Option<String>> {
                 )
             };
             if code == 259 {
-                break;
+                return Ok(None);
             }
             if code != 0 {
                 return Err(io::Error::from_raw_os_error(code as i32));
@@ -422,7 +428,9 @@ fn registration(sid: &str, expected: &Path) -> io::Result<Option<String>> {
                 return Ok(Some(key_name));
             }
         }
-        Ok(None)
+        Err(denied(
+            "inventario WSL excede el límite; ausencia no confirmada",
+        ))
     })();
     unsafe { RegCloseKey(root) };
     result

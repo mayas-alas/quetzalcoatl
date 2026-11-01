@@ -5,7 +5,11 @@ use super::{
 use crate::protocol::{DISTRO, invalid};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{fs, io, time::Duration};
+use std::{
+    fs,
+    io::{self, Write},
+    time::Duration,
+};
 
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(super) struct Inventory {
@@ -16,6 +20,8 @@ pub(super) struct Inventory {
     pub retired_files: Vec<String>,
     #[serde(default)]
     pub guests_observed: bool,
+    #[serde(default)]
+    pub removed: bool,
 }
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(super) struct Guest {
@@ -298,15 +304,34 @@ pub(super) fn inventory() -> io::Result<Inventory> {
         configuration_digest,
         retired_files: files(&owner.sid)?,
         guests_observed: true,
+        removed: false,
     })
 }
 
 // Force authorizes the entire registered WSL disk, not a running PVE stack.
 // A cold/unreachable PVE cannot provide a current guest list: label the last
 // confirmed list explicitly rather than starting WSL or fabricating evidence.
-pub(super) fn force_inventory(previous: Option<&Inventory>) -> io::Result<Inventory> {
+pub(super) fn force_inventory(previous: Option<&Inventory>, resume: bool) -> io::Result<Inventory> {
     security::require_system()?;
-    let owner = Ownership::read()?;
+    let owner = match Ownership::read() {
+        Ok(owner) => owner,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            if !resume {
+                return Err(invalid(
+                    "sin retirada pendiente no se continúa un bootstrap",
+                ));
+            }
+            let expected = previous
+                .ok_or_else(|| invalid("sin identidad anterior no se continúa una retirada"))?;
+            verify_removed(expected)?;
+            let mut inventory = expected.clone();
+            inventory.removed = true;
+            inventory.guests_observed = false;
+            inventory.retired_files.clear();
+            return Ok(inventory);
+        }
+        Err(error) => return Err(error),
+    };
     if super::bootstrap::owned_account_sid()? != owner.sid {
         return Err(invalid("SID de servicio divergente"));
     }
@@ -375,10 +400,41 @@ pub(super) fn force_inventory(previous: Option<&Inventory>) -> io::Result<Invent
         configuration_digest: format!("{:x}", Sha256::digest(b"entire-owned-wsl-disk")),
         retired_files,
         guests_observed,
+        removed: false,
     })
 }
 
+fn verify_removed(expected: &Inventory) -> io::Result<()> {
+    security::require_system()?;
+    if super::bootstrap::owned_account_sid()? != expected.sid || !files(&expected.sid)?.is_empty() {
+        return Err(invalid(
+            "cuenta divergente o estado de nodo presente; no se continúa el bootstrap",
+        ));
+    }
+    let owner = Ownership {
+        version: 1,
+        sid: expected.sid.clone(),
+        distribution_id: expected.distribution.clone(),
+    };
+    let identity = Identity::after_removal(&owner)?;
+    let path = identity.profile_dir().join(r"AppData\Local\GnX Core\wsl");
+    match fs::read_dir(path) {
+        Ok(mut entries) => {
+            if entries.next().is_some() {
+                Err(invalid("directorio WSL no vacío; no se adopta ni se borra"))
+            } else {
+                Ok(())
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 pub(super) fn verify_target(expected: &Inventory) -> io::Result<()> {
+    if expected.removed {
+        return verify_removed(expected);
+    }
     let owner = Ownership::read()?;
     if owner.sid != expected.sid
         || owner.distribution_id != expected.distribution
@@ -402,6 +458,12 @@ pub(super) fn execute(expected: &Inventory) -> io::Result<()> {
     // and the worker holding the cross-process maintenance lease.
     security::require_system()?;
     verify_target(expected)?;
+    if expected.removed {
+        super::service::report_information(
+            "Continuación: WSL anterior ausente y scaffold verificado; solo bootstrap, sin unregister.",
+        );
+        return super::bootstrap::prepare();
+    }
     let owner = Ownership::read()?;
     let identity = Identity::open(&owner)?;
     // This is not graceful uninstall. Do not gate destructive unregister on
@@ -441,6 +503,48 @@ pub(super) fn execute(expected: &Inventory) -> io::Result<()> {
     // Windows service-account scaffold stays private. WSL, node CA, mesh identity,
     // PVE credential/configuration, managed storage and guests are new/empty.
     super::bootstrap::prepare()
+}
+
+pub(super) fn confirm(inventory: &Inventory) -> io::Result<bool> {
+    let word = if inventory.removed {
+        println!(
+            "CONTINUACIÓN DE PREPARACIÓN: WSL anterior {} (SID {}) ya ausente.",
+            inventory.distribution, inventory.sid
+        );
+        println!(
+            "Se verificó la ausencia del GUID, del VHD y de otra WSL GnX en la cuenta propia. No se repite --unregister ni se borra otro nodo; solo se prepara la base desde el payload instalado."
+        );
+        "PREPARAR"
+    } else {
+        println!(
+            "RECREACIÓN SIN RECUPERACIÓN AUTOMÁTICA: WSL {} (SID {}).",
+            inventory.distribution, inventory.sid
+        );
+        println!(
+            "Se pierden datos, CA, identidad mesh, credencial PVE, configuración y TODOS los guests del almacenamiento administrado:"
+        );
+        println!(
+            "Se elimina el VHD de la WSL propia mediante --unregister; no se conserva copia ni se vuelve al nodo anterior."
+        );
+        if !inventory.guests_observed {
+            println!(
+                "PVE no proporcionó una lista actual. La lista siguiente es la última confirmada o está vacía; la autorización incluye TODO el contenido del VHD, también guests no observables ahora."
+            );
+        }
+        for guest in &inventory.guests {
+            println!("  {} {}: {}", guest.kind, guest.vmid, guest.status);
+        }
+        println!(
+            "Recibos Windows retirados: {}. Se conserva solo la cuenta Windows privada de servicio y los archivos de esta transacción. No Windows, otras WSL ni recursos externos.",
+            inventory.retired_files.join(", ")
+        );
+        "RECREAR"
+    };
+    print!("Escribe {word} para autorizar la operación indicada: ");
+    io::stdout().flush()?;
+    let mut confirmation = String::new();
+    io::stdin().read_line(&mut confirmation)?;
+    Ok(confirmation.trim_end_matches(['\r', '\n']) == word)
 }
 
 #[cfg(test)]

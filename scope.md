@@ -115,6 +115,8 @@ actualizador: dependen de una entrega instalada y comprobaciones independientes.
   su VHD ni sus guests y prepara la base como en primera instalación. No depende
   de una parada limpia de PVE. Si no puede observar guests, indica lista histórica
   o desconocida y exige autorizar TODO el contenido del VHD identificado.
+  Desde 0.0.26, si la retirada ya se consumó y no hay otro nodo/estado parcial,
+  permite confirmar solo la preparación pendiente sin repetir el borrado.
   No existen `--force-recreate` ni `--remove-orphans`.
 - **R-VAL-01 — Aceptación manual recreada y compartida:** distinguir la
   preparación de un entorno nuevo de producto y su operación posterior por

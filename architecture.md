@@ -197,6 +197,12 @@ En 0.0.25 no llama a la retirada conservadora ni exige PVE disponible: elimina l
 WSL registrada, comprueba la ausencia del GUID y VHD anteriores y prepara la base.
 Una lista de guests no observable se distingue de una actual; el alcance aprobado
 es todo el VHD. Se registran errores del subproceso y no se restaura el nodo viejo.
+Desde 0.0.26, el worker puede reconocer una retirada anterior ya consumada mediante
+el recibo y la identidad Windows verificados, sin crear un perfil para observarla.
+Si no existe GUID/VHD, registro GnX ni otro estado de nodo, exige `PREPARAR` y
+ejecuta solo bootstrap; revalida antes de actuar y nunca repite `--unregister` en
+esa rama. Un nodo nuevo/parcial bloquea la continuación. El bootstrap usa el SID
+de la cuenta en `NetLocalGroupAddMembers`, no un nombre relativo.
 
 ## Diagnóstico y límites
 
