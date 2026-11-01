@@ -685,8 +685,15 @@ fn worker() -> io::Result<()> {
             return Err(invalid("la CLI iniciadora no salió; no se reemplaza"));
         }
         let mut observed = recreation::inventory()?;
-        if Some(&observed) != transaction.inventory.as_ref() {
-            return Err(invalid("inventario cambió después de confirmar"));
+        if let Some(field) = observed.difference(
+            transaction
+                .inventory
+                .as_ref()
+                .ok_or_else(|| invalid("falta inventario confirmado"))?,
+        ) {
+            return Err(invalid(&format!(
+                "inventario cambió después de confirmar: {field}"
+            )));
         }
         if service_binary()? != transaction.binary {
             return Err(invalid("servicio divergente"));
@@ -789,8 +796,15 @@ fn worker() -> io::Result<()> {
             // The package has not bootstrapped while our lease was held. Recheck
             // identity/guests before invoking recreation in the installed binary.
             observed = recreation::inventory()?;
-            if Some(&observed) != transaction.inventory.as_ref() {
-                return Err(invalid("inventario cambió durante instalación"));
+            if let Some(field) = observed.difference(
+                transaction
+                    .inventory
+                    .as_ref()
+                    .ok_or_else(|| invalid("falta inventario confirmado"))?,
+            ) {
+                return Err(invalid(&format!(
+                    "inventario cambió durante instalación: {field}"
+                )));
             }
             phase(
                 &mut transaction,

@@ -52,6 +52,12 @@ ni rollback automático de migraciones.
 El CLI de 0.0.22 no descarga MSI: la primera instalación de 0.0.23 requiere ejecutar
 su MSI o EXE publicado respetando la vía de mantenimiento existente.
 
+0.0.24 normaliza el orden del conjunto `content` que devuelve PVE y precisa qué
+parte del inventario diverge. El CLI instalado 0.0.23 conserva su comparación
+anterior y puede bloquear antes de lanzar ese MSI. Si sucede, usar el instalador
+nativo de la candidata en una ventana con guests detenidos; no editar recibos ni
+omitir la comprobación para forzar el salto.
+
 ## Recreación explícita en 0.0.23
 
 `gnx update --force` recrea la versión instalada, sin descubrimiento remoto.

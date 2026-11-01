@@ -70,7 +70,7 @@ dependencies = [
 
 [[package]]
 name = "gnx"
-version = "0.0.23"
+version = "0.0.24"
 dependencies = [
  "rpassword",
  "serde",

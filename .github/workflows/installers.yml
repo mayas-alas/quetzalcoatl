@@ -112,6 +112,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Rust formatting failed' }
           cargo clippy --locked -- -D warnings
           if ($LASTEXITCODE -ne 0) { throw 'Rust static analysis failed' }
+          cargo test --locked --bin gnx windows::recreation::checks
+          if ($LASTEXITCODE -ne 0) { throw 'Inventory content normalization checks failed' }
 
       - name: Compile and package a new CLI with canonical gates
         if: ${{ inputs.cli_mode == 'source' }}

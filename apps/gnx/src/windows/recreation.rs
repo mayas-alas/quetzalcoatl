@@ -21,6 +21,40 @@ pub(super) struct Guest {
     pub kind: String,
     pub status: String,
 }
+
+impl Inventory {
+    pub(super) fn difference(&self, expected: &Self) -> Option<&'static str> {
+        if self.sid != expected.sid {
+            Some("SID Windows")
+        } else if self.distribution != expected.distribution {
+            Some("GUID WSL")
+        } else if self.guests != expected.guests {
+            Some("guests o estados PVE")
+        } else if self.configuration_digest != expected.configuration_digest {
+            Some("configuración PVE")
+        } else if self.retired_files != expected.retired_files {
+            Some("recibos Windows")
+        } else {
+            None
+        }
+    }
+}
+
+// PVE renders storage.content from an unordered Perl set. JSON key ordering
+// alone cannot canonicalize a set encoded as a comma-separated string.
+fn canonical_content(value: &str) -> io::Result<String> {
+    let mut items: Vec<_> = value.split(',').collect();
+    if items
+        .iter()
+        .any(|item| item.is_empty() || !item.bytes().all(|c| c.is_ascii_lowercase()))
+    {
+        return Err(invalid("tipos de contenido PVE no reconocidos"));
+    }
+    items.sort_unstable();
+    items.dedup();
+    Ok(items.join(","))
+}
+
 fn files(sid: &str) -> io::Result<Vec<String>> {
     let mut result = Vec::new();
     for entry in fs::read_dir(super::bootstrap::private_root()?)? {
@@ -154,9 +188,9 @@ pub(super) fn inventory() -> io::Result<Inventory> {
             None,
             30,
         )?;
-        let storages: Vec<serde_json::Value> = serde_json::from_str(&storage)
+        let mut storages: Vec<serde_json::Value> = serde_json::from_str(&storage)
             .map_err(|_| invalid("almacenamiento PVE no observado"))?;
-        for value in &storages {
+        for value in &mut storages {
             if value["storage"].as_str() != Some("local")
                 || value["type"].as_str() != Some("dir")
                 || value["path"].as_str() != Some("/var/lib/vz")
@@ -165,6 +199,10 @@ pub(super) fn inventory() -> io::Result<Inventory> {
                     "almacenamiento externo o no reconocido; no se recrea ni se adopta",
                 ));
             }
+            let content = value["content"]
+                .as_str()
+                .ok_or_else(|| invalid("contenido PVE no observado"))?;
+            value["content"] = canonical_content(content)?.into();
         }
         if storages.len() != 1 {
             return Err(invalid("almacenamiento administrado no confirmado"));
@@ -264,8 +302,10 @@ pub(super) fn execute(expected: &Inventory) -> io::Result<()> {
     // Called only by the installed executable as SYSTEM, with GnXCore stopped
     // and the worker holding the cross-process maintenance lease.
     security::require_system()?;
-    if &inventory()? != expected {
-        return Err(invalid("inventario cambió; no se retira el nodo"));
+    if let Some(field) = inventory()?.difference(expected) {
+        return Err(invalid(&format!(
+            "inventario cambió; no se retira el nodo: {field}"
+        )));
     }
     let owner = Ownership::read()?;
     let identity = Identity::open(&owner)?;
@@ -297,4 +337,26 @@ pub(super) fn execute(expected: &Inventory) -> io::Result<()> {
     // Windows service-account scaffold stays private. WSL, node CA, mesh identity,
     // PVE credential/configuration, managed storage and guests are new/empty.
     super::bootstrap::prepare()
+}
+
+#[cfg(test)]
+mod checks {
+    use super::canonical_content;
+
+    #[test]
+    fn content_order_is_semantically_stable() {
+        assert_eq!(
+            canonical_content("images,rootdir,iso").unwrap(),
+            canonical_content("iso,images,rootdir").unwrap()
+        );
+    }
+
+    #[test]
+    fn content_changes_are_not_ignored() {
+        assert_ne!(
+            canonical_content("images,rootdir,iso").unwrap(),
+            canonical_content("images,rootdir").unwrap()
+        );
+        assert!(canonical_content("images,,rootdir").is_err());
+    }
 }
