@@ -38,7 +38,13 @@ pub fn installer(remove: bool) -> std::io::Result<()> {
     let operation = if remove {
         crate::protocol::Operation::Retire
     } else {
-        match security::read_private("intent", 16)?.as_slice() {
+        let intent = match security::read_private("intent", 16) {
+            Ok(value) => value,
+            // An unprepared installation has no prior running/stopped intent.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        match intent.as_slice() {
             b"running" => crate::protocol::Operation::Start,
             b"stopped" => crate::protocol::Operation::Stop,
             _ => return Err(crate::protocol::invalid("intención inválida")),

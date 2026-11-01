@@ -20,6 +20,13 @@ La acción del MSI usa el servicio Rust y su pipe administrativo existentes. En
 operación en curso. No arranca automáticamente un servicio Windows detenido ni
 incorpora una vía alternativa que omita esas comprobaciones.
 
+Desde 0.0.27 también se reconoce un nodo parcial mediante el recibo de identidad
+o una recreación interrumpida propia, contrastando SID, GUID y BasePath. No se exige
+que existan todas las unidades o un certificado aún no publicado. Se conservan los
+datos; una operación MSI desconocida, worker/proceso previo o bootstrap Linux activo
+siguen bloqueando la retirada. Para una recreación interrumpida, la excepción de
+mantenimiento exige el cliente SYSTEM real del instalador, observado por el pipe.
+
 `gnx stop` detiene el nodo, pero deja el servicio Windows disponible para recibir
 operaciones. Detener `GnXCore` desde el administrador de servicios es distinto y
 puede impedir la retirada hasta recuperar ese servicio. Si faltan archivos,
@@ -65,6 +72,8 @@ todas las fases, rutas de mantenimiento Burn o datos de aplicaciones se recupera
 
 Consultar el log de Windows Installer, eventos `GnXCore`, journal y tareas PVE antes
 de repetir una operación desconocida. No borrar recibos para evitar un conflicto.
+La [síntesis de lifecycle](lifecycle.md) distingue estas fronteras de `--force`:
+desinstalar no ejecuta `--unregister` ni elimina el VHD del nodo.
 
 La inspección del MSI o una actualización satisfactoria no acreditan el ciclo de
 desinstalación, rollback y reinstalación de esa versión. Ese ciclo requiere una

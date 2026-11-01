@@ -74,7 +74,7 @@ impl Controller {
         Ok(())
     }
 
-    pub async fn execute(&self, request: &Request) -> Response {
+    pub async fn execute(&self, request: &Request, client_pid: u32) -> Response {
         // Profile loading/unloading is shared per Windows identity. Serialize
         // its use too; a concurrent status returns immediately, never races it.
         let _permit = match self.mutation.clone().try_acquire_owned() {
@@ -98,7 +98,11 @@ impl Controller {
         match tokio::task::spawn_blocking(move || {
             let result = (|| {
                 let _lease = super::maintenance::lease()?;
-                super::product_update::permit(Some(op))?;
+                if op == Operation::Retire {
+                    super::product_update::permit_retire(client_pid)?;
+                } else {
+                    super::product_update::permit(Some(op))?;
+                }
                 if matches!(op, Operation::UpdateCheck | Operation::UpdateApply) {
                     super::updates::execute(op == Operation::UpdateApply, catalog)
                 } else if let Some(bundle) = bundle {
@@ -375,58 +379,102 @@ pub fn recover() -> io::Result<()> {
 
 pub fn retire() -> io::Result<()> {
     // MSI removal preserves node intent for rollback/reinstallation and all data.
-    let ownership = match Ownership::read() {
+    let ownership = match Ownership::record() {
         Ok(value) => value,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            match super::product_update::retirement_owner()? {
+                Some(owner) => owner,
+                None => {
+                    return match security::private_directory() {
+                        Ok(_directory) => super::access::remove(),
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                        Err(error) => Err(error),
+                    };
+                }
+            }
+        }
         Err(error) => return Err(error),
     };
-    let identity = Identity::open(&ownership)?;
+    let identity = Identity::for_retirement(&ownership)?;
     let running = identity.run(&["--list", "--running", "--quiet"], Duration::from_secs(10))?;
     if running.code != 0 {
         return Err(io::Error::other("estado WSL no confirmado"));
     }
     if running.text().lines().any(|line| line.trim() == DISTRO) {
-        let stopped = identity.run(
-            &[
+        let names = [
+            TARGET,
+            "gnx-core-gateway.service",
+            "gnx-core-dns.service",
+            "gnx-core-mesh.service",
+            "gnx-core-compute.service",
+            "gnx-core-crl.service",
+            "gnx-core-crl.timer",
+        ];
+        let mut query = vec![
+            "--distribution",
+            DISTRO,
+            "--exec",
+            "/usr/bin/bash",
+            "-c",
+            r#"set -eu
+if active=$(systemctl show -p ActiveState --value gnx-core-install.service); then :; else code=$?; [ "$code" = 4 ] && [ "$active" = inactive ] || exit "$code"; fi
+case "$active" in active|activating|deactivating|reloading) echo 'Bootstrap Linux activo; no desinstalar' >&2; exit 1;; esac
+for name in "$@"; do
+ if state=$(systemctl show -p LoadState --value "$name"); then :; else code=$?; [ "$code" = 4 ] && [ "$state" = not-found ] || exit "$code"; fi
+ case "$state" in loaded|not-found) printf '%s=%s\n' "$name" "$state";; *) exit 1;; esac
+done"#,
+            "gnx-retire",
+        ];
+        query.extend_from_slice(&names);
+        let observed = identity.run(&query, Duration::from_secs(15))?;
+        let text = observed.text();
+        let states: Vec<_> = text.lines().collect();
+        if observed.code != 0 || states.len() != names.len() {
+            return Err(io::Error::other(
+                "unidades propias no observadas o bootstrap activo; no se retiran",
+            ));
+        }
+        let mut loaded = Vec::new();
+        for (name, state) in names.into_iter().zip(states) {
+            if state == format!("{name}=loaded") {
+                loaded.push(name);
+            } else if state != format!("{name}=not-found") {
+                return Err(io::Error::other("inventario de unidades divergente"));
+            }
+        }
+        if !loaded.is_empty() {
+            let mut stop = vec![
                 "--distribution",
                 DISTRO,
                 "--exec",
                 "/usr/bin/systemctl",
                 "stop",
-                TARGET,
-            ],
-            Duration::from_secs(150),
-        )?;
-        if stopped.code != 0 {
-            return Err(io::Error::other(
-                "parada nativa no confirmada; no se desinstala",
-            ));
-        }
-        let state = identity.run(
-            &[
+            ];
+            stop.extend_from_slice(&loaded);
+            let stopped = identity.run(&stop, Duration::from_secs(150))?;
+            if stopped.code != 0 {
+                return Err(io::Error::other(
+                    "parada nativa no confirmada; no se desinstala",
+                ));
+            }
+            let mut check = vec![
                 "--distribution",
                 DISTRO,
                 "--exec",
                 "/usr/bin/systemctl",
                 "is-active",
                 "--quiet",
-                TARGET,
-                "gnx-core-gateway.service",
-                "gnx-core-dns.service",
-                "gnx-core-mesh.service",
-                "gnx-core-compute.service",
-                "gnx-core-crl.service",
-                "gnx-core-crl.timer",
-            ],
-            Duration::from_secs(10),
-        )?;
-        // Native LSB 3 means no listed unit is active. Do not parse display text
-        // (including warnings/whitespace), or treat arbitrary errors as stopped.
-        if state.code != 3 {
-            return Err(io::Error::other(format!(
-                "parada no confirmada (systemctl {}); no se desinstala",
-                state.code
-            )));
+            ];
+            check.extend_from_slice(&loaded);
+            let state = identity.run(&check, Duration::from_secs(10))?;
+            // Native LSB 3 means no listed unit is active. Do not parse display text
+            // (including warnings/whitespace), or treat arbitrary errors as stopped.
+            if state.code != 3 {
+                return Err(io::Error::other(format!(
+                    "parada no confirmada (systemctl {}); no se desinstala",
+                    state.code
+                )));
+            }
         }
     }
     super::access::remove()?;

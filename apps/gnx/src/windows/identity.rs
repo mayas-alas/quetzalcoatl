@@ -1,13 +1,18 @@
 use super::security::{self, Handle, denied};
 use crate::protocol::{ACCOUNT, DISTRO, invalid};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
+    fs::File,
     io,
+    os::windows::io::AsRawHandle,
     ptr::{null, null_mut},
     time::{Duration, Instant},
 };
 use windows_sys::Win32::{
-    Foundation::{GetLastError, HANDLE, LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT},
+    Foundation::{
+        DUPLICATE_SAME_ACCESS, DuplicateHandle, GetLastError, HANDLE, LocalFree, WAIT_OBJECT_0,
+        WAIT_TIMEOUT,
+    },
     Security::{
         Cryptography::{CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptUnprotectData},
         LOGON32_LOGON_SERVICE, LOGON32_PROVIDER_DEFAULT, LogonUserW, SECURITY_ATTRIBUTES,
@@ -21,17 +26,17 @@ use windows_sys::Win32::{
         Registry::{HKEY_USERS, KEY_READ, RRF_RT_REG_SZ, RegCloseKey, RegGetValueW, RegOpenKeyExW},
         Threading::{
             CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
-            DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
-            InitializeProcThreadAttributeList, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-            PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess,
-            UpdateProcThreadAttribute, WaitForSingleObject,
+            DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess,
+            GetExitCodeProcess, InitializeProcThreadAttributeList,
+            PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, STARTF_USESTDHANDLES,
+            STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
         },
     },
     UI::Shell::{GetUserProfileDirectoryW, LoadUserProfileW, PROFILEINFOW, UnloadUserProfile},
 };
 use zeroize::Zeroizing;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Ownership {
     pub version: u16,
@@ -39,11 +44,19 @@ pub struct Ownership {
     pub distribution_id: String,
 }
 
+enum Input<'a> {
+    Bytes(&'a [u8]),
+    Pipe(&'a File),
+}
 impl Ownership {
     pub fn read() -> io::Result<Self> {
         if security::read_private("prepared", 16)? != b"1" {
             return Err(invalid("preparación incompleta"));
         }
+        Self::record()
+    }
+
+    pub(super) fn record() -> io::Result<Self> {
         let bytes = security::read_private("identity.json", 4096)?;
         let value: Self = serde_json::from_slice(&bytes)
             .map_err(|_| invalid("registro de propiedad inválido"))?;
@@ -102,6 +115,18 @@ impl Identity {
         Self::open_inner(ownership, false, true)
     }
 
+    pub(super) fn for_retirement(ownership: &Ownership) -> io::Result<Self> {
+        if ownership.version != 1
+            || !valid_sid(&ownership.sid)
+            || !valid_guid(&ownership.distribution_id)
+        {
+            return Err(invalid("identidad de retirada inválida"));
+        }
+        let identity = Self::open_inner(ownership, false, false)?;
+        identity.verify_registration(ownership, true)?;
+        Ok(identity)
+    }
+
     pub fn for_setup(sid: &str) -> io::Result<Self> {
         Self::open_inner(
             &Ownership {
@@ -115,19 +140,39 @@ impl Identity {
     }
 
     pub(super) fn after_removal(ownership: &Ownership) -> io::Result<Self> {
+        let (identity, candidate) = Self::inspect_recreation(ownership)?;
+        if candidate.is_some() {
+            return Err(denied(
+                "otra WSL GnX ya está registrada; no se adopta ni borra",
+            ));
+        }
+        identity.verify_unregistered(ownership)?;
+        Ok(identity)
+    }
+
+    pub(super) fn inspect_recreation(
+        ownership: &Ownership,
+    ) -> io::Result<(Self, Option<Ownership>)> {
         if !valid_sid(&ownership.sid) || !valid_guid(&ownership.distribution_id) {
             return Err(invalid("identidad anterior inválida"));
         }
         // Load only the existing dedicated profile, never provision another one.
         let identity = Self::open_inner(ownership, false, false)?;
-        identity.verify_unregistered(ownership)?;
+        identity.verify_guid_absent(ownership)?;
         let path = identity.profile_dir().join(r"AppData\Local\GnX Core\wsl");
-        if super::bootstrap::registration(&ownership.sid, &path)?.is_some() {
-            return Err(denied(
-                "otra WSL GnX ya está registrada; no se adopta ni borra",
-            ));
+        let candidate =
+            super::bootstrap::registration(&ownership.sid, &path)?.map(|guid| Ownership {
+                version: 1,
+                sid: ownership.sid.clone(),
+                distribution_id: guid,
+            });
+        if let Some(candidate) = &candidate {
+            if !valid_guid(&candidate.distribution_id) {
+                return Err(invalid("GUID parcial inválido"));
+            }
+            identity.verify_registration(candidate, true)?;
         }
-        Ok(identity)
+        Ok((identity, candidate))
     }
 
     fn open_inner(ownership: &Ownership, setup: bool, registration: bool) -> io::Result<Self> {
@@ -249,7 +294,7 @@ impl Identity {
             return Err(io::Error::last_os_error());
         }
         if registration {
-            identity.verify_registration(ownership)?;
+            identity.verify_registration(ownership, false)?;
         }
         Ok(identity)
     }
@@ -263,7 +308,7 @@ impl Identity {
         std::path::PathBuf::from(String::from_utf16_lossy(&self.directory[..end]))
     }
 
-    fn verify_registration(&self, ownership: &Ownership) -> io::Result<()> {
+    fn verify_registration(&self, ownership: &Ownership, retiring: bool) -> io::Result<()> {
         let key = wide(&format!(
             r"{}\Software\Microsoft\Windows\CurrentVersion\Lxss\{}",
             ownership.sid, ownership.distribution_id
@@ -332,7 +377,17 @@ impl Identity {
         let mut directory = self.profile_dir();
         for part in ["AppData", "Local", "GnX Core", "wsl"] {
             directory.push(part);
-            let metadata = std::fs::symlink_metadata(&directory)?;
+            let metadata = match std::fs::symlink_metadata(&directory) {
+                Ok(metadata) => metadata,
+                Err(error)
+                    if retiring
+                        && ["GnX Core", "wsl"].contains(&part)
+                        && error.kind() == io::ErrorKind::NotFound =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             if !metadata.is_dir()
                 || metadata.file_attributes()
                     & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
@@ -341,7 +396,11 @@ impl Identity {
                 return Err(denied("ruta WSL enlazada o inválida; no se adopta"));
             }
         }
-        let disk = std::fs::symlink_metadata(expected.join("ext4.vhdx"))?;
+        let disk = match std::fs::symlink_metadata(expected.join("ext4.vhdx")) {
+            Ok(metadata) => metadata,
+            Err(error) if retiring && error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
         if !disk.is_file()
             || disk.file_attributes()
                 & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
@@ -367,11 +426,27 @@ impl Identity {
                         && metadata.file_attributes()
                             & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
                             == 0 => {}
-                Err(error) if part == "wsl" && error.kind() == io::ErrorKind::NotFound => {}
+                Err(error)
+                    if ["GnX Core", "wsl"].contains(&part)
+                        && error.kind() == io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error),
                 _ => return Err(denied("ruta WSL enlazada o inválida tras retirada")),
             }
         }
+        self.verify_guid_absent(ownership)?;
+        if self
+            .profile_dir()
+            .join(r"AppData\Local\GnX Core\wsl\ext4.vhdx")
+            .try_exists()?
+        {
+            return Err(denied(
+                "hay un VHD en la ruta dedicada; no se declara nodo ausente",
+            ));
+        }
+        Ok(())
+    }
+
+    fn verify_guid_absent(&self, ownership: &Ownership) -> io::Result<()> {
         let key = wide(&format!(
             r"{}\Software\Microsoft\Windows\CurrentVersion\Lxss\{}",
             ownership.sid, ownership.distribution_id
@@ -387,15 +462,6 @@ impl Identity {
         if code != 2 {
             return Err(io::Error::from_raw_os_error(code as i32));
         }
-        if self
-            .profile_dir()
-            .join(r"AppData\Local\GnX Core\wsl\ext4.vhdx")
-            .try_exists()?
-        {
-            return Err(denied(
-                "hay un VHD en la ruta dedicada; no se declara nodo ausente",
-            ));
-        }
         Ok(())
     }
 
@@ -403,14 +469,23 @@ impl Identity {
         if input.len() > 4096 {
             return Err(invalid("entrada protegida fuera de límite"));
         }
-        self.run_input(args, Some(input), limit, None)
+        self.run_input(args, Some(Input::Bytes(input)), limit, None)
     }
 
     pub fn run_payload(&self, args: &[&str], input: &[u8], limit: Duration) -> io::Result<Output> {
         if input.len() > 32768 {
             return Err(invalid("archivo fuera de límite"));
         }
-        self.run_input(args, Some(input), limit, None)
+        self.run_input(args, Some(Input::Bytes(input)), limit, None)
+    }
+
+    pub(super) fn run_pipe(
+        &self,
+        args: &[&str],
+        pipe: &File,
+        limit: Duration,
+    ) -> io::Result<Output> {
+        self.run_input(args, Some(Input::Pipe(pipe)), limit, None)
     }
 
     pub fn keep_alive(&self, cancel: &std::sync::atomic::AtomicBool) -> io::Result<()> {
@@ -432,7 +507,7 @@ impl Identity {
     fn run_input(
         &self,
         args: &[&str],
-        input: Option<&[u8]>,
+        input: Option<Input<'_>>,
         limit: Duration,
         cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> io::Result<Output> {
@@ -448,7 +523,24 @@ impl Identity {
         }
         let read = Handle(read);
         let write = Handle(write);
-        let nul = if let Some(input) = input {
+        let nul = if let Some(Input::Pipe(pipe)) = input {
+            let mut handle = null_mut();
+            if unsafe {
+                DuplicateHandle(
+                    GetCurrentProcess(),
+                    pipe.as_raw_handle(),
+                    GetCurrentProcess(),
+                    &mut handle,
+                    0,
+                    1,
+                    DUPLICATE_SAME_ACCESS,
+                )
+            } == 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            Handle(handle)
+        } else if let Some(Input::Bytes(input)) = input {
             let mut input_read = null_mut();
             let mut input_write = null_mut();
             if unsafe { CreatePipe(&mut input_read, &mut input_write, &security, 65536) } == 0 {
@@ -526,6 +618,10 @@ impl Identity {
             .map_err(|_| io::Error::other("SystemRoot no disponible"))?;
         let executable = format!(r"{system}\System32\wsl.exe");
         let mut command = quote(&executable);
+        // A service-profile Windows cwd need not be visible through DrvFS.
+        if args.first() == Some(&"--distribution") {
+            command.push_str(" --cd /");
+        }
         for arg in args {
             command.push(' ');
             command.push_str(&quote(arg));

@@ -22,6 +22,8 @@ pub(super) struct Inventory {
     pub guests_observed: bool,
     #[serde(default)]
     pub removed: bool,
+    #[serde(default)]
+    pub partial: bool,
 }
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(super) struct Guest {
@@ -305,6 +307,7 @@ pub(super) fn inventory() -> io::Result<Inventory> {
         retired_files: files(&owner.sid)?,
         guests_observed: true,
         removed: false,
+        partial: false,
     })
 }
 
@@ -323,6 +326,19 @@ pub(super) fn force_inventory(previous: Option<&Inventory>, resume: bool) -> io:
             }
             let expected = previous
                 .ok_or_else(|| invalid("sin identidad anterior no se continúa una retirada"))?;
+            if let Some(owner) = pending_target(expected)? {
+                let retired_files = files(&owner.sid)?;
+                return Ok(Inventory {
+                    sid: owner.sid,
+                    distribution: owner.distribution_id,
+                    guests: Vec::new(),
+                    configuration_digest: expected.configuration_digest.clone(),
+                    retired_files,
+                    guests_observed: false,
+                    removed: false,
+                    partial: true,
+                });
+            }
             verify_removed(expected)?;
             let mut inventory = expected.clone();
             inventory.removed = true;
@@ -335,7 +351,7 @@ pub(super) fn force_inventory(previous: Option<&Inventory>, resume: bool) -> io:
     if super::bootstrap::owned_account_sid()? != owner.sid {
         return Err(invalid("SID de servicio divergente"));
     }
-    let identity = Identity::open(&owner)?;
+    let identity = Identity::for_retirement(&owner)?;
     let retired_files = files(&owner.sid)?;
     let mut guests = previous
         .filter(|p| p.sid == owner.sid && p.distribution == owner.distribution_id)
@@ -401,7 +417,63 @@ pub(super) fn force_inventory(previous: Option<&Inventory>, resume: bool) -> io:
         retired_files,
         guests_observed,
         removed: false,
+        partial: false,
     })
+}
+
+// One ownership boundary for interrupted force and native installer retirement.
+pub(super) fn pending_target(expected: &Inventory) -> io::Result<Option<Ownership>> {
+    if super::bootstrap::owned_account_sid()? != expected.sid {
+        return Err(invalid("SID parcial divergente"));
+    }
+    match Ownership::record() {
+        Ok(owner) => {
+            if owner.sid != expected.sid
+                || (expected.partial && owner.distribution_id != expected.distribution)
+            {
+                return Err(invalid("identidad parcial cambió"));
+            }
+            let _verified = Identity::for_retirement(&owner)?;
+            return Ok(Some(owner));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    if !files(&expected.sid)?.is_empty() {
+        return Err(invalid(
+            "estado parcial sin recibo de identidad; no se adopta",
+        ));
+    }
+    let previous = Ownership {
+        version: 1,
+        sid: expected.sid.clone(),
+        distribution_id: expected.distribution.clone(),
+    };
+    if expected.partial {
+        let _verified = Identity::for_retirement(&previous)?;
+        return Ok(Some(previous));
+    }
+    let (_, current) = Identity::inspect_recreation(&previous)?;
+    if current.is_some() && !expected.removed {
+        return Err(invalid("nodo nuevo sin retirada confirmada; no se adopta"));
+    }
+    Ok(current)
+}
+
+fn target_owner(expected: &Inventory) -> io::Result<Ownership> {
+    let owner = if expected.partial {
+        pending_target(expected)?
+            .ok_or_else(|| invalid("WSL parcial ausente; no se sustituye por otra"))?
+    } else {
+        Ownership::read()?
+    };
+    if owner.sid != expected.sid
+        || owner.distribution_id != expected.distribution
+        || super::bootstrap::owned_account_sid()? != owner.sid
+    {
+        return Err(invalid("identidad de la WSL confirmada cambió"));
+    }
+    Ok(owner)
 }
 
 fn verify_removed(expected: &Inventory) -> io::Result<()> {
@@ -435,16 +507,8 @@ pub(super) fn verify_target(expected: &Inventory) -> io::Result<()> {
     if expected.removed {
         return verify_removed(expected);
     }
-    let owner = Ownership::read()?;
-    if owner.sid != expected.sid
-        || owner.distribution_id != expected.distribution
-        || super::bootstrap::owned_account_sid()? != owner.sid
-    {
-        return Err(invalid(
-            "identidad de la WSL confirmada cambió; no se adopta otra",
-        ));
-    }
-    let _verified = Identity::open(&owner)?;
+    let owner = target_owner(expected)?;
+    let _verified = Identity::for_retirement(&owner)?;
     if files(&owner.sid)? != expected.retired_files {
         return Err(invalid(
             "recibos Windows cambiaron; no se retiran recursos no confirmados",
@@ -464,18 +528,18 @@ pub(super) fn execute(expected: &Inventory) -> io::Result<()> {
         );
         return super::bootstrap::prepare();
     }
-    let owner = Ownership::read()?;
-    let identity = Identity::open(&owner)?;
+    let owner = target_owner(expected)?;
+    let identity = Identity::for_retirement(&owner)?;
     // This is not graceful uninstall. Do not gate destructive unregister on
     // systemctl/PVE availability or preserve the old disk as a fallback.
     super::access::remove()?;
-    // Identity::open validated SID, GUID and the dedicated profile/base path.
+    // Retirement identity validated SID, GUID and the dedicated profile/base path.
     // Never unregister by an unverified display name or recursively delete a path.
-    let checked = Ownership::read()?;
+    let checked = target_owner(expected)?;
     if checked.sid != expected.sid || checked.distribution_id != expected.distribution {
         return Err(invalid("propiedad cambió"));
     }
-    let _verified = Identity::open(&checked)?;
+    let _verified = Identity::for_retirement(&checked)?;
     let result = identity.run(&["--unregister", DISTRO], Duration::from_secs(180))?;
     if result.code != 0 {
         return Err(io::Error::other(format!(
@@ -520,11 +584,16 @@ pub(super) fn confirm(inventory: &Inventory) -> io::Result<bool> {
             "RECREACIÓN SIN RECUPERACIÓN AUTOMÁTICA: WSL {} (SID {}).",
             inventory.distribution, inventory.sid
         );
+        if inventory.partial {
+            println!(
+                "Nodo parcial: esta autorización retira ESTE GUID y su VHD actual; no es una continuación conservadora."
+            );
+        }
         println!(
             "Se pierden datos, CA, identidad mesh, credencial PVE, configuración y TODOS los guests del almacenamiento administrado:"
         );
         println!(
-            "Se elimina el VHD de la WSL propia mediante --unregister; no se conserva copia ni se vuelve al nodo anterior."
+            "Se retira el registro WSL propio mediante --unregister y su VHD si aún existe; no se conserva copia ni se vuelve al nodo anterior."
         );
         if !inventory.guests_observed {
             println!(

@@ -203,6 +203,12 @@ Si no existe GUID/VHD, registro GnX ni otro estado de nodo, exige `PREPARAR` y
 ejecuta solo bootstrap; revalida antes de actuar y nunca repite `--unregister` en
 esa rama. Un nodo nuevo/parcial bloquea la continuación. El bootstrap usa el SID
 de la cuenta en `NetLocalGroupAddMembers`, no un nombre relativo.
+En 0.0.27 la propiedad se escribe tras importar y se reutiliza para reconocer
+preparaciones parciales en retirada/recreación. La configuración Linux entra por
+stdin; el payload se entrega con tar nativo y se verifica en Linux, sin depender
+de DrvFS ni añadir un supervisor. SCM/pipe aportan el PID real del iniciador MSI;
+lease, recibo y procesos observados protegen la retirada durante una interrupción.
+Las políticas diferentes y el camino de síntesis están en [lifecycle](docs/lifecycle.md).
 
 ## Diagnóstico y límites
 

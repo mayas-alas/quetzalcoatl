@@ -90,6 +90,13 @@ no se adopta ni se retira ese recurso. Instalar no completa este paso por sí so
 La cuenta se incorpora al grupo Usuarios por SID; una pertenencia existente es
 válida. No editar recibos ni usar la CLI de una versión anterior para continuar.
 
+En 0.0.27, si existe un nodo parcial propio, una nueva solicitud `--force` muestra
+su GUID actual y requiere `RECREAR` para eliminar ese nodo completo; no confundirlo
+con `PREPARAR`, que solo se ofrece cuando no queda nodo. El bootstrap vuelve a crear
+un VHD: no es una copia conservada del anterior. Usa los archivos de configuración
+declarados y transfiere el payload verificado por stdin sin depender de DrvFS,
+sin reiniciar Windows ni otras WSL. Véase [síntesis de lifecycle](lifecycle.md).
+
 El formato está en [config/update-catalog.json](../config/update-catalog.json):
 `schema: 1`, `architecture: linux/amd64` y exactamente ocho componentes con
 `name` e `image`. Se permiten únicamente los repositorios de esos componentes,

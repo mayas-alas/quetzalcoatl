@@ -23,7 +23,7 @@ struct Entry {
     sha256: String,
 }
 
-pub fn verify(root: &Path) -> io::Result<()> {
+pub fn verify(root: &Path) -> io::Result<Vec<String>> {
     let file = fs::File::open(root.join("manifest.json"))?;
     if file.metadata()?.len() > 65536 {
         return Err(io::Error::other("manifiesto fuera de límite"));
@@ -90,6 +90,7 @@ pub fn verify(root: &Path) -> io::Result<()> {
         }
     }
     let mut seen = std::collections::HashSet::new();
+    let mut paths = Vec::new();
     for entry in manifest.files {
         let path = Path::new(&entry.path);
         if path.is_absolute()
@@ -131,6 +132,7 @@ pub fn verify(root: &Path) -> io::Result<()> {
         if format!("{:x}", hash.finalize()) != entry.sha256.to_ascii_lowercase() {
             return Err(io::Error::other(format!("hash inválido: {}", entry.path)));
         }
+        paths.push(entry.path);
     }
-    Ok(())
+    Ok(paths)
 }

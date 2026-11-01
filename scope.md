@@ -117,6 +117,9 @@ actualizador: dependen de una entrega instalada y comprobaciones independientes.
   o desconocida y exige autorizar TODO el contenido del VHD identificado.
   Desde 0.0.26, si la retirada ya se consumó y no hay otro nodo/estado parcial,
   permite confirmar solo la preparación pendiente sin repetir el borrado.
+  En 0.0.27 una nueva confirmación destructiva puede abarcar el nodo parcial propio
+  identificado; `uninstall` sigue conservándolo. Un nuevo VHD creado por bootstrap
+  no es conservación del VHD retirado. La síntesis se fija en [lifecycle](docs/lifecycle.md).
   No existen `--force-recreate` ni `--remove-orphans`.
 - **R-VAL-01 — Aceptación manual recreada y compartida:** distinguir la
   preparación de un entorno nuevo de producto y su operación posterior por

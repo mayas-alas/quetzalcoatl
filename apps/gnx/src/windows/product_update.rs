@@ -152,6 +152,53 @@ struct RuntimeHold {
     cancel: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
+
+pub(super) fn permit_retire(client_pid: u32) -> io::Result<()> {
+    if permit(Some(Operation::Retire)).is_ok() {
+        return Ok(());
+    }
+    let previous = read()?;
+    if !previous.force
+        || previous.install
+        || !["interrupted", "cancelled", "failed_before_native"].contains(&previous.phase.as_str())
+    {
+        return Err(invalid(
+            "transacción desconocida/activa; no se retira el producto",
+        ));
+    }
+    worker_absent()?;
+    // The native installer client is distinct from this SCM process. Exclude
+    // only its observed SYSTEM PID; reject any remaining bootstrap/worker child.
+    security::require_idle_maintenance(
+        &service_binary()?,
+        &super::bootstrap::private_root()?.join(HELPER),
+        Some(client_pid),
+    )
+}
+
+pub(super) fn retirement_owner() -> io::Result<Option<super::identity::Ownership>> {
+    let previous = match read() {
+        Ok(value) => value,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if !previous.force
+        || previous.install
+        || !(previous.phase == "interrupted"
+            || (previous.unresolved_recreation
+                && ["cancelled", "failed_before_native"].contains(&previous.phase.as_str())))
+    {
+        return Err(invalid(
+            "retirada parcial sin transacción propia reconocida",
+        ));
+    }
+    recreation::pending_target(
+        previous
+            .inventory
+            .as_ref()
+            .ok_or_else(|| invalid("falta inventario propio"))?,
+    )
+}
 impl RuntimeHold {
     fn new() -> Self {
         let cancel = Arc::new(AtomicBool::new(false));
@@ -304,9 +351,7 @@ fn clean_previous(force: bool, binary: &Path) -> io::Result<(Option<Inventory>, 
                     ));
                 }
                 match super::identity::Ownership::read() {
-                    Ok(owner)
-                        if owner.sid == expected.sid
-                            && owner.distribution_id == expected.distribution => {}
+                    Ok(owner) if owner.sid == expected.sid => {}
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {} // Worker must prove removal before offering bootstrap only.
                     _ => return Err(invalid("propiedad del nodo divergente; no se continúa")),
                 }
@@ -858,7 +903,8 @@ fn worker() -> io::Result<()> {
                 "retirada exclusiva de la WSL verificada y su estado; sin rollback de datos"
             };
             phase(&mut transaction, "recreating", message)?;
-            let code = native(&binary, &["--product-recreate"], 1800)?;
+            // Import (600s), payload/install (1200s), configuration and validation.
+            let code = native(&binary, &["--product-recreate"], 2100)?;
             if code != 0 {
                 return Err(invalid(&format!(
                     "recreación devolvió {code}; consultar el error específico en eventos, no repetir a ciegas"

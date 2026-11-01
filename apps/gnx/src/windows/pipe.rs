@@ -20,7 +20,9 @@ use windows_sys::Win32::{
         RevertToSelf, SECURITY_ATTRIBUTES,
     },
     Storage::FileSystem::SECURITY_IDENTIFICATION,
-    System::Pipes::{GetNamedPipeServerProcessId, ImpersonateNamedPipeClient},
+    System::Pipes::{
+        GetNamedPipeClientProcessId, GetNamedPipeServerProcessId, ImpersonateNamedPipeClient,
+    },
 };
 use zeroize::Zeroizing;
 
@@ -153,6 +155,10 @@ async fn connection_task(
 ) -> io::Result<()> {
     let bytes = Zeroizing::new(timeout(IO_TIMEOUT, read_frame(&mut pipe)).await??);
     authorize(&pipe)?;
+    let mut client_pid = 0;
+    if unsafe { GetNamedPipeClientProcessId(pipe.as_raw_handle().cast(), &mut client_pid) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
     let request = Request::decode(&bytes)?;
     if !seen
         .lock()
@@ -161,7 +167,7 @@ async fn connection_task(
     {
         return Err(protocol::invalid("petición repetida"));
     }
-    let response = controller.execute(&request).await;
+    let response = controller.execute(&request, client_pid).await;
     let bytes = serde_json::to_vec(&response).map_err(io::Error::other)?;
     timeout(IO_TIMEOUT, write_frame(&mut pipe, &bytes)).await??;
     // Bounded application ACK replaces unbounded FlushFileBuffers.
@@ -279,6 +285,9 @@ pub async fn client_request(
         Operation::Deploy | Operation::UpdateCheck | Operation::UpdateApply
     ) {
         Duration::from_secs(3600)
+    } else if operation == Operation::Retire {
+        // Includes native unit stop, validation and Windows publication cleanup.
+        Duration::from_secs(300)
     } else {
         OP_TIMEOUT
     };

@@ -210,7 +210,11 @@ fn trust(remove: bool) -> io::Result<()> {
         ptr::{null, null_mut},
     };
     let path = security::state_dir()?.join("root.crt");
-    let _receipt = security::private_file("root.crt")?;
+    let _receipt = match security::private_file("root.crt") {
+        Ok(file) => file,
+        Err(error) if remove && error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
     let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     let mut context = null_mut();
     if unsafe {

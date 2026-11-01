@@ -6,7 +6,9 @@ use crate::protocol::{ACCOUNT, DISTRO};
 use serde::{Deserialize, Serialize};
 use std::{
     fs, io,
+    os::windows::io::FromRawHandle,
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     ptr::{null, null_mut},
     time::Duration,
 };
@@ -454,7 +456,13 @@ pub fn prepare() -> io::Result<()> {
         .parent()
         .ok_or_else(|| io::Error::other("ruta de instalación inválida"))?
         .join("payload");
-    if security::read_private("prepared", 16).is_ok_and(|b| b == b"1") {
+    let prepared = match security::read_private("prepared", 16) {
+        Ok(value) if value == b"1" => true,
+        Ok(_) => return Err(denied("marcador de preparación inválido")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error),
+    };
+    if prepared {
         // Reconcile ownership and apply a changed package only. Never recreate
         // a missing account/distro or replace its profile, CA or credentials.
         let _root = private_root()?;
@@ -470,12 +478,12 @@ pub fn prepare() -> io::Result<()> {
         {
             return Ok(());
         }
-        crate::package::verify(&package)?;
+        let files = crate::package::verify(&package)?;
         let identity = Identity::open(&super::identity::Ownership::read()?)?;
-        apply(&identity, &package, "update")?;
+        apply(&identity, &package, "update", files)?;
         return fs::write(_root.join("applied-version"), env!("CARGO_PKG_VERSION"));
     }
-    crate::package::verify(&package)?;
+    let files = crate::package::verify(&package)?;
     let root = private_root()?;
     let sid = ensure_account(&root)?;
     let identity = Identity::for_setup(&sid)?;
@@ -487,7 +495,16 @@ pub fn prepare() -> io::Result<()> {
         )?;
     }
     let destination = identity.profile_dir().join(r"AppData\Local\GnX Core\wsl");
-    if registration(&sid, &destination)?.is_none() {
+    let imported = registration(&sid, &destination)?.is_none();
+    if imported {
+        match super::identity::Ownership::record() {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            _ => {
+                return Err(denied(
+                    "nodo declarado ausente; requiere recreación explícita, no otra importación",
+                ));
+            }
+        }
         fs::create_dir_all(
             destination
                 .parent()
@@ -522,8 +539,22 @@ pub fn prepare() -> io::Result<()> {
     }
     let guid = registration(&sid, &destination)?
         .ok_or_else(|| io::Error::other("registro WSL no confirmado"))?;
-    let payload = linux_path(&package)?;
-    let result = identity.run(
+    // Bind the imported node before any later bootstrap step can fail.
+    let ownership = super::identity::Ownership {
+        version: 1,
+        sid: sid.clone(),
+        distribution_id: guid.clone(),
+    };
+    match super::identity::Ownership::record() {
+        Ok(saved) if saved.sid == sid && saved.distribution_id == guid => {}
+        Err(error) if imported && error.kind() == io::ErrorKind::NotFound => write_new(
+            &root.join("identity.json"),
+            &serde_json::to_vec(&ownership).map_err(io::Error::other)?,
+        )?,
+        _ => return Err(denied("identidad parcial divergente; no se sobrescribe")),
+    }
+    // Configuration is input data, not a Windows path that first needs DrvFS.
+    let result = identity.run_payload(
         &[
             "--distribution",
             DISTRO,
@@ -531,27 +562,18 @@ pub fn prepare() -> io::Result<()> {
             "/usr/bin/install",
             "-m",
             "0644",
-            &format!("{payload}/config/wsl.conf"),
+            "/dev/stdin",
             "/etc/wsl.conf",
         ],
+        &fs::read(package.join("config/wsl.conf"))?,
         Duration::from_secs(60),
     )?;
-    if result.code != 0 {
-        return Err(io::Error::other("configuración WSL no confirmada"));
-    }
+    checked(result, "configuración WSL")?;
     let result = identity.run(&["--terminate", DISTRO], Duration::from_secs(30))?;
     if result.code != 0 {
         return Err(io::Error::other("reinicio de WSL propia no confirmado"));
     }
-    apply(&identity, &package, "install")?;
-    let ownership = serde_json::json!({"version":1,"sid":sid,"distribution_id":guid});
-    let identity_file = root.join("identity.json");
-    if !identity_file.exists() {
-        write_new(
-            &identity_file,
-            &serde_json::to_vec(&ownership).map_err(io::Error::other)?,
-        )?;
-    }
+    apply(&identity, &package, "install", files)?;
     super::access::publish(&identity)?;
     if !root.join("intent").exists() {
         write_new(&root.join("intent"), b"running")?;
@@ -561,29 +583,118 @@ pub fn prepare() -> io::Result<()> {
     Ok(())
 }
 
-fn apply(identity: &Identity, package: &Path, mode: &str) -> io::Result<()> {
-    let payload = linux_path(package)?;
-    let result = identity.run(
+fn checked(result: super::identity::Output, stage: &str) -> io::Result<()> {
+    if result.code == 0 {
+        return Ok(());
+    }
+    let detail: String = result
+        .text()
+        .chars()
+        .rev()
+        .take(350)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    Err(io::Error::other(format!(
+        "{stage}: exit {}; {detail}",
+        result.code
+    )))
+}
+
+fn apply(
+    identity: &Identity,
+    package: &Path,
+    mode: &str,
+    mut files: Vec<String>,
+) -> io::Result<()> {
+    use sha2::{Digest, Sha256};
+    use windows_sys::Win32::{
+        Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation},
+        System::Pipes::CreatePipe,
+    };
+    // Native tar -> inherited WSL stdin; no DrvFS, host archive or new transport service.
+    let manifest = format!(
+        "{:x}",
+        Sha256::digest(fs::read(package.join("manifest.json"))?)
+    );
+    files.retain(|path| path != "rootfs.tar");
+    files.push("manifest.json".into());
+    if files.iter().any(|path| path.contains(['\r', '\n'])) {
+        return Err(denied("nombre no transferible"));
+    }
+    let attrs = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: null_mut(),
+        bInheritHandle: 1,
+    };
+    let mut read = null_mut();
+    let mut write = null_mut();
+    if unsafe { CreatePipe(&mut read, &mut write, &attrs, 65536) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let read = security::Handle(read);
+    let write = security::Handle(write);
+    if unsafe { SetHandleInformation(read.0, HANDLE_FLAG_INHERIT, 0) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let reader = unsafe { fs::File::from_raw_handle(read.0) };
+    std::mem::forget(read);
+    let writer = unsafe { fs::File::from_raw_handle(write.0) };
+    std::mem::forget(write);
+    let tar =
+        PathBuf::from(std::env::var_os("SystemRoot").ok_or_else(|| denied("SystemRoot ausente"))?)
+            .join("System32/tar.exe");
+    let mut producer = Command::new(tar)
+        .args(["--format=ustar", "-cf", "-", "-C"])
+        .arg(package)
+        .arg("--")
+        .args(&files)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(writer))
+        .stderr(Stdio::null())
+        .spawn()?;
+    let operations = r#"set -euo pipefail
+umask 077
+[[ "$1" =~ ^[a-f0-9]{64}$ && ( "$2" == install || "$2" == update ) ]]
+if state=$(systemctl show -p ActiveState --value gnx-core-install.service); then :; else code=$?; [[ "$code" == 4 && "$state" == inactive ]] || exit "$code"; fi
+case "$state" in active|activating|deactivating|reloading) echo 'Instalación Linux anterior activa; no repetir' >&2; exit 1;; esac
+root=/var/lib/gnx-core
+if [[ -e "$root" ]]; then [[ -d "$root" && ! -L "$root" && $(stat -c %u "$root") == 0 && $(stat -c %d "$root") == $(stat -c %d /) ]]; else install -d -m 0700 "$root"; fi
+stage=$(mktemp -d "$root/payload.XXXXXXXX")
+tar -x --ignore-zeros --no-same-owner --no-same-permissions -f - -C "$stage"
+cd "$stage"
+printf '%s  manifest.json\n' "$1" | sha256sum --check --status -
+jq -er '.files[] | select(.path != "rootfs.tar") | "\(.sha256)  \(.path)"' manifest.json | sha256sum --check --status -
+systemd-run --unit=gnx-core-install --wait --collect --property=Type=oneshot /usr/bin/bash "$stage/scripts/install.run" "$stage" "$2"
+cd /
+rm -r -- "$stage"
+"#;
+    let result = identity.run_pipe(
         &[
             "--distribution",
             DISTRO,
             "--exec",
-            "/usr/bin/systemd-run",
-            "--unit=gnx-core-install",
-            "--wait",
-            "--collect",
-            "--property=Type=oneshot",
             "/usr/bin/bash",
-            &format!("{payload}/scripts/install.run"),
-            &payload,
+            "-c",
+            operations,
+            "gnx-bootstrap",
+            &manifest,
             mode,
         ],
-        Duration::from_secs(600),
+        &reader,
+        Duration::from_secs(1200),
+    );
+    drop(reader);
+    let status = producer.wait()?;
+    checked(
+        result?,
+        "bootstrap Linux; consultar journal gnx-core-install",
     )?;
-    if result.code != 0 {
-        return Err(io::Error::other(
-            "preparación Linux no confirmada; consultar journalctl -u gnx-core-install",
-        ));
+    if !status.success() {
+        return Err(io::Error::other(format!(
+            "tar Windows: {status}; transferencia no confirmada"
+        )));
     }
     Ok(())
 }
