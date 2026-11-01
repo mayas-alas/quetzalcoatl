@@ -1,7 +1,7 @@
-# v0.0.23 — En preparación
+# v0.0.23 — Candidata
 
-**Estado:** candidata compilada y empaquetada en CI; sin publicación,
-instalación ni aceptación funcional.
+**Estado:** candidata compilada y empaquetada en CI; instalación y aceptación
+funcional no acreditadas por el build.
 Entrada enmascarada, actualizador y recreación forman parte de esta propuesta
 compilada. No están disponibles en el CLI instalado v0.0.22.
 
