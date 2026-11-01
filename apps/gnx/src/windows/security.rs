@@ -183,6 +183,96 @@ pub fn effective_admin() -> io::Result<()> {
     Ok(())
 }
 
+// Replacing a failed force transaction is a new explicit destructive request,
+// never an automatic retry while an earlier product process is still alive.
+pub(super) fn require_idle_maintenance(
+    binary: &Path,
+    helper: &Path,
+    main_pid: Option<u32>,
+) -> io::Result<()> {
+    use windows_sys::Win32::{
+        Foundation::{
+            ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES, GetLastError, INVALID_HANDLE_VALUE,
+        },
+        System::{
+            Diagnostics::ToolHelp::{
+                CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+                TH32CS_SNAPPROCESS,
+            },
+            Threading::QueryFullProcessImageNameW,
+        },
+    };
+    if let Some(pid) = main_pid {
+        process_is_system(pid)?;
+    }
+    let binary = std::fs::canonicalize(binary)?;
+    let helper = std::fs::canonicalize(helper)?;
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let snapshot = Handle(snapshot);
+    let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+    entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+    let mut available = unsafe { Process32FirstW(snapshot.0, &mut entry) };
+    let mut last_error = if available == 0 {
+        unsafe { GetLastError() }
+    } else {
+        0
+    };
+    while available != 0 {
+        let name = String::from_utf16_lossy(
+            &entry.szExeFile[..entry
+                .szExeFile
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(entry.szExeFile.len())],
+        );
+        if entry.th32ProcessID != std::process::id()
+            && Some(entry.th32ProcessID) != main_pid
+            && ["gnx.exe", "product-update.exe"].contains(&name.to_ascii_lowercase().as_str())
+        {
+            let handle =
+                unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, entry.th32ProcessID) };
+            if handle.is_null() {
+                if unsafe { GetLastError() } != ERROR_INVALID_PARAMETER {
+                    return Err(denied(
+                        "no se puede confirmar la salida de un proceso previo",
+                    ));
+                }
+            } else {
+                let handle = Handle(handle);
+                let mut path = [0u16; 32768];
+                let mut size = path.len() as u32;
+                if unsafe { QueryFullProcessImageNameW(handle.0, 0, path.as_mut_ptr(), &mut size) }
+                    == 0
+                {
+                    return Err(io::Error::last_os_error());
+                }
+                let path = std::fs::canonicalize(
+                    String::from_utf16(&path[..size as usize])
+                        .map_err(|_| denied("ruta de proceso inválida"))?,
+                )?;
+                if path == binary || path == helper {
+                    return Err(denied(
+                        "hay un proceso de mantenimiento previo vivo; no se repite la retirada",
+                    ));
+                }
+            }
+        }
+        available = unsafe { Process32NextW(snapshot.0, &mut entry) };
+        last_error = if available == 0 {
+            unsafe { GetLastError() }
+        } else {
+            0
+        };
+    }
+    if last_error != ERROR_NO_MORE_FILES {
+        return Err(io::Error::from_raw_os_error(last_error as i32));
+    }
+    Ok(())
+}
+
 fn check_acl(file: &File) -> io::Result<()> {
     let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
     if unsafe { GetFileInformationByHandle(file.as_raw_handle().cast(), &mut info) } == 0 {

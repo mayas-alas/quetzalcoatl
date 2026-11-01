@@ -70,8 +70,15 @@ PVE y todos los guests del almacenamiento administrado, incluidos los del usuari
 No hay recuperación automática. Se conserva la cuenta Windows privada de servicio
 y la transacción, no el nodo anterior. El payload instalado prepara un nodo vacío;
 volver a configurar `gnx password`, `gnx enroll` y los despliegues deseados.
-Almacenamiento externo, estado no reconocido o un inventario que cambió bloquean
-la recreación. Windows, otras WSL y recursos externos no se purgan.
+Una ruta WSL externa/enlazada, identidad divergente o recibos Windows sin propiedad
+confirmada bloquean la recreación. Windows, otras WSL y recursos externos no se purgan.
+
+En 0.0.25, confirmar la recreación autoriza `--unregister` de la WSL propia y la
+pérdida de TODO su VHD, no una parada ordenada de guests ni la conservación de
+volúmenes. Con PVE detenida se etiqueta la lista histórica/no observable antes de
+confirmar. Tras verificar la retirada nativa del registro y del VHD, se prepara
+la base desde el payload instalado. No se recupera el nodo anterior si falla el
+bootstrap; se conserva el resultado y el diagnóstico nativos, sin reintento ciego.
 
 El formato está en [config/update-catalog.json](../config/update-catalog.json):
 `schema: 1`, `architecture: linux/amd64` y exactamente ocho componentes con

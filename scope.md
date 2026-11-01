@@ -111,6 +111,10 @@ actualizador: dependen de una entrega instalada y comprobaciones independientes.
   también `gnx update --force` para recrear la versión instalada sin otra descarga.
   Conservan la cuenta Windows privada de servicio y el estado de transacción;
   renuevan el nodo WSL y su almacenamiento, CA, mesh y configuración PVE.
+  El recorrido destructivo de 0.0.25 usa `--unregister` de esa WSL: no conserva
+  su VHD ni sus guests y prepara la base como en primera instalación. No depende
+  de una parada limpia de PVE. Si no puede observar guests, indica lista histórica
+  o desconocida y exige autorizar TODO el contenido del VHD identificado.
   No existen `--force-recreate` ni `--remove-orphans`.
 - **R-VAL-01 — Aceptación manual recreada y compartida:** distinguir la
   preparación de un entorno nuevo de producto y su operación posterior por

@@ -173,6 +173,9 @@ un agente sin compartir la cuenta Windows de servicio.**
 - `gnx update --force` permite recrear solo la versión instalada. Se conserva la
   cuenta Windows privada de servicio y la transacción, no el nodo WSL, CA, mesh,
   configuración PVE ni guests anteriores. Reconfigurar `password` y `enroll`.
+- Tras la confirmación, retirar la WSL propia mediante `--unregister`, sin VHD de
+  respaldo ni parada limpia de PVE como requisito. Verificar ausencia del registro
+  y disco anteriores antes del bootstrap; un error no autoriza declarar éxito.
 - Usar el lifecycle nativo. Una actualización normal no retira guests; la
   recreación completa retira el almacenamiento del nodo identificado según el
   inventario aprobado. No convierte recursos externos en recursos del producto

@@ -29,7 +29,7 @@ pub fn product_worker() -> std::io::Result<()> {
     product_update::dispatch()
 }
 pub fn product_recreate() -> std::io::Result<()> {
-    product_update::recreate_installed()
+    product_update::recreate_installed().inspect_err(service::report_error)
 }
 
 pub fn installer(remove: bool) -> std::io::Result<()> {

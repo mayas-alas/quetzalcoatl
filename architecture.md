@@ -187,12 +187,16 @@ serializa pipe, recuperación y worker. La entrega al worker no significa éxito
 Reinicio requerido y resultado desconocido se conservan sin repetir instaladores.
 
 La recreación exige inventario y confirmación interactiva, revalida SID, GUID WSL,
-guests, almacenamiento y recibos, retira publicación propia y usa únicamente
+BasePath y recibos, retira publicación propia y usa únicamente
 `wsl --unregister` bajo la identidad dedicada verificada. No elimina directorios
 externos por nombre. Conserva el scaffold de cuenta Windows y la transacción;
 prepara WSL vacía desde el payload instalado, sin CA/mesh/credencial PVE anteriores.
 La operación vuelve a requerir `password` y `enroll`; no es una actualización
 conservadora ni una prueba de aceptación de ese recorrido.
+En 0.0.25 no llama a la retirada conservadora ni exige PVE disponible: elimina la
+WSL registrada, comprueba la ausencia del GUID y VHD anteriores y prepara la base.
+Una lista de guests no observable se distingue de una actual; el alcance aprobado
+es todo el VHD. Se registran errores del subproceso y no se restaura el nodo viejo.
 
 ## Diagnóstico y límites
 

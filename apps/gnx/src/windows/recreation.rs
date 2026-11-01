@@ -14,6 +14,8 @@ pub(super) struct Inventory {
     pub guests: Vec<Guest>,
     pub configuration_digest: String,
     pub retired_files: Vec<String>,
+    #[serde(default)]
+    pub guests_observed: bool,
 }
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(super) struct Guest {
@@ -295,21 +297,116 @@ pub(super) fn inventory() -> io::Result<Inventory> {
         guests,
         configuration_digest,
         retired_files: files(&owner.sid)?,
+        guests_observed: true,
     })
+}
+
+// Force authorizes the entire registered WSL disk, not a running PVE stack.
+// A cold/unreachable PVE cannot provide a current guest list: label the last
+// confirmed list explicitly rather than starting WSL or fabricating evidence.
+pub(super) fn force_inventory(previous: Option<&Inventory>) -> io::Result<Inventory> {
+    security::require_system()?;
+    let owner = Ownership::read()?;
+    if super::bootstrap::owned_account_sid()? != owner.sid {
+        return Err(invalid("SID de servicio divergente"));
+    }
+    let identity = Identity::open(&owner)?;
+    let retired_files = files(&owner.sid)?;
+    let mut guests = previous
+        .filter(|p| p.sid == owner.sid && p.distribution == owner.distribution_id)
+        .map(|p| p.guests.clone())
+        .unwrap_or_default();
+    let mut guests_observed = false;
+    let running = identity.run(&["--list", "--running", "--quiet"], Duration::from_secs(15));
+    if running.as_ref().is_ok_and(|running| {
+        running.code == 0 && running.text().lines().any(|s| s.trim() == DISTRO)
+    }) {
+        if let Ok(output) = super::deploy::command(
+            &identity,
+            &[
+                "pvesh",
+                "get",
+                "/cluster/resources",
+                "--type",
+                "vm",
+                "--output-format",
+                "json",
+            ],
+            None,
+            15,
+        ) {
+            if let Ok(resources) = serde_json::from_str::<Vec<serde_json::Value>>(&output) {
+                let parsed: Option<Vec<_>> = resources
+                    .iter()
+                    .map(|value| {
+                        Some(Guest {
+                            vmid: value["vmid"]
+                                .as_u64()
+                                .filter(|id| (100..=999999999).contains(id))?,
+                            kind: value["type"]
+                                .as_str()
+                                .filter(|kind| ["lxc", "qemu"].contains(kind))?
+                                .to_owned(),
+                            status: value["status"]
+                                .as_str()
+                                .filter(|status| ["running", "stopped"].contains(status))?
+                                .to_owned(),
+                        })
+                    })
+                    .collect();
+                if resources.len() <= 1024
+                    && resources
+                        .iter()
+                        .all(|v| v["node"].as_str() == Some("gnx-core-compute"))
+                {
+                    if let Some(parsed) = parsed {
+                        guests = parsed;
+                        guests_observed = true;
+                    }
+                }
+            }
+        }
+    }
+    guests.sort_by_key(|guest| guest.vmid);
+    Ok(Inventory {
+        sid: owner.sid,
+        distribution: owner.distribution_id,
+        guests,
+        configuration_digest: format!("{:x}", Sha256::digest(b"entire-owned-wsl-disk")),
+        retired_files,
+        guests_observed,
+    })
+}
+
+pub(super) fn verify_target(expected: &Inventory) -> io::Result<()> {
+    let owner = Ownership::read()?;
+    if owner.sid != expected.sid
+        || owner.distribution_id != expected.distribution
+        || super::bootstrap::owned_account_sid()? != owner.sid
+    {
+        return Err(invalid(
+            "identidad de la WSL confirmada cambió; no se adopta otra",
+        ));
+    }
+    let _verified = Identity::open(&owner)?;
+    if files(&owner.sid)? != expected.retired_files {
+        return Err(invalid(
+            "recibos Windows cambiaron; no se retiran recursos no confirmados",
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn execute(expected: &Inventory) -> io::Result<()> {
     // Called only by the installed executable as SYSTEM, with GnXCore stopped
     // and the worker holding the cross-process maintenance lease.
     security::require_system()?;
-    if let Some(field) = inventory()?.difference(expected) {
-        return Err(invalid(&format!(
-            "inventario cambió; no se retira el nodo: {field}"
-        )));
-    }
+    verify_target(expected)?;
     let owner = Ownership::read()?;
     let identity = Identity::open(&owner)?;
-    super::node::retire()?;
+    // This is not graceful uninstall. Do not gate destructive unregister on
+    // systemctl/PVE availability or preserve the old disk as a fallback.
+    super::access::remove()?;
     // Identity::open validated SID, GUID and the dedicated profile/base path.
     // Never unregister by an unverified display name or recursively delete a path.
     let checked = Ownership::read()?;
@@ -319,8 +416,15 @@ pub(super) fn execute(expected: &Inventory) -> io::Result<()> {
     let _verified = Identity::open(&checked)?;
     let result = identity.run(&["--unregister", DISTRO], Duration::from_secs(180))?;
     if result.code != 0 {
-        return Err(io::Error::other("retirada WSL no confirmada; no repetir"));
+        return Err(io::Error::other(format!(
+            "unregister de WSL propia devolvió {}; no repetir sin comprobar estado",
+            result.code
+        )));
     }
+    identity.verify_unregistered(&checked)?;
+    super::service::report_information(
+        "Recreación: GUID WSL anterior retirado y VHD anterior ausente; preparando el nodo desde cero.",
+    );
     drop(_verified);
     drop(identity);
     let root = super::bootstrap::private_root()?;

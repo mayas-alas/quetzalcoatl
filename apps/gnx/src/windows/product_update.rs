@@ -66,6 +66,8 @@ struct Transaction {
     parent_created: u64,
     assets: Vec<Asset>,
     inventory: Option<Inventory>,
+    #[serde(default)]
+    unresolved_recreation: bool,
     message: String,
 }
 fn save(transaction: &Transaction) -> io::Result<()> {
@@ -112,8 +114,15 @@ fn phase(transaction: &mut Transaction, value: &str, message: &str) -> io::Resul
 pub(super) fn receipt() -> io::Result<Option<String>> {
     match read() {
         Ok(t) => Ok(Some(format!(
-            "Transacción de producto {}: {}; {}",
-            t.target, t.phase, t.message
+            "Transacción de producto {}: {}; {}{}",
+            t.target,
+            t.phase,
+            t.message,
+            if t.unresolved_recreation && t.phase != "complete" {
+                "; recreación anterior pendiente: cancelar esta solicitud no libera otras mutaciones"
+            } else {
+                ""
+            }
         ))),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e),
@@ -127,14 +136,10 @@ pub(super) fn permit(operation: Option<Operation>) -> io::Result<()> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
         Ok(t)
-            if [
-                "complete",
-                "cancelled",
-                "failed_before_native",
-                "starting_service",
-                "applying_components",
-            ]
-            .contains(&t.phase.as_str()) =>
+            if ["complete", "starting_service", "applying_components"]
+                .contains(&t.phase.as_str())
+                || (!t.unresolved_recreation
+                    && ["cancelled", "failed_before_native"].contains(&t.phase.as_str())) =>
         {
             Ok(())
         }
@@ -265,17 +270,51 @@ fn worker_absent() -> io::Result<()> {
         )),
     }
 }
-fn clean_previous() -> io::Result<()> {
+fn clean_previous(force: bool, binary: &Path) -> io::Result<(Option<Inventory>, bool)> {
     worker_absent()?;
     match read() {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok((None, false)),
         Err(e) => Err(e),
         Ok(previous) => {
-            if !["complete", "cancelled", "failed_before_native"].contains(&previous.phase.as_str())
+            let unresolved = previous.phase == "interrupted"
+                || (previous.unresolved_recreation && previous.phase != "complete");
+            let new_destructive_request = force
+                && previous.force
+                && !previous.install
+                && unresolved
+                && ["interrupted", "cancelled", "failed_before_native"]
+                    .contains(&previous.phase.as_str());
+            if (unresolved
+                || !["complete", "cancelled", "failed_before_native"]
+                    .contains(&previous.phase.as_str()))
+                && !new_destructive_request
             {
                 return Err(invalid(
                     "transacción previa pendiente, desconocida o con reinicio requerido; no se repite automáticamente",
                 ));
+            }
+            if new_destructive_request {
+                let expected = previous
+                    .inventory
+                    .as_ref()
+                    .ok_or_else(|| invalid("falta identidad de la retirada anterior"))?;
+                let owner = super::identity::Ownership::read()?;
+                if owner.sid != expected.sid || owner.distribution_id != expected.distribution {
+                    return Err(invalid(
+                        "la instancia anterior cambió; no se adopta otra para borrar",
+                    ));
+                }
+                let service = manager(ServiceManagerAccess::CONNECT)?
+                    .open_service(SERVICE, ServiceAccess::QUERY_STATUS)
+                    .map_err(io::Error::other)?;
+                security::require_idle_maintenance(
+                    binary,
+                    &super::bootstrap::private_root()?.join(HELPER),
+                    service.query_status().map_err(io::Error::other)?.process_id,
+                )?;
+                println!(
+                    "La retirada anterior falló. Esta solicitud requiere un nuevo inventario y confirmar el borrado completo; no se reanuda ni se revierte automáticamente."
+                );
             }
             for asset in &previous.assets {
                 verify(asset)?;
@@ -284,8 +323,9 @@ fn clean_previous() -> io::Result<()> {
             for asset in &previous.assets {
                 fs::remove_file(root.join(&asset.name))?;
             }
-            fs::remove_file(root.join(RECEIPT))?;
-            Ok(())
+            // Keep the prior barrier on disk throughout staging. The atomic save
+            // of the replacement carries it through cancellation/early failure.
+            Ok((previous.inventory, unresolved))
         }
     }
 }
@@ -337,6 +377,7 @@ pub fn apply(force: bool, discover: bool) -> io::Result<bool> {
         parent_created: created(unsafe { GetCurrentProcess() })?,
         assets: Vec::new(),
         inventory: None,
+        unresolved_recreation: false,
         message: String::new(),
     };
     // Discovery and integrity failures occur before touching SCM or the node.
@@ -368,7 +409,8 @@ pub fn apply(force: bool, discover: bool) -> io::Result<bool> {
         ));
     }
     let lease = maintenance::lease()?;
-    clean_previous()?;
+    (transaction.inventory, transaction.unresolved_recreation) =
+        clean_previous(force, &transaction.binary)?;
     for name in [HELPER, MSI, BUNDLE] {
         match fs::symlink_metadata(super::bootstrap::private_root()?.join(name)) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -467,6 +509,14 @@ pub fn apply(force: bool, discover: bool) -> io::Result<bool> {
         println!(
             "Se pierden datos, CA, identidad mesh, credencial PVE, configuración y TODOS los guests del almacenamiento administrado:"
         );
+        println!(
+            "Se elimina el VHD de la WSL propia mediante --unregister; no se conserva copia ni se vuelve al nodo anterior."
+        );
+        if !inventory.guests_observed {
+            println!(
+                "PVE no proporcionó una lista actual. La lista siguiente es la última confirmada o está vacía; la autorización incluye TODO el contenido del VHD, también guests no observables ahora."
+            );
+        }
         for guest in &inventory.guests {
             println!("  {} {}: {}", guest.kind, guest.vmid, guest.status);
         }
@@ -479,11 +529,12 @@ pub fn apply(force: bool, discover: bool) -> io::Result<bool> {
         let mut confirmation = String::new();
         io::stdin().read_line(&mut confirmation)?;
         if confirmation.trim_end_matches(['\r', '\n']) != "RECREAR" {
-            phase(
-                &mut transaction,
-                "cancelled",
-                "no se autorizó ninguna instalación ni recreación",
-            )?;
+            let message = if transaction.unresolved_recreation {
+                "nueva solicitud cancelada; la recreación anterior sigue sin resolver y bloquea otras mutaciones"
+            } else {
+                "no se autorizó ninguna instalación ni recreación"
+            };
+            phase(&mut transaction, "cancelled", message)?;
             return Ok(false);
         }
     }
@@ -638,7 +689,11 @@ fn worker() -> io::Result<()> {
             return Err(invalid("proceso iniciador no confirmado"));
         }
         let lease = maintenance::lease()?;
-        let inventory = recreation::inventory()?;
+        let inventory = if transaction.force {
+            recreation::force_inventory(transaction.inventory.as_ref())?
+        } else {
+            recreation::inventory()?
+        };
         if !transaction.force && inventory.guests.iter().any(|g| g.status != "stopped") {
             return Err(invalid(
                 "hay guests activos; detenerlos explícitamente en PVE antes de actualizar sin fuerza",
@@ -662,6 +717,7 @@ fn worker() -> io::Result<()> {
                 || next.bundle != transaction.bundle
                 || next.binary != transaction.binary
                 || next.assets != transaction.assets
+                || next.unresolved_recreation != transaction.unresolved_recreation
             {
                 return Err(invalid("handoff de transacción divergente"));
             }
@@ -684,8 +740,14 @@ fn worker() -> io::Result<()> {
         if unsafe { WaitForSingleObject(parent.0, 30000) } != WAIT_OBJECT_0 {
             return Err(invalid("la CLI iniciadora no salió; no se reemplaza"));
         }
-        let mut observed = recreation::inventory()?;
-        if let Some(field) = observed.difference(
+        if transaction.force {
+            recreation::verify_target(
+                transaction
+                    .inventory
+                    .as_ref()
+                    .ok_or_else(|| invalid("falta destino confirmado"))?,
+            )?;
+        } else if let Some(field) = recreation::inventory()?.difference(
             transaction
                 .inventory
                 .as_ref()
@@ -706,7 +768,9 @@ fn worker() -> io::Result<()> {
         for asset in &transaction.assets {
             verify(asset)?;
         }
-        let mut runtime_hold = Some(RuntimeHold::new());
+        // Only conservative updates need a live runtime across SCM maintenance.
+        // Force must not start a cold WSL merely to keep the old node alive.
+        let mut runtime_hold = (!transaction.force).then(RuntimeHold::new);
         phase(
             &mut transaction,
             "stopping_service",
@@ -794,26 +858,23 @@ fn worker() -> io::Result<()> {
         }
         if transaction.force {
             // The package has not bootstrapped while our lease was held. Recheck
-            // identity/guests before invoking recreation in the installed binary.
-            observed = recreation::inventory()?;
-            if let Some(field) = observed.difference(
+            // the owned target before invoking recreation in the installed binary.
+            recreation::verify_target(
                 transaction
                     .inventory
                     .as_ref()
-                    .ok_or_else(|| invalid("falta inventario confirmado"))?,
-            ) {
-                return Err(invalid(&format!(
-                    "inventario cambió durante instalación: {field}"
-                )));
-            }
+                    .ok_or_else(|| invalid("falta destino confirmado"))?,
+            )?;
             phase(
                 &mut transaction,
                 "recreating",
                 "retirada exclusiva de la WSL verificada y su estado; sin rollback de datos",
             )?;
-            drop(runtime_hold.take());
-            if native(&binary, &["--product-recreate"], 1800)? != 0 {
-                return Err(invalid("recreación no confirmada; no repetir"));
+            let code = native(&binary, &["--product-recreate"], 1800)?;
+            if code != 0 {
+                return Err(invalid(&format!(
+                    "recreación devolvió {code}; consultar el error específico en eventos, no repetir a ciegas"
+                )));
             }
         }
         phase(

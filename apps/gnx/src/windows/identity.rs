@@ -339,6 +339,34 @@ impl Identity {
         self.run_input(args, None, limit, None)
     }
 
+    pub(super) fn verify_unregistered(&self, ownership: &Ownership) -> io::Result<()> {
+        let key = wide(&format!(
+            r"{}\Software\Microsoft\Windows\CurrentVersion\Lxss\{}",
+            ownership.sid, ownership.distribution_id
+        ));
+        let mut handle = null_mut();
+        let code = unsafe { RegOpenKeyExW(HKEY_USERS, key.as_ptr(), 0, KEY_READ, &mut handle) };
+        if code == 0 {
+            unsafe {
+                RegCloseKey(handle);
+            }
+            return Err(denied("unregister no retiró el GUID WSL confirmado"));
+        }
+        if code != 2 {
+            return Err(io::Error::from_raw_os_error(code as i32));
+        }
+        if self
+            .profile_dir()
+            .join(r"AppData\Local\GnX Core\wsl\ext4.vhdx")
+            .try_exists()?
+        {
+            return Err(denied(
+                "el VHD anterior sigue presente; no se declara nodo nuevo",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn run_secret(&self, args: &[&str], input: &[u8], limit: Duration) -> io::Result<Output> {
         if input.len() > 4096 {
             return Err(invalid("entrada protegida fuera de límite"));
