@@ -37,7 +37,6 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 60
     permissions:
-      actions: write
       contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -141,6 +140,8 @@ jobs:
           foreach ($name in 'gnx.exe', 'base-image.digest') {
             Copy-Item -LiteralPath (Join-Path $output $name) -Destination $metadata
           }
+          Copy-Item -LiteralPath (Join-Path $output 'build-provenance.json') -Destination (Join-Path $metadata 'canonical-build-provenance.json')
+          Copy-Item -LiteralPath (Join-Path $installers 'SHA256SUMS.txt') -Destination (Join-Path $metadata 'INSTALLER-SHA256SUMS.txt')
           $head = git rev-parse --short=12 HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Cannot identify packaged source commit' }
           Copy-Item -LiteralPath "build/package/v$env:GNX_VERSION-$head/payload/manifest.json" -Destination $metadata
@@ -161,7 +162,7 @@ jobs:
             runner_cargo = $cargo
           }
           [IO.File]::WriteAllText((Join-Path $metadata 'build-provenance.json'), ($provenance | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
-          $technicalHashes = foreach ($name in 'gnx.exe', 'base-image.digest', 'manifest.json', 'CHANGELOG.md', 'build-provenance.json') {
+          $technicalHashes = foreach ($name in 'gnx.exe', 'base-image.digest', 'manifest.json', 'CHANGELOG.md', 'build-provenance.json', 'canonical-build-provenance.json', 'INSTALLER-SHA256SUMS.txt') {
             "$((Get-FileHash -LiteralPath (Join-Path $metadata $name) -Algorithm SHA256).Hash.ToLowerInvariant())  $name"
           }
           [IO.File]::WriteAllText((Join-Path $metadata 'BUILD-SHA256SUMS.txt'), ($technicalHashes -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
@@ -175,32 +176,13 @@ jobs:
           [IO.File]::ReadAllText((Join-Path $metadata 'BUILD-SHA256SUMS.txt')).TrimEnd() >> $env:GITHUB_STEP_SUMMARY
           [IO.File]::ReadAllText((Join-Path $metadata 'build-provenance.json')) >> $env:GITHUB_STEP_SUMMARY
 
-      - name: Prune artifacts from previous runs to keep Actions storage clean
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = 'Continue'
-          # Hosted runners always start on a fresh VM (docs.github.com/en/actions/reference/runners/github-hosted-runners),
-          # so only artifact storage persists across runs. Purge artifacts from older
-          # runs to stay within the repository storage quota.
-          $removed = 0; $freedBytes = [long]0; $page = 1
-          while ($true) {
-            $items = @( gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts?per_page=100&page=$page" 2>$null |
-              ConvertFrom-Json | ForEach-Object { $_.artifacts } )
-            if ($LASTEXITCODE -ne 0) { throw 'Listing artifacts failed' }
-            if ($items.Count -eq 0) { break }
-            foreach ($artifact in $items) {
-              if ($artifact.run_id -lt [long]$env:GITHUB_RUN_ID) {
-                gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$($artifact.id)" 2>$null
-                if ($LASTEXITCODE -eq 0) { $removed++; $freedBytes += [long]$artifact.size_in_bytes }
-              }
-            }
-            $page++
-          }
-          $pruned = '{0} artifacts from previous runs pruned; freed {1:N0} bytes' -f $removed, $freedBytes
-          Write-Host $pruned
-          $pruned >> $env:GITHUB_STEP_SUMMARY
+      - name: Preserve canonical CLI and technical provenance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gnx-technical-v${{ env.GNX_VERSION }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/releases/v${{ env.GNX_VERSION }}/metadata/
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Stage user draft release (installers and checksums only)
         if: ${{ inputs.publish_release }}

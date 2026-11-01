@@ -133,7 +133,7 @@ explícitas; CI no los hace automáticamente.
 [Windows installers](../.github/workflows/installers.yml) se ejecuta manualmente
 con `workflow_dispatch`, en `windows-2022`. No se activa por pull requests ni instala
 el producto. El job de empaquetado requiere escritura: crea la release borrador de
-usuario y purga siempre los artifacts de runs anteriores (ver cuota abajo). El job
+usuario y conserva un artefacto técnico pequeño con retención limitada. El job
 opcional de publicación requiere escritura y publica únicamente una pre-release
 tras completar los gates.
 
@@ -150,6 +150,11 @@ El artefacto técnico conserva el CLI, los hashes y `build-provenance.json` con
 commit, modo y toolchain del runner. En modo `versioned`, ese toolchain no se
 atribuye a la compilación del CLI reutilizado. La procedencia no acredita
 instalación, aceptación ni que el binario generado haya sido incorporado a Git.
+Se descarga desde el run como `gnx-technical-v<versión>-<run>-<intento>` y se retiene
+30 días. Incluye `canonical-build-provenance.json` del build canónico y una copia
+de los hashes de los instaladores para vincular el CLI con la entrega de ese run.
+Para igualdad byte a byte local/nube, descargar los instaladores de esa release
+y verificar `SHA256SUMS.txt`; no recompilarlos ni reempaquetarlos localmente.
 
 ### Preparar el ZIP de inputs
 
@@ -208,13 +213,14 @@ integridad del checkout.
 3. Elegir `cli_mode` e indicar `payload_release` (tag de la release de inputs) y `payload_sha256`
    (hash del ZIP completo). La Action descarga, verifica y extrae solo los archivos permitidos.
 4. Se ejecuta la ruta canónica seleccionada, sin reemplazar un CLI versionado distinto.
-5. Entrega sin artifacts: la corrida purga los artifacts de runs anteriores (el
-   almacenamiento de artifacts es compartido por cuenta y limitado; los
-   instaladores por corrida suelen agotar esa cuota). El job de empaquetado crea
+5. Los instaladores no se suben como artifacts de Actions por su tamaño. Los artifacts
+   `gnx-technical-*` vencen por la retención nativa, sin purgar otros runs. El job
+   de empaquetado, con `publish_release` activado, crea
    la release borrador `v<versión>` con exactamente tres assets de usuario: MSI,
    setup EXE y `SHA256SUMS.txt`. El CLI canónico, `build-provenance.json`,
-   `BUILD-SHA256SUMS.txt` y los hashes técnicos se registran solo en el resumen
-   del run correspondiente; no son descargas ni componentes adicionales.
+   `BUILD-SHA256SUMS.txt` y la procedencia se conservan en el artefacto técnico
+   descargable del run, separado de los instaladores de usuario. El resumen
+   registra también sus hashes; no son componentes adicionales del producto.
 6. Opcionalmente, activar `publish_release` y ejecutar desde el tag `v<versión>`
    previamente creado sobre el commit elegido. El segundo job descarga los tres
    assets del borrador, verifica hashes y coincidencia tag/commit (que sean del
