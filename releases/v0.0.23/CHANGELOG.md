@@ -1,9 +1,9 @@
 # v0.0.23 — En preparación
 
-**Estado:** en desarrollo; sin entrega ni aceptación funcional.
-Entrada enmascarada, actualizador y recreación implementados en fuentes;
-compilación, empaquetado y aceptación todavía no establecidos. No están
-disponibles en el CLI instalado v0.0.22.
+**Estado:** candidata compilada y empaquetada en CI; sin publicación,
+instalación ni aceptación funcional.
+Entrada enmascarada, actualizador y recreación forman parte de esta propuesta
+compilada. No están disponibles en el CLI instalado v0.0.22.
 
 ## Añadido en fuentes
 
