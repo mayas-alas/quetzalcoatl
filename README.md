@@ -22,7 +22,7 @@ Requiere Windows x64 con WSL2 y virtualización disponibles. Los instaladores
 incluyen el filesystem Linux y las cuatro imágenes OCI del núcleo; no instalan
 los prerrequisitos Windows que falten. No se garantiza cualquier host limpio.
 
-Descarga la [candidata 0.0.22 para Windows x64](https://github.com/mayas-alas/quetzalcoatl/releases/tag/v0.0.22).
+Descarga la [candidata 0.0.28 para Windows x64](https://github.com/mayas-alas/quetzalcoatl/releases/tag/v0.0.28).
 Incluye `GnxCoreSetup.exe`, `GnxCore.msi` y `SHA256SUMS.txt`. La release es pública;
 no requiere una sesión GitHub para descargar esos archivos.
 
