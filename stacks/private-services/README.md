@@ -18,6 +18,12 @@ una copia del código de las aplicaciones.
 
 ## Preparar la entrada
 
+Las fuentes permiten `gnx deploy` sin argumentos: el servicio usa estas definiciones
+incorporadas, genera la configuración privada y la conserva bajo las ACL del estado
+Windows del producto. No requiere una copia local de este repositorio ni se ejecuta
+al instalar o arrancar. Consulta [stack predeterminado](../../docs/deployment.md#stack-predeterminado).
+El procedimiento siguiente corresponde a `gnx deploy <carpeta>` explícito.
+
 La carpeta final de `gnx deploy` debe contener los cinco Quadlets de `quadlets/`
 y estos archivos bajo `config/`, protegidos y fuera de Git:
 

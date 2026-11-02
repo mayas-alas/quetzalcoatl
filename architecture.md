@@ -299,6 +299,17 @@ El guest recibe solo la CA pública; la preparación verifica nombre/cadena TLS 
 la CRL firmada vigente sin rotar la raíz existente. El operador registra su passkey
 real en Pocket ID. Preparar clientes OIDC no acredita autenticación humana.
 
+En las fuentes, `deploy` sin carpeta transmite una selección fija por el pipe,
+no una ruta privilegiada. `deploy.rs` construye el bundle con las definiciones
+incorporadas y secretos aleatorios, la CA pública propia y la plantilla NetBird.
+Persiste los bytes exactos ligados al SID/GUID WSL en
+`default-private-services.json` bajo las ACL administrativas Windows antes de
+reservar un guest. Reutiliza el mismo recorrido LXC y no actualiza ese bundle al
+reiniciar o cambiar las fuentes. La recreación inventaría ese estado propio; la
+retirada conservadora no lo elimina. El pipe admite marcos de progreso solicitados
+solo por deploy, correlacionados con la petición y limitados a etapas/estados sin
+salida bruta de procesos. Desconectar la CLI no cancela la operación nativa.
+
 Caddy transporta HTTP/2 gRPC y relay NetBird; no transporta STUN UDP. El puerto
 3478 se publica en la IP del guest, no mediante el portproxy TCP Windows. Acceso
 externo y conexión entre peers requieren su comprobación independiente.

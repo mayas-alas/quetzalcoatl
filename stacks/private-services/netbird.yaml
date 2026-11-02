@@ -1,0 +1,25 @@
+# Combined server behind the existing GnX HTTPS gateway.
+# Schema: https://github.com/netbirdio/netbird/blob/main/combined/config.yaml.example
+# The service supplies and persists the two empty private keys before deployment.
+server:
+  listenAddress: ":8081"
+  exposedAddress: "https://netbird.gnx:443"
+  stunPorts: [3478]
+  logLevel: "info"
+  logFile: "console"
+  authSecret: ""
+  dataDir: "/var/lib/netbird/"
+  disableAnonymousMetrics: true
+  disableGeoliteUpdate: true
+  auth:
+    issuer: "https://netbird.gnx/oauth2"
+    localAuthDisabled: false
+    signKeyRefreshEnabled: true
+    dashboardRedirectURIs:
+      - "https://netbird.gnx/nb-auth"
+      - "https://netbird.gnx/nb-silent-auth"
+    cliRedirectURIs:
+      - "http://localhost:53000/"
+  store:
+    engine: "sqlite"
+    encryptionKey: ""

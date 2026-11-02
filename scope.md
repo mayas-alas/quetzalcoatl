@@ -12,7 +12,7 @@ terminal como supervisor.
 | Entrega | EXE Burn como entrada interactiva recomendada y MSI autocontenido como vía administrativa directa al mismo producto. |
 | Automatización | GitHub Action manual para compilar una versión nueva desde fuentes o empaquetar el CLI versionado, entregar MSI/EXE con hashes y, opcionalmente, publicar una pre-release con tag coincidente. |
 | Identidad | Servicio `GnXCore`, cuenta `gnxcoresvc`, WSL `gnx-core` y estado protegido propio. |
-| Control | `start`, `stop`, `status`, `enroll`, `password` y `deploy <carpeta>` mediante un pipe administrativo local; las fuentes 0.0.20 añaden `update --check|--apply [catalogo.json]`. |
+| Control | `start`, `stop`, `status`, `enroll`, `password` y `deploy [carpeta]` mediante un pipe administrativo local; las fuentes 0.0.20 añaden `update --check|--apply [catalogo.json]`. |
 | Acceso | `app.gnx` y `compute.gnx`; el stack privado registrado añade Pocket ID, RustFS/S3 y NetBird por HTTPS. Acceso mesh sujeto a DNS, ACL y confianza del cliente. |
 | Certificados | CA persistente, confianza Windows interna, renovación de hoja servidor y CRL mediante systemd. |
 | Conservación | Actualización y reinstalación preservan identidad, CA, credenciales y datos. Desinstalación normal sin purga. |
@@ -39,6 +39,13 @@ Desde 0.0.16, `gnx deploy <carpeta>` permite enviar
 Quadlets/configuración a un LXC nuevo. La admisión, recursos, propiedad y límites
 están en [Despliegue](docs/deployment.md). La carpeta debe estar bajo control del
 administrador, no en una ubicación compartida modificable por terceros.
+
+Las fuentes también permiten `gnx deploy` sin carpeta para el stack privado fijo:
+preparan su entrada y secretos persistentes bajo las ACL del estado propio y
+muestran etapas/estados en vivo, sin volcar secretos ni journal bruto. Reutilizan
+el despliegue LXC existente; no crean guests automáticamente al instalar/arrancar
+ni reemplazan un stack registrado distinto. No se atribuye este cambio a los
+instaladores publicados anteriormente.
 
 La candidata 0.0.18 admite `.container` y `.network`, verifica cada unidad e incluye
 el caso fijo [stack privado](stacks/private-services/README.md): RustFS, Pocket ID

@@ -9,6 +9,33 @@ $gnx = "$env:ProgramFiles\GnX Core\gnx.exe"
 & $gnx deploy 'C:\ruta\a\servicios'
 ```
 
+## Stack predeterminado
+
+En las fuentes, `gnx deploy` sin argumentos selecciona `private-services` incorporado
+en el ejecutable; no busca una carpeta relativa al directorio de PowerShell.
+El servicio genera claves propias de Pocket ID, RustFS y NetBird y utiliza la CA
+pública del nodo. Conserva la entrada exacta, ligada al SID y registro WSL, en
+`%ProgramData%\GnX Core\default-private-services.json`, protegido para SYSTEM y
+administradores. No contiene credenciales Windows/PVE ni crea una cuenta humana.
+Este archivo contiene secretos: no publicarlo ni copiarlo al checkout.
+
+La selección reutiliza la admisión, recibos y despliegue LXC existentes. No cambia
+definiciones ni regenera secretos al repetir, tampoco sustituye un stack registrado
+desde otra entrada. Una entrada parcial o inválida se conserva y bloquea, sin
+asignar otro VMID a ciegas. La actualización y desinstalación normal la conservan;
+la recreación explícita la incluye en el inventario de estado a retirar.
+
+Se requiere `gnx start`, compute configurado mediante `gnx password` y conexión a
+los registros de imágenes. No se despliega implícitamente al instalar/arrancar.
+La CLI recibe etapas y estados de unidades en vivo por el pipe autenticado; no
+imprime configuración, secretos ni salida bruta de procesos. El detalle nativo
+permanece en journal y las tareas PVE. Una desconexión no cancela el trabajo nativo;
+un timeout conserva un resultado desconocido y no autoriza repetirlo.
+
+Los instaladores publicados antes de este cambio requieren la carpeta explícita.
+La disponibilidad HTTPS, el alta/passkey en `https://pocket.gnx/setup`, S3 y la
+conectividad entre peers se comprueban aparte.
+
 ## Carpeta de entrada
 
 ```text

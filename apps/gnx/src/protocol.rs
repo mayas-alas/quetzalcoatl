@@ -50,6 +50,8 @@ pub struct Request {
     pub bundle: Option<crate::deployment::Bundle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog: Option<crate::updates::Catalog>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub progress: bool,
 }
 
 impl Drop for Request {
@@ -72,7 +74,7 @@ impl Request {
         }
         match (request.operation, &request.bundle) {
             (Operation::Deploy, Some(bundle)) => bundle.validate()?,
-            (Operation::Deploy, None) => return Err(invalid("faltan Quadlets")),
+            (Operation::Deploy, None) => {} // Fixed private-services input, prepared by the service.
             (_, Some(_)) => return Err(invalid("operación no admite archivos")),
             _ => {}
         }
@@ -82,6 +84,9 @@ impl Request {
             }
             (_, Some(_)) => return Err(invalid("esta operación no admite catálogos")),
             _ => {}
+        }
+        if request.progress && request.operation != Operation::Deploy {
+            return Err(invalid("esta operación no admite progreso"));
         }
         match request.operation {
             Operation::Enroll | Operation::Password => {
@@ -126,6 +131,8 @@ pub struct Response {
     pub ok: bool,
     pub state: NodeState,
     pub message: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub progress: bool,
 }
 
 impl Response {
@@ -136,6 +143,7 @@ impl Response {
             ok,
             state,
             message: message.into(),
+            progress: false,
         }
     }
 

@@ -74,7 +74,12 @@ impl Controller {
         Ok(())
     }
 
-    pub async fn execute(&self, request: &Request, client_pid: u32) -> Response {
+    pub async fn execute(
+        &self,
+        request: &Request,
+        client_pid: u32,
+        progress: tokio::sync::mpsc::Sender<String>,
+    ) -> Response {
         // Profile loading/unloading is shared per Windows identity. Serialize
         // its use too; a concurrent status returns immediately, never races it.
         let _permit = match self.mutation.clone().try_acquire_owned() {
@@ -105,8 +110,9 @@ impl Controller {
                 }
                 if matches!(op, Operation::UpdateCheck | Operation::UpdateApply) {
                     super::updates::execute(op == Operation::UpdateApply, catalog)
-                } else if let Some(bundle) = bundle {
-                    super::deploy::apply(&bundle).map(|message| (NodeState::Active, message))
+                } else if op == Operation::Deploy {
+                    super::deploy::execute(bundle, &progress)
+                        .map(|message| (NodeState::Active, message))
                 } else {
                     execute_secret(op, secret.as_deref().map(String::as_str))
                 }
@@ -132,6 +138,14 @@ impl Controller {
                 }
                 Response::new(request, state != NodeState::Degraded, state, &message)
             }
+            Ok(Err(error)) if op == Operation::Deploy => Response::new(
+                request,
+                false,
+                NodeState::Unknown,
+                &format!(
+                    "deploy: {error}; conserva el recibo y consulta journal/Visor de eventos antes de repetir"
+                ),
+            ),
             Ok(Err(error)) if error.kind() == io::ErrorKind::NotFound => Response::new(
                 request,
                 false,

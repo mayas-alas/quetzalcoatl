@@ -65,13 +65,15 @@ pub fn client(op: crate::protocol::Operation) -> std::io::Result<crate::protocol
         .block_on(pipe::client(op))
 }
 
-pub fn deploy(bundle: crate::deployment::Bundle) -> std::io::Result<crate::protocol::Response> {
+pub fn deploy(
+    bundle: Option<crate::deployment::Bundle>,
+) -> std::io::Result<crate::protocol::Response> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
         .block_on(pipe::client_bundle(
             crate::protocol::Operation::Deploy,
-            Some(bundle),
+            bundle,
         ))
 }
 

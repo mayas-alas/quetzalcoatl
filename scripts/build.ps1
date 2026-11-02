@@ -107,7 +107,7 @@ try {
     if ($sourceHash -ne (Get-FileHash -LiteralPath $releaseBinary).Hash) { throw 'Release binary mismatch' }
     $output = Join-Path $repo "build/releases/v$version/"
     New-Item -ItemType Directory -Force $output | Out-Null
-    $sourcePaths = @(git ls-files --cached --others --exclude-standard -- Cargo.toml Cargo.lock apps/gnx config scripts README.md architecture.md scope.md docs .github/workflows/installers.yml "releases/v$version/CHANGELOG.md")
+    $sourcePaths = @(git ls-files --cached --others --exclude-standard -- Cargo.toml Cargo.lock apps/gnx config scripts stacks README.md architecture.md scope.md docs .github/workflows/installers.yml "releases/v$version/CHANGELOG.md")
     if ($LASTEXITCODE -ne 0) { throw 'Cannot record source inventory' }
     $sourceFiles = @($sourcePaths | Sort-Object -Unique | ForEach-Object {
         if (Test-Path -LiteralPath $_ -PathType Leaf) { @{path=$_;sha256=(Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()} }

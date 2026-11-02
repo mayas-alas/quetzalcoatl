@@ -167,7 +167,31 @@ async fn connection_task(
     {
         return Err(protocol::invalid("petición repetida"));
     }
-    let response = controller.execute(&request, client_pid).await;
+    let (progress, mut logs) = tokio::sync::mpsc::channel(64);
+    let execution = controller.execute(&request, client_pid, progress);
+    tokio::pin!(execution);
+    let mut connected = true;
+    let mut logs_open = true;
+    let response = loop {
+        tokio::select! {
+            // Drain queued stages before sending the final result.
+            biased;
+            message = logs.recv(), if logs_open => {
+                let Some(message) = message else { logs_open = false; continue; };
+                if request.progress && connected {
+                    let mut frame = Response::new(&request, true, protocol::NodeState::Starting, &message);
+                    frame.progress = true;
+                    let bytes = serde_json::to_vec(&frame).map_err(io::Error::other)?;
+                    connected = matches!(timeout(IO_TIMEOUT, write_frame(&mut pipe, &bytes)).await, Ok(Ok(())));
+                }
+            }
+            response = &mut execution => break response,
+        }
+    };
+    // A disconnected reader must not cancel or repeat an in-flight native job.
+    if !connected {
+        return Ok(());
+    }
     let bytes = serde_json::to_vec(&response).map_err(io::Error::other)?;
     timeout(IO_TIMEOUT, write_frame(&mut pipe, &bytes)).await??;
     // Bounded application ACK replaces unbounded FlushFileBuffers.
@@ -227,18 +251,20 @@ pub async fn client_request(
     // Human input happens before opening the short-lived connection. The pipe
     // server is authenticated again before any bytes or credentials are sent.
     let secret = match operation {
-        Operation::Enroll => Some(prompt_secret("Key Tailscale (sin eco): ", false)?),
+        Operation::Enroll => {
+            let value = prompt_secret("Auth key Tailscale: ")?;
+            super::console::validate_auth_key(&value)?;
+            Some(value.to_string())
+        }
         Operation::Password => {
-            let value = Zeroizing::new(prompt_secret(
-                "Nueva contraseña PVE root@pam (mín. 12 bytes; Esc cancela): ",
-                true,
-            )?);
+            let value =
+                prompt_secret("Nueva contraseña PVE root@pam (mín. 12 bytes; Esc cancela): ")?;
             if value.len() < 12 || value.len() > 1024 || value.chars().any(char::is_control) {
                 return Err(protocol::invalid(
                     "contraseña inválida: usa de 12 a 1024 bytes sin caracteres de control; no se enviaron cambios",
                 ));
             }
-            let confirmation = Zeroizing::new(prompt_secret("Repite la nueva contraseña: ", true)?);
+            let confirmation = prompt_secret("Repite la nueva contraseña: ")?;
             if *value != *confirmation {
                 return Err(protocol::invalid(
                     "las contraseñas no coinciden; no se enviaron cambios",
@@ -257,6 +283,7 @@ pub async fn client_request(
         secret,
         bundle,
         catalog,
+        progress: operation == Operation::Deploy,
     };
     let bytes = Zeroizing::new(serde_json::to_vec(&request).map_err(io::Error::other)?);
     let _ = Request::decode(&bytes)?;
@@ -291,29 +318,39 @@ pub async fn client_request(
     } else {
         OP_TIMEOUT
     };
-    let bytes = timeout(limit, read_frame(&mut pipe)).await.map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::TimedOut,
-            "resultado desconocido; consulta status, no repitas una mutación a ciegas",
-        )
-    })??;
-    let response = Response::decode(&bytes, id)?;
-    timeout(IO_TIMEOUT, pipe.write_u8(1)).await??;
-    Ok(response)
+    let deadline = tokio::time::Instant::now() + limit;
+    loop {
+        let bytes = tokio::time::timeout_at(deadline, read_frame(&mut pipe))
+            .await
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "resultado desconocido; consulta status, no repitas una mutación a ciegas",
+                )
+            })??;
+        let response = Response::decode(&bytes, id)?;
+        if response.progress {
+            if !request.progress {
+                return Err(protocol::invalid("progreso no solicitado"));
+            }
+            eprintln!("[deploy] {}", response.message);
+            continue;
+        }
+        timeout(IO_TIMEOUT, pipe.write_u8(1)).await??;
+        return Ok(response);
+    }
 }
 
-fn prompt_secret(prompt: &str, masked: bool) -> io::Result<String> {
+fn prompt_secret(prompt: &str) -> io::Result<Zeroizing<String>> {
     use std::io::{BufRead, IsTerminal};
     if std::io::stdin().is_terminal() {
-        if masked {
-            return super::console::read_masked(prompt)
-                .map(|mut value| std::mem::take(&mut *value));
-        }
-        return rpassword::prompt_password(prompt);
+        return super::console::read_masked(prompt);
     }
     // Redirected stdin is already a private inherited pipe, not a console
     // whose echo mode needs changing. Never read secrets from arguments.
-    let mut value = String::new();
+    let mut value = Zeroizing::new(String::new());
     std::io::stdin().lock().read_line(&mut value)?;
-    Ok(value.trim_end_matches(['\r', '\n']).to_owned())
+    let end = value.trim_end_matches(['\r', '\n']).len();
+    value.truncate(end);
+    Ok(value)
 }

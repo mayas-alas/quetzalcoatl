@@ -3,7 +3,7 @@ use super::{
     security,
 };
 use crate::{
-    deployment::Bundle,
+    deployment::{Bundle, File},
     protocol::{DISTRO, invalid},
 };
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,176 @@ use std::{
     io::{self, Read, Write},
     time::Duration,
 };
+
+const DEFAULT_INPUT: &str = "default-private-services.json";
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct DefaultInput {
+    version: u16,
+    owner: Ownership,
+    bundle: Bundle,
+}
+
+// These are fixed stage messages, never process output, configuration or secrets.
+fn log(progress: &tokio::sync::mpsc::Sender<String>, message: impl Into<String>) {
+    let _ = progress.try_send(message.into());
+}
+
+fn random_key() -> io::Result<String> {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut bytes = zeroize::Zeroizing::new([0u8; 32]);
+    security::random(bytes.as_mut())?;
+    let mut encoded = String::with_capacity(44);
+    for chunk in bytes.chunks(3) {
+        let bits = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for (index, shift) in [18, 12, 6, 0].into_iter().enumerate() {
+            encoded.push(if index <= chunk.len() {
+                ALPHABET[((bits >> shift) & 63) as usize] as char
+            } else {
+                '='
+            });
+        }
+    }
+    Ok(encoded)
+}
+
+fn saved_default() -> io::Result<DefaultInput> {
+    let bytes = zeroize::Zeroizing::new(security::read_private(DEFAULT_INPUT, 128 * 1024)?);
+    let saved: DefaultInput = serde_json::from_slice(&bytes)
+        .map_err(|_| invalid("entrada private-services guardada inválida; no se regenera"))?;
+    if saved.version != 1 || !saved.bundle.private_stack() {
+        return Err(invalid("entrada private-services incompatible"));
+    }
+    saved.bundle.validate()?;
+    Ok(saved)
+}
+
+pub(super) fn validate_default_owner(sid: &str) -> io::Result<()> {
+    if saved_default()?.owner.sid != sid {
+        return Err(invalid("entrada private-services ajena"));
+    }
+    Ok(())
+}
+
+fn default_bundle() -> io::Result<Bundle> {
+    let owner = Ownership::read()?;
+    match saved_default() {
+        Ok(saved) => {
+            if saved.owner.sid != owner.sid || saved.owner.distribution_id != owner.distribution_id
+            {
+                return Err(invalid(
+                    "private-services pertenece a otro nodo; no se reutiliza",
+                ));
+            }
+            return Ok(saved.bundle);
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let mut files = Vec::new();
+    for (path, contents) in [
+        (
+            "private.network",
+            include_str!("../../../../stacks/private-services/quadlets/private.network"),
+        ),
+        (
+            "pocket-id.container",
+            include_str!("../../../../stacks/private-services/quadlets/pocket-id.container"),
+        ),
+        (
+            "rustfs.container",
+            include_str!("../../../../stacks/private-services/quadlets/rustfs.container"),
+        ),
+        (
+            "netbird-server.container",
+            include_str!("../../../../stacks/private-services/quadlets/netbird-server.container"),
+        ),
+        (
+            "netbird-dashboard.container",
+            include_str!(
+                "../../../../stacks/private-services/quadlets/netbird-dashboard.container"
+            ),
+        ),
+        (
+            "config/private-stack.json",
+            include_str!("../../../../stacks/private-services/quadlets/config/private-stack.json"),
+        ),
+    ] {
+        files.push(File {
+            path: path.into(),
+            contents: contents.into(),
+        });
+    }
+    let mut access_bytes = zeroize::Zeroizing::new([0u8; 16]);
+    security::random(access_bytes.as_mut())?;
+    let access_key = zeroize::Zeroizing::new(
+        access_bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+    );
+    for (path, contents) in [
+        (
+            "config/root.crt",
+            String::from_utf8(security::read_private("root.crt", 16384)?)
+                .map_err(|_| invalid("CA pública inválida"))?,
+        ),
+        (
+            "config/pocket.env",
+            format!(
+                "ENCRYPTION_KEY={}\nSTATIC_API_KEY={}\n",
+                random_key()?,
+                random_key()?
+            ),
+        ),
+        (
+            "config/rustfs.env",
+            format!(
+                "RUSTFS_ACCESS_KEY={}\nRUSTFS_SECRET_KEY={}\n",
+                access_key.as_str(),
+                &random_key()?[..32]
+            ),
+        ),
+        (
+            "config/netbird.yaml",
+            include_str!("../../../../stacks/private-services/netbird.yaml")
+                .replace(
+                    "authSecret: \"\"",
+                    &format!("authSecret: \"{}\"", random_key()?),
+                )
+                .replace(
+                    "encryptionKey: \"\"",
+                    &format!("encryptionKey: \"{}\"", random_key()?),
+                ),
+        ),
+    ] {
+        files.push(File {
+            path: path.into(),
+            contents,
+        });
+    }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    let saved = DefaultInput {
+        version: 1,
+        owner,
+        bundle: Bundle { files },
+    };
+    saved.bundle.validate()?;
+    let _directory = security::private_directory()?;
+    let bytes = zeroize::Zeroizing::new(serde_json::to_vec(&saved).map_err(io::Error::other)?);
+    // Persist the exact input before reserving a VMID. Never rotate keys on retry
+    // or silently use new embedded definitions for an existing deployment.
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(security::state_dir()?.join(DEFAULT_INPUT))?;
+    file.write_all(&bytes)?;
+    file.sync_all()?;
+    Ok(saved.bundle)
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,14 +244,32 @@ fn save(path: &std::path::Path, receipt: &Receipt) -> io::Result<()> {
     file.sync_all()
 }
 
-pub fn apply(bundle: &Bundle) -> io::Result<String> {
-    bundle.validate()?;
+pub fn execute(
+    bundle: Option<Bundle>,
+    progress: &tokio::sync::mpsc::Sender<String>,
+) -> io::Result<String> {
+    security::require_system()?;
+    log(progress, "Validando entrada, propiedad y CA del nodo.");
     let owner = Ownership::read()?;
     let identity = Identity::open(&owner)?;
     let _directory = security::private_directory()?;
     if security::read_private("intent", 16)? != b"running" {
-        return Err(io::Error::new(io::ErrorKind::NotConnected, "nodo detenido"));
+        return Err(io::Error::new(
+            io::ErrorKind::NotConnected,
+            "nodo detenido; usa gnx start",
+        ));
     }
+    let bundle = match bundle {
+        Some(bundle) => bundle,
+        None => {
+            log(
+                progress,
+                "Preparando private-services y su configuración persistente protegida.",
+            );
+            default_bundle()?
+        }
+    };
+    bundle.validate()?;
     let digest = bundle.digest()?;
     let private_stack = bundle.private_stack();
     if private_stack {
@@ -139,6 +327,13 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
     let saved = completed.or(reserved);
     let description = format!("GnX.Core:{digest}");
     let receipt = if let Some(receipt) = saved {
+        log(
+            progress,
+            format!(
+                "Recibo existente: LXC {}. Verificando propiedad sin asignar otro VMID.",
+                receipt.vmid
+            ),
+        );
         if receipt.version != 1
             || receipt.sid != owner.sid
             || receipt.digest != digest
@@ -148,6 +343,10 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
         }
         receipt
     } else {
+        log(
+            progress,
+            "Comprobando inventario PVE, paquete y almacenamiento.",
+        );
         if private_stack {
             let present = identity.run(
                 &[
@@ -247,6 +446,7 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
             Duration::from_secs(15),
         )?;
         if exists.code == 1 {
+            log(progress, "Copiando y verificando la base LXC.");
             let linux = linux_path(&rootfs)?;
             let destination = format!("gnx-core-compute:{template_path}");
             let copied = identity.run(
@@ -287,6 +487,7 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
             complete: false,
         };
         save(&path, &receipt)?; // Before mutation: a failed/unknown create cannot silently allocate another guest.
+        log(progress, format!("Reserva persistida: creando LXC {vmid}."));
         let id = vmid.to_string();
         let hostname = format!("gnx-{}", &receipt.digest[..12]);
         command(
@@ -350,6 +551,10 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
         return Err(invalid("propiedad del LXC no confirmada; no se modifica"));
     }
     if receipt.complete {
+        log(
+            progress,
+            format!("LXC {id} ya completado: consultando su estado, sin reinstalar."),
+        );
         let status = command(&identity, &["pct", "status", &id], None, 15)?;
         return Ok(format!(
             "LXC {id} ya registrado; {}. No se recrearon datos.",
@@ -357,6 +562,12 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
         ));
     }
     let status = command(&identity, &["pct", "status", &id], None, 15)?;
+    log(
+        progress,
+        format!(
+            "LXC {id}: preparando guest y transfiriendo Quadlets/configuración (contenido omitido)."
+        ),
+    );
     if status.trim() == "status: stopped" {
         command(&identity, &["pct", "start", &id], None, 60)?;
     }
@@ -495,6 +706,10 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
         }
     }
     let mut args = vec!["pct", "exec", &id, "--", "/usr/bin/systemctl", "start"];
+    log(
+        progress,
+        "Iniciando unidades: Podman descarga las imágenes fijadas si faltan; consulta journal del guest para detalle.",
+    );
     args.extend(units.iter().map(String::as_str));
     command(&identity, &args, None, 600)?;
     for unit in &units {
@@ -515,12 +730,14 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
             15,
         )?;
         if state.trim() != "active" {
-            return Err(io::Error::other(
-                "no están activas todas las unidades solicitadas; consultar journal del guest",
-            ));
+            return Err(io::Error::other(format!(
+                "{unit} no está activa; consultar journal del guest"
+            )));
         }
+        log(progress, format!("LXC {id}: {unit} activa."));
     }
     if private_stack {
+        log(progress, "Registrando publicación HTTPS/DNS del stack.");
         let input = serde_json::to_vec(
             &serde_json::json!({"vmid": receipt.vmid, "digest": receipt.digest}),
         )
@@ -543,6 +760,10 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
             ));
         }
         let enrollment = fs::read(payload.join("scripts/enroll-stack.run"))?;
+        log(
+            progress,
+            "Configurando clientes OIDC Pocket ID / RustFS / NetBird; secretos omitidos.",
+        );
         command(
             &identity,
             &["pct", "exec", &id, "--", "/usr/bin/python3", "-"],
@@ -572,6 +793,10 @@ pub fn apply(bundle: &Bundle) -> io::Result<String> {
                 ));
             }
         }
+        log(
+            progress,
+            "OIDC configurado y unidades activas; alta humana pendiente en https://pocket.gnx/setup.",
+        );
     }
     let completed = Receipt {
         complete: true,

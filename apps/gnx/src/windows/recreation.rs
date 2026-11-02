@@ -106,6 +106,8 @@ fn files(sid: &str) -> io::Result<Vec<String>> {
             {
                 return Err(invalid("recibo no pertenece a esta identidad"));
             }
+        } else if name == "default-private-services.json" {
+            super::deploy::validate_default_owner(sid)?;
         } else if ![
             "prepared",
             "identity.json",

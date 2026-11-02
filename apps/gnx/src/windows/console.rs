@@ -34,7 +34,28 @@ impl Drop for InputMode {
     }
 }
 
-// Only the interactive password path calls this. Redirected stdin keeps its
+pub(super) fn validate_auth_key(value: &str) -> io::Result<()> {
+    if value.is_empty() {
+        return Err(invalid(
+            "no se recibió una auth key; usa Pegar o Ctrl+Shift+V en Windows Terminal; no se envió nada",
+        ));
+    }
+    if value.len() > 1024
+        || !value.strip_prefix("tskey-auth-").is_some_and(|key| {
+            !key.is_empty()
+                && key
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
+        })
+    {
+        return Err(invalid(
+            "formato de auth key inválido; pega solo la key tskey-auth-…, sin nombre de variable, comillas ni espacios; no se envió nada",
+        ));
+    }
+    Ok(())
+}
+
+// Both interactive secret prompts use this reader. Redirected stdin keeps its
 // existing line protocol; neither the input value nor its characters are echoed.
 pub(super) fn read_masked(prompt: &str) -> io::Result<Zeroizing<String>> {
     let input = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
@@ -60,6 +81,10 @@ pub(super) fn read_masked(prompt: &str) -> io::Result<Zeroizing<String>> {
     };
     let mut output = io::stderr().lock();
     let result = (|| {
+        writeln!(
+            output,
+            "Pegar: Ctrl+Shift+V o menú Pegar de Windows Terminal. Esc/Ctrl+C cancela."
+        )?;
         write!(output, "{prompt}")?;
         output.flush()?;
         let mut value = Zeroizing::new(String::new());
@@ -84,13 +109,13 @@ pub(super) fn read_masked(prompt: &str) -> io::Result<Zeroizing<String>> {
                     3 | 27 => {
                         return Err(io::Error::new(
                             io::ErrorKind::Interrupted,
-                            "entrada cancelada; no se envió una contraseña",
+                            "entrada cancelada; no se envió ningún secreto",
                         ));
                     }
                     13 => {
                         if high.is_some() {
                             return Err(invalid(
-                                "entrada Unicode incompleta; no se envió una contraseña",
+                                "entrada Unicode incompleta; no se envió ningún secreto",
                             ));
                         }
                         return Ok(value);
@@ -100,6 +125,15 @@ pub(super) fn read_masked(prompt: &str) -> io::Result<Zeroizing<String>> {
                             write!(output, "\x08 \x08")?;
                             output.flush()?;
                         }
+                        continue;
+                    }
+                    22 => {
+                        write!(
+                            output,
+                            "\r\nCtrl+V no insertó texto: usa Ctrl+Shift+V o Pegar.\r\n{prompt}{}",
+                            "*".repeat(value.chars().count())
+                        )?;
+                        output.flush()?;
                         continue;
                     }
                     0 => continue, // Modifiers and navigation keys are not input.
@@ -116,7 +150,7 @@ pub(super) fn read_masked(prompt: &str) -> io::Result<Zeroizing<String>> {
                     (None, 0..=0xd7ff | 0xe000..=0xffff) => u32::from(unit),
                     _ => {
                         return Err(invalid(
-                            "entrada Unicode inválida; no se envió una contraseña",
+                            "entrada Unicode inválida; no se envió ningún secreto",
                         ));
                     }
                 };
@@ -126,7 +160,7 @@ pub(super) fn read_masked(prompt: &str) -> io::Result<Zeroizing<String>> {
                     continue;
                 }
                 if value.len() + character.len_utf8() > 1024 {
-                    return Err(invalid("contraseña demasiado larga; máximo 1024 bytes"));
+                    return Err(invalid("entrada demasiado larga; máximo 1024 bytes"));
                 }
                 value.push(character);
                 write!(output, "*")?;
@@ -139,4 +173,34 @@ pub(super) fn read_masked(prompt: &str) -> io::Result<Zeroizing<String>> {
     restored?;
     newline?;
     result
+}
+
+#[cfg(test)]
+mod temporary_paste_check {
+    use super::*;
+
+    #[test]
+    #[ignore = "manual isolated Windows Terminal check; no service or real credentials"]
+    fn terminal_without_service() {
+        let input = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+        let mut before = 0;
+        assert_ne!(unsafe { GetConsoleMode(input, &mut before) }, 0);
+        assert!(validate_auth_key("").is_err());
+        assert!(validate_auth_key("TS_AUTH=not-a-key").is_err());
+        assert!(validate_auth_key("tskey-auth-public-format-example").is_ok());
+        let value = read_masked("Prueba aislada de pegado (texto público): ").unwrap();
+        assert!(
+            value.as_str() == "PEGADO-ñ-🔑",
+            "el texto no coincide; contenido capturado omitido"
+        );
+        let mut after = 0;
+        assert_ne!(unsafe { GetConsoleMode(input, &mut after) }, 0);
+        assert_eq!(before, after);
+        println!("PEGADO_OK; modo de consola restaurado; ninguna llamada al servicio");
+        let cancelled = read_masked("Prueba aislada de cancelación: pulsa Esc: ");
+        assert!(matches!(cancelled, Err(ref error) if error.kind() == io::ErrorKind::Interrupted));
+        assert_ne!(unsafe { GetConsoleMode(input, &mut after) }, 0);
+        assert_eq!(before, after);
+        println!("CANCELACION_OK; modo restaurado; ninguna credencial enviada");
+    }
 }

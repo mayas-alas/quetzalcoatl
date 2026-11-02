@@ -71,7 +71,7 @@ $gnx = "$env:ProgramFiles\GnX Core\gnx.exe"
 | `enroll` | Solicita la key Tailscale sin eco y configura la mesh. Necesita conectividad con Tailscale. |
 | `password` | Establece una nueva contraseña de `root@pam` en PVE, con confirmación sin eco, y conserva su hash en la configuración protegida. |
 | `stop` | Detiene los servicios propios y conserva datos e identidad. La recuperación del servicio Windows respeta esa parada. |
-| `deploy <carpeta>` | Envía Quadlets admitidos por el pipe administrativo y crea un LXC no privilegiado nuevo. Una entrada idéntica ya aplicada no duplica el guest. |
+| `deploy [carpeta]` | Sin carpeta prepara el stack `private-services` incorporado y conserva su entrada privada; con carpeta envía los Quadlets aportados. Muestra etapas en vivo por el pipe administrativo. Una entrada idéntica ya aplicada no duplica el guest. |
 | `update --check [catalogo.json]` | En 0.0.23 sin catálogo consulta releases públicas, muestra la transacción y compara componentes. Con catálogo solo compara componentes localmente. No instala. |
 | `update --apply [catalogo.json]` | En 0.0.23 sin catálogo selecciona la release pública y entrega MSI/Burn a un worker SCM; con catálogo solo aplica componentes. Bloquea instalación normal con guests activos. |
 | `update --force` | En 0.0.23 recrea el nodo de la versión instalada, con inventario y confirmación interactiva de pérdida de datos y guests. |
@@ -80,6 +80,17 @@ $gnx = "$env:ProgramFiles\GnX Core\gnx.exe"
 Se usa la ruta explícita porque el instalador no modifica `PATH`. No introduzcas
 keys ni contraseñas en argumentos, la app informativa, logs o chat. Los formularios
 de autenticación nativos de PVE se usan únicamente con HTTPS confiable.
+
+En Windows Terminal, pega mediante **Ctrl+Shift+V** o su acción **Pegar** cuando
+GnX solicite la entrada, no en la línea de comandos. Para `enroll`, pega solo la
+auth key `tskey-auth-…`, sin `TS_AUTH=`, comillas ni espacios. La validación de
+formato no comprueba si la key está vigente: eso lo decide Tailscale.
+
+Las fuentes usan un mismo lector con asteriscos para `enroll` y `password`, sin
+mostrar el secreto; permiten retroceso y cancelación con Esc/Ctrl+C. Si Ctrl+V
+llega como control en vez de pegar, se indica cómo usar el pegado del terminal.
+Los instaladores publicados antes de este cambio pueden ocultar toda la entrada
+de `enroll`, sin asteriscos. La automatización por stdin no imprime máscaras ni eco.
 
 ### Contraseña de PVE
 
@@ -124,6 +135,19 @@ registros. La candidata 0.0.18 incluye `.network` y el caso fijo de
 [servicios privados](stacks/private-services/README.md): bridge, HTTPS y clientes
 OIDC de Pocket ID para RustFS y NetBird. No es una publicación genérica de cualquier
 aplicación. Salud, login humano y conectividad entre peers se verifican por separado.
+
+Las fuentes permiten desplegar el stack predeterminado sin preparar una carpeta:
+
+```powershell
+& "$env:ProgramFiles\GnX Core\gnx.exe" deploy
+```
+
+Requiere el nodo iniciado, compute configurado con `gnx password` y acceso a los
+registros de imágenes. El servicio genera y conserva la configuración privada en
+`%ProgramData%\GnX Core\default-private-services.json`, con las ACL administrativas
+del producto; no la copies a Git ni la compartas. La CLI muestra etapas y estados,
+no secretos ni el journal bruto. Los instaladores anteriores a este cambio no
+incorporan este recorrido. No se ejecuta al instalar o al arrancar el nodo.
 
 Para el primer acceso humano, abre `https://pocket.gnx/setup`, crea tu cuenta y
 registra una passkey real. La preparación de OIDC no crea esa cuenta. STUN UDP
