@@ -97,6 +97,32 @@ un VHD: no es una copia conservada del anterior. Usa los archivos de configuraci
 declarados y transfiere el payload verificado por stdin sin depender de DrvFS,
 sin reiniciar Windows ni otras WSL. Véase [síntesis de lifecycle](lifecycle.md).
 
+### Continuar una preparación parcial
+
+Las fuentes 0.0.33 añaden `gnx update --resume`, usando la CLI instalada que
+coincide con su MSI. No es una variante de `--force`: no descarga, reinstala,
+importa un rootfs ni ejecuta `--unregister`. Requiere una transacción propia de
+recreación interrumpida sin instalador pendiente, el registro protegido del nodo
+parcial y su VHD existente. No se deriva propiedad de su nombre o del tamaño
+del disco; la primera continuación verifica que el GUID anterior ya no existe.
+
+La consola muestra el SID y GUID actuales y requiere escribir `PREPARAR`. Puede
+iniciar esa WSL, completar el bootstrap y publicar su HTTPS; detiene y recupera
+el servicio Windows mediante el worker SCM existente. No termina la WSL ni omite
+una instalación Linux activa: si `wsl.conf` no coincide con el payload instalado,
+se bloquea sin reescribirlo. El recibo conserva el GUID confirmado y no permite
+adoptar otro en una solicitud posterior. Una lista de guests no observada no
+significa que esté vacía.
+
+Estado de despliegues/actualizaciones de componentes, identidad divergente o un
+nodo ya preparado con otra versión bloquean esta continuación limitada. Si la
+preparación de esa misma versión terminó y solo falló recuperar el servicio,
+no se reaplica el payload. Cancelación, fallo o timeout mantienen la barrera:
+observar procesos y journal/Visor de eventos antes de solicitar otra continuación.
+No editar el recibo para liberar `deploy`, `password` o `enroll`. La entrega al
+worker no es finalización; usar el estado de transacción y el diagnóstico nativo.
+Este recorrido no recupera datos del nodo eliminado ni acredita salud o login.
+
 El formato está en [config/update-catalog.json](../config/update-catalog.json):
 `schema: 1`, `architecture: linux/amd64` y exactamente ocho componentes con
 `name` e `image`. Se permiten únicamente los repositorios de esos componentes,

@@ -215,6 +215,45 @@ pub async fn client_request(
     bundle: Option<crate::deployment::Bundle>,
     catalog: Option<crate::updates::Catalog>,
 ) -> io::Result<Response> {
+    use std::io::{IsTerminal, Write};
+    let mut response = request_once(operation, bundle.clone(), catalog.clone(), None).await?;
+    let Some(recovery) = response.recover_missing.take() else {
+        return Ok(response);
+    };
+    if operation != Operation::Deploy {
+        return Err(protocol::invalid(
+            "confirmación de recuperación no solicitada",
+        ));
+    }
+    eprintln!("{recovery}");
+    if !std::io::stdin().is_terminal() {
+        response.message.push_str(
+            "; requiere confirmación en una consola interactiva; no se archivó la reserva",
+        );
+        return Ok(response);
+    }
+    eprint!(
+        "Escribe RECUPERAR {} para continuar, o Enter para cancelar: ",
+        recovery.vmid
+    );
+    std::io::stderr().flush()?;
+    let mut confirmation = String::new();
+    std::io::stdin().read_line(&mut confirmation)?;
+    if confirmation.trim() != format!("RECUPERAR {}", recovery.vmid) {
+        response.message = "recuperación cancelada; reserva y configuración conservadas".into();
+        return Ok(response);
+    }
+    // A new authenticated request revalidates native absence and the exact attempt.
+    // Never retry this mutation after a lost response or timeout.
+    request_once(operation, bundle, catalog, Some(recovery)).await
+}
+
+async fn request_once(
+    operation: Operation,
+    bundle: Option<crate::deployment::Bundle>,
+    catalog: Option<crate::updates::Catalog>,
+    recover_missing: Option<protocol::MissingDeployment>,
+) -> io::Result<Response> {
     super::security::effective_admin()?;
     let manager = windows_service::service_manager::ServiceManager::local_computer(
         None::<&str>,
@@ -284,6 +323,7 @@ pub async fn client_request(
         bundle,
         catalog,
         progress: operation == Operation::Deploy,
+        recover_missing,
     };
     let bytes = Zeroizing::new(serde_json::to_vec(&request).map_err(io::Error::other)?);
     let _ = Request::decode(&bytes)?;

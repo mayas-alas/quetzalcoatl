@@ -451,7 +451,25 @@ pub(super) fn linux_path(path: &Path) -> io::Result<String> {
 }
 
 pub fn prepare() -> io::Result<()> {
+    prepare_inner(None)
+}
+
+pub(super) fn resume(expected: &super::identity::Ownership) -> io::Result<()> {
+    prepare_inner(Some(expected))
+}
+
+fn prepare_inner(resume: Option<&super::identity::Ownership>) -> io::Result<()> {
     security::require_system()?;
+    if let Some(expected) = resume {
+        let saved = super::identity::Ownership::record()?;
+        if saved.sid != expected.sid
+            || saved.distribution_id != expected.distribution_id
+            || owned_account_sid()? != expected.sid
+        {
+            return Err(denied("identidad parcial cambió; no se prepara otro nodo"));
+        }
+        let _identity = Identity::open(expected)?;
+    }
     let package = std::env::current_exe()?
         .parent()
         .ok_or_else(|| io::Error::other("ruta de instalación inválida"))?
@@ -478,6 +496,11 @@ pub fn prepare() -> io::Result<()> {
         {
             return Ok(());
         }
+        if resume.is_some() {
+            return Err(denied(
+                "continuación no actualiza un nodo ya preparado con otra versión",
+            ));
+        }
         let files = crate::package::verify(&package)?;
         let identity = Identity::open(&super::identity::Ownership::read()?)?;
         apply(&identity, &package, "update", files)?;
@@ -485,8 +508,16 @@ pub fn prepare() -> io::Result<()> {
     }
     let files = crate::package::verify(&package)?;
     let root = private_root()?;
-    let sid = ensure_account(&root)?;
-    let identity = Identity::for_setup(&sid)?;
+    let sid = if let Some(expected) = resume {
+        expected.sid.clone()
+    } else {
+        ensure_account(&root)?
+    };
+    let identity = if let Some(expected) = resume {
+        Identity::open(expected)?
+    } else {
+        Identity::for_setup(&sid)?
+    };
     let wslconfig = identity.profile_dir().join(".wslconfig");
     if !wslconfig.exists() {
         write_new(
@@ -496,6 +527,11 @@ pub fn prepare() -> io::Result<()> {
     }
     let destination = identity.profile_dir().join(r"AppData\Local\GnX Core\wsl");
     let imported = registration(&sid, &destination)?.is_none();
+    if resume.is_some() && imported {
+        return Err(denied(
+            "WSL parcial ausente; no se importa otra para continuar",
+        ));
+    }
     if imported {
         match super::identity::Ownership::record() {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -553,25 +589,47 @@ pub fn prepare() -> io::Result<()> {
         )?,
         _ => return Err(denied("identidad parcial divergente; no se sobrescribe")),
     }
-    // Configuration is input data, not a Windows path that first needs DrvFS.
-    let result = identity.run_payload(
-        &[
-            "--distribution",
-            DISTRO,
-            "--exec",
-            "/usr/bin/install",
-            "-m",
-            "0644",
-            "/dev/stdin",
-            "/etc/wsl.conf",
-        ],
-        &fs::read(package.join("config/wsl.conf"))?,
-        Duration::from_secs(60),
-    )?;
-    checked(result, "configuración WSL")?;
-    let result = identity.run(&["--terminate", DISTRO], Duration::from_secs(30))?;
-    if result.code != 0 {
-        return Err(io::Error::other("reinicio de WSL propia no confirmado"));
+    // Continuation must not terminate a possibly live Linux installation. Its
+    // configuration must already match; apply() rejects an active install unit.
+    if resume.is_some() {
+        let result = identity.run_payload(
+            &[
+                "--distribution",
+                DISTRO,
+                "--exec",
+                "/usr/bin/cmp",
+                "-s",
+                "/etc/wsl.conf",
+                "/dev/stdin",
+            ],
+            &fs::read(package.join("config/wsl.conf"))?,
+            Duration::from_secs(60),
+        )?;
+        checked(
+            result,
+            "configuración WSL parcial no coincide; no se reconfigura ni termina",
+        )?;
+    } else {
+        // Configuration is input data, not a Windows path that first needs DrvFS.
+        let result = identity.run_payload(
+            &[
+                "--distribution",
+                DISTRO,
+                "--exec",
+                "/usr/bin/install",
+                "-m",
+                "0644",
+                "/dev/stdin",
+                "/etc/wsl.conf",
+            ],
+            &fs::read(package.join("config/wsl.conf"))?,
+            Duration::from_secs(60),
+        )?;
+        checked(result, "configuración WSL")?;
+        let result = identity.run(&["--terminate", DISTRO], Duration::from_secs(30))?;
+        if result.code != 0 {
+            return Err(io::Error::other("reinicio de WSL propia no confirmado"));
+        }
     }
     apply(&identity, &package, "install", files)?;
     super::access::publish(&identity)?;

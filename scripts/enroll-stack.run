@@ -2,21 +2,33 @@
 """Fixed, guest-local initial OIDC configuration; never simulate a user's passkey."""
 import json
 import base64
+import hashlib
 import os
 from pathlib import Path
 import secrets
 import ssl
 import stat
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 
 BASE = Path('/etc/gnx-app/config')
 STATE = BASE / 'enrollment.json'
 CA = BASE / 'root.crt'
 os.umask(0o077)
 TLS = None
+CLIENT_FIELDS = ('name', 'description', 'callbackURLs', 'logoutCallbackURLs', 'backchannelLogoutURL',
+                 'isPublic', 'pkceEnabled', 'requiresReauthentication', 'requiresPushedAuthorizationRequests',
+                 'skipConsent', 'credentials', 'launchURL', 'hasLogo', 'hasDarkLogo', 'isGroupRestricted',
+                 'accessTokenDurationMinutes', 'refreshTokenDurationMinutes')
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
 
 
 def initialize_tls():
@@ -66,11 +78,306 @@ def request(service, method, path, value=None, token=None, timeout=10):
         headers['X-API-Key' if service == 'pocket' else 'Authorization'] = token if service == 'pocket' else 'Token ' + token
     body = json.dumps(value).encode() if value is not None else None
     req = urllib.request.Request(origin + path, data=body, headers=headers, method=method)
-    with urllib.request.urlopen(req, context=TLS, timeout=timeout) as response:
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=TLS), NoRedirect())
+    with opener.open(req, timeout=timeout) as response:
         data = response.read(262145)
         if len(data) > 262144:
             fail('STACK_API_RESPONSE_TOO_LARGE')
         return json.loads(data) if data else None
+
+
+def onboarding(state):
+    value = state.setdefault('onboarding', {'version': 1, 'groups': {}})
+    if value.get('version') != 1 or not isinstance(value.get('groups'), dict):
+        fail('STACK_ONBOARDING_STATE_INVALID')
+    return value
+
+
+def known_mutation(state, operation, apply, confirmed):
+    # A prior unknown mutation is observed, never blindly repeated. Only a
+    # canonical read proving its complete result clears the protected intent.
+    value = onboarding(state)
+    pending = value.get('pending')
+    if pending:
+        if pending != operation or not confirmed():
+            fail('STACK_ONBOARDING_MUTATION_RESULT_UNKNOWN')
+    elif not confirmed():
+        value['pending'] = operation
+        save(state)
+        apply()
+        if not confirmed():
+            fail('STACK_ONBOARDING_MUTATION_NOT_CONFIRMED')
+    value.pop('pending', None)
+    save(state)
+
+
+def client_settings_digest(client):
+    settings = {field: client[field] for field in CLIENT_FIELDS if field in client}
+    return hashlib.sha256(json.dumps(settings, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def settle_pending(state, key):
+    value = onboarding(state)
+    pending = value.get('pending')
+    if not pending:
+        return
+    kind = pending.get('kind')
+    confirmed = False
+    if kind in ('client-groups', 'restrict-client'):
+        names = [name for name, entry in state['clients'].items() if entry['id'] == pending.get('client')]
+        if len(names) == 1:
+            client = owned_client(state, names[0], key)
+            confirmed = (client_settings_digest(client) == pending['settings_digest'] if kind == 'restrict-client' else
+                         {g['id'] for g in (client.get('allowedUserGroups') or [])} == set(pending['groups']))
+    elif kind == 'group-members':
+        names = [name for name, entry in value['groups'].items() if entry['id'] == pending.get('group')]
+        if len(names) == 1:
+            group = owned_group(state, names[0], key)
+            confirmed = {u['id'] for u in (group.get('users') or [])} == set(pending['users'])
+    elif kind in ('approve-operator', 'admin-operator') and pending.get('user') == operator_subject(state):
+        user = netbird_operator(state)
+        confirmed = (user is not None and user.get('pending_approval') is False and user.get('is_blocked') is False)
+        if kind == 'admin-operator':
+            confirmed = confirmed and user.get('role') == 'admin' and set(user.get('auto_groups') or []) == set(pending['groups'])
+    # A create without its returned ID cannot be recovered by matching a name.
+    if not confirmed:
+        fail('STACK_ONBOARDING_MUTATION_RESULT_UNKNOWN')
+    value.pop('pending')
+    save(state)
+
+
+def owned_client(state, name, key):
+    entry = state['clients'][name]
+    client = request('pocket', 'GET', '/api/oidc/clients/' + quote(entry['id'], safe=''), token=key)
+    callback = ('https://netbird.gnx/oauth2/callback' if name == 'netbird' else
+                'https://rustfs.gnx/rustfs/admin/v3/oidc/callback/default')
+    if (client.get('id') != entry['id'] or client.get('description') != 'GnX private stack ' + state['nonce']
+            or client.get('callbackURLs') != [callback] or client.get('isPublic')):
+        fail('STACK_POCKET_CLIENT_NOT_OWNED')
+    return client
+
+
+def owned_group(state, name, key):
+    entry = onboarding(state)['groups'][name]
+    group = request('pocket', 'GET', '/api/user-groups/' + quote(entry['id'], safe=''), token=key)
+    if group.get('id') != entry['id'] or group.get('name') != entry['name'] or group.get('ldapId'):
+        fail('STACK_POCKET_GROUP_NOT_OWNED')
+    return group
+
+
+def prepare_groups(state, key):
+    value = onboarding(state)
+    for name in ('netbird', 'rustfs'):
+        entry = value['groups'].get(name)
+        if entry is None:
+            # The API assigns IDs. Persist intent first; a lost create response
+            # must not cause adoption by name or creation of another group.
+            if value.get('pending'):
+                fail('STACK_ONBOARDING_MUTATION_RESULT_UNKNOWN')
+            group_name = 'gnx-' + name + '-' + state['nonce']
+            value['pending'] = {'kind': 'create-group', 'name': group_name}
+            save(state)
+            group = request('pocket', 'POST', '/api/user-groups', {
+                'name': group_name, 'friendlyName': 'GnX ' + ('NetBird' if name == 'netbird' else 'RustFS')}, key)
+            if not isinstance(group.get('id'), str) or not group['id'] or group.get('name') != group_name:
+                fail('STACK_POCKET_GROUP_CREATE_RESULT_UNKNOWN')
+            value['groups'][name] = {'id': group['id'], 'name': group_name}
+            value.pop('pending')
+            save(state)
+        group = owned_group(state, name, key)
+        client = owned_client(state, name, key)
+        expected = sorted({g['id'] for g in (client.get('allowedUserGroups') or [])} | {group['id']})
+        endpoint = '/api/oidc/clients/' + quote(client['id'], safe='') + '/allowed-user-groups'
+        operation = {'kind': 'client-groups', 'client': client['id'], 'groups': expected}
+        known_mutation(state, operation,
+                       lambda: request('pocket', 'PUT', endpoint, {'userGroupIds': expected}, key),
+                       lambda: {g['id'] for g in (owned_client(state, name, key).get('allowedUserGroups') or [])} == set(expected))
+
+
+def pocket_users(key):
+    result = request('pocket', 'GET', '/api/users?pagination[limit]=100', token=key, timeout=3)
+    pagination = result.get('pagination') or {}
+    if (not isinstance(result.get('data'), list) or len(result['data']) > 100
+            or pagination.get('currentPage') != 1 or pagination.get('totalPages') not in (0, 1)
+            or pagination.get('totalItems') != len(result['data'])):
+        fail('STACK_POCKET_USER_INVENTORY_OUTSIDE_BOUND')
+    return result['data']
+
+
+def human_operator(state, key):
+    users = pocket_users(key)
+    value = onboarding(state)
+    if value.get('operator_id'):
+        candidates = [u for u in users if u.get('id') == value['operator_id']]
+        if len(candidates) != 1:
+            fail('STACK_INITIAL_OPERATOR_CHANGED')
+    else:
+        candidates = [u for u in users if u.get('isAdmin') and not u.get('disabled')]
+    if len(candidates) > 8:
+        fail('STACK_INITIAL_OPERATOR_INVENTORY_OUTSIDE_BOUND')
+    humans = []
+    for user in candidates:
+        if not user.get('isAdmin') or user.get('disabled'):
+            fail('STACK_INITIAL_OPERATOR_CHANGED')
+        # The static API principal has no passkey. Do not create a user or an
+        # authenticator, or infer an operator from an email/display name.
+        credentials = request('pocket', 'GET', '/api/users/' + quote(user['id'], safe='') +
+                              '/webauthn-credentials', token=key, timeout=3)
+        if credentials is None:
+            credentials = []
+        if not isinstance(credentials, list):
+            fail('STACK_POCKET_PASSKEY_INVENTORY_INVALID')
+        if credentials:
+            humans.append(user)
+    if len(humans) > 1:
+        fail('STACK_INITIAL_OPERATOR_AMBIGUOUS')
+    if not humans:
+        return None
+    user = humans[0]
+    if not user.get('email') or not user.get('displayName'):
+        fail('STACK_INITIAL_OPERATOR_EMAIL_NAME_REQUIRED')
+    return user
+
+
+def finish_operator(state, key):
+    value = onboarding(state)
+    if value.get('complete'):
+        print('STACK_ONBOARDING_COMPLETE')
+        return 0
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        operator = human_operator(state, key)
+        if operator:
+            break
+        time.sleep(2)
+    else:
+        print('STACK_ONBOARDING_OPERATOR_PENDING')
+        return 42
+    if not value.get('operator_id'):
+        value['operator_id'] = operator['id']
+        save(state)
+    prepare_groups(state, key)
+    for name in ('netbird', 'rustfs'):
+        group = owned_group(state, name, key)
+        members = sorted({u['id'] for u in (group.get('users') or [])} | {operator['id']})
+        endpoint = '/api/user-groups/' + quote(group['id'], safe='') + '/users'
+        operation = {'kind': 'group-members', 'group': group['id'], 'users': members}
+        known_mutation(state, operation,
+                       lambda: request('pocket', 'PUT', endpoint, {'userIds': members}, key),
+                       lambda: {u['id'] for u in (owned_group(state, name, key).get('users') or [])} == set(members))
+        client = owned_client(state, name, key)
+        if not client.get('isGroupRestricted'):
+            # Pocket ID PUT replaces the DTO. Preserve all writable native
+            # settings, credential metadata and unrelated allowed groups.
+            rendered = {field: client[field] for field in CLIENT_FIELDS if field in client}
+            rendered['isGroupRestricted'] = True
+            desired = client_settings_digest(rendered)
+            operation = {'kind': 'restrict-client', 'client': client['id'], 'settings_digest': desired}
+            endpoint = '/api/oidc/clients/' + quote(client['id'], safe='')
+            known_mutation(state, operation,
+                           lambda: request('pocket', 'PUT', endpoint, rendered, key),
+                           lambda: client_settings_digest(owned_client(state, name, key)) == desired)
+        if (not owned_client(state, name, key).get('isGroupRestricted') or
+                group['id'] not in {g['id'] for g in (owned_client(state, name, key).get('allowedUserGroups') or [])}):
+            fail('STACK_POCKET_GROUP_ACCESS_NOT_CONFIRMED')
+    value['operator_ready'] = True
+    save(state)
+    print('STACK_ONBOARDING_OPERATOR_READY')
+    return 0
+
+
+def netbird_users(state):
+    current = request('netbird', 'GET', '/api/users/current', token=state['token'], timeout=3)
+    if current.get('id') != state.get('owner_id') or current.get('role') != 'owner':
+        fail('STACK_NETBIRD_NATIVE_OWNER_MISMATCH')
+    users = request('netbird', 'GET', '/api/users', token=state['token'], timeout=3)
+    if not isinstance(users, list) or len(users) > 100:
+        fail('STACK_NETBIRD_USER_INVENTORY_OUTSIDE_BOUND')
+    return users
+
+
+def operator_subject(state):
+    # NetBird's EncodeDexUserID: standard unpadded base64 of the protobuf
+    # strings user_id (field 1) and connector_id (field 2). Bind both stable IDs,
+    # never just the user's email. Refuse formats outside the native bound.
+    user = onboarding(state)['operator_id'].encode('ascii')
+    provider = state['provider_id'].encode('ascii')
+    if not 1 <= len(user) < 128 or not 1 <= len(provider) < 128:
+        fail('STACK_NETBIRD_SUBJECT_OUTSIDE_BOUND')
+    return base64.b64encode(b'\x0a' + bytes([len(user)]) + user + b'\x12' + bytes([len(provider)]) + provider).decode().rstrip('=')
+
+
+def netbird_operator(state):
+    target = operator_subject(state)
+    users = [u for u in netbird_users(state) if u.get('id') == target]
+    if len(users) > 1:
+        fail('STACK_NETBIRD_OPERATOR_AMBIGUOUS')
+    if not users:
+        return None
+    user = users[0]
+    if user.get('idp_id') != state['provider_id'] or user.get('is_service_user') or user.get('role') not in ('user', 'admin'):
+        fail('STACK_NETBIRD_OPERATOR_NOT_OWNED')
+    return user
+
+
+def verify_operator_access(state, key):
+    value = onboarding(state)
+    if not value.get('operator_ready') or not human_operator(state, key):
+        fail('STACK_INITIAL_OPERATOR_NOT_READY')
+    for name in ('netbird', 'rustfs'):
+        group = owned_group(state, name, key)
+        client = owned_client(state, name, key)
+        if (value['operator_id'] not in {u['id'] for u in (group.get('users') or [])} or
+                not client.get('isGroupRestricted') or
+                group['id'] not in {g['id'] for g in (client.get('allowedUserGroups') or [])}):
+            fail('STACK_INITIAL_OPERATOR_ACCESS_CHANGED')
+
+
+def finish_netbird(state, key):
+    value = onboarding(state)
+    if value.get('complete'):
+        print('STACK_ONBOARDING_COMPLETE')
+        return 0
+    verify_operator_access(state, key)
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        user = netbird_operator(state)
+        if user:
+            break
+        time.sleep(2)
+    else:
+        print('STACK_ONBOARDING_NETBIRD_PENDING')
+        return 42
+    # Revalidate after the human wait, not just before it. A revoked Pocket
+    # administrator/passkey/group must not receive a new NetBird grant.
+    verify_operator_access(state, key)
+    endpoint = '/api/users/' + quote(user['id'], safe='')
+    if user.get('pending_approval'):
+        operation = {'kind': 'approve-operator', 'user': user['id']}
+        known_mutation(state, operation,
+                       lambda: request('netbird', 'POST', endpoint + '/approve', token=state['token']),
+                       lambda: (target := netbird_operator(state)) is not None and
+                       target.get('pending_approval') is False and target.get('is_blocked') is False)
+    user = netbird_operator(state)
+    if user.get('is_blocked') or user.get('pending_approval'):
+        fail('STACK_NETBIRD_OPERATOR_BLOCKED_NOT_OVERRIDDEN')
+    if user['role'] != 'admin':
+        verify_operator_access(state, key)
+        groups = user.get('auto_groups') or []
+        if not isinstance(groups, list):
+            fail('STACK_NETBIRD_OPERATOR_GROUPS_INVALID')
+        operation = {'kind': 'admin-operator', 'user': user['id'], 'groups': groups}
+        known_mutation(state, operation,
+                       lambda: request('netbird', 'PUT', endpoint, {
+                           'role': 'admin', 'auto_groups': groups, 'is_blocked': False}, state['token']),
+                       lambda: (target := netbird_operator(state)) is not None and
+                       target.get('role') == 'admin' and target.get('is_blocked') is False and
+                       target.get('pending_approval') is False and set(target.get('auto_groups') or []) == set(groups))
+    value['netbird_user_id'] = user['id']
+    value['complete'] = True
+    save(state)
+    print('STACK_ONBOARDING_COMPLETE')
+    return 0
 
 
 def main():
@@ -81,6 +388,19 @@ def main():
     if not key:
         fail('STACK_POCKET_API_KEY_REQUIRED')
     initialize_tls()
+    phase = sys.argv[1] if len(sys.argv) == 2 else 'prepare'
+    if len(sys.argv) > 2 or phase not in ('prepare', 'groups', 'operator', 'netbird'):
+        fail('STACK_ONBOARDING_PHASE_INVALID')
+    if phase != 'prepare':
+        state = json.loads(read_private(STATE))
+        if state.get('version') != 1 or not state.get('configured'):
+            fail('STACK_ONBOARDING_NOT_CONFIGURED')
+        settle_pending(state, key)
+        if phase == 'groups':
+            if not onboarding(state).get('complete'):
+                prepare_groups(state, key)
+            return 0
+        return finish_operator(state, key) if phase == 'operator' else finish_netbird(state, key)
     for attempt in range(20):
         try:
             discovery = request('pocket', 'GET', '/.well-known/openid-configuration', timeout=3)
@@ -102,6 +422,7 @@ def main():
         save(state)
     if state.get('version') != 1:
         fail('STACK_ENROLLMENT_VERSION_INVALID')
+    settle_pending(state, key)
     if instance.get('setup_required'):
         owner = request('netbird', 'POST', '/api/setup', {
             **state['owner'], 'name': 'GnX recovery administrator', 'create_pat': True, 'pat_expire_in': 1})
@@ -126,7 +447,7 @@ def main():
                 raise
             client = request('pocket', 'POST', '/api/oidc/clients', {
                 'id': client_id, 'name': 'GnX ' + name, 'description': description,
-                'isPublic': False, 'pkceEnabled': name == 'rustfs', 'skipConsent': False,
+                'isPublic': False, 'pkceEnabled': name == 'rustfs', 'skipConsent': False, 'isGroupRestricted': True,
                 'callbackURLs': [callback], 'launchURL': 'https://' + name + '.gnx'}, key)
             # The upstream auto-created secret is unused; its value is not exported.
             if client.get('createdSecret'):
@@ -142,6 +463,8 @@ def main():
             request('pocket', 'DELETE', '/api/oidc/clients/' + client_id + '/secrets/' + entry['auto_secret_id'], token=key)
             del entry['auto_secret_id']
             save(state)
+    if not onboarding(state).get('complete'):
+        prepare_groups(state, key)
     if not state.get('provider_id'):
         client = state['clients']['netbird']
         provider = request('netbird', 'POST', '/api/identity-providers', {
@@ -174,17 +497,18 @@ def main():
     state['configured'] = True
     save(state)
     print('Stack OIDC configured; a real operator passkey is still required for human sign-in.')
+    return 0
 
 
 if __name__ == '__main__':
     try:
-        main()
+        raise SystemExit(main())
     except urllib.error.HTTPError as error:
         print('Stack API operation not confirmed (HTTP ' + str(error.code) + '); inspect owned enrollment state, do not reset it.', file=__import__('sys').stderr)
         raise SystemExit(1)
     except RuntimeError as error:
         print(str(error), file=__import__('sys').stderr)
         raise SystemExit(1)
-    except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.CalledProcessError) as error:
         print('Stack enrollment not confirmed (' + type(error).__name__ + '); preserve credentials and inspect native diagnostics.', file=__import__('sys').stderr)
         raise SystemExit(1)

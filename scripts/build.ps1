@@ -137,7 +137,7 @@ try {
         $base = (Get-Content config/bootc.json -Raw | ConvertFrom-Json).source
         $image = Join-Path (Split-Path $layer -Parent) 'base.image.tar'
         $revision = git rev-parse HEAD
-        Native 'Sealed base OCI' { & $crane mutate $base --platform=linux/amd64 --append $layerTar --label "org.opencontainers.image.version=$version" --label 'org.opencontainers.image.title=GnX Core Base' --label 'org.opencontainers.image.source=https://github.com/mayas-alas/quetzalcoatl-next' --label "org.opencontainers.image.revision=$revision" --output $image }
+        Native 'Sealed base OCI' { & $crane mutate $base --platform=linux/amd64 --append $layerTar --label "org.opencontainers.image.version=$version" --label 'org.opencontainers.image.title=GnX Core Base' --label 'org.opencontainers.image.source=https://github.com/mayas-alas/quetzalcoatl' --label "org.opencontainers.image.revision=$revision" --output $image }
         $digest = & $crane digest --tarball $image
         if ($LASTEXITCODE -ne 0 -or $digest -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Sealed image digest unavailable' }
         [IO.File]::WriteAllText((Join-Path $output 'base-image.digest'),$digest,[Text.UTF8Encoding]::new($false))

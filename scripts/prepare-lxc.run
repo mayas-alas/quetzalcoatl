@@ -1,6 +1,7 @@
 #!/usr/bin/bash
 # Fixed guest-only preparation, not a user-supplied script.
 set -euo pipefail
+trap 'code=$?; printf "GNX_LXC_PREPARE_FAILED line=%s exit=%s\n" "$LINENO" "$code" >&2; exit "$code"' ERR
 umask 077
 [[ $(id -u) == 0 ]]
 systemd-detect-virt --container --quiet

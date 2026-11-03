@@ -22,13 +22,13 @@ fn run() -> std::io::Result<bool> {
     match args.as_slice() {
         [] => {
             println!(
-                "gnx start | stop | status | enroll | password | deploy [carpeta] | update --check|--apply [catalogo.json] | update --force"
+                "gnx start | stop | status | enroll | password | deploy [carpeta] | update --check|--apply [catalogo.json] | update --force | update --resume"
             );
             Ok(true)
         }
         [arg] if arg == "--help" || arg == "-h" => {
             println!(
-                "gnx start | stop | status | enroll | password | deploy [carpeta]\ngnx update --check|--apply [catalogo.json]\ngnx update --force\ngnx update --apply --force\nDeploy sin carpeta prepara private-services; muestra etapas sin secretos. Con carpeta mantiene el despliegue explícito. Check sin catálogo consulta releases públicas y muestra la transacción. Apply sin catálogo actualiza el producto por MSI/Burn y luego sus componentes; con catálogo solo aplica componentes. Force recrea el nodo instalado: borra datos, identidades y guests administrados tras inventario y confirmación interactiva. Apply --force selecciona primero la release pública. No reinicia Windows ni purga otras WSL. La entrega al worker no confirma finalización; consulta --check y eventos. Enroll/password solicitan entrada sin eco."
+                "gnx start | stop | status | enroll | password | deploy [carpeta]\ngnx update --check|--apply [catalogo.json]\ngnx update --force\ngnx update --apply --force\ngnx update --resume\nDeploy sin carpeta prepara private-services; muestra etapas sin secretos. Con carpeta mantiene el despliegue explícito. Check sin catálogo consulta releases públicas y muestra la transacción. Apply sin catálogo actualiza el producto por MSI/Burn y luego sus componentes; con catálogo solo aplica componentes. Force recrea el nodo instalado: borra datos, identidades y guests administrados tras inventario y confirmación interactiva. Apply --force selecciona primero la release pública. Resume continúa la preparación de un nodo parcial propio tras una recreación interrumpida sin instalador pendiente; requiere PREPARAR, no borra ni restaura el nodo anterior. No reinicia Windows ni purga otras WSL. La entrega al worker no confirma finalización; consulta --check y eventos. Enroll/password solicitan entrada sin eco."
             );
             Ok(true)
         }
@@ -52,6 +52,11 @@ fn run() -> std::io::Result<bool> {
             Ok(true)
         }
         #[cfg(windows)]
+        [arg] if arg == "--product-resume" => {
+            windows::product_resume()?;
+            Ok(true)
+        }
+        #[cfg(windows)]
         [arg] if arg == "--service" => {
             windows::service::dispatch()?;
             Ok(true)
@@ -67,6 +72,8 @@ fn run() -> std::io::Result<bool> {
             println!("catálogo válido; compatibilidad, instalación y salud no comprobadas");
             Ok(true)
         }
+        #[cfg(windows)]
+        [arg, mode] if arg == "update" && mode == "--resume" => windows::resume_product(),
         #[cfg(windows)]
         [arg, mode] if arg == "update" && (mode == "--apply" || mode == "--force") => {
             windows::apply_product(mode == "--force", mode == "--apply")

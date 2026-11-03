@@ -25,11 +25,17 @@ pub fn check_product_release() -> std::io::Result<String> {
 pub fn apply_product(force: bool, discover: bool) -> std::io::Result<bool> {
     product_update::apply(force, discover)
 }
+pub fn resume_product() -> std::io::Result<bool> {
+    product_update::resume()
+}
 pub fn product_worker() -> std::io::Result<()> {
     product_update::dispatch()
 }
 pub fn product_recreate() -> std::io::Result<()> {
     product_update::recreate_installed().inspect_err(service::report_error)
+}
+pub fn product_resume() -> std::io::Result<()> {
+    product_update::resume_installed().inspect_err(service::report_error)
 }
 
 pub fn installer(remove: bool) -> std::io::Result<()> {

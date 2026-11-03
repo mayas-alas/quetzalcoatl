@@ -48,6 +48,13 @@ fi
 [[ "$mode" != dns ]] || exit 0
 # A container being started is not the same as its PVE config store being ready.
 podman exec gnx-core-compute systemctl start pve-cluster.service
+# A registered guest that no longer exists has nothing to reconcile. Failing here
+# tore down a healthy container and re-entered the restart cycle for as long as
+# the guest stayed absent; check the exact config instead of masking other errors.
+if ! podman exec gnx-core-compute test -f "/etc/pve/nodes/gnx-core-compute/lxc/$id.conf"; then
+    echo "gnx-stack-access: guest $id is absent; skipping reconcile" >&2
+    exit 0
+fi
 podman exec gnx-core-compute pvesh get "/nodes/gnx-core-compute/lxc/$id/config" --output-format json |
     jq -e --arg owner "GnX.Core:$digest" --arg mac "$mac" '.unprivileged == 1 and (.description|rtrimstr("\n")) == $owner and (.net0|contains("ip=172.30.0.100/24")) and (.net0|ascii_downcase|contains("hwaddr=" + ($mac|ascii_downcase)))' >/dev/null
 # Claim only this exact host route, never another subnet or a default route.

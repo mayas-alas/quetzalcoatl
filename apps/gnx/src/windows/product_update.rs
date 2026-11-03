@@ -68,6 +68,8 @@ struct Transaction {
     inventory: Option<Inventory>,
     #[serde(default)]
     unresolved_recreation: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    resume: bool,
     message: String,
 }
 fn save(transaction: &Transaction) -> io::Result<()> {
@@ -95,6 +97,12 @@ fn read() -> io::Result<Transaction> {
         || value.assets.iter().filter(|a| a.name == MSI).count() != usize::from(value.install)
         || value.assets.iter().filter(|a| a.name == BUNDLE).count() != usize::from(value.bundle)
         || (value.bundle && !value.install)
+        || (value.resume
+            && (value.force
+                || value.install
+                || value.bundle
+                || !value.unresolved_recreation
+                || value.inventory.is_none()))
     {
         return Err(invalid("transacción no reconocida"));
     }
@@ -136,8 +144,9 @@ pub(super) fn permit(operation: Option<Operation>) -> io::Result<()> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
         Ok(t)
-            if ["complete", "starting_service", "applying_components"]
-                .contains(&t.phase.as_str())
+            if t.phase == "complete"
+                || ((!t.resume || operation.is_none())
+                    && ["starting_service", "applying_components"].contains(&t.phase.as_str()))
                 || (!t.unresolved_recreation
                     && ["cancelled", "failed_before_native"].contains(&t.phase.as_str())) =>
         {
@@ -317,12 +326,41 @@ fn worker_absent() -> io::Result<()> {
         )),
     }
 }
-fn clean_previous(force: bool, binary: &Path) -> io::Result<(Option<Inventory>, bool)> {
+fn clean_previous(
+    force: bool,
+    binary: &Path,
+    resume: bool,
+) -> io::Result<(Option<Inventory>, bool)> {
     worker_absent()?;
     match read() {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok((None, false)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound && !resume => Ok((None, false)),
         Err(e) => Err(e),
         Ok(previous) => {
+            if resume {
+                if (!previous.force && !previous.resume)
+                    || (!previous.resume
+                        && previous.phase != "interrupted"
+                        && !previous.unresolved_recreation)
+                    || previous.install
+                    || previous.bundle
+                    || !["interrupted", "cancelled", "failed_before_native"]
+                        .contains(&previous.phase.as_str())
+                    || previous.inventory.is_none()
+                    || service_binary()? != previous.binary
+                {
+                    return Err(invalid(
+                        "sin recreación interrumpida propia y sin instalador pendiente no se continúa la preparación",
+                    ));
+                }
+                let main = manager(ServiceManagerAccess::CONNECT)?
+                    .open_service(SERVICE, ServiceAccess::QUERY_STATUS)
+                    .map_err(io::Error::other)?;
+                security::require_idle_maintenance(
+                    binary,
+                    &super::bootstrap::private_root()?.join(HELPER),
+                    main.query_status().map_err(io::Error::other)?.process_id,
+                )?;
+            }
             let unresolved = previous.phase == "interrupted"
                 || (previous.unresolved_recreation && previous.phase != "complete");
             let new_destructive_request = force
@@ -335,6 +373,7 @@ fn clean_previous(force: bool, binary: &Path) -> io::Result<(Option<Inventory>, 
                 || !["complete", "cancelled", "failed_before_native"]
                     .contains(&previous.phase.as_str()))
                 && !new_destructive_request
+                && !resume
             {
                 return Err(invalid(
                     "transacción previa pendiente, desconocida o con reinicio requerido; no se repite automáticamente",
@@ -376,7 +415,15 @@ fn clean_previous(force: bool, binary: &Path) -> io::Result<(Option<Inventory>, 
             }
             // Keep the prior barrier on disk throughout staging. The atomic save
             // of the replacement carries it through cancellation/early failure.
-            Ok((previous.inventory, unresolved))
+            let mut inventory = previous.inventory;
+            if resume && !previous.resume {
+                // The first continuation must prove the OLD GUID is absent.
+                // Only a ready continuation binds partial=true to its new GUID.
+                if let Some(inventory) = &mut inventory {
+                    inventory.partial = false;
+                }
+            }
+            Ok((inventory, unresolved || resume))
         }
     }
 }
@@ -407,6 +454,14 @@ fn stage_download(name: &str, asset: &release_source::Asset, expected: &str) -> 
     result
 }
 pub fn apply(force: bool, discover: bool) -> io::Result<bool> {
+    apply_inner(force, discover, false)
+}
+
+pub fn resume() -> io::Result<bool> {
+    apply_inner(false, false, true)
+}
+
+fn apply_inner(force: bool, discover: bool, resume: bool) -> io::Result<bool> {
     security::effective_admin()?;
     let binary = service_binary()?;
     if fs::canonicalize(std::env::current_exe()?)? != binary
@@ -429,6 +484,7 @@ pub fn apply(force: bool, discover: bool) -> io::Result<bool> {
         assets: Vec::new(),
         inventory: None,
         unresolved_recreation: false,
+        resume,
         message: String::new(),
     };
     // Discovery and integrity failures occur before touching SCM or the node.
@@ -446,7 +502,7 @@ pub fn apply(force: bool, discover: bool) -> io::Result<bool> {
     } else {
         None
     };
-    if !transaction.install && !force {
+    if !transaction.install && !force && !resume {
         let result = super::update(
             Operation::UpdateApply,
             Some(crate::updates::Catalog::builtin()?),
@@ -454,14 +510,14 @@ pub fn apply(force: bool, discover: bool) -> io::Result<bool> {
         println!("{}", result.message);
         return Ok(result.ok);
     }
-    if force && !io::stdin().is_terminal() {
+    if (force || resume) && !io::stdin().is_terminal() {
         return Err(invalid(
-            "la recreación requiere consola interactiva e inventario confirmado; sin confirmación implícita",
+            "la recreación o continuación requiere consola interactiva e inventario confirmado; sin confirmación implícita",
         ));
     }
     let lease = maintenance::lease()?;
     (transaction.inventory, transaction.unresolved_recreation) =
-        clean_previous(force, &transaction.binary)?;
+        clean_previous(force, &transaction.binary, resume)?;
     for name in [HELPER, MSI, BUNDLE] {
         match fs::symlink_metadata(super::bootstrap::private_root()?.join(name)) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -548,12 +604,17 @@ pub fn apply(force: bool, discover: bool) -> io::Result<bool> {
         }
         std::thread::sleep(Duration::from_millis(200));
     }
-    if force {
+    if force || resume {
         let inventory = transaction
             .inventory
             .as_ref()
             .ok_or_else(|| invalid("falta inventario"))?;
-        if !recreation::confirm(inventory)? {
+        let confirmed = if resume {
+            recreation::confirm_preparation(inventory)?
+        } else {
+            recreation::confirm(inventory)?
+        };
+        if !confirmed {
             let message = if transaction.unresolved_recreation {
                 "nueva solicitud cancelada; la recreación anterior sigue sin resolver y bloquea otras mutaciones"
             } else {
@@ -714,7 +775,14 @@ fn worker() -> io::Result<()> {
             return Err(invalid("proceso iniciador no confirmado"));
         }
         let lease = maintenance::lease()?;
-        let inventory = if transaction.force {
+        let inventory = if transaction.resume {
+            recreation::preparation_inventory(
+                transaction
+                    .inventory
+                    .as_ref()
+                    .ok_or_else(|| invalid("falta identidad de preparación pendiente"))?,
+            )?
+        } else if transaction.force {
             recreation::force_inventory(
                 transaction.inventory.as_ref(),
                 transaction.unresolved_recreation,
@@ -722,7 +790,10 @@ fn worker() -> io::Result<()> {
         } else {
             recreation::inventory()?
         };
-        if !transaction.force && inventory.guests.iter().any(|g| g.status != "stopped") {
+        if !transaction.force
+            && !transaction.resume
+            && inventory.guests.iter().any(|g| g.status != "stopped")
+        {
             return Err(invalid(
                 "hay guests activos; detenerlos explícitamente en PVE antes de actualizar sin fuerza",
             ));
@@ -746,6 +817,7 @@ fn worker() -> io::Result<()> {
                 || next.binary != transaction.binary
                 || next.assets != transaction.assets
                 || next.unresolved_recreation != transaction.unresolved_recreation
+                || next.resume != transaction.resume
             {
                 return Err(invalid("handoff de transacción divergente"));
             }
@@ -768,7 +840,14 @@ fn worker() -> io::Result<()> {
         if unsafe { WaitForSingleObject(parent.0, 30000) } != WAIT_OBJECT_0 {
             return Err(invalid("la CLI iniciadora no salió; no se reemplaza"));
         }
-        if transaction.force {
+        if transaction.resume {
+            recreation::verify_preparation(
+                transaction
+                    .inventory
+                    .as_ref()
+                    .ok_or_else(|| invalid("falta nodo parcial confirmado"))?,
+            )?;
+        } else if transaction.force {
             recreation::verify_target(
                 transaction
                     .inventory
@@ -798,7 +877,7 @@ fn worker() -> io::Result<()> {
         }
         // Only conservative updates need a live runtime across SCM maintenance.
         // Force must not start a cold WSL merely to keep the old node alive.
-        let mut runtime_hold = (!transaction.force).then(RuntimeHold::new);
+        let mut runtime_hold = (!transaction.force && !transaction.resume).then(RuntimeHold::new);
         phase(
             &mut transaction,
             "stopping_service",
@@ -884,7 +963,25 @@ fn worker() -> io::Result<()> {
         if manifest["product_version"].as_str() != Some(transaction.target.as_str()) {
             return Err(invalid("payload instalado no corresponde a la release"));
         }
-        if transaction.force {
+        if transaction.resume {
+            recreation::verify_preparation(
+                transaction
+                    .inventory
+                    .as_ref()
+                    .ok_or_else(|| invalid("falta nodo parcial confirmado"))?,
+            )?;
+            phase(
+                &mut transaction,
+                "preparing",
+                "continuación del nodo parcial confirmado; sin unregister ni reinstalación Windows",
+            )?;
+            let code = native(&binary, &["--product-resume"], 2100)?;
+            if code != 0 {
+                return Err(invalid(&format!(
+                    "preparación devolvió {code}; consultar eventos antes de solicitar otra continuación"
+                )));
+            }
+        } else if transaction.force {
             // The package has not bootstrapped while our lease was held. Recheck
             // the owned target before invoking recreation in the installed binary.
             recreation::verify_target(
@@ -941,7 +1038,7 @@ fn worker() -> io::Result<()> {
             std::thread::sleep(Duration::from_secs(1));
         }
         drop(runtime_hold.take());
-        if !transaction.force {
+        if !transaction.force && !transaction.resume {
             phase(
                 &mut transaction,
                 "applying_components",
@@ -962,7 +1059,9 @@ fn worker() -> io::Result<()> {
                 ));
             }
         }
-        let message = if transaction.force {
+        let message = if transaction.resume {
+            "preparación del nodo propio completada; sin restaurar datos del nodo retirado; salud/login no aceptados"
+        } else if transaction.force {
             "nodo recreado vacío; configura de nuevo password y enroll; login y salud no aceptados"
         } else {
             "instalación y aplicación nativas terminadas; salud/login y rollback de migraciones no acreditados"
@@ -989,6 +1088,7 @@ pub fn recreate_installed() -> io::Result<()> {
     security::enable_identity_privileges()?;
     let transaction = read()?;
     if !transaction.force
+        || transaction.resume
         || transaction.phase != "recreating"
         || service_binary()? != fs::canonicalize(std::env::current_exe()?)?
     {
@@ -1011,4 +1111,43 @@ pub fn recreate_installed() -> io::Result<()> {
             .as_ref()
             .ok_or_else(|| invalid("falta inventario confirmado"))?,
     )
+}
+
+pub fn resume_installed() -> io::Result<()> {
+    security::require_system()?;
+    security::enable_identity_privileges()?;
+    let transaction = read()?;
+    if !transaction.resume
+        || transaction.phase != "preparing"
+        || transaction.target != env!("CARGO_PKG_VERSION")
+        || installer_package::installed()? != transaction.target
+        || service_binary()? != fs::canonicalize(std::env::current_exe()?)?
+    {
+        return Err(invalid(
+            "continuación interna no autorizada por transacción",
+        ));
+    }
+    let service = manager(ServiceManagerAccess::CONNECT)?
+        .open_service(SERVICE, ServiceAccess::QUERY_STATUS)
+        .map_err(io::Error::other)?;
+    if service
+        .query_status()
+        .map_err(io::Error::other)?
+        .current_state
+        != ServiceState::Stopped
+    {
+        return Err(invalid("servicio principal no está detenido"));
+    }
+    let expected = transaction
+        .inventory
+        .as_ref()
+        .ok_or_else(|| invalid("falta nodo parcial confirmado"))?;
+    recreation::verify_preparation(expected)?;
+    let owner = super::identity::Ownership::record()?;
+    super::bootstrap::resume(&owner)?;
+    let prepared = super::identity::Ownership::read()?;
+    if prepared.sid != expected.sid || prepared.distribution_id != expected.distribution {
+        return Err(invalid("identidad cambió durante la preparación"));
+    }
+    Ok(())
 }

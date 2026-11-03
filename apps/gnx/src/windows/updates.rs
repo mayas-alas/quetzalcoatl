@@ -35,6 +35,8 @@ struct Receipt {
     digest: String,
     vmid: u32,
     complete: bool,
+    #[serde(default)]
+    attempt: u32,
 }
 
 #[derive(Deserialize)]
@@ -125,6 +127,7 @@ cat "$p"
             {
                 return Err(invalid("propiedad de stack no confirmada"));
             }
+            let mut attempt = None;
             for (suffix, complete) in [(".json", false), (".complete.json", true)] {
                 let name = format!("deploy-{}{suffix}", stack.digest);
                 let receipt: Receipt =
@@ -135,9 +138,12 @@ cat "$p"
                     || receipt.digest != stack.digest
                     || receipt.vmid != stack.vmid
                     || receipt.complete != complete
+                    || receipt.attempt >= 32
+                    || attempt.is_some_and(|previous| previous != receipt.attempt)
                 {
                     return Err(invalid("stack ajeno o incompleto; no se adopta"));
                 }
+                attempt = Some(receipt.attempt);
             }
             let endpoint = format!("/nodes/gnx-core-compute/lxc/{}/config", stack.vmid);
             let conf: serde_json::Value = serde_json::from_str(&super::deploy::command(

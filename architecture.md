@@ -177,8 +177,8 @@ no reemplazan una WSL existente con el rootfs de primera instalación. No existe
 una función de purga genérica. El empaquetado local y CI, sus inputs y gates se describen
 en [docs/packaging.md](docs/packaging.md).
 
-Las fuentes 0.0.23 añaden `release_source.rs`, `installer_package.rs`,
-`product_update.rs`, `maintenance.rs` y `recreation.rs`. El descubrimiento HTTPS
+El descubrimiento y la transacción de actualización se separan de la inspección
+del instalador y de las políticas de conservación/recreación. El descubrimiento HTTPS
 es público y no usa sesiones de desarrollo; la inspección MSI contrasta identidad
 y versión nativas. Un worker SCM temporal LocalSystem usa una copia protegida del
 ejecutable para esperar la salida de la CLI y ejecutar MSI/Burn fuera de `GnXCore`.
@@ -193,28 +193,47 @@ externos por nombre. Conserva el scaffold de cuenta Windows y la transacción;
 prepara WSL vacía desde el payload instalado, sin CA/mesh/credencial PVE anteriores.
 La operación vuelve a requerir `password` y `enroll`; no es una actualización
 conservadora ni una prueba de aceptación de ese recorrido.
-En 0.0.25 no llama a la retirada conservadora ni exige PVE disponible: elimina la
-WSL registrada, comprueba la ausencia del GUID y VHD anteriores y prepara la base.
+La retirada destructiva no llama a la retirada conservadora ni exige PVE disponible:
+elimina la WSL registrada, comprueba la ausencia del GUID y VHD anteriores y prepara la base.
 Una lista de guests no observable se distingue de una actual; el alcance aprobado
 es todo el VHD. Se registran errores del subproceso y no se restaura el nodo viejo.
-Desde 0.0.26, el worker puede reconocer una retirada anterior ya consumada mediante
+El worker puede reconocer una retirada anterior ya consumada mediante
 el recibo y la identidad Windows verificados, sin crear un perfil para observarla.
 Si no existe GUID/VHD, registro GnX ni otro estado de nodo, exige `PREPARAR` y
 ejecuta solo bootstrap; revalida antes de actuar y nunca repite `--unregister` en
-esa rama. Un nodo nuevo/parcial bloquea la continuación. El bootstrap usa el SID
+esa rama. Un nodo nuevo/parcial exige otra autorización de recreación. El bootstrap usa el SID
 de la cuenta en `NetLocalGroupAddMembers`, no un nombre relativo.
-En 0.0.27 la propiedad se escribe tras importar y se reutiliza para reconocer
+La propiedad se escribe tras importar y se reutiliza para reconocer
 preparaciones parciales en retirada/recreación. La configuración Linux entra por
 stdin; el payload se entrega con tar nativo y se verifica en Linux, sin depender
 de DrvFS ni añadir un supervisor. SCM/pipe aportan el PID real del iniciador MSI;
 lease, recibo y procesos observados protegen la retirada durante una interrupción.
 Las políticas diferentes y el camino de síntesis están en [lifecycle](docs/lifecycle.md).
 
+En las fuentes 0.0.33, `update --resume` usa el mismo worker SCM para continuar
+una preparación parcial, sin descarga, MSI/Burn, catálogo de componentes ni
+retirada. Una bandera opcional del recibo, ausente en los anteriores, distingue
+esta operación de `force`. La primera observación exige ausencia del GUID anterior
+y coincidencia del registro nuevo con `identity.json`, SID, BasePath y VHD propio
+directo. El inventario confirmado fija ese GUID para posteriores continuaciones;
+no inicia WSL ni presenta como actual la lista histórica de guests.
+
+Tras `PREPARAR`, el worker revalida el nodo y detiene solo `GnXCore`. La entrada
+SYSTEM instalada comparte el bootstrap, pero no crea cuenta/perfil, importa otra
+WSL, reescribe `wsl.conf` ni termina la distro: exige que su configuración coincida
+y rechaza la unidad de instalación Linux activa. Completa el payload y la
+publicación propios; si ya está preparado con esa misma versión, no los reaplica.
+Rechaza estado de despliegues o actualizaciones de componentes y nodos preparados
+con otra versión. Cancelación o fallo conservan la barrera; al recuperar el
+servicio solo se permite su preparación interna, no otras mutaciones hasta
+completar la transacción. Este recorrido no restaura el nodo retirado ni acredita
+salud o autenticación.
+
 ## Diagnóstico y límites
 
 SCM/Visor de eventos y systemd/journal son las fuentes de diagnóstico. No se añade
 otro observador ni se presenta una fase histórica como salud actual.
-Desde 0.0.16 existe una entrada CLI de despliegue a LXC; no existe
+La CLI admite despliegue a LXC; no existe
 recepción web ni puente nativo desde la página. El contrato y estado de aceptación
 se detallan en [Despliegue](docs/deployment.md). Las integraciones de aplicaciones
 no se acreditan por iniciar sus contenedores.
@@ -259,14 +278,26 @@ define su compatibilidad con versiones anteriores. Esta separación guía la
 recuperación prevista para WSL y LXC; no acredita que ya esté implementada.
 
 El cierre consulta `ActiveState` por cada unidad solicitada, también después de
-la configuración OIDC del stack. No prueba salud funcional. Al reenviar una entrada completada solo se
-consulta `pct status`, sin reconciliar archivos ni comprobar otra vez las unidades.
+la configuración OIDC del stack. No prueba salud funcional. Al reenviar una entrada
+general completada solo se consulta `pct status`, sin reconciliar archivos ni
+comprobar otra vez las unidades. El stack privado en ejecución admite la continuación
+acotada de su onboarding inicial, sin reinstalar aplicaciones ni iniciar el guest.
 La preparación enmascara ajuste de reloj y montajes de host incompatibles con el
 guest no privilegiado; no se describe como una plantilla LXC mínima o libre de fallos.
 
+La preparación delega la espera inicial del guest en
+`systemctl is-system-running --wait`. Rust comparte un plazo total de 120 segundos
+entre las consultas nativas y la espera de un segundo cuando el bus aún no existe
+o rechaza conexión. Solo se repite esa lectura ante el error nativo reconocido,
+no las mutaciones ni los errores desconocidos. Se acepta
+fin de arranque `running`/`degraded`, no salud de las aplicaciones ni éxito de la
+preparación. Los errores distinguen operaciones y solo la preparación fija sin
+credenciales expone detalle nativo limitado; no se vuelcan entradas privadas ni
+el journal. No hay otro supervisor ni reintentos de mutaciones desconocidas.
+
 ### Stack privado
 
-Las fuentes 0.0.20 incorporan `updates.rs` y `windows/updates.rs`: validan un catálogo
+La actualización de componentes valida un catálogo
 cerrado para ocho componentes, reutilizan el pipe administrativo y su exclusión de
 mutaciones, contrastan ownership y coordinan operaciones fijas por unidad con
 `update-component.run`. Este script opera Podman/systemd sin gestionar otro lifecycle.
@@ -274,8 +305,8 @@ El catálogo aprobado vive en estado Windows protegido; recibos y Quadlets anter
 quedan en `updates/` del estado Linux correspondiente. Comparar al arrancar no consulta
 la red ni aplica imágenes. El contrato operativo está en [Actualizaciones](docs/updates.md).
 
-`install-console.run` verifica y extrae el ZIP oficial Console v0.1.38 incluido en
-el payload. Caddy sirve sus recursos estáticos bajo `/rustfs/console/`, conservando
+La consola oficial se incorpora al payload como un recurso fijado y verificado.
+Caddy sirve sus recursos estáticos bajo `/rustfs/console/`, conservando
 API/callback/S3 en RustFS. La imagen del servidor y sus volúmenes no se reconstruyen.
 La versión del frontend se identifica separadamente mediante una cabecera; el endpoint
 nativo `/rustfs/console/version` continúa informando la versión del servidor.
@@ -299,7 +330,22 @@ El guest recibe solo la CA pública; la preparación verifica nombre/cadena TLS 
 la CRL firmada vigente sin rotar la raíz existente. El operador registra su passkey
 real en Pocket ID. Preparar clientes OIDC no acredita autenticación humana.
 
-En las fuentes, `deploy` sin carpeta transmite una selección fija por el pipe,
+Las fuentes 0.0.34 coordinan desde Rust las fases fijas `groups`, `operator` y
+`netbird` del mismo script mediante `pct exec`/stdin. Cada espera humana dura hasta
+120 segundos; cada operación nativa queda acotada en Rust. No se añade un supervisor.
+El estado privado guarda IDs de grupos con nombres ligados al nonce de la instancia,
+el único administrador humano inicial con passkey y el sujeto Dex derivado de su
+ID Pocket ID y del conector propio. Las APIs añaden su pertenencia a los grupos y
+la restricción de los clientes; aprueban y conceden Admin de NetBird solo a ese
+sujeto, conservando la aprobación global y el propietario técnico. Membresías y
+grupos permitidos se conservan; clientes previamente abiertos pasan a restringidos
+durante la finalización explícita. No se asume identidad por correo o nombre.
+La intención protegida de cada mutación nueva se contrasta con lecturas nativas
+antes de continuar tras una interrupción. Una creación sin ID devuelto no se adopta.
+La finalización se registra separadamente del despliegue y no reconcilia después
+los cambios administrativos humanos. Véanse límites en [Despliegue](docs/deployment.md#onboarding-inicial-del-stack-privado).
+
+`deploy` sin carpeta transmite una selección fija por el pipe,
 no una ruta privilegiada. `deploy.rs` construye el bundle con las definiciones
 incorporadas y secretos aleatorios, la CA pública propia y la plantilla NetBird.
 Persiste los bytes exactos ligados al SID/GUID WSL en
@@ -309,6 +355,17 @@ reiniciar o cambiar las fuentes. La recreación inventaría ese estado propio; l
 retirada conservadora no lo elimina. El pipe admite marcos de progreso solicitados
 solo por deploy, correlacionados con la petición y limitados a etapas/estados sin
 salida bruta de procesos. Desconectar la CLI no cancela la operación nativa.
+
+La recuperación de una reserva incompleta es una operación explícita, distinta
+de restaurar datos o adoptar un guest. El servicio contrasta inventarios PVE,
+ausencia de tareas/discos y la reserva protegida; no deduce ausencia de un error
+de transporte. La CLI solicita consentimiento ligado al nodo, entrada, VMID e
+intento y el servicio revalida antes de archivar. El historial se conserva y el
+intento avanza antes de crear otro guest, sin rotar credenciales ni eliminar
+recursos nativos. Una reserva incompleta bloquea ante un stack registrado. Para un
+despliegue completado cuyo guest está ausente, la misma confirmación archiva los
+dos recibos y retira solo su registro privado obsoleto. Los detalles operativos
+están en [Despliegue](docs/deployment.md).
 
 Caddy transporta HTTP/2 gRPC y relay NetBird; no transporta STUN UDP. El puerto
 3478 se publica en la IP del guest, no mediante el portproxy TCP Windows. Acceso

@@ -96,6 +96,7 @@ impl Controller {
         let op = request.operation;
         let bundle = request.bundle.clone();
         let catalog = request.catalog.clone();
+        let recovery = request.recover_missing.clone();
         let secret = request
             .secret
             .as_ref()
@@ -111,7 +112,7 @@ impl Controller {
                 if matches!(op, Operation::UpdateCheck | Operation::UpdateApply) {
                     super::updates::execute(op == Operation::UpdateApply, catalog)
                 } else if op == Operation::Deploy {
-                    super::deploy::execute(bundle, &progress)
+                    super::deploy::execute(bundle, &progress, recovery.as_ref())
                         .map(|message| (NodeState::Active, message))
                 } else {
                     execute_secret(op, secret.as_deref().map(String::as_str))
@@ -138,14 +139,21 @@ impl Controller {
                 }
                 Response::new(request, state != NodeState::Degraded, state, &message)
             }
-            Ok(Err(error)) if op == Operation::Deploy => Response::new(
-                request,
-                false,
-                NodeState::Unknown,
-                &format!(
-                    "deploy: {error}; conserva el recibo y consulta journal/Visor de eventos antes de repetir"
-                ),
-            ),
+            Ok(Err(error)) if op == Operation::Deploy => {
+                let mut response = Response::new(
+                    request,
+                    false,
+                    NodeState::Unknown,
+                    &format!(
+                        "deploy: {error}; conserva el recibo y consulta journal/Visor de eventos antes de repetir"
+                    ),
+                );
+                response.recover_missing = error
+                    .get_ref()
+                    .and_then(|cause| cause.downcast_ref::<crate::protocol::MissingDeployment>())
+                    .cloned();
+                response
+            }
             Ok(Err(error)) if error.kind() == io::ErrorKind::NotFound => Response::new(
                 request,
                 false,

@@ -76,6 +76,7 @@ $gnx = "$env:ProgramFiles\GnX Core\gnx.exe"
 | `update --apply [catalogo.json]` | En 0.0.23 sin catálogo selecciona la release pública y entrega MSI/Burn a un worker SCM; con catálogo solo aplica componentes. Bloquea instalación normal con guests activos. |
 | `update --force` | En 0.0.23 recrea el nodo de la versión instalada, con inventario y confirmación interactiva de pérdida de datos y guests. |
 | `update --apply --force` | Selecciona primero la release pública y recrea después el nodo. No reinicia Windows ni purga otras WSL. |
+| `update --resume` | En las fuentes 0.0.33 continúa la preparación del nodo parcial propio tras una recreación interrumpida sin instalador pendiente. Exige `PREPARAR`; no repite el borrado ni restaura el nodo anterior. |
 
 Se usa la ruta explícita porque el instalador no modifica `PATH`. No introduzcas
 keys ni contraseñas en argumentos, la app informativa, logs o chat. Los formularios
@@ -149,10 +150,24 @@ del producto; no la copies a Git ni la compartas. La CLI muestra etapas y estado
 no secretos ni el journal bruto. Los instaladores anteriores a este cambio no
 incorporan este recorrido. No se ejecuta al instalar o al arrancar el nodo.
 
+Si se eliminó manualmente un LXC cuyo despliegue quedó incompleto, las fuentes
+permiten una [recuperación explícita](docs/deployment.md#recuperar-una-reserva-incompleta-de-un-guest-ausente)
+desde el mismo `deploy`: comprueban ausencia y solicitan `RECUPERAR <vmid>`.
+Conservan credenciales e historial, pero no restauran datos del guest eliminado.
+No borres recibos ni uses `update --force` para resolver ese caso.
+
 Para el primer acceso humano, abre `https://pocket.gnx/setup`, crea tu cuenta y
 registra una passkey real. La preparación de OIDC no crea esa cuenta. STUN UDP
 no atraviesa el portproxy TCP de Windows; no se acredita conectividad entre peers
 externos por abrir el dashboard de NetBird.
+
+Las fuentes 0.0.34 guían ese alta dentro de `deploy`, preparan grupos propios y
+aprueban como Admin de NetBird únicamente al operador inicial con passkey. Mantén
+el permiso de correo al autenticarte en NetBird. Si vence la espera humana, la CLI
+informa onboarding pendiente; la misma entrada permite continuarlo sin recrear
+el LXC ni reinstalar aplicaciones. No se desactiva la aprobación de otros usuarios.
+Consulta [el recorrido y sus límites](docs/deployment.md#onboarding-inicial-del-stack-privado).
+Este cambio en fuentes no acredita una 0.0.34 empaquetada o instalada.
 
 ## Acceso y conservación
 

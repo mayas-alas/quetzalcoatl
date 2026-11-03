@@ -36,6 +36,47 @@ Los instaladores publicados antes de este cambio requieren la carpeta explícita
 La disponibilidad HTTPS, el alta/passkey en `https://pocket.gnx/setup`, S3 y la
 conectividad entre peers se comprueban aparte.
 
+### Onboarding inicial del stack privado
+
+Las fuentes 0.0.34 separan el despliegue de aplicaciones del onboarding humano.
+`deploy` prepara grupos propios para NetBird y RustFS mediante las APIs de Pocket ID;
+guarda sus IDs en el estado privado y vincula los clientes sin adoptar grupos por nombre.
+Los clientes nuevos nacen restringidos por grupo. No se crean usuarios ni passkeys.
+
+La CLI indica dos pasos humanos, con una espera de hasta 120 segundos por etapa:
+
+1. Completar `https://pocket.gnx/setup` con correo, nombre y una passkey. Solo el
+   único administrador humano con passkey puede seleccionarse como operador inicial;
+   la cuenta técnica de API no sirve. Si hay varios candidatos, se detiene sin elegir.
+2. Iniciar sesión en `https://netbird.gnx` con Pocket ID **compartiendo el correo**.
+   NetBird requiere los datos OIDC `email` y `name`; retirar ese permiso puede impedir
+   la autenticación. GnX muestra el aviso, no modifica la pantalla de consentimiento upstream.
+
+GnX añade únicamente al operador inicial a sus grupos, conserva los miembros y
+grupos permitidos existentes y activa la restricción por grupo de los clientes
+propios. Si un cliente existente no estaba restringido, otros usuarios necesitarán
+pertenecer a un grupo permitido a partir de esta finalización. La CLI lo advierte.
+El primer usuario NetBird debe corresponder exactamente al ID Pocket ID guardado
+y al conector registrado, no solo al mismo correo. Solo a ese usuario se le aprueba
+y concede el rol **Admin**; se conserva su asignación de grupos y no se altera la
+política global de aprobación ni el propietario técnico. Una cuenta bloqueada sin
+aprobación pendiente no se desbloquea automáticamente.
+
+Si vence la espera, se informa **servicios desplegados; onboarding pendiente**.
+`gnx deploy` con la misma entrada puede continuarlo en el mismo guest en ejecución,
+sin reinstalar ni transferir otra vez secretos. No hay daemon, timer ni aprobación
+en segundo plano después de terminar la operación. Tras completarlo, las siguientes
+invocaciones no reescriben roles o membresías administrados por el operador.
+
+Las mutaciones nuevas registran intención antes de la llamada y comprueban su
+resultado mediante lecturas nativas. Si una respuesta se pierde, no se repite a
+ciegas: un ID conocido permite reconocer un resultado ya aplicado; una creación
+de grupo sin ID devuelto queda bloqueada, sin adoptar por nombre ni duplicar.
+Un token de preparación rechazado/caducado también bloquea, sin resetear cuentas
+ni regenerar credenciales. El recibo de despliegue y el de onboarding no acreditan
+login humano nuevo, S3 ni conectividad entre peers. Esta implementación en fuentes
+no acredita instalación o aceptación runtime de la 0.0.34.
+
 ## Carpeta de entrada
 
 ```text
@@ -144,15 +185,44 @@ otro VMID silenciosamente. Consultar tareas PVE/journal antes de repetir.
 Una entrada incompleta vuelve a transferir archivos y preparar directorios; no
 hay rollback del contenido del guest ni una reanudación transaccional garantizada.
 Si se guardó la reserva pero `pct create` no llegó a crear el guest, la misma
-entrada no crea automáticamente un reemplazo. No hay un comando de reparación
-o limpieza de recibos. No borrarlos ni modificar una descripción PVE para forzar adopción.
+entrada no crea automáticamente un reemplazo. No borrar recibos ni modificar
+una descripción PVE para forzar adopción.
+
+### Recuperar una reserva incompleta de un guest ausente
+
+`gnx deploy` comprueba la ausencia con inventarios nativos PVE y exige que no haya
+tareas activas ni discos locales asociados al VMID. Un error, timeout, respuesta
+inválida o código `2`/`125` no demuestra ausencia y no habilita la recuperación.
+Los recibos deben pertenecer al SID/entrada actuales. Una reserva incompleta no
+puede tener un stack privado registrado. Para un despliegue completado cuyo guest
+ya no existe, la confirmación también archiva su completion y retira únicamente
+el registro privado que apunta a ese mismo guest ausente; no adopta otro stack.
+
+En una consola interactiva, la CLI informa del VMID e intento y solicita escribir
+`RECUPERAR <vmid>`. Enter, otra respuesta o stdin redirigido no archivan la reserva.
+Tras confirmar, otra petición autenticada revalida nodo, entrada, intento y estado
+nativo. El servicio conserva los bytes del recibo en
+`deploy-<digest>.missing-<intento>.json` bajo las mismas ACL, retira solo la reserva
+activa y, si corresponde, la completion y el registro privado obsoleto, y solicita
+un LXC nuevo por el recorrido normal. PVE puede reutilizar un
+VMID libre: sigue siendo un guest nuevo, no la restauración del eliminado.
+
+Se conservan la configuración privada, credenciales e historial; no se borran ni
+adoptan guests o discos y no se recuperan datos retirados manualmente. Los intentos
+son monótonos y acotados a 32 para no aplicar una confirmación antigua a una reserva
+nueva. Un archivo histórico distinto o inválido bloquea, nunca se sobrescribe. Si
+el guest reaparece o existe otro recurso, el servicio cancela la recuperación.
+Si hay interrupción entre archivo y retirada, se reconoce únicamente el histórico
+idéntico tras otra confirmación y revalidación; no se repite una creación desconocida.
 
 Reenviar una carpeta idéntica ya aplicada identifica el mismo guest sin reinstalar
 ni borrar sus datos. Una carpeta cambiada solicita otro LXC; no existe todavía una
 función de actualización, redimensionamiento o eliminación de despliegues.
 El digest depende de nombres y contenido: cambiar una credencial, comentario o
-salto de línea puede solicitar otro LXC. Una entrada completada solo consulta el
-estado PVE; no vuelve a transferir, arrancar ni verificar sus servicios o archivos.
+salto de línea puede solicitar otro LXC. Una entrada general completada solo consulta
+el estado PVE; no vuelve a transferir, arrancar ni verificar sus servicios o archivos.
+En las fuentes 0.0.34, el stack privado ya desplegado y en ejecución permite además
+continuar su onboarding inicial por las APIs nativas. No inicia un guest detenido.
 
 ## Resultado y límites
 
@@ -163,6 +233,24 @@ Esto no permite deducir salud HTTP, login u autorización de cada aplicación.
 La base Fedora reutilizada no está depurada específicamente para LXC: unidades
 de ajuste de reloj o montajes de sistema son incompatibles con sus restricciones;
 la preparación deshabilita esas unidades concretas dentro del guest.
+
+En las fuentes 0.0.29, antes de preparar el guest Rust espera el fin del arranque
+con `systemctl is-system-running --wait`, limitado a 120 segundos. `degraded`
+permite continuar para tratar esas unidades incompatibles, no acredita salud.
+El progreso distingue preparación de transferencia; un error en la preparación
+fija conserva línea/código y detalle nativo acotado sin credenciales. Las
+transferencias y OIDC no publican contenido ni salida privada. Una espera fallida
+no repite ni recrea el guest y conserva su recibo.
+
+Las fuentes 0.0.34 distinguen el error nativo de bus de systemd todavía ausente o
+rechazando conexión. Solo en ese caso vuelven a consultar su estado, con una pausa
+de un segundo y un único presupuesto total de 120 segundos compartido con la espera
+nativa `--wait`. No repiten creación, arranque ni preparación del guest. Otros errores
+o un resultado desconocido interrumpen la operación, sin reintento automático.
+Si se agota el plazo, no se preparan aplicaciones y se conserva la reserva; hay
+que consultar PVE/journal sin borrar el guest ni usar `update --force`. Esta espera
+y sus mensajes no se atribuyen a instaladores ya publicados.
+
 Separar fallos del sistema guest de los de las aplicaciones; no elevar privilegios
 ni ocultar estados fallidos para declarar aceptación.
 

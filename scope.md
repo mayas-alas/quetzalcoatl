@@ -47,6 +47,14 @@ el despliegue LXC existente; no crean guests automáticamente al instalar/arranc
 ni reemplazan un stack registrado distinto. No se atribuye este cambio a los
 instaladores publicados anteriormente.
 
+La recuperación explícita de recibos de un guest ausente requiere ausencia observable
+del guest y ausencia de tareas/discos asociados. Una reserva incompleta bloquea si
+hay un stack registrado; un despliegue completado solo retira su registro privado
+obsoleto tras la misma confirmación vinculada al guest ausente. `deploy` pide
+confirmación interactiva y revalida antes de archivar el recibo y crear otro guest;
+conserva configuración, credenciales e historial. No restaura datos eliminados ni
+adopta recursos existentes. Un error o timeout no autoriza esa recuperación.
+
 La candidata 0.0.18 admite `.container` y `.network`, verifica cada unidad e incluye
 el caso fijo [stack privado](stacks/private-services/README.md): RustFS, Pocket ID
 y NetBird con dashboard, red bridge, publicación HTTPS condicional e integración
@@ -55,6 +63,16 @@ catálogo, otro supervisor ni imágenes reconstruidas. El alta humana usa la pas
 real del operador. No se acredita login ni conectividad entre peers por configurar OIDC.
 El arranque compute espera disponibilidad de PVE mediante su healthcheck nativo
 antes de reconciliar la publicación del stack.
+
+Las fuentes 0.0.34 añaden el [onboarding inicial acotado](docs/deployment.md#onboarding-inicial-del-stack-privado)
+al mismo `deploy`: grupos propios de Pocket ID, pertenencia del único administrador
+humano inicial con passkey y aprobación/rol Admin de NetBird solo para su identidad
+estable y conector registrados. Conserva grupos existentes y la política global
+de aprobación; restringe por grupo los clientes propios al finalizar. Distingue
+servicios desplegados de onboarding pendiente y permite continuarlo en el guest
+ya desplegado sin reinstalar. No crea identidades humanas, no modifica roles tras
+finalizar ni añade otro supervisor. Pendientes empaquetado, instalación y aceptación
+runtime de esta versión.
 
 No existen todavía subida web, build por Containerfile ni soporte de todas las
 clases de Quadlet (`.volume`, `.pod`, `.build`). La publicación no es genérica:
@@ -127,7 +145,14 @@ actualizador: dependen de una entrega instalada y comprobaciones independientes.
   En 0.0.27 una nueva confirmación destructiva puede abarcar el nodo parcial propio
   identificado; `uninstall` sigue conservándolo. Un nuevo VHD creado por bootstrap
   no es conservación del VHD retirado. La síntesis se fija en [lifecycle](docs/lifecycle.md).
-  No existen `--force-recreate` ni `--remove-orphans`.
+   No existen `--force-recreate` ni `--remove-orphans`.
+   Las fuentes 0.0.33 añaden `gnx update --resume` para continuar explícitamente
+   la preparación del nodo parcial propio tras una recreación interrumpida sin
+   instalador pendiente. Requiere vincular SID, GUID y almacenamiento existentes,
+   confirmación `PREPARAR` y payload instalado verificado. No importa otro rootfs,
+   no repite la retirada ni recupera datos del nodo eliminado; no omite una
+   instalación Linux activa ni una configuración WSL divergente. No acredita
+   instalación o aceptación runtime de esta continuación.
 - **R-VAL-01 — Aceptación manual recreada y compartida:** distinguir la
   preparación de un entorno nuevo de producto y su operación posterior por
   humano y agente sobre la misma instancia. Mantener `gnx password` como vía

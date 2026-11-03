@@ -45,6 +45,13 @@ La preparación fija `scripts/enroll-stack.run` se ejecuta dentro del guest. Cre
 clientes dedicados de Pocket ID y añade ese proveedor en NetBird. Configura RustFS
 con el cliente separado y la política S3 `readwrite`, no administración global.
 Los usuarios de Pocket ID los administra el operador; no se abre el registro público.
+Las fuentes 0.0.34 crean y vinculan grupos propios de acceso para NetBird y RustFS.
+El onboarding acotado de `deploy` añade solo al operador humano inicial, identificado
+por su cuenta administradora y passkey, y activa la restricción de los clientes
+conservando otros grupos permitidos. Solo su identidad estable en el conector propio
+se aprueba como Admin de NetBird; la aprobación global no cambia. Si todavía no ha
+completado el alta o el primer login, queda pendiente y puede continuar con la misma
+entrada, sin recrear el LXC. [Recorrido y límites](../../docs/deployment.md#onboarding-inicial-del-stack-privado).
 
 Solo una instancia NetBird sin propietario puede recibir el administrador local
 de recuperación inicial. Su credencial y el estado de la integración quedan en
@@ -73,7 +80,15 @@ navegador. Antes de usar los botones Pocket ID de RustFS o NetBird:
 1. Abrir `https://pocket.gnx/setup` con HTTPS confiable.
 2. Completar el alta inicial con los datos del operador.
 3. Elegir **Add Passkey** y registrar un autenticador real compatible.
-4. Volver a la aplicación e iniciar sesión con esa passkey.
+4. Volver a la aplicación e iniciar sesión con esa passkey. En NetBird, mantener
+   autorizado compartir el correo: los datos OIDC `email` y `name` son necesarios.
+
+Con las fuentes 0.0.34, mantener `gnx deploy` abierto durante las dos etapas humanas
+que indica su progreso. Si la espera termina, ejecutar de nuevo la misma entrada
+para continuar el onboarding. No se transfiere por ello otra vez la configuración
+de aplicaciones. El administrador técnico `admin@gnx.local` no es un buzón: la
+aprobación inicial y el rol Admin del operador se tramitan mediante la API nativa,
+sin entregar sus credenciales en el chat ni exigir abrir ese correo.
 
 Es el [flujo nativo de Pocket ID](https://pocket-id.org/docs/setup/installation#create-the-admin-account),
 no otro mecanismo de autenticación de GnX. La página de setup solo está disponible

@@ -98,11 +98,25 @@ fn files(sid: &str) -> io::Result<Vec<String>> {
             let digest = receipt["digest"]
                 .as_str()
                 .ok_or_else(|| invalid("recibo sin digest"))?;
+            let attempt = receipt
+                .get("attempt")
+                .map_or(Some(0), serde_json::Value::as_u64)
+                .filter(|attempt| *attempt < 32);
+            let plain = attempt.is_some_and(|attempt| {
+                receipt["complete"] == false
+                    && name == format!("deploy-{digest}.missing-{attempt}.json")
+            });
+            let completion = attempt.is_some_and(|attempt| {
+                receipt["complete"] == true
+                    && name == format!("deploy-{digest}.missing-{attempt}.complete.json")
+            });
+            let historical = plain || completion;
             if receipt["sid"].as_str() != Some(sid)
                 || digest.len() != 64
                 || !digest.bytes().all(|c| c.is_ascii_hexdigit())
                 || (name != format!("deploy-{digest}.json")
                     && name != format!("deploy-{digest}.complete.json"))
+                    && !historical
             {
                 return Err(invalid("recibo no pertenece a esta identidad"));
             }
@@ -421,6 +435,111 @@ pub(super) fn force_inventory(previous: Option<&Inventory>, resume: bool) -> io:
         removed: false,
         partial: false,
     })
+}
+
+// Observe a partial node without starting WSL or inferring ownership from a name.
+// A legacy force receipt still names the retired node. A ready continuation binds
+// partial=true to the existing replacement and may never switch to another GUID.
+pub(super) fn preparation_inventory(expected: &Inventory) -> io::Result<Inventory> {
+    security::require_system()?;
+    let owner = Ownership::record()?;
+    if super::bootstrap::owned_account_sid()? != expected.sid || owner.sid != expected.sid {
+        return Err(invalid("SID de preparación divergente"));
+    }
+    if expected.partial {
+        if owner.distribution_id != expected.distribution {
+            return Err(invalid("GUID parcial cambió; no se adopta otro nodo"));
+        }
+    } else {
+        let previous = Ownership {
+            version: 1,
+            sid: expected.sid.clone(),
+            distribution_id: expected.distribution.clone(),
+        };
+        let (_identity, current) = Identity::inspect_recreation(&previous)?;
+        if current.is_none_or(|current| current.distribution_id != owner.distribution_id) {
+            return Err(invalid("nodo parcial no coincide con el recibo propio"));
+        }
+    }
+    // Unlike retirement, continuation requires the disk to exist, without links.
+    let _identity = Identity::open(&owner)?;
+    let retired_files = files(&owner.sid)?;
+    if retired_files.iter().any(|name| {
+        ![
+            "identity.json",
+            "prepared",
+            "applied-version",
+            "intent",
+            "root.crt",
+            "portproxy",
+            "portproxy-80",
+            "revocation",
+            "trace.log",
+        ]
+        .contains(&name.as_str())
+    }) {
+        return Err(invalid(
+            "estado posterior al bootstrap presente; no se continúa la preparación",
+        ));
+    }
+    match security::read_private("prepared", 16) {
+        Ok(value) if value == b"1" => {
+            if security::read_private("applied-version", 64)?
+                != env!("CARGO_PKG_VERSION").as_bytes()
+            {
+                return Err(invalid(
+                    "nodo preparado con otra versión; no se reaplica automáticamente",
+                ));
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            match security::read_private("intent", 16) {
+                Ok(value) if value == b"running" => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                _ => {
+                    return Err(invalid(
+                        "intención parcial no permite continuar el bootstrap",
+                    ));
+                }
+            }
+        }
+        _ => return Err(invalid("preparación parcial no observable")),
+    }
+    Ok(Inventory {
+        sid: owner.sid,
+        distribution: owner.distribution_id,
+        guests: Vec::new(),
+        configuration_digest: expected.configuration_digest.clone(),
+        retired_files,
+        guests_observed: false,
+        removed: false,
+        partial: true,
+    })
+}
+
+pub(super) fn verify_preparation(expected: &Inventory) -> io::Result<()> {
+    if !expected.partial || preparation_inventory(expected)? != *expected {
+        return Err(invalid(
+            "el nodo parcial o sus recibos cambiaron; no se prepara",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn confirm_preparation(inventory: &Inventory) -> io::Result<bool> {
+    println!(
+        "CONTINUAR PREPARACIÓN: WSL {} (SID {}).",
+        inventory.distribution, inventory.sid
+    );
+    println!(
+        "Se aplica el payload instalado al nodo parcial propio y se completa su publicación HTTPS. Puede iniciar esa WSL y sus servicios. No se ejecuta unregister, no se importa otro rootfs ni se retiran datos o guests. No restaura el nodo anterior."
+    );
+    println!("No se observó PVE; una lista vacía no acredita ausencia de guests.");
+    print!("Escribe PREPARAR para autorizar esta continuación: ");
+    io::stdout().flush()?;
+    let mut confirmation = String::new();
+    io::stdin().read_line(&mut confirmation)?;
+    Ok(confirmation.trim_end_matches(['\r', '\n']) == "PREPARAR")
 }
 
 // One ownership boundary for interrupted force and native installer retirement.

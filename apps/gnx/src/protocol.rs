@@ -52,7 +52,31 @@ pub struct Request {
     pub catalog: Option<crate::updates::Catalog>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub progress: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recover_missing: Option<MissingDeployment>,
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MissingDeployment {
+    pub vmid: u32,
+    pub digest: String,
+    pub sid: String,
+    pub distribution_id: String,
+    pub attempt: u32,
+}
+
+impl std::fmt::Display for MissingDeployment {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "LXC {} ausente en PVE, ausencia confirmada por inventario nativo (intento {}). Recuperar archiva los recibos de ese despliegue: la reserva y, si llegó a completarse, también la completion y el registro del stack privado (el servicio del nodo sigue activo sin stack). Después solicita un guest nuevo con la misma configuración y credenciales. No recupera datos del guest eliminado ni borra otros recursos, guests, identidades o CA",
+            self.vmid, self.attempt
+        )
+    }
+}
+
+impl std::error::Error for MissingDeployment {}
 
 impl Drop for Request {
     fn drop(&mut self) {
@@ -87,6 +111,18 @@ impl Request {
         }
         if request.progress && request.operation != Operation::Deploy {
             return Err(invalid("esta operación no admite progreso"));
+        }
+        if let Some(recovery) = &request.recover_missing {
+            if request.operation != Operation::Deploy
+                || !(100..=999999999).contains(&recovery.vmid)
+                || recovery.digest.len() != 64
+                || !recovery.digest.bytes().all(|c| c.is_ascii_hexdigit())
+                || recovery.sid.len() > 256
+                || recovery.distribution_id.len() > 64
+                || recovery.attempt >= 32
+            {
+                return Err(invalid("confirmación de recuperación inválida"));
+            }
         }
         match request.operation {
             Operation::Enroll | Operation::Password => {
@@ -133,6 +169,8 @@ pub struct Response {
     pub message: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub progress: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recover_missing: Option<MissingDeployment>,
 }
 
 impl Response {
@@ -144,6 +182,7 @@ impl Response {
             state,
             message: message.into(),
             progress: false,
+            recover_missing: None,
         }
     }
 
