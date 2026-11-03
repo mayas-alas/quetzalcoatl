@@ -114,6 +114,9 @@ impl Controller {
                 } else if op == Operation::Deploy {
                     super::deploy::execute(bundle, &progress, recovery.as_ref())
                         .map(|message| (NodeState::Active, message))
+                } else if op == Operation::Recovery {
+                    super::deploy::one_time_access(secret.as_deref().map(String::as_str))
+                        .map(|message| (NodeState::Active, message))
                 } else {
                     execute_secret(op, secret.as_deref().map(String::as_str))
                 }

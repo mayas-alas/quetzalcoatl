@@ -23,6 +23,7 @@ pub enum Operation {
     Deploy,
     UpdateCheck,
     UpdateApply,
+    Recovery,
 }
 
 impl Operation {
@@ -33,6 +34,7 @@ impl Operation {
             "status" => Some(Self::Status),
             "enroll" => Some(Self::Enroll),
             "password" => Some(Self::Password),
+            "recovery" => Some(Self::Recovery),
             _ => None,
         }
     }
@@ -136,6 +138,21 @@ impl Request {
                 if request.operation == Operation::Password && (value.len() < 12 || value == "root")
                 {
                     return Err(invalid("contraseña debe tener al menos 12 bytes"));
+                }
+            }
+            // The account identifier travels as the protected entry: it is not a
+            // credential, but it is personal data; no echo, argv or logs.
+            Operation::Recovery => {
+                let value = request
+                    .secret
+                    .as_deref()
+                    .ok_or_else(|| invalid("falta la cuenta operadora"))?;
+                if value.is_empty()
+                    || value.len() > 256
+                    || value.chars().any(char::is_control)
+                    || value.trim() != value
+                {
+                    return Err(invalid("cuenta operadora inválida"));
                 }
             }
             _ if request.secret.is_some() => {

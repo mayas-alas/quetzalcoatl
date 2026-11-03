@@ -311,6 +311,19 @@ async fn request_once(
             }
             Some(value.to_string())
         }
+        Operation::Recovery => {
+            let value = prompt_secret("Cuenta operadora de Pocket ID (correo o usuario): ")?;
+            if value.is_empty()
+                || value.len() > 256
+                || value.chars().any(char::is_control)
+                || value.trim() != value.as_str()
+            {
+                return Err(protocol::invalid(
+                    "cuenta operadora inválida; no se envió nada",
+                ));
+            }
+            Some(value.to_string())
+        }
         _ => None,
     };
     let mut id = [0u8; 16];

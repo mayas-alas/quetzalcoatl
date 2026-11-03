@@ -566,6 +566,145 @@ pub(super) fn command(
     Ok(output.text())
 }
 
+// Upstream-documented recovery for a lost operator passkey: the native
+// `pocket-id one-time-access-token` subcommand inside the guest creates a
+// single-use login code for the operator's own account. The link returns as
+// the response message so it prints only on the operator console; nothing
+// about it is persisted, logged or transformed here. It creates no users,
+// changes no roles and deletes nothing.
+pub(super) fn one_time_access(account: Option<&str>) -> io::Result<String> {
+    security::require_system()?;
+    let account = account.ok_or_else(|| invalid("falta la cuenta operadora"))?;
+    let owner = Ownership::read()?;
+    let identity = Identity::open(&owner)?;
+    let _directory = security::private_directory()?;
+    if security::read_private("intent", 16)? != b"running" {
+        return Err(io::Error::new(
+            io::ErrorKind::NotConnected,
+            "nodo detenido; usa gnx start",
+        ));
+    }
+    // Adopt only the stack this identity registered: fixed path, root owner,
+    // private mode, bounded size, then matching receipts for the exact SID.
+    let stack = identity.run_payload(
+        &[
+            "--distribution",
+            DISTRO,
+            "--exec",
+            "/usr/bin/bash",
+            "-s",
+            "--",
+        ],
+        br#"set -euo pipefail
+test "$(id -u)" = 0
+p=/var/lib/gnx-core/private-stack.json
+[[ -f "$p" && ! -L "$p" && $(stat -c %u "$p") == 0 && $(stat -c %a "$p") == 600 && $(stat -c %s "$p") -le 4096 ]]
+cat "$p"
+"#,
+        Duration::from_secs(15),
+    )?;
+    if stack.code != 0 {
+        return Err(io::Error::other(
+            "registro de stack no disponible; consultar journal del nodo",
+        ));
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Stack {
+        vmid: u32,
+        digest: String,
+        mac: String,
+    }
+    let stack: Stack = serde_json::from_str(stack.text().trim())
+        .map_err(|_| invalid("recibo de stack inválido"))?;
+    if !(100..=999999999).contains(&stack.vmid)
+        || stack.digest.len() != 64
+        || !stack.digest.bytes().all(|b| b.is_ascii_hexdigit())
+        || stack.mac.len() != 17
+    {
+        return Err(invalid("propiedad de stack no confirmada"));
+    }
+    for (suffix, complete) in [(".json", false), (".complete.json", true)] {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Receipt {
+            version: u16,
+            sid: String,
+            digest: String,
+            vmid: u32,
+            complete: bool,
+            #[serde(default)]
+            attempt: u32,
+        }
+        let receipt: Receipt = serde_json::from_slice(&security::read_private(
+            &format!("deploy-{}{suffix}", stack.digest),
+            4096,
+        )?)
+        .map_err(|_| invalid("recibo Windows inválido"))?;
+        if receipt.version != 1
+            || receipt.sid != owner.sid
+            || receipt.digest != stack.digest
+            || receipt.vmid != stack.vmid
+            || receipt.complete != complete
+            || receipt.attempt >= 32
+        {
+            return Err(invalid("stack ajeno o incompleto; no se adopta"));
+        }
+    }
+    // The guest itself must still match the receipt natively before anything
+    // is executed inside it.
+    let endpoint = format!("/nodes/gnx-core-compute/lxc/{}/config", stack.vmid);
+    let conf: serde_json::Value = serde_json::from_str(&command(
+        &identity,
+        &["pvesh", "get", &endpoint, "--output-format", "json"],
+        None,
+        15,
+    )?)
+    .map_err(|_| invalid("configuración PVE inválida"))?;
+    let expected = format!("GnX.Core:{}", stack.digest);
+    if conf["description"].as_str().map(str::trim_end) != Some(expected.as_str())
+        || conf["unprivileged"].as_u64() != Some(1)
+        || !conf["net0"].as_str().is_some_and(|s| {
+            s.to_ascii_lowercase()
+                .contains(&stack.mac.to_ascii_lowercase())
+        })
+    {
+        return Err(invalid("propiedad del LXC no confirmada"));
+    }
+    let vmid = stack.vmid.to_string();
+    let output = command(
+        &identity,
+        &[
+            "pct",
+            "exec",
+            &vmid,
+            "--",
+            "/usr/bin/podman",
+            "exec",
+            "pocket-id",
+            "/app/pocket-id",
+            "one-time-access-token",
+            account,
+        ],
+        None,
+        30,
+    )?;
+    let mut result: String = output
+        .chars()
+        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+        .take(2048)
+        .collect();
+    if !result.contains("/lc/") {
+        return Err(invalid(
+            "salida inesperada del subcomando de recuperación; contenido omitido",
+        ));
+    }
+    while result.ends_with(['\n', '\t', ' ']) {
+        result.pop();
+    }
+    Ok(result)
+}
+
 fn wait_guest(
     identity: &Identity,
     id: &str,

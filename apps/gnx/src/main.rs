@@ -22,13 +22,13 @@ fn run() -> std::io::Result<bool> {
     match args.as_slice() {
         [] => {
             println!(
-                "gnx start | stop | status | enroll | password | deploy [carpeta] | update --check|--apply [catalogo.json] | update --force | update --resume"
+                "gnx start | stop | status | enroll | password | recovery | deploy [carpeta] | update --check|--apply [catalogo.json] | update --force | update --resume"
             );
             Ok(true)
         }
         [arg] if arg == "--help" || arg == "-h" => {
             println!(
-                "gnx start | stop | status | enroll | password | deploy [carpeta]\ngnx update --check|--apply [catalogo.json]\ngnx update --force\ngnx update --apply --force\ngnx update --resume\nDeploy sin carpeta prepara private-services; muestra etapas sin secretos. Con carpeta mantiene el despliegue explícito. Check sin catálogo consulta releases públicas y muestra la transacción. Apply sin catálogo actualiza el producto por MSI/Burn y luego sus componentes; con catálogo solo aplica componentes. Force recrea el nodo instalado: borra datos, identidades y guests administrados tras inventario y confirmación interactiva. Apply --force selecciona primero la release pública. Resume continúa la preparación de un nodo parcial propio tras una recreación interrumpida sin instalador pendiente; requiere PREPARAR, no borra ni restaura el nodo anterior. No reinicia Windows ni purga otras WSL. La entrega al worker no confirma finalización; consulta --check y eventos. Enroll/password solicitan entrada sin eco."
+                "gnx start | stop | status | enroll | password | recovery | deploy [carpeta]\ngnx update --check|--apply [catalogo.json]\ngnx update --force\ngnx update --apply --force\ngnx update --resume\nDeploy sin carpeta prepara private-services; muestra etapas sin secretos. Con carpeta mantiene el despliegue explícito. Check sin catálogo consulta releases públicas y muestra la transacción. Apply sin catálogo actualiza el producto por MSI/Burn y luego sus componentes; con catálogo solo aplica componentes. Force recrea el nodo instalado: borra datos, identidades y guests administrados tras inventario y confirmación interactiva. Apply --force selecciona primero la release pública. Resume continúa la preparación de un nodo parcial propio tras una recreación interrumpida sin instalador pendiente; requiere PREPARAR, no borra ni restaura el nodo anterior. No reinicia Windows ni purga otras WSL. La entrega al worker no confirma finalización; consulta --check y eventos. Enroll/password solicitan entrada sin eco. Recovery crea un código de acceso de un solo uso del operador de Pocket ID; el enlace saldrá solo en esta consola y expira en 1 h, no se registra en journal."
             );
             Ok(true)
         }
@@ -116,7 +116,9 @@ fn run() -> std::io::Result<bool> {
         }
         [arg] => {
             let op = protocol::Operation::parse(arg).ok_or_else(|| {
-                protocol::invalid("usa start, stop, status, enroll, password o deploy [carpeta]")
+                protocol::invalid(
+                    "usa start, stop, status, enroll, password, recovery o deploy [carpeta]",
+                )
             })?;
             #[cfg(windows)]
             {
