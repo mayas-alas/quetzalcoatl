@@ -1,0 +1,5 @@
+subjectAltName=DNS:app.gnx,DNS:compute.gnx,DNS:pocket.gnx,DNS:rustfs.gnx,DNS:s3.gnx,DNS:netbird.gnx,DNS:f1.gnx,DNS:intelligent.gnx,DNS:omniroute.gnx,DNS:api.gnx,DNS:agent.gnx
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+crlDistributionPoints=URI:http://app.gnx/pki/root.crl

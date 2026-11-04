@@ -9,6 +9,14 @@ $gnx = "$env:ProgramFiles\GnX Core\gnx.exe"
 & $gnx deploy 'C:\ruta\a\servicios'
 ```
 
+El recorrido pendiente de `app.gnx` con **Containerfile → imagen OCI → Podman y
+Quadlets** en el LXC existente se prioriza en [features](../features.md#prioridad-de-entrega).
+La construcción con Podman pertenece al builder autorizado, no a la admisión de
+esta CLI. Este comando crea un LXC nuevo: no construye Containerfiles ni actualiza
+el guest existente al recibir una carpeta cambiada. Aplicar imágenes/Quadlets a
+ese guest y publicar la aplicación en Caddy requieren un recorrido explícito y
+autorizado; no se presentan aquí como comandos ya implementados.
+
 ## Stack predeterminado
 
 En las fuentes, `gnx deploy` sin argumentos selecciona `private-services` incorporado

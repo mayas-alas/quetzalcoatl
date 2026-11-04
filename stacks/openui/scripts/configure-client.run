@@ -1,0 +1,25 @@
+#!/usr/bin/bash
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 && -t 0 ]]
+root=/stacks/openui
+IFS= read -r -s -p 'API key de cliente de OmniRoute: ' client_key
+printf '\n'
+IFS= read -r -p 'Modelo exacto publicado por OmniRoute [entry-stack]: ' model
+model=${model:-entry-stack}
+[[ "$client_key" =~ ^[A-Za-z0-9._:/+=-]{12,512}$ ]]
+[[ "$model" =~ ^[A-Za-z0-9._/:@+-]{1,256}$ ]]
+base_url=$(jq -er .base_url "$root/runtime.json")
+[[ "$base_url" =~ ^http://[A-Za-z0-9._:-]+/v1$ ]]
+{
+    printf 'LLM_BASE_URL=%s\n' "$base_url"
+    printf 'LLM_API_KEY=%s\n' "$client_key"
+    printf 'LLM_MODEL=%s\n' "$model"
+    printf 'LLM_REASONING_EFFORT=default\n'
+} > "$root/secrets/apps.env.new"
+chmod 0600 "$root/secrets/apps.env.new"
+mv "$root/secrets/apps.env.new" "$root/secrets/apps.env"
+unset client_key model
+systemctl restart openui-f1.service openui-intelligent.service
+systemctl is-active openui-f1.service openui-intelligent.service
+printf 'Cliente configurado. Comprueba una pregunta real y una llamada de herramientas F1.\n'

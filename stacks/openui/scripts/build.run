@@ -1,0 +1,30 @@
+#!/usr/bin/bash
+set -euo pipefail
+umask 077
+root=/stacks/openui
+cd "$root"
+for cmd in podman curl tar jq; do command -v "$cmd" >/dev/null; done
+install -d -m 0700 sources
+option=; if (( $# )); then option=$1; fi
+names="f1 intelligent"
+if [[ "$option" == --with-omniroute ]]; then names="$names omniroute"; fi
+for name in $names; do
+    repo=$(jq -er --arg name "$name" '.[$name].repository' sources.json)
+    revision=$(jq -er --arg name "$name" '.[$name].revision' sources.json)
+    [[ "$repo" =~ ^[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$ && "$revision" =~ ^[a-f0-9]{40}$ ]]
+    if [[ ! -f "sources/$name/.gnx-revision" ]]; then
+        [[ ! -e "sources/$name" ]]
+        curl --fail --location --proto '=https' --tlsv1.2 "https://codeload.github.com/$repo/tar.gz/$revision" -o "sources/$name.tar.gz"
+        install -d -m 0700 "sources/$name"
+        tar -xzf "sources/$name.tar.gz" --strip-components=1 -C "sources/$name"
+        printf '%s\n' "$revision" > "sources/$name/.gnx-revision"
+    fi
+    [[ $(cat "sources/$name/.gnx-revision") == "$revision" ]]
+done
+# Upstream runner-base deliberately excludes the runner-cli target.
+if [[ "$option" == --with-omniroute ]]; then
+    podman build --target runner-base -t localhost/gnx/omniroute:0.0.36 -f containers/omniroute.Containerfile sources/omniroute
+fi
+podman build -t localhost/gnx/openui-f1:0.0.36 -f containers/f1.Containerfile .
+podman build -t localhost/gnx/openui-intelligent:0.0.36 -f containers/intelligent.Containerfile .
+for name in openui-f1 openui-intelligent; do podman image inspect --format '{{.Id}}' "localhost/gnx/$name:0.0.36"; done

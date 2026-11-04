@@ -1,0 +1,38 @@
+f1.gnx {
+    bind {$GNX_BIND}
+    tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+    basic_auth {
+        demo {$GNX_OPENUI_PASSWORD_HASH}
+    }
+    reverse_proxy {$GNX_OPENUI_GUEST}:3101 {
+        flush_interval -1
+    }
+}
+intelligent.gnx {
+    bind {$GNX_BIND}
+    tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+    basic_auth {
+        demo {$GNX_OPENUI_PASSWORD_HASH}
+    }
+    reverse_proxy {$GNX_OPENUI_GUEST}:3102 {
+        flush_interval -1
+    }
+}
+omniroute.gnx {
+    bind {$GNX_BIND}
+    tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+    reverse_proxy {$GNX_OPENUI_GUEST}:20128
+}
+api.gnx {
+    bind {$GNX_BIND}
+    tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+    @inference path /v1/models /v1/chat/completions
+    handle @inference {
+        reverse_proxy {$GNX_OPENUI_GUEST}:20128 {
+            flush_interval -1
+        }
+    }
+    handle {
+        respond 404
+    }
+}

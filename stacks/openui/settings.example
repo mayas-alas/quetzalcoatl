@@ -1,0 +1,5 @@
+# Server-only settings: configure key/model after OmniRoute setup.
+LLM_BASE_URL=http://host.containers.internal:20128/v1
+LLM_API_KEY=
+LLM_MODEL=entry-stack
+LLM_REASONING_EFFORT=default

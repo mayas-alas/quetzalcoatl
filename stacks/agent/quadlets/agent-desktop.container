@@ -1,0 +1,24 @@
+[Unit]
+Description=GnX Agent desktop
+
+[Container]
+Image=ghcr.io/bytebot-ai/bytebot-desktop@sha256:e974e7ac93c8f755e98b8a437e5497a63175c7096b51a348f5f1d9320598a1c9
+ContainerName=gnx-agent-desktop
+Network=agent.network
+NetworkAlias=desktop
+NetworkAlias=bytebot-desktop
+HostName=computer
+Environment=DISPLAY=:0
+ShmSize=2g
+Volume=agent-desktop-home.volume:/home/user
+PodmanArgs=--privileged
+LogDriver=journald
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=180
+MemoryMax=2300M
+
+[Install]
+WantedBy=multi-user.target

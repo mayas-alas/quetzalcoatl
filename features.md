@@ -4,18 +4,143 @@ Requisitos pendientes y prioridades de diseño, no funciones implementadas ni
 aceptación. [scope.md](scope.md) delimita el producto actual; las decisiones aquí
 no autorizan instalar, publicar, migrar datos ni ampliar permisos por sí solas.
 
-## Prioridad
+## Prioridad de entrega
+
+La entrega inmediata es una demo funcional de `app.gnx`, con presupuesto máximo
+de **un día** y un primer recorrido utilizable en horas, no una planificación
+semanal. P0 define el corte de esa entrega; P1/P2 no lo bloquean. Los requisitos
+de actualización se conservan, pero no son prerrequisitos de la demo. Integridad,
+autorización, protección de secretos y conservación de datos no se posponen.
 
 | Orden | Feature | Resultado esperado |
 | --- | --- | --- |
-| P0 | R-UPD-01 — Actualizaciones como estado deseado | Saber qué hay instalado, aplicado y ejecutándose; adoptar una entrega compatible sin exigir reinicios manuales a ciegas. |
-| P0 | R-IMG-01 — Actualización de imágenes | Cambiar imágenes del núcleo y stacks existentes por versiones/digests aprobados, sin recrear guests ni confundirlo con actualizar GnX. |
-| P1 | R-WEB-01 — Inicio GnX con OpenUI | `https://app.gnx` como entrada de texto, widgets y accesos a aplicaciones. |
-| P1 | R-AGENT-01 — Respuestas de agentes con interfaz | Renderizar respuestas interactivas con componentes propios y acciones autorizadas. |
+| P0 | R-OCI-01 — Construcción y ejecución Podman | Containerfiles versionados, imágenes identificables y servicios bajo Quadlets en el LXC existente autorizado. |
+| P0 | R-INF-01 — Inferencia mediante OmniRoute | Endpoint privado compatible OpenAI, proveedores autorizados, cuotas y política explícita de coste y privacidad. |
+| P0 | R-WEB-01 — Interfaz conversacional GnX | Adoptar la experiencia de `openui-f1-dashboard`: dashboard, conversación, herramientas visibles y respuestas OpenUI en streaming. |
+| P0 | R-AGENT-01 — Consulta con datos reales | Una herramienta de solo lectura, tabla/gráfico y seguimiento de conversación, sin control administrativo. |
+| P1 | R-OBS-01 — Kluster y Kubeshark | Ampliar consultas de infraestructura y red sin exigir Kubernetes ni privilegios eBPF al recorrido P0. |
+| P1 | R-UPD-01 — Actualizaciones como estado deseado | Saber qué hay instalado, aplicado y ejecutándose; adoptar una entrega compatible sin reinicios manuales a ciegas. |
+| P1 | R-IMG-01 — Actualización de imágenes | Cambiar imágenes del núcleo y stacks por digests aprobados, sin recrear guests ni confundirlo con actualizar GnX. |
 | P2 | R-MOBILE-01 — Clientes móviles | Adoptar Appless como referencia de desarrollo móvil, bajo el mismo estándar OpenUI. |
 
 La recuperación de base LXC (**R-LXC-01**, en alcance) sigue pendiente y condiciona
 las actualizaciones que necesiten cambiar esa base; no equivale a rollback de datos.
+
+### Corte mínimo y orden de trabajo
+
+La referencia principal es [OpenUI F1 Dashboard](https://github.com/thesysdev/openui-f1-dashboard),
+la demo completa derivada del [cookbook de analítica conversacional](https://github.com/thesysdev/openui/tree/main/examples/cookbooks/conversational-analytics).
+No se diseña otra portada primero ni se copian todas las páginas de Fórmula 1.
+Se conserva la interacción y se sustituye su dominio por información GnX.
+
+```text
+Fuentes y Containerfiles versionados
+             │ construcción con Podman en builder autorizado
+             ▼
+Imágenes OCI identificadas → systemd/Quadlets → Podman dentro del LXC existente
+                                                │
+https://app.gnx → Caddy existente → aplicación GnX con OpenUI
+                                      ├─ backend → OmniRoute /v1 → proveedores
+                                      └─ consulta acotada → datos reales autorizados
+```
+
+El repositorio de integración es [gnx-kluster](https://github.com/mayas-alas/gnx-kluster)
+(nombre del repositorio; «cluster» describe aquí el conjunto de servicios con
+engine **Podman**). No se introduce Docker Engine, Compose, Kubernetes, Helm ni
+un supervisor adicional como requisito de ejecución. El origen kftray de ese fork
+no acredita soporte web o gestión de Podman ya implementados. Estas decisiones
+son requisitos pendientes; este checkout no contiene todavía esa integración.
+
+| Ventana máxima de trabajo | Resultado que debe obtenerse |
+| --- | --- |
+| 0–1 h | Identificar checkout/revisión y licencia de las referencias, builder Podman, LXC propio, recursos, acceso al gateway y proveedor/modelo autorizados. Resolver el canal protegido de credenciales sin pedir secretos por chat. |
+| 1–4 h | Obtener imágenes trazables desde Containerfile y OmniRoute accesible privadamente bajo Quadlet, con un proveedor operativo. Primer artefacto ejecutable, no solo un diseño. |
+| 4–8 h | Conectar la interfaz elegida a OmniRoute y una consulta real; mostrar respuesta OpenUI y actividad de herramientas. |
+| 8–12 h | Cerrar HTTPS en `app.gnx`, historial propio, acceso protegido, límites y un seguimiento de conversación con tabla/gráfico verificable. |
+| 12–24 h | Margen para corregir bloqueos del recorrido P0 y realizar su aceptación manual autorizada; no abrir P1/P2 antes del cierre. |
+
+Son presupuestos, no evidencia ni garantía de finalización. Una credencial no
+disponible, incompatibilidad o licencia sin aclarar se comunica en la primera
+ventana afectada; no se consume el día en reintentos ni se sustituye por mocks.
+La primera conexión usa un proveedor explícito; una API operativa no acredita
+que las suscripciones y free tiers restantes estén conectados o permitidos.
+
+El corte exige una portada/dashboard mínimo con entrada conversacional, una
+tabla y un gráfico basados en una consulta real, actividad de herramientas,
+seguimiento e historial propio. Los datos incluyen fuente, momento de lectura y
+ausencias/errores explícitos. No se generan métricas plausibles para completar
+una pantalla. Páginas adicionales, catálogo de apps, móvil, orquestación genérica,
+control administrativo y captura eBPF no forman parte del corte.
+
+Antes de aplicar al host se identifican VMID/propiedad, unidades y datos afectados,
+publicación `app.gnx`, interrupción prevista y vía de restitución. No se recrea
+el LXC ni se ejecuta `gnx deploy` con una carpeta cambiada para actualizarlo. El
+gateway actual sirve una página estática: su publicación dinámica necesita una
+adaptación explícita y autorizada, conservando CA, CRL y acceso informativo cuando
+el backend no esté disponible. No se reconstruye MSI/EXE para documentar la demo.
+
+El cierre funcional está en [los recorridos pendientes](historias-de-usuario.md#demo-conversacional-appgnx).
+Construido, desplegado, accesible y aceptado se informan por separado; una página
+visible o una unidad activa no acreditan el recorrido completo.
+
+## R-OCI-01 — Containerfile, Podman y Quadlets
+
+- Versionar Containerfiles de aplicación/backend y la construcción de OmniRoute
+  cuando se use el fork seleccionado. Fijar revisión, bases y dependencias con
+  lockfile; revisar licencias antes de incorporar código/assets. Una imagen de
+  upstream no acredita contener las modificaciones de otro fork.
+- Construir con Podman en un builder autorizado, separado del servicio web y sin
+  montar su socket en la aplicación o el gateway de inferencia. Si el builder está
+  en el LXC, comprobar recursos y compatibilidad sin elevarlo a privilegiado.
+  Construir allí no es requisito para ejecutar allí las imágenes.
+- Entregar imagen por registro confiable con digest verificable. Una transferencia
+  OCI nativa requiere un recorrido de mantenimiento autorizado distinto del bundle
+  de `gnx deploy`; la CLI actual no admite archivos OCI ni Containerfiles.
+- Ejecutar con engine Podman y unidades `.container`/`.network` de Quadlet;
+  systemd posee arranque, parada y recuperación. Sin builds en cada petición o
+  arranque, `.build` supuesto, Compose, PM2 ni motor nuevo de workloads.
+- Persistir conversaciones y estado privado de OmniRoute fuera de las capas de
+  imagen, con ACL/permisos y copia recuperable antes de cambios con estado. Claves
+  fuera de contexto de build, capas, argumentos y repositorio; cifrado de estado
+  de OmniRoute configurado con clave protegida separada, no asumido por defecto.
+- Ajustar escucha dentro del contenedor para el proxy/red privada; los scripts
+  loopback de la referencia no se publican simplemente con un mapeo de puerto.
+  Gateway y backend de inferencia no se exponen como administración pública.
+
+## R-INF-01 — OmniRoute como gateway de inferencia
+
+**OmniRoute es P0**, no una integración opcional posterior. Usar el
+[fork seleccionado](https://github.com/ChrisCompton/omniroute), fijando revisión y
+procedencia de imagen. Su papel en la demo es inferencia; no se incorporan sus
+capacidades de ejecución, túneles públicos, MCP/A2A o gestión de procesos por rutina.
+
+- Contrato inicial: `GET /v1/models` y `POST /v1/chat/completions`, streaming y
+  function tools en el modelo elegido. Responses es una extensión posterior salvo
+  necesidad concreta; tener una ruta no demuestra todas sus semánticas por proveedor.
+- La aplicación conserva su bucle acotado de herramientas y transforma respuestas
+  del gateway en eventos AG-UI para el navegador. OpenAI-compatible, AG-UI y OpenUI
+  Lang son contratos distintos: API de inferencia, eventos y descripción visual.
+- Configurar endpoint/modelo en servidor; ninguna clave de proveedor o de OmniRoute
+  en el frontend. Limitar entrada, concurrencia, rondas, tokens, tiempos y gasto.
+  Acceso del operador protegido y ownership de cada conversación en el servidor;
+  `Origin`, CORS o un ID anónimo de sessionStorage no autentican a una persona.
+- Admitir suscripciones y APIs con free tier proveedor por proveedor según permiso,
+  disponibilidad, capacidades y tratamiento de datos. La compatibilidad técnica
+  de un adaptador no autoriza reutilizar credenciales, compartir cuentas ni revender
+  cuota. No prometer uso ilimitado ni cuotas del README como compromiso de GnX.
+- Para OpenAI, comprobar elegibilidad de la vía oficial de uso de planes en apps
+  participantes o créditos API asociados a suscripción; activación real y facturación
+  API son distintas de tener un plan. El adaptador Codex no acredita esa elegibilidad.
+  No usar credenciales Claude de suscripción como proxy para terceros sin autorización
+  expresa del proveedor; conservar su vía API admitida.
+- Política de rutas explícita: al agotar cuota, informar; fallback solo a destinos
+  previamente permitidos por capacidad, privacidad y presupuesto. Nada de pasar a
+  pago o a un free tier que cambie tratamiento de datos silenciosamente. Respetar
+  `Retry-After`; no repetir herramientas ni reiniciar una respuesta parcial a ciegas.
+- Empezar con un proveedor autorizado. Otro proveedor puede añadirse después de
+  ese recorrido; no se declara cobertura general de suscripciones/free tiers por
+  mostrar un selector. Sin proveedor autorizado disponible, la inferencia queda
+  bloqueada y no se finge una respuesta ni se adopta Thesys Cloud como atajo.
 
 ## R-UPD-01 — Nuevo enfoque de actualizaciones
 
@@ -61,17 +186,17 @@ porque se instaló otro GnX o se descargó una imagen. Comprobar que la imagen i
 la corrección de consola y, por separado, el comportamiento real con autorización.
 Si todavía no existe una imagen compatible corregida, comunicar ese bloqueo.
 
-## R-WEB-01 — `app.gnx`: texto, widgets y aplicaciones
+## R-WEB-01 — `app.gnx`: dashboard conversacional OpenUI
 
 - **OpenUI es el estándar del frontend de Quetzalcoatl**, también para futuros
   frontends custom. Appless no sustituye ese estándar ni es la base web obligatoria.
-- Entrada de texto central para interactuar con GnX, no un buscador Google.
-  Estilo de página de inicio inspirado en la referencia visual de Firefox:
-  identidad GnX, superficies sobrias, accesos rápidos y widgets; sin copiar sus
-  marcas ni convertirlo en un navegador nuevo.
-- Tarjetas de aplicaciones con icono, nombre y descripción/preview en hover y foco;
-  alternativa accesible para teclado y pantalla táctil. Enlaces a las interfaces
-  nativas, por ejemplo `https://rustfs.gnx`, sin reemplazar sus autenticaciones.
+- Referencia literal de experiencia: **OpenUI F1 Dashboard** como dashboard
+  conversacional. Conservar dashboard, navegación lateral, bienvenida,
+  entrada persistente, conversaciones y respuestas visuales; sustituir identidad,
+  assets y herramientas F1 por GnX, sin copiar marcas o páginas sin utilidad.
+- Para la demo basta un dashboard y conversación con seguimiento. Accesos a las
+  interfaces nativas son secundarios y conservan sus autenticaciones, con hover,
+  foco y alternativa táctil accesibles; no se construye un catálogo antes del chat.
 - Config-first: definir tokens de diseño, componentes admitidos, propiedades,
   widgets, destinos y acciones como contrato versionado. Generar desde la misma
   biblioteca la especificación/prompt del agente y el renderer; evitar contratos
@@ -81,12 +206,37 @@ Si todavía no existe una imagen compatible corregida, comunicar ese bloqueo.
   rendimiento que publica el proveedor sin medición propia.
 - Mostrar estado real y errores/carga/desconexión explícitos, no datos plausibles
   generados como si fueran observaciones del nodo. No recoger secretos administrativos.
+- Los componentes de datos reciben referencias acotadas y consultan endpoints de
+  lectura autorizados; no aceptan URLs, SQL o comandos arbitrarios del modelo.
+  Preferir que las series lleguen de la fuente al gráfico sin reescritura del LLM.
+  Validar también las cifras de tablas copiadas desde resultados de herramientas.
+- Mantener identidad/autoría y licencia del código reutilizado sin inferir que el
+  repositorio de la demo hereda automáticamente la licencia del proyecto principal.
 
 ## R-AGENT-01 — Agentes que responden con widgets
 
 Usar el enfoque oficial **Build agents** de OpenUI: el backend incorpora el contrato
 de componentes y el cliente renderiza sus respuestas en streaming y devuelve las
-interacciones. La elección de proveedor/modelo y backend de agentes queda pendiente.
+interacciones. **OmniRoute** es la vía de inferencia elegida; el proveedor/modelo
+concreto requiere disponibilidad y permiso. La adaptación de aplicación se integra
+en `gnx-kluster`; no se reescribe todo el frontend Tauri ni el núcleo Windows para
+mostrar el primer recorrido. Rust conserva las fronteras y coordinación del producto;
+el bucle de conversación de la aplicación no se convierte en supervisor del host.
+
+- Conservar el flujo **AG-UI sobre SSE** de `openui-f1-dashboard`, incluida actividad
+  y resultados de herramientas. El cookbook pequeño usa el stream NDJSON del runner:
+  no intercambiar sus adaptadores ni conectarlos al SSE OpenAI sin conversión.
+- Sustituir llamadas a OpenUI Gateway, historial remoto, frontend tokens y el modo
+  de prompt `cloud: true` por contratos compatibles con la ejecución propia. No
+  basta cambiar `baseURL`. Generar el prompt desde la biblioteca local y no asumir
+  reparación automática o persistencia provistas por OmniRoute.
+- Historial propio en servidor, con almacenamiento persistente y validación de
+  acceso por conversación; navegador sin conexión directa a Thesys. No habilitar
+  PostHog, sinks Cloud u otra telemetría por copiar dependencias de la referencia.
+- Herramienta inicial: consulta agregada de inferencia desde la API nativa de
+  OmniRoute, previa confirmación de sus campos y acceso. Si no ofrece la serie
+  necesaria, elegir una fuente real ya disponible y autorizada antes de implementar;
+  no inventar métricas ni crear un recolector adicional para salvar la pantalla.
 
 - Presentar agentes y sus respuestas mediante tarjetas/widgets del sistema GnX.
   Hover/foco puede dar información o previsualización; **no ejecuta acciones
@@ -99,6 +249,22 @@ interacciones. La elección de proveedor/modelo y backend de agentes queda pendi
 - No exponer keys en bundles/configuración pública ni asumir dependencia obligatoria
   de un gateway externo. La adopción de servicios, coste y tratamiento de datos
   requiere una decisión explícita.
+
+## R-OBS-01 — Kluster y Kubeshark sin cambiar de engine
+
+- `gnx-kluster` es el destino de integración de la experiencia y servicios con
+  Podman. Su origen kftray aporta código de acceso Kubernetes/Tauri y MCP, no una
+  API de gestión Podman ya disponible. Separar adaptadores web/escritorio y no
+  trasladar kubeconfigs, sockets o IPC privilegiado al navegador.
+- [gnx-kubeshark](https://github.com/mayas-alas/gnx-kubeshark) aporta observación de
+  red para Kubernetes y consultas MCP. No demuestra captura de Podman en un LXC.
+  Verificar entorno, kernel, eBPF y alcance antes de decidir su incorporación.
+- No instalar Kubernetes, conceder capacidades adicionales ni convertir el guest
+  en privilegiado para completar esta demo. Sin compatibilidad comprobada, se
+  informa integración pendiente; no se muestran datos simulados ni se bloquea P0.
+- La captura y su retención requieren autorización explícita: no enviar PCAP,
+  cabeceras, tokens o payloads a proveedores externos por defecto. Desactivar
+  telemetría no autorizada antes de aplicar una configuración de captura.
 
 ## R-MOBILE-01 — Appless como referencia móvil
 
@@ -116,6 +282,15 @@ no habilitar telemetría remota ni empaquetar claves como variables públicas.
 ## Fuentes de diseño
 
 - [OpenUI, proyecto estándar elegido](https://github.com/thesysdev/openui).
+- [OpenUI F1 Dashboard, referencia principal de experiencia](https://github.com/thesysdev/openui-f1-dashboard).
+- [Cookbook de analítica conversacional, referencia mínima de flujo](https://github.com/thesysdev/openui/tree/main/examples/cookbooks/conversational-analytics).
+- [OmniRoute, fork elegido para inferencia](https://github.com/ChrisCompton/omniroute).
+- [GnX Kluster, repositorio de integración](https://github.com/mayas-alas/gnx-kluster).
+- [GnX Kubeshark, observación de red](https://github.com/mayas-alas/gnx-kubeshark).
+- [OpenAI: uso de planes en aplicaciones participantes](https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites).
+- [OpenAI: créditos API para suscripciones elegibles](https://help.openai.com/en/articles/20001626-api-credits-benefit-for-eligible-chatgpt-subscriptions).
+- [Anthropic: autenticación y uso de credenciales](https://code.claude.com/docs/en/legal-and-compliance).
+- [Gemini API: condiciones de tratamiento de datos](https://ai.google.dev/gemini-api/terms).
 - [OpenUI Lang y su relación con JSON](https://www.openui.com/docs/openui-lang).
 - [Contrato de componentes y especificación para el agente](https://www.openui.com/docs/build-agents/ui-generation).
 - [Build agents: alcance de backend y frontend](https://www.openui.com/docs/build-agents).

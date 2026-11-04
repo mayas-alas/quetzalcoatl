@@ -1,0 +1,18 @@
+[Unit]
+Description=GnX Open Intelligent UI via OmniRoute
+After=network-online.target
+[Container]
+Image=localhost/gnx/openui-intelligent:0.0.36
+Pull=never
+ContainerName=gnx-openui-intelligent
+Network=openui.network
+EnvironmentFile=/stacks/openui/secrets/apps.env
+Environment=ALLOWED_ORIGINS=https://intelligent.gnx
+PublishPort=3102:3000
+LogDriver=journald
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+[Install]
+WantedBy=multi-user.target

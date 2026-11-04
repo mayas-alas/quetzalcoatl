@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GnX · Tu espacio</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,Segoe UI,Arial,sans-serif;background:#111113;color:#f7f7fb}*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:32px 5vw}header{display:flex;gap:18px;align-items:center;font-size:38px;font-weight:750}.brand{display:grid;place-items:center;width:72px;height:72px;background:#d0f59b;color:#253516;border-radius:24px;font-size:44px}main{max-width:1280px;margin:auto}.search{margin:42px auto 94px;max-width:640px;display:flex;align-items:center;gap:14px;background:#262629;border:1px solid #303034;border-radius:40px;padding:18px 24px}.search span{font-size:24px;color:#c4a8ff}.search input{width:100%;border:0;background:none;color:inherit;font:18px inherit;outline:none}.search:focus-within{outline:2px solid #bca0ff}.projects{display:grid;grid-template-columns:repeat(8,1fr);gap:24px;max-width:900px;margin:auto}.project{text-align:center;text-decoration:none;color:inherit;font-size:14px;line-height:1.5}.tile{display:grid;place-items:center;margin:0 auto 10px;width:80px;height:80px;border-radius:17px;background:#222225;transition:transform .16s,background .16s}.project:hover .tile{transform:translateY(-5px);background:#303034}.icon{width:50px;height:50px;display:grid;place-items:center;border-radius:15px;font-weight:800;font-size:25px}.lime{background:#d0f59b;color:#253516}.orange{color:#ff8c3b}.purple{color:#c4a8ff}.white{color:#fff}.blue{color:#74b7ff}.widgets{margin-top:62px}h2{font-size:21px;font-weight:550}.grid{display:flex;flex-wrap:wrap;gap:22px}.widget{background:#222225;border:1px solid #29292e;border-radius:22px;padding:24px;min-width:300px}.focus{display:flex;align-items:center;gap:25px;width:418px}.play{width:82px;height:82px;display:grid;place-items:center;border:15px solid #aaa8b0;border-radius:50%;color:#eee2ff;font-size:23px}.time{font-size:28px;text-align:center;margin-bottom:16px}.modes{display:flex;border:1px solid #88858c;padding:5px;border-radius:30px;font-size:14px}.modes span{padding:8px 14px}.selected{background:#b99afa;color:#19151f;border-radius:24px;font-weight:650}.workspace{max-width:420px}.workspace p{color:#aaa7b2;font-size:14px;line-height:1.65;margin:8px 0}.workspace a{color:#d0f59b}footer{margin-top:64px;color:#8e8b98;font-size:12px;display:flex;justify-content:space-between;gap:20px}footer a{color:inherit}@media(max-width:900px){.projects{grid-template-columns:repeat(4,1fr);gap:25px 12px}.search{margin-bottom:65px}.widgets{margin-top:42px}}@media(max-width:480px){body{padding:24px 20px}header{font-size:30px}.brand{width:58px;height:58px}.tile{width:62px;height:62px}.project{font-size:12px}.focus{width:100%;gap:15px}.widget{min-width:0;width:100%}.search{margin:38px auto 50px;padding:16px}footer{flex-direction:column}}
+</style>
+</head>
+<body><main>
+<header><div class="brand" aria-hidden="true">G</div>GnX</header>
+<form class="search" action="https://intelligent.gnx/" method="get" role="search">
+<span aria-hidden="true">✦</span><input name="prompt" aria-label="Pregunta a tu espacio" placeholder="Pregunta, explora o crea con GnX…" required maxlength="600">
+</form>
+<nav class="projects" aria-label="Tus proyectos">
+<a class="project" href="https://app.gnx"><div class="tile"><span class="icon lime">G</span></div>GnX Core</a>
+<a class="project" href="https://compute.gnx"><div class="tile"><span class="icon orange">X</span></div>Compute</a>
+<a class="project" href="https://f1.gnx"><div class="tile"><span class="icon orange">F1</span></div>F1 Dashboard</a>
+<a class="project" href="https://intelligent.gnx"><div class="tile"><span class="icon purple">✦</span></div>Intelligent UI</a>
+<a class="project" href="https://omniroute.gnx"><div class="tile"><span class="icon white">◎</span></div>OmniRoute</a>
+<a class="project" href="https://agent.gnx"><div class="tile"><span class="icon lime">A</span></div>Agent</a>
+<a class="project" href="https://pocket.gnx"><div class="tile"><span class="icon white">P</span></div>Pocket ID</a>
+<a class="project" href="https://rustfs.gnx"><div class="tile"><span class="icon blue">S3</span></div>RustFS</a>
+</nav>
+<section class="widgets"><h2>Widgets <span aria-hidden="true">⌄</span></h2><div class="grid">
+<div class="widget focus"><div class="play" aria-hidden="true">▶</div><div><div class="time">− &nbsp; 25:00 &nbsp; +</div><div class="modes"><span class="selected">Concentración</span><span>Descanso</span></div></div></div>
+<div class="widget workspace"><strong>Un espacio para tus proyectos</strong><p>Explora datos con OpenUI y conecta tus aplicaciones a la inferencia privada de OmniRoute.</p><a href="https://api.gnx/v1/models">API de generación de texto ↗</a></div>
+</div></section>
+<footer><span>GnX · Tu infraestructura, conectada.</span><span><a href="https://github.com/mayas-alas/gnx-kluster">Kluster</a> · <a href="https://github.com/mayas-alas/gnx-kubeshark">Kubeshark</a> · <a href="https://github.com/mayas-alas/quetzalcoatl">Código fuente</a></span></footer>
+</main></body></html>

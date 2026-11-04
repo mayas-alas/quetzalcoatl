@@ -1,0 +1,7 @@
+{
+  "mode": "new",
+  "existing_container": "gnx-omniroute",
+  "base_url": "http://host.containers.internal:20128/v1",
+  "guest_address": "172.30.0.15",
+  "image": "docker.io/diegosouzapw/omniroute@sha256:b08a12e876baa8a5ccadd1ebbe346fe7267dba3b1c9f4fd6bb02070fae41ab6c"
+}

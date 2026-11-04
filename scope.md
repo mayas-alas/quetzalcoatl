@@ -100,8 +100,20 @@ remoto, selección automática de versiones compatibles ni aceptación runtime d
 actualizador: dependen de una entrega instalada y comprobaciones independientes.
 
 - La priorización de actualizaciones y los nuevos frontends se registran en
-  [features.md](features.md): **OpenUI** es el estándar; **Appless** es referencia
-  para clientes móviles. No son capacidades ya incorporadas a `app.gnx`.
+  [features.md](features.md): la entrega inmediata prioriza una demo en un día de
+  `app.gnx` basada en **OpenUI F1 Dashboard**, con **OmniRoute** como gateway de
+  inferencia e integración en `gnx-kluster` con engine **Podman**. El paradigma
+  requerido incluye Containerfile → imagen OCI → systemd/Quadlets en el LXC
+  existente autorizado, sin exigir Kubernetes ni recrear el guest. Construcción
+  externa con Podman no equivale a soporte de builds en `gnx deploy` ni a aplicación
+  sobre un guest existente por esa CLI. Se requieren adaptación explícita de
+  publicación HTTPS, acceso protegido, historial propio y consultas de solo lectura;
+  no un canal administrativo web. Suscripciones y free tiers se admiten según las
+  condiciones y capacidades reales de cada proveedor, sin prometer cuota ilimitada.
+  Son requisitos pendientes, no integración implementada, build, despliegue ni
+  aceptación. Kubeshark y la ampliación de observabilidad no bloquean ese corte;
+  **Appless** permanece como referencia móvil posterior. La documentación no
+  autoriza por sí sola cambios del host, ejecución remota o publicación.
 - **R-IMG-01 — Imágenes al iniciar:** extender la actualización al arranque tanto
   a aplicaciones como a los cuatro servicios del núcleo, con canales explícitos,
   semilla offline verificada e intención de parada respetada. No incluye actualizar

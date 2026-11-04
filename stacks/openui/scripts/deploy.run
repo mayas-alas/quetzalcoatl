@@ -1,0 +1,7 @@
+#!/usr/bin/bash
+set -euo pipefail
+umask 077
+cd /stacks/openui
+bash scripts/install.run --inference-only
+bash scripts/build.run
+bash scripts/install.run

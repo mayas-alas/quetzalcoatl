@@ -364,6 +364,45 @@ pub fn private_directory() -> io::Result<File> {
     open_checked(&state_dir()?, true)
 }
 
+pub fn enable_profile_privileges() -> io::Result<()> {
+    use windows_sys::Win32::Security::{
+        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_BACKUP_NAME,
+        SE_PRIVILEGE_ENABLED, SE_RESTORE_NAME, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
+    };
+    let mut token = null_mut();
+    if unsafe {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES,
+            &mut token,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    let token = Handle(token);
+    for name in [SE_BACKUP_NAME, SE_RESTORE_NAME] {
+        let mut luid = unsafe { std::mem::zeroed() };
+        if unsafe { LookupPrivilegeValueW(std::ptr::null(), name, &mut luid) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let value = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            Privileges: [LUID_AND_ATTRIBUTES {
+                Luid: luid,
+                Attributes: SE_PRIVILEGE_ENABLED,
+            }],
+        };
+        if unsafe { AdjustTokenPrivileges(token.0, 0, &value, 0, null_mut(), null_mut()) } == 0
+            || unsafe { windows_sys::Win32::Foundation::GetLastError() }
+                == windows_sys::Win32::Foundation::ERROR_NOT_ALL_ASSIGNED
+        {
+            return Err(denied("privilegios de perfil no disponibles"));
+        }
+    }
+    Ok(())
+}
+
 pub fn enable_identity_privileges() -> io::Result<()> {
     use windows_sys::Win32::{
         Foundation::{ERROR_NOT_ALL_ASSIGNED, GetLastError, LUID},

@@ -102,7 +102,7 @@ la última fase de configuración, no salud en vivo ni una API administrativa.
 La escucha del gateway se limita a sus IP NAT y mesh, no a una publicación LAN.
 
 El stack privado registrado añade `pocket.gnx`, `rustfs.gnx`, `s3.gnx` y
-`netbird.gnx` al mismo gateway y certificado. Windows gestiona los seis nombres
+`netbird.gnx` al mismo gateway y certificado. Windows gestiona los diez nombres
 locales; las rutas Caddy de aplicaciones se importan solo después de registrar
 el stack. DNS PVE incluye sus nombres y una reserva DHCP para la MAC registrada.
 Una ruta `/32` lleva el tráfico al guest, no sustituye el gateway general del nodo.
@@ -370,3 +370,10 @@ están en [Despliegue](docs/deployment.md).
 Caddy transporta HTTP/2 gRPC y relay NetBird; no transporta STUN UDP. El puerto
 3478 se publica en la IP del guest, no mediante el portproxy TCP Windows. Acceso
 externo y conexión entre peers requieren su comprobación independiente.
+
+Las fuentes 0.0.37 incluyen cuatro nombres para el stack OpenUI externo: f1.gnx,
+intelligent.gnx, omniroute.gnx y api.gnx. Su publicación requiere el LXC y
+configuración de ingress comprobados; no se despliega al instalar el núcleo.
+La continuación conservadora update --resume verifica instalación, payload,
+assets e identidad contra el inventario preservado y mantiene components_pending
+hasta la aplicación explícita de componentes. No repite MSI ni recrea WSL.

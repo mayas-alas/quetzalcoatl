@@ -1,0 +1,3 @@
+[Network]
+NetworkName=gnx-agent
+Driver=bridge

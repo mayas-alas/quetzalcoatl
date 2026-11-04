@@ -1,0 +1,8 @@
+{
+  "desktop": "ghcr.io/bytebot-ai/bytebot-desktop@sha256:e974e7ac93c8f755e98b8a437e5497a63175c7096b51a348f5f1d9320598a1c9",
+  "agent": "ghcr.io/bytebot-ai/bytebot-agent@sha256:a36e65ce6db772a4c6fa340a68c50bca0a493bc16b6f86d566ac8fc11c122b29",
+  "ui": "ghcr.io/bytebot-ai/bytebot-ui@sha256:492d57da67513582dd15cde892dc8b29b9a6deec62c9e2b4e2c86e168c22302f",
+  "postgres": "docker.io/library/postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab",
+  "tailscale": "docker.io/tailscale/tailscale@sha256:ed6480b33c6eb67c9cbd203ed42b9fb57e361986725b6856def71b7a3d9e276c",
+  "llm": "docker.io/library/node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c"
+}

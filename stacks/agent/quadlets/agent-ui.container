@@ -1,0 +1,27 @@
+[Unit]
+Description=GnX Agent ui
+Requires=agent.service
+After=agent.service
+
+[Container]
+Image=ghcr.io/bytebot-ai/bytebot-ui@sha256:492d57da67513582dd15cde892dc8b29b9a6deec62c9e2b4e2c86e168c22302f
+ContainerName=gnx-agent-ui
+Network=agent.network
+NetworkAlias=agent-ui
+NetworkAlias=agents-ui
+Environment=NODE_ENV=production
+Environment=HOSTNAME=0.0.0.0
+Environment=PORT=9992
+Environment=BYTEBOT_AGENT_BASE_URL=http://agent:9991
+Environment=BYTEBOT_DESKTOP_VNC_URL=http://desktop:9990/websockify
+PublishPort=9992:9992
+LogDriver=journald
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=180
+MemoryMax=768M
+
+[Install]
+WantedBy=multi-user.target
