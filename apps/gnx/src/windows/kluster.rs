@@ -53,6 +53,10 @@ pub(super) fn bundle() -> io::Result<Bundle> {
             include_str!("../../../../stacks/kluster/scripts/health.run"),
         ),
         (
+            "config/kluster-reconcile-observe.run",
+            include_str!("../../../../stacks/kluster/scripts/reconcile-observe.run"),
+        ),
+        (
             "config/kluster-values.yaml",
             include_str!("../../../../stacks/kluster/kubeshark-values.yaml"),
         ),
@@ -197,7 +201,7 @@ pub(super) fn health(identity: &Identity, id: &str) -> io::Result<()> {
             "/etc/gnx-app/config/kluster-health.run",
         ],
         None,
-        240,
+        300,
     )?;
     Ok(())
 }

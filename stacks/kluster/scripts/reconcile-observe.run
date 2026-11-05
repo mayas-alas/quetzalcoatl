@@ -1,0 +1,54 @@
+#!/usr/bin/bash
+# Fixed Helm reconciliation; preserves K3s, registry, cluster identity and data.
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 ]]
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+cfg=/etc/gnx-app/config
+state=/var/lib/gnx-app/kluster
+tools=/var/lib/gnx-app/tools
+for cmd in curl jq tar flock; do command -v "$cmd" >/dev/null; done
+[[ -f $cfg/kluster-values.yaml && -f $cfg/kluster-assets.json ]]
+install -d -m 0700 "$state"
+exec 9>"$state/observe.lock"
+flock -n 9 || { echo 'Ya hay una actualizacion de Kubeshark en curso.' >&2; exit 1; }
+temporary=$(mktemp -d "$state/observe-XXXXXXXX")
+trap 'rm -rf -- "$temporary"' EXIT
+chart_hash=$(jq -er .downloads.chart.sha256 "$cfg/kluster-assets.json")
+[[ $chart_hash =~ ^[a-f0-9]{64}$ ]]
+printf '%s  %s\n' "$chart_hash" "$tools/kubeshark-source.tar.gz" | sha256sum -c -
+install -d -m 0700 "$temporary/chart"
+tar -xzf "$tools/kubeshark-source.tar.gz" --strip-components=1 -C "$temporary/chart"
+# This pinned chart hardcodes a 1 GiB frontend limit; bound it for this demo.
+front="$temporary/chart/helm-chart/templates/06-front-deployment.yaml"
+[[ $(grep -c 'memory: 1Gi' "$front") == 1 ]]
+sed -i 's/memory: 1Gi/memory: 128Mi/' "$front"
+
+/usr/local/bin/k3s kubectl get --raw=/readyz --request-timeout=5s >/dev/null
+release=absent
+namespace=$(/usr/local/bin/k3s kubectl get namespace gnx-observe --ignore-not-found -o name)
+if [[ -n $namespace ]]; then
+  release=$(/usr/local/bin/helm list -n gnx-observe --all --filter '^gnx-kubeshark$' -o json |
+    jq -er 'if length == 0 then "absent" elif length == 1 then .[0].status else error("release ambigua") end')
+fi
+case "$release" in
+  absent|deployed|failed) ;;
+  *) echo "Estado Helm $release: revisar la operacion anterior antes de repetir." >&2; exit 1 ;;
+esac
+[[ $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) -ge 1048576 ]] || {
+  echo 'Se requiere al menos 1 GiB de memoria disponible antes de actualizar Kubeshark.' >&2
+  exit 1
+}
+echo "Kubeshark: reconciliando release $release; tracer limitado a 1 GiB. Espera maxima: 5 minutos."
+if ! /usr/local/bin/helm upgrade --install gnx-kubeshark "$temporary/chart/helm-chart" \
+  --namespace gnx-observe --create-namespace --values "$cfg/kluster-values.yaml" \
+  --wait --timeout 5m >/dev/null; then
+  /usr/local/bin/k3s kubectl -n gnx-observe get pods -o wide
+  /usr/local/bin/k3s kubectl -n gnx-observe get pods -o json |
+    jq '[.items[] | {pod: .metadata.name, containers: [.status.containerStatuses[]? | {name, ready, restartCount, state, lastState}]}]'
+  cat /sys/fs/cgroup/memory.events
+  free -h
+  exit 1
+fi
+echo 'Kubeshark desplegado; verificando registry, demo y workloads.'
+bash "$cfg/kluster-health.run"

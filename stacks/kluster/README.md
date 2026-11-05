@@ -25,6 +25,17 @@ mayas-alas/gnx-kubeshark en gnx-observe. Las descargas tienen SHA256 y las image
 del registry, demo y Kubeshark estan fijadas por digest. Las imagenes internas
 de K3s corresponden a su distribucion fijada. La demo se publica y consume por digest en el
 registry local. No se compila en el LXC ni se desactiva la verificacion TLS.
+El tracer tiene un limite de 1 GiB y reserva 256 MiB; los limites del hub,
+sniffer y frontend son 512, 384 y 128 MiB. Su aceptacion requiere comprobar
+memoria y estabilidad de todos los contenedores, ademas del estado Ready.
+
+La reconciliacion fija de observabilidad esta en
+`scripts/reconcile-observe.run`. Es la misma que llama el instalador y permite
+reintentar una release Helm fallida con los valores instalados, sin reiniciar
+K3s ni el registry. Verifica el chart cacheado por SHA256, exige al menos 1 GiB
+disponible y bloquea una release con operacion pendiente. No reinstala el cluster.
+La comprobacion final exige que todos los contenedores del worker esten Ready
+y conserven su identidad y contador de reinicios durante 30 segundos.
 
 Las versiones y procedencia estan en assets.json. El chart se descarga del fork
 fijado; las herramientas kftui/kftray y kubeshark utilizan binarios publicados por
@@ -78,3 +89,7 @@ El EXE y su publicacion por Actions se construyen despues de validar el stack.
 La fuente prepara el comando de la siguiente entrega; el CLI 0.0.38 instalado
 no admite esta seleccion todavia. La prueba manual valida scripts y runtime,
 no la actualizacion MSI/EXE ni el recorrido del servicio Windows de esa entrega.
+
+Para actualizar solo observabilidad en el laboratorio ya preparado, ejecutar
+`bash stacks/kluster/scripts/validate-lab.run observe`. Transfiere los valores
+y scripts incorporados y ejecuta Helm; conserva los parametros del LXC, K3s y registry.
