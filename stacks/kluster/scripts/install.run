@@ -136,9 +136,11 @@ timeout 120 bash -c 'until /usr/local/bin/k3s kubectl get --raw=/readyz --reques
 
 sed "s|127.0.0.1:5000/gnx/demo:1|127.0.0.1:5000/gnx/demo@$demo_digest|g" "$cfg/kluster-demo.yaml" > "$temporary/demo.yaml"
 /usr/local/bin/k3s kubectl apply -f "$temporary/demo.yaml"
+echo 'Esperando workloads de Kubeshark (hasta 5 minutos). El detalle esta en los pods y eventos de gnx-observe.'
 /usr/local/bin/helm upgrade --install gnx-kubeshark "$temporary/chart/helm-chart" \
   --kubeconfig /etc/rancher/k3s/k3s.yaml --namespace gnx-observe --create-namespace \
   --values "$cfg/kluster-values.yaml" --wait --timeout 5m >/dev/null
+echo 'Kubeshark desplegado; verificando registry, demo y workloads.'
 bash "$cfg/kluster-health.run"
 install -m 0600 "$assets" "$state/installed-assets.json"
 echo 'GNX_KLUSTER_INSTALLED'
