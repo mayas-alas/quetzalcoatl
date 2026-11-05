@@ -10,6 +10,7 @@ tools=/var/lib/gnx-app/tools
 install -d -m 0700 "$state" "$tools" /etc/rancher/k3s/config.yaml.d
 temporary=$(mktemp -d "$state/stage-XXXXXXXX")
 trap 'rm -rf -- "$temporary"' EXIT
+install -d -m 0700 "$temporary/downloads"
 for cmd in curl jq openssl podman systemctl tar; do command -v "$cmd" >/dev/null; done
 [[ $(uname -m) == x86_64 && $(jq -r .schema "$assets") == 1 ]]
 dd if=/dev/kmsg of=/dev/null count=0 status=none
@@ -29,9 +30,9 @@ download() {
     [[ $(sha256sum "$target" | cut -d' ' -f1) == "$hash" ]] || { echo "Binario existente distinto: $name" >&2; exit 1; }
     return
   fi
-  curl -fSL --connect-timeout 10 --max-time 300 "$url" -o "$temporary/$name"
-  printf '%s  %s\n' "$hash" "$temporary/$name" | sha256sum -c -
-  install -m 0755 "$temporary/$name" "$target"
+  curl -fSL --connect-timeout 10 --max-time 300 "$url" -o "$temporary/downloads/$name"
+  printf '%s  %s\n' "$hash" "$temporary/downloads/$name" | sha256sum -c -
+  install -m 0755 "$temporary/downloads/$name" "$target"
 }
 download k3s /usr/local/bin/k3s
 download helm "$tools/helm.tar.gz"
