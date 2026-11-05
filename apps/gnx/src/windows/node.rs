@@ -118,6 +118,9 @@ impl Controller {
                             Ok((state, message))
                         },
                     )
+                } else if op == Operation::DeployKluster {
+                    super::deploy::execute_kluster(&progress)
+                        .map(|message| (NodeState::Active, message))
                 } else if op == Operation::Deploy {
                     super::deploy::execute(bundle, &progress, recovery.as_ref())
                         .map(|message| (NodeState::Active, message))
@@ -149,7 +152,7 @@ impl Controller {
                 }
                 Response::new(request, state != NodeState::Degraded, state, &message)
             }
-            Ok(Err(error)) if op == Operation::Deploy => {
+            Ok(Err(error)) if matches!(op, Operation::Deploy | Operation::DeployKluster) => {
                 let mut response = Response::new(
                     request,
                     false,
@@ -158,10 +161,16 @@ impl Controller {
                         "deploy: {error}; conserva el recibo y consulta journal/Visor de eventos antes de repetir"
                     ),
                 );
-                response.recover_missing = error
-                    .get_ref()
-                    .and_then(|cause| cause.downcast_ref::<crate::protocol::MissingDeployment>())
-                    .cloned();
+                response.recover_missing = if op == Operation::Deploy {
+                    error
+                        .get_ref()
+                        .and_then(|cause| {
+                            cause.downcast_ref::<crate::protocol::MissingDeployment>()
+                        })
+                        .cloned()
+                } else {
+                    None
+                };
                 response
             }
             Ok(Err(error)) if error.kind() == io::ErrorKind::NotFound => Response::new(

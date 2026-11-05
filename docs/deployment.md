@@ -19,6 +19,19 @@ autorizado; no se presentan aquí como comandos ya implementados.
 
 ## Stack predeterminado
 
+El perfil Kubernetes se selecciona por separado:
+
+```powershell
+gnx deploy --stack kluster
+```
+
+Prepara parámetros del kernel compartido de la WSL dedicada y crea un LXC
+privilegiado propio con /dev/kmsg de lectura. Mantiene recibos antes de crear,
+verifica propiedad y conserva el guest ante errores. No usa una carpeta aportada
+por el cliente ni adopta el laboratorio 1002. Véanse recursos, procedencia,
+acceso y comprobaciones en [Kluster](../stacks/kluster/README.md).
+Las comprobaciones locales de código no acreditan despliegue ni un EXE publicado.
+
 En las fuentes, `gnx deploy` sin argumentos selecciona `private-services` incorporado
 en el ejecutable; no busca una carpeta relativa al directorio de PowerShell.
 El servicio genera claves propias de Pocket ID, RustFS y NetBird y utiliza la CA

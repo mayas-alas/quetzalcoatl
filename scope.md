@@ -29,6 +29,13 @@ artefactos técnicos de CI, no descargas adicionales para instalar.
 
 ## Despliegue de Quadlets
 
+Las fuentes incorporan el perfil fijo `gnx deploy --stack kluster`: preparación
+del kernel en la WSL dedicada y un LXC Kubernetes privilegiado propio, con
+registry TLS, servicio HTTP y observabilidad de red. Su selección no modifica la admisión
+genérica ni adopta guests existentes. La implementación y la prueba manual
+están en [Kluster](stacks/kluster/README.md); su aceptación runtime y el nuevo
+instalador están pendientes.
+
 Admisión de una carpeta de Quadlets/configuración
 por la CLI, transferencia por el pipe existente y creación de un LXC nuevo con
 `pct` desde Rust. Aplicación y lifecycle mediante Podman/systemd del guest, sin
@@ -100,7 +107,7 @@ remoto, selección automática de versiones compatibles ni aceptación runtime d
 actualizador: dependen de una entrega instalada y comprobaciones independientes.
 
 - La priorización de actualizaciones y los nuevos frontends se registran en
-  [features.md](features.md): la entrega inmediata prioriza una demo en un día de
+  [features.md](features.md): la entrega inmediata prioriza una implementación de
   `app.gnx` basada en **OpenUI F1 Dashboard**, con **OmniRoute** como gateway de
   inferencia e integración en `gnx-kluster` con engine **Podman**. El paradigma
   requerido incluye Containerfile → imagen OCI → systemd/Quadlets en el LXC

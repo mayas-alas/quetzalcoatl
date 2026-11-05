@@ -4,6 +4,7 @@ mod console;
 mod deploy;
 mod identity;
 mod installer_package;
+mod kluster;
 mod maintenance;
 mod node;
 mod pipe;
@@ -81,6 +82,13 @@ pub fn deploy(
             crate::protocol::Operation::Deploy,
             bundle,
         ))
+}
+
+pub fn deploy_kluster() -> std::io::Result<crate::protocol::Response> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(pipe::client(crate::protocol::Operation::DeployKluster))
 }
 
 pub fn update(
