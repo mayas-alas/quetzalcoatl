@@ -6,15 +6,15 @@ systemctl is-active --quiet registry.service k3s.service
 curl -fsS --cacert /var/lib/gnx-app/registry-tls/ca.crt https://127.0.0.1:5000/v2/ >/dev/null
 "$k" kubectl get --raw=/readyz --request-timeout=5s >/dev/null
 "$k" kubectl wait --for=condition=Ready nodes --all --timeout=60s
-"$k" kubectl -n gnx-demo rollout status deployment/demo --timeout=90s
-"$k" kubectl -n gnx-demo rollout status deployment/traffic --timeout=90s
-"$k" kubectl -n gnx-demo exec deployment/traffic -- wget -q -O /dev/null http://demo:8080/
+"$k" kubectl -n gnx-services rollout status deployment/service-health --timeout=90s
+"$k" kubectl -n gnx-services rollout status deployment/http-probe --timeout=90s
+"$k" kubectl -n gnx-services exec deployment/http-probe -- wget -q -O /dev/null http://service-health:8080/
 # The Helm release and every workload, including capture workers, must be ready.
-/usr/local/bin/helm status gnx-kubeshark -n gnx-observe -o json | jq -e '.info.status == "deployed"' >/dev/null
-"$k" kubectl -n gnx-observe get deployments,daemonsets -o json |
+/usr/local/bin/helm status gnx-observability -n gnx-observability -o json | jq -e '.info.status == "deployed"' >/dev/null
+"$k" kubectl -n gnx-observability get deployments,daemonsets -o json |
   jq -e '.items | length > 0 and all(.[]; if .kind == "Deployment" then (.status.availableReplicas // 0) >= (.spec.replicas // 1) else (.status.desiredNumberScheduled // 0) > 0 and .status.numberReady == .status.desiredNumberScheduled end)' >/dev/null
 worker_snapshot() {
-  "$k" kubectl -n gnx-observe get pods -l app.kubeshark.com/app=worker -o json |
+  "$k" kubectl -n gnx-observability get pods -l app.kubeshark.com/app=worker -o json |
     jq -ce '[.items[] | .status.containerStatuses[]?] |
       if length > 0 and all(.[]; .ready and .state.running != null)
       then map({name, containerID, restartCount}) | sort_by(.containerID)

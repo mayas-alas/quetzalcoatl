@@ -19,37 +19,64 @@ chart_hash=$(jq -er .downloads.chart.sha256 "$cfg/kluster-assets.json")
 printf '%s  %s\n' "$chart_hash" "$tools/kubeshark-source.tar.gz" | sha256sum -c -
 install -d -m 0700 "$temporary/chart"
 tar -xzf "$tools/kubeshark-source.tar.gz" --strip-components=1 -C "$temporary/chart"
-# This pinned chart hardcodes a 1 GiB frontend limit; bound it for this demo.
+# This pinned chart hardcodes a 1 GiB frontend limit; bound it for this deployment.
 front="$temporary/chart/helm-chart/templates/06-front-deployment.yaml"
 [[ $(grep -c 'memory: 1Gi' "$front") == 1 ]]
 sed -i 's/memory: 1Gi/memory: 128Mi/' "$front"
+# Product workloads are named by responsibility; vendor labels and private API
+# service names remain intact because the published binaries depend on them.
+grep -Fq 'name: {{ include "kubeshark.name" . }}-front' "$front"
+sed -i 's/name: {{ include "kubeshark.name" . }}-front/name: network-console/; s/name: kubeshark-front/name: network-console/' "$front"
+hub="$temporary/chart/helm-chart/templates/04-hub-deployment.yaml"
+grep -Fq 'name: {{ include "kubeshark.name" . }}-hub' "$hub"
+sed -i 's/name: {{ include "kubeshark.name" . }}-hub/name: traffic-analysis/' "$hub"
+worker="$temporary/chart/helm-chart/templates/09-worker-daemon-set.yaml"
+grep -Fq 'name: kubeshark-worker-daemon-set' "$worker"
+sed -i 's/name: kubeshark-worker-daemon-set/name: packet-capture/g' "$worker"
+cp "$temporary/chart/helm-chart/templates/07-front-service.yaml" "$temporary/chart/helm-chart/templates/07-network-console-service.yaml"
+sed -i 's/kubeshark-front/network-console/g' "$temporary/chart/helm-chart/templates/07-network-console-service.yaml"
 
 /usr/local/bin/k3s kubectl get --raw=/readyz --request-timeout=5s >/dev/null
+# Never create a parallel installation over the previous laboratory layout.
+legacy=$(/usr/local/bin/k3s kubectl get namespace gnx-observe --ignore-not-found -o name)
+if [[ -n $legacy ]]; then
+  prior=$(/usr/local/bin/helm list -n gnx-observe --filter '^gnx-kubeshark$' -o json | jq -er length)
+  [[ $prior == 0 ]] || { echo 'La instalación anterior requiere una migración explícita; no se modifica.' >&2; exit 1; }
+fi
 release=absent
-namespace=$(/usr/local/bin/k3s kubectl get namespace gnx-observe --ignore-not-found -o name)
+namespace=$(/usr/local/bin/k3s kubectl get namespace gnx-observability --ignore-not-found -o name)
 if [[ -n $namespace ]]; then
   # Helm 4 includes every status by default, including pending operations.
-  release=$(/usr/local/bin/helm list -n gnx-observe --filter '^gnx-kubeshark$' -o json |
+  release=$(/usr/local/bin/helm list -n gnx-observability --filter '^gnx-observability$' -o json |
     jq -er 'if length == 0 then "absent" elif length == 1 then .[0].status else error("release ambigua") end')
 fi
 case "$release" in
   absent|deployed|failed) ;;
   *) echo "Estado Helm $release: revisar la operacion anterior antes de repetir." >&2; exit 1 ;;
 esac
+# The hub changes this operational toggle at runtime. Render its current value
+# so Helm's apply can share that field without forcing ownership or resetting it.
+helm_args=()
+current_config=$(/usr/local/bin/k3s kubectl -n gnx-observability get configmap kubeshark-config-map --ignore-not-found -o json)
+if [[ -n $current_config ]]; then
+  dissection=$(jq -er '.data.DISSECTION_ENABLED' <<< "$current_config")
+  [[ $dissection == true || $dissection == false ]]
+  helm_args+=(--set "tap.capture.dissection.enabled=$dissection")
+fi
 [[ $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) -ge 1048576 ]] || {
   echo 'Se requiere al menos 1 GiB de memoria disponible antes de actualizar Kubeshark.' >&2
   exit 1
 }
 echo "Kubeshark: reconciliando release $release; tracer limitado a 1 GiB. Espera maxima: 5 minutos."
-if ! /usr/local/bin/helm upgrade --install gnx-kubeshark "$temporary/chart/helm-chart" \
-  --namespace gnx-observe --create-namespace --values "$cfg/kluster-values.yaml" \
-  --wait --timeout 5m >/dev/null; then
-  /usr/local/bin/k3s kubectl -n gnx-observe get pods -o wide
-  /usr/local/bin/k3s kubectl -n gnx-observe get pods -o json |
+if ! /usr/local/bin/helm upgrade --install gnx-observability "$temporary/chart/helm-chart" \
+  --namespace gnx-observability --create-namespace --values "$cfg/kluster-values.yaml" \
+  "${helm_args[@]}" --wait --timeout 5m >/dev/null; then
+  /usr/local/bin/k3s kubectl -n gnx-observability get pods -o wide
+  /usr/local/bin/k3s kubectl -n gnx-observability get pods -o json |
     jq '[.items[] | {pod: .metadata.name, containers: [.status.containerStatuses[]? | {name, ready, restartCount, state, lastState}]}]'
   cat /sys/fs/cgroup/memory.events
   free -h
   exit 1
 fi
-echo 'Kubeshark desplegado; verificando registry, demo y workloads.'
+echo 'Kubeshark desplegado; verificando registry, servicio HTTP y workloads.'
 bash "$cfg/kluster-health.run"

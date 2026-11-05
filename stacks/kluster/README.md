@@ -1,95 +1,84 @@
 # GnX Kluster
 
-Perfil fijo seleccionado por `gnx deploy --stack kluster`. Es distinto de
-`gnx deploy` (private-services) y de la admision generica de carpetas.
+Perfil de infraestructura seleccionado con `gnx deploy --stack kluster`.
+El servicio verifica su identidad Windows y WSL, prepara el kernel y despliega
+un LXC Kubernetes propio. El instalador Windows incorpora el comando; el despliegue
+se solicita explícitamente después de instalar.
 
-El servicio verifica la identidad de su cuenta/WSL dedicada y persiste la entrada
-exacta. Prepara kernel.panic=10 y vm.overcommit_memory=1 en esa WSL, conserva los
-valores anteriores en /var/lib/gnx-core/kluster-kernel/original.conf y registra una
-unidad systemd anterior a compute. Los parametros pertenecen al kernel compartido
-por PVE y sus LXC. No modifica .wslconfig, memoria de WSL ni una WSL personal.
+## Componentes
 
-El perfil crea un LXC privilegiado propio (2 CPU, 3 GiB RAM, 512 MiB swap, 20 GiB
-disco), fijando descripcion, recibo, base verificada y /dev/kmsg con escritura
-denegada. No convierte ni adopta 1001/1002, no modifica la admision generica.
-Antes del primer arranque restaura CAP_SETFCAP, que Fedora descarta y que el
-sandbox OCI necesita. Conserva las otras siete capacidades descartadas por las
-plantillas; una politica distinta bloquea para revision. Usa el bloqueo y la
-escritura nativos de PVE, con respaldo de la configuracion en /var/lib/vz.
-Preserva las reservas incompletas; la ausencia del guest o una entrada diferente
-requieren revision explicita y no asignan otro VMID silenciosamente.
+| Ámbito | Componente | Responsabilidad |
+| --- | --- | --- |
+| LXC | `gnx-kluster-registry` | Registro OCI local con TLS y CA privada. |
+| `gnx-services` | `service-health` | Endpoint HTTP para comprobar conectividad. |
+| `gnx-services` | `http-probe` | Comprobaciones HTTP periódicas con resultado en los logs. |
+| `gnx-observability` | `network-console` | Consola de observabilidad de red. |
+| `gnx-observability` | `traffic-analysis` | Coordinación y análisis del tráfico capturado. |
+| `gnx-observability` | `packet-capture` | Captura de paquetes y trazado TLS mediante eBPF. |
 
-Dentro del guest instala K3s, un registry Podman/Quadlet en loopback con TLS y CA
-local, una aplicacion HTTP y un emisor de trafico en gnx-demo, y el chart del fork
-mayas-alas/gnx-kubeshark en gnx-observe. Las descargas tienen SHA256 y las imagenes
-del registry, demo y Kubeshark estan fijadas por digest. Las imagenes internas
-de K3s corresponden a su distribucion fijada. La demo se publica y consume por digest en el
-registry local. No se compila en el LXC ni se desactiva la verificacion TLS.
-El tracer tiene un limite de 1 GiB y reserva 256 MiB; los limites del hub,
-sniffer y frontend son 512, 384 y 128 MiB. Su aceptacion requiere comprobar
-memoria y estabilidad de todos los contenedores, ademas del estado Ready.
+La release Helm se llama `gnx-observability`. Kubeshark es la dependencia de
+observabilidad; las imágenes, etiquetas y endpoints internos que sus binarios
+requieren conservan su identidad técnica. El servicio `network-console` es la
+entrada del producto; el alias interno del proveedor se conserva por compatibilidad.
+No se atribuye a GnX la autoría de esas dependencias.
 
-La reconciliacion fija de observabilidad esta en
-`scripts/reconcile-observe.run`. Es la misma que llama el instalador y permite
-reintentar una release Helm fallida con los valores instalados, sin reiniciar
-K3s ni el registry. Verifica el chart cacheado por SHA256, exige al menos 1 GiB
-disponible y bloquea una release con operacion pendiente. No reinstala el cluster.
-La comprobacion final exige que todos los contenedores del worker esten Ready
-y conserven su identidad y contador de reinicios durante 30 segundos.
+## Despliegue controlado
 
-Las versiones y procedencia estan en assets.json. El chart se descarga del fork
-fijado; las herramientas kftui/kftray y kubeshark utilizan binarios publicados por
-sus proyectos upstream, con la version correspondiente al fork y SHA256 fijados.
-No se presentan como binarios compilados por los forks de mayas-alas.
+El perfil prepara `kernel.panic=10` y `vm.overcommit_memory=1` en la WSL dedicada,
+guarda los valores anteriores y registra una unidad systemd anterior a compute.
+Los parámetros pertenecen al kernel compartido por PVE y sus LXC. No modifica
+`.wslconfig` ni reinicia WSL.
 
-El archivo AppImage del tray queda en /var/lib/gnx-app/tools/kftray.AppImage para
-instalarlo en un escritorio compatible; el LXC no inicia una interfaz grafica.
-La integracion visual con el escritorio Agent requiere verificar sus dependencias
-y credenciales por separado. No se copia el kubeconfig administrador a Agent.
+Crea un LXC privilegiado propio con 2 CPU, 3 GiB de RAM, 512 MiB de swap y 20 GiB
+de disco. Reserva el VMID, verifica recibos y descripción, y pasa `/dev/kmsg` con
+escritura denegada. Antes del arranque restaura únicamente CAP_SETFCAP frente al
+perfil Fedora, conserva las otras siete capacidades descartadas y guarda un
+respaldo PVE. Una política distinta requiere revisión.
+
+Las versiones, fuentes y hashes están en `assets.json`. El chart procede del fork
+mayas-alas/gnx-kubeshark. K3s, Helm, kubeshark, kftui y kftray son binarios upstream
+verificados; no se compilan dentro del LXC. Las imágenes se fijan por digest.
+El endpoint HTTP se publica en el registro local y se consume por digest con TLS.
+
+El trazador tiene límite de 1 GiB y reserva de 256 MiB. Los límites del coordinador,
+capturador y consola son 512, 384 y 128 MiB. La suficiencia de estos límites se
+comprueba en la aceptación manual; el límite previo del trazador provocó OOM.
+
+`scripts/reconcile-observe.run` actualiza observabilidad mediante Helm sin
+reiniciar K3s ni el registro. Verifica el chart almacenado, exige 1 GiB disponible
+y bloquea operaciones pendientes. Conserva el valor operativo de
+`DISSECTION_ENABLED` que mantiene el coordinador para evitar imponer otro valor
+ni forzar su propiedad. La salud exige servicios disponibles, una petición HTTP
+correcta y 30 segundos sin reinicios del capturador.
+
+El AppImage del cliente gráfico queda en `/var/lib/gnx-app/tools/kftray.AppImage`.
+Su instalación en un escritorio compatible y sus credenciales se verifican por
+separado; el LXC no inicia una interfaz gráfica ni copia el kubeconfig a Agent.
 
 ## Acceso
 
-Las UIs son ClusterIP, sin ingress publico. La autenticacion de acceso la aporta
-Kubernetes al autorizar port-forward; Kubeshark esta limitado a observar gnx-demo.
-Desde una consola administrativa del guest:
+Los servicios son ClusterIP. El acceso se autoriza mediante Kubernetes y
+port-forward desde una consola administrativa del guest:
 
 ```bash
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-/usr/local/bin/k3s kubectl -n gnx-demo port-forward svc/demo 8080:8080
+/usr/local/bin/k3s kubectl -n gnx-services port-forward svc/service-health 8080:8080
 # En otra consola:
-/usr/local/bin/k3s kubectl -n gnx-observe port-forward svc/kubeshark-front 8899:80
+/usr/local/bin/k3s kubectl -n gnx-observability port-forward svc/network-console 8899:80
 ```
 
-El kubeconfig permanece root:0600 y no se imprime. Un cliente externo debe recibir
-un kubeconfig protegido, CA valida y permisos acordes a su uso. La IP DHCP debe
-mantenerse alcanzable; no se presupone publicacion por los dominios GnX.
+El kubeconfig permanece root:0600. Un cliente externo necesita credenciales
+protegidas, CA válida y permisos acordes a su uso. La captura se limita a
+`gnx-services`; no se presupone publicación por los dominios GnX.
 
-## Prueba en el laboratorio 1002
+## Aceptación y laboratorio
 
-Con el codigo de esta rama disponible en PVE, ejecutar:
+La candidata 0.0.39 incorpora estas fuentes. Compilar y empaquetar no acredita
+instalación Windows, disponibilidad del stack ni captura real: se comprueban
+manualmente con el instalador exacto descargado.
 
-```bash
-pct shutdown 1002 --timeout 60
-perl stacks/kluster/scripts/prepare-lxc.run 1002 lab-1002 apply
-pct start 1002
-bash stacks/kluster/scripts/validate-lab.run
-```
-
-Este recorrido modifica exclusivamente el guest de laboratorio 1002 y los dos
-sysctls compartidos autorizados; sube su limite de RAM a 3 GiB tras comprobar RAM
-disponible en PVE. Usa los mismos scripts de kernel e instalacion que el servicio.
-No registra el guest manual como propiedad del producto y no ejecuta el pipe de
-la nueva CLI. Conserva cluster, datos, CA y configuracion base del K3s ya instalado.
-
-La aceptacion exige nodo Ready, registry TLS disponible, demo respondiendo y
-workloads de Kubeshark listos. La captura real y el tray requieren comprobacion
-visual posterior. Ningun check estatico acredita esas condiciones en runtime.
-
-El EXE y su publicacion por Actions se construyen despues de validar el stack.
-La fuente prepara el comando de la siguiente entrega; el CLI 0.0.38 instalado
-no admite esta seleccion todavia. La prueba manual valida scripts y runtime,
-no la actualizacion MSI/EXE ni el recorrido del servicio Windows de esa entrega.
-
-Para actualizar solo observabilidad en el laboratorio ya preparado, ejecutar
-`bash stacks/kluster/scripts/validate-lab.run observe`. Transfiere los valores
-y scripts incorporados y ejecuta Helm; conserva los parametros del LXC, K3s y registry.
+`validate-lab.run` se limita al laboratorio manual 1002 y no lo adopta como
+propiedad del servicio. El esquema de recursos anterior requiere una migración
+explícita: la reconciliación detecta esa instalación y se detiene antes de crear
+otra en paralelo. No elimina namespaces, releases ni datos para cambiar nombres.
+El despliegue del servicio crea su propio LXC; no transforma 1001 ni 1002.

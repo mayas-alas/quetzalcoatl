@@ -1314,7 +1314,7 @@ fn execute_profile(
         if kluster {
             super::kluster::health(&identity, &id)?;
             return Ok(format!(
-                "Kluster LXC {id}: nodo Ready, registry y demo disponibles; datos conservados."
+                "Kluster LXC {id}: nodo Ready, registro OCI y servicio HTTP disponibles; datos conservados."
             ));
         }
         log(
@@ -1495,7 +1495,7 @@ fn execute_profile(
     if kluster {
         log(
             progress,
-            "Instalando K3s, registry, demo, Kubeshark y herramientas con versiones fijadas.",
+            "Instalando K3s, registro OCI, servicio HTTP, observabilidad de red y herramientas verificadas.",
         );
         super::kluster::install(&identity, &id)?;
     }
@@ -1615,7 +1615,7 @@ fn execute_profile(
     }
     if kluster {
         return Ok(format!(
-            "Kluster LXC {id}: nodo Ready, registry TLS, demo y Kubeshark desplegados; captura y escritorio se verifican por separado."
+            "Kluster LXC {id}: nodo Ready, registro OCI con TLS, servicio HTTP y observabilidad de red desplegados; captura y escritorio se verifican por separado."
         ));
     }
     Ok(format!(

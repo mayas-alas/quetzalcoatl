@@ -254,8 +254,8 @@ CAP_SETFCAP frente a las capacidades descartadas por Fedora, conservando las otr
 restricciones y un respaldo. Una política de plantilla distinta bloquea para revisión.
 La entrada genérica conserva su LXC no privilegiado y las restricciones
 de dispositivos. K3s usa containerd; Podman/Quadlet gobiernan el registry local.
-Los binarios y el chart se verifican por SHA256; las imágenes y la demo local
-se consumen por digest. La finalización exige checks del nodo, TLS, demo y
+Los binarios y el chart se verifican por SHA256; las imágenes y el servicio HTTP
+se consumen por digest. La finalización exige checks del nodo, TLS, servicio HTTP y
 workloads. La captura y el cliente gráfico se aceptan por separado.
 
 La CLI recoge una carpeta administrativa y transmite un bundle acotado por el

@@ -72,12 +72,12 @@ printf '[Service]\nMemoryMax=192M\n' > /etc/systemd/system/registry.service.d/li
 systemctl daemon-reload
 systemctl restart registry.service
 timeout 30 bash -c 'until curl -fsS --cacert /var/lib/gnx-app/registry-tls/ca.crt https://127.0.0.1:5000/v2/ >/dev/null; do sleep 1; done'
-demo_image=$(jq -er .images.demo "$assets")
-podman pull "$demo_image"
-podman tag "$demo_image" 127.0.0.1:5000/gnx/demo:1
-podman push --digestfile "$temporary/demo.digest" 127.0.0.1:5000/gnx/demo:1
-demo_digest=$(cat "$temporary/demo.digest")
-[[ $demo_digest =~ ^sha256:[a-f0-9]{64}$ ]]
+service_image=$(jq -er '.images["service-health"]' "$assets")
+podman pull "$service_image"
+podman tag "$service_image" 127.0.0.1:5000/gnx/service-health:1
+podman push --digestfile "$temporary/service-health.digest" 127.0.0.1:5000/gnx/service-health:1
+service_digest=$(cat "$temporary/service-health.digest")
+[[ $service_digest =~ ^sha256:[a-f0-9]{64}$ ]]
 
 # Drop-ins preserve an existing base config and cluster identity (lab 1002).
 cat > /etc/rancher/k3s/config.yaml.d/90-gnx-kluster.yaml <<'CONFIG'
@@ -133,8 +133,8 @@ systemctl restart --no-block k3s.service
 timeout 120 bash -c 'until /usr/local/bin/k3s kubectl get --raw=/readyz --request-timeout=3s >/dev/null 2>&1; do sleep 2; done'
 /usr/local/bin/k3s kubectl wait --for=condition=Ready nodes --all --timeout=120s
 
-sed "s|127.0.0.1:5000/gnx/demo:1|127.0.0.1:5000/gnx/demo@$demo_digest|g" "$cfg/kluster-demo.yaml" > "$temporary/demo.yaml"
-/usr/local/bin/k3s kubectl apply -f "$temporary/demo.yaml"
+sed "s|127.0.0.1:5000/gnx/service-health:1|127.0.0.1:5000/gnx/service-health@$service_digest|g" "$cfg/kluster-service-health.yaml" > "$temporary/service-health.yaml"
+/usr/local/bin/k3s kubectl apply -f "$temporary/service-health.yaml"
 bash "$cfg/kluster-reconcile-observe.run"
 install -m 0600 "$assets" "$state/installed-assets.json"
 echo 'GNX_KLUSTER_INSTALLED'

@@ -7,7 +7,7 @@ tap:
       hub: docker.io/kubeshark/hub@sha256:90486bf3b22d834a57703097457afa5a607e92cc46a512fb692707d8d3967efb
       worker: docker.io/kubeshark/worker@sha256:3fc84ec4b50c8b7c3c74851ad8aa4f61399ec7ce52f761eef8a536b62d1b30b2
       front: docker.io/kubeshark/front@sha256:7e5bb967176ed97535604e72f3f63dbe9e74e2fe9956fe4c9439d2e3fab4998b
-  namespaces: [gnx-demo]
+  namespaces: [gnx-services]
   telemetry:
     enabled: false
   auth:

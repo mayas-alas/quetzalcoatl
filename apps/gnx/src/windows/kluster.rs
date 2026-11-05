@@ -61,8 +61,8 @@ pub(super) fn bundle() -> io::Result<Bundle> {
             include_str!("../../../../stacks/kluster/kubeshark-values.yaml"),
         ),
         (
-            "config/kluster-demo.yaml",
-            include_str!("../../../../stacks/kluster/demo.yaml"),
+            "config/kluster-service-health.yaml",
+            include_str!("../../../../stacks/kluster/service-health.yaml"),
         ),
         (
             "config/kluster-kernel.run",
