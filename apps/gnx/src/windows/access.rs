@@ -10,13 +10,17 @@ use std::{
 };
 use windows_sys::Win32::{Foundation::CRYPT_E_NOT_FOUND, Security::Cryptography::*};
 
-const NAMES: [&str; 6] = [
+const NAMES: [&str; 10] = [
     "app.gnx",
     "compute.gnx",
     "pocket.gnx",
     "rustfs.gnx",
     "s3.gnx",
     "netbird.gnx",
+    "f1.gnx",
+    "intelligent.gnx",
+    "omniroute.gnx",
+    "api.gnx",
 ];
 
 fn native(name: &str, args: &[&str]) -> io::Result<()> {
@@ -74,7 +78,7 @@ fn hosts() -> io::Result<()> {
     if present.len() != NAMES.len() {
         let mut file = fs::OpenOptions::new().append(true).open(path)?;
         file.write_all(
-            b"\r\n127.0.0.1 app.gnx compute.gnx pocket.gnx rustfs.gnx s3.gnx netbird.gnx # GnXCore:7a34f3dc-ea24-4ddf-8adb-5817bf28bd21\r\n",
+            b"\r\n127.0.0.1 app.gnx compute.gnx pocket.gnx rustfs.gnx s3.gnx netbird.gnx f1.gnx intelligent.gnx omniroute.gnx api.gnx # GnXCore:7a34f3dc-ea24-4ddf-8adb-5817bf28bd21\r\n",
         )?;
         file.sync_all()?;
     }

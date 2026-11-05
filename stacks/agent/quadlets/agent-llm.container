@@ -1,0 +1,21 @@
+[Unit]
+Description=GnX Agent llm
+
+[Container]
+Image=docker.io/library/node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
+ContainerName=gnx-agent-llm
+Network=agent.network
+NetworkAlias=llm
+EnvironmentFile=/stacks/openui/secrets/apps.env
+Volume=/stacks/agent/bridge.mjs:/app/bridge.mjs:ro
+Exec=node /app/bridge.mjs
+LogDriver=journald
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=180
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

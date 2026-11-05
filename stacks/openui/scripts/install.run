@@ -1,0 +1,72 @@
+#!/usr/bin/bash
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 ]]
+root=/stacks/openui
+[[ -d "$root" && ! -L "$root" ]]
+install -d -m 0700 "$root/secrets" "$root/data" "$root/data/omniroute"
+install -d -m 0755 "$root/data/f1" /etc/containers/systemd
+for cmd in podman systemctl openssl jq; do command -v "$cmd" >/dev/null; done
+guest=$(jq -er .guest_address "$root/runtime.json")
+[[ "$guest" =~ ^172\.30\.0\.[0-9]+$ ]]
+mode=$(jq -er .mode "$root/runtime.json")
+[[ "$mode" == existing || "$mode" == new ]]
+existing=$(jq -er .existing_container "$root/runtime.json")
+[[ "$existing" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]
+if [[ "$mode" == new ]]; then
+    if ! podman container exists "$existing"; then
+        if [[ ! -e "$root/secrets/omniroute.env" ]]; then
+            {
+                printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)"
+                printf 'API_KEY_SECRET=%s\n' "$(openssl rand -hex 32)"
+                printf 'STORAGE_ENCRYPTION_KEY=%s\n' "$(openssl rand -hex 32)"
+                printf 'INITIAL_PASSWORD=%s\n' "$(openssl rand -hex 24)"
+            } > "$root/secrets/omniroute.env"
+            chmod 0600 "$root/secrets/omniroute.env"
+        fi
+        [[ ! -e /etc/containers/systemd/omniroute.container ]]
+        install -m 0644 "$root/quadlets/openui.network" /etc/containers/systemd/openui.network
+        install -m 0644 "$root/quadlets/omniroute.container" /etc/containers/systemd/omniroute.container
+        systemctl daemon-reload
+        systemctl start omniroute.service
+    fi
+fi
+# Existing resources are inspected, never recreated or reconfigured.
+podman container exists "$existing"
+auth_image=$(podman inspect --format '{{.Image}}' "$existing")
+if (( $# )); then
+    if [[ "$1" == --inference-only ]]; then
+        systemctl is-active omniroute.service
+        exit 0
+    fi
+fi
+base_url=$(jq -er .base_url "$root/runtime.json")
+[[ "$base_url" =~ ^http://[A-Za-z0-9._:-]+/v1$ ]]
+if [[ ! -e "$root/secrets/apps.env" ]]; then
+    sed "s|^LLM_BASE_URL=.*$|LLM_BASE_URL=$base_url|" "$root/settings.example" > "$root/secrets/apps.env"
+fi
+chmod 0600 "$root/secrets/apps.env"
+if [[ ! -e "$root/secrets/demo-password" ]]; then
+    openssl rand -hex 24 > "$root/secrets/demo-password"
+fi
+if [[ ! -e "$root/secrets/ingress.env" ]]; then
+    hash=$(podman run --rm --network none -i --entrypoint node "$auth_image" --input-type=module -e 'import {createRequire} from "node:module"; let bcrypt; for (const path of ["/app/dev/package.json","/app/package.json"]) { try { bcrypt=createRequire(path)("bcryptjs"); break; } catch {} } if (!bcrypt) throw Error("bcryptjs missing from runtime image"); let input=""; for await (const chunk of process.stdin) input+=chunk; process.stdout.write(await bcrypt.hash(input.trim(),12));' < "$root/secrets/demo-password")
+    [[ "$hash" == '$2'* ]]
+    printf 'GNX_OPENUI_PASSWORD_HASH=%s\n' "$hash" > "$root/secrets/ingress.env"
+    printf 'GNX_OPENUI_GUEST=%s\n' "$guest" >> "$root/secrets/ingress.env"
+fi
+chmod 0600 "$root/secrets/demo-password" "$root/secrets/ingress.env"
+for unit in openui.network openui-f1.container openui-intelligent.container; do
+    target=/etc/containers/systemd/$unit
+    [[ ! -L "$target" ]]
+    if [[ -e "$target" ]] && ! cmp -s "$root/quadlets/$unit" "$target"; then
+        echo "Unidad existente distinta: $unit. Revisar antes de reemplazar." >&2; exit 1
+    fi
+    install -m 0644 "$root/quadlets/$unit" "$target"
+done
+systemctl daemon-reload
+if ! grep -Eq '^LLM_API_KEY=.+$' "$root/secrets/apps.env" || ! grep -Eq '^LLM_MODEL=.+$' "$root/secrets/apps.env"; then
+    echo "Demos disponibles; inferencia pendiente hasta guardar API key y modelo en secrets/apps.env."
+fi
+systemctl start openui-f1.service openui-intelligent.service
+systemctl is-active openui-f1.service openui-intelligent.service

@@ -140,10 +140,52 @@ Disponible desde 0.0.16. Subida web, puente nativo y builds no se presentan como
 
 ## Requisitos pendientes
 
-Estos recorridos corresponden a R-IMG-01, R-LXC-01, R-UPD-01, R-REC-01 y R-VAL-01 en
+Estos recorridos corresponden a R-OCI-01, R-INF-01, R-WEB-01, R-AGENT-01 y R-OBS-01
+priorizados en [features](features.md#prioridad-de-entrega), y a
+R-IMG-01, R-LXC-01, R-UPD-01, R-REC-01 y R-VAL-01 en
 [alcance](scope.md#requisitos-pendientes-autorizados). Las fuentes 0.0.23 implementan
 R-UPD-01 y R-REC-01; su aceptación manual sigue pendiente. R-IMG-01 y R-LXC-01
 continúan como evolución pendiente, no como capacidades del instalador.
+
+### Demo conversacional app.gnx
+
+**Como operadora autorizada, quiero explorar datos reales mediante la experiencia
+de OpenUI F1 Dashboard adaptada a GnX, con inferencia mediante OmniRoute.**
+
+- Obtener una entrega funcional en el presupuesto de un día, con un primer
+  recorrido utilizable en horas; no cerrar solo documentación, una captura o un
+  frontend sin inferencia. No exigir antes móvil, catálogo, Kubernetes o Kubeshark.
+- Identificar fuentes, revisión y licencias; construir las imágenes con Podman
+  desde Containerfiles versionados y vincularlas por digest a sus Quadlets.
+  Ejecutarlas con engine Podman y systemd dentro del LXC propio autorizado, sin
+  recrearlo ni cambiar su privilegio. La integración se realiza en `gnx-kluster`,
+  no se atribuye a las funciones del fork ya existentes ni al instalador publicado.
+- Acceder por HTTPS confiable a `https://app.gnx`, conservando CA y CRL. El acceso
+  debe estar protegido para el operador; un `Origin` válido o un ID anónimo no
+  acreditan identidad ni permiso para consumir cuota. Sin inferencia disponible,
+  informar el fallo y conservar acceso a la información del nodo.
+- Enviar una pregunta y obtener una consulta real de solo lectura con actividad
+  y resultado visibles, seguida de tabla y gráfico en streaming OpenUI. Los
+  valores deben coincidir con la fuente, con fecha de lectura, unidades y datos
+  ausentes explícitos; no inferir salud global desde `status.txt` o unidades activas.
+- Hacer una pregunta de seguimiento sobre esos datos y recuperar la conversación
+  tras recargar mediante historial propio persistente, con acceso verificado por
+  el servidor. No depender de Conversations/frontend tokens de Thesys.
+- Realizar inferencia a través de OmniRoute con un proveedor/modelo realmente
+  autorizado y límites definidos. Verificar streaming y function tools para ese
+  adaptador; no anunciar todas las suscripciones/free tiers como aceptados por
+  conectar uno. La política de coste y privacidad debe impedir fallback no aprobado.
+- Mostrar errores reales de proveedor/cuota/desconexión cuando ocurran, sin claves,
+  logs privados o falsa respuesta completada. No inducir agotamiento de cuota,
+  caídas ni cambios de host para demostrarlo sin autorización específica.
+- Conservar secretos fuera de Git, capas de imagen, argv y bundle del navegador.
+  Sin telemetría remota ni herramientas de escritura, shell libre o puente al
+  pipe administrativo Windows. El modelo no autoriza acciones por describirlas.
+- Separar evidencia de imagen construida, unidad activa, ruta HTTPS y conversación
+  aceptada. La aceptación manual requiere entorno y permisos identificados; estos
+  criterios no autorizan ejecutarla ni generar tests, mocks o simulaciones.
+
+### Actualización y recuperación del núcleo
 
 **Como administradora, quiero instalar una vez con MSI o EXE y actualizar el
 producto instalado mediante `gnx update --apply`.**

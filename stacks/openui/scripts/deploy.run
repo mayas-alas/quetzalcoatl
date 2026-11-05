@@ -1,0 +1,11 @@
+#!/usr/bin/bash
+set -euo pipefail
+umask 077
+cd /stacks/openui
+bash scripts/install.run --inference-only
+for unit in openui-f1.container openui-intelligent.container; do
+    image=$(sed -n 's/^Image=//p' "quadlets/$unit")
+    [[ "$image" =~ ^ghcr\.io/mayas-alas/gnx-openui-(f1|intelligent)@sha256:[a-f0-9]{64}$ ]]
+    podman pull "$image"
+done
+bash scripts/install.run

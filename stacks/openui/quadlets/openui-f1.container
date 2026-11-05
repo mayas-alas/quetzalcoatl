@@ -1,0 +1,19 @@
+[Unit]
+Description=GnX OpenUI F1 via OmniRoute
+After=network-online.target
+[Container]
+Image=ghcr.io/mayas-alas/gnx-openui-f1@sha256:86aa943729a9ad779cb18ccb02fbf0c35b710f96db9d7785160918de195f42b2
+Pull=missing
+ContainerName=gnx-openui-f1
+Network=openui.network
+EnvironmentFile=/stacks/openui/secrets/apps.env
+Environment=ALLOWED_ORIGINS=https://f1.gnx
+PublishPort=3101:3000
+Volume=/stacks/openui/data/f1:/app/data:U
+LogDriver=journald
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+[Install]
+WantedBy=multi-user.target

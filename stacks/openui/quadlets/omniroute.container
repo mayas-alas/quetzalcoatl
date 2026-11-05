@@ -1,0 +1,22 @@
+[Unit]
+Description=GnX OmniRoute private inference gateway
+[Container]
+Image=docker.io/diegosouzapw/omniroute@sha256:b08a12e876baa8a5ccadd1ebbe346fe7267dba3b1c9f4fd6bb02070fae41ab6c
+Pull=missing
+ContainerName=gnx-omniroute
+Network=openui.network
+NetworkAlias=omniroute
+EnvironmentFile=/stacks/openui/secrets/omniroute.env
+Environment=REQUIRE_API_KEY=true
+Environment=HOSTNAME=0.0.0.0
+Environment=PORT=20128
+Environment=DATA_DIR=/app/data
+PublishPort=20128:20128
+Volume=/stacks/openui/data/omniroute:/app/data:U
+LogDriver=journald
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=180
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+{
+  "f1": {
+    "repository": "thesysdev/openui-f1-dashboard",
+    "revision": "91c1e7ae71fbd3f53401541f5924545f9ac4b1eb"
+  },
+  "intelligent": {
+    "repository": "thesysdev/open-intelligent-ui",
+    "revision": "16ef26475999e3a021a50b1607a03717c0721255"
+  },
+  "omniroute": {
+    "repository": "ChrisCompton/omniroute",
+    "revision": "515674b6cf7cc29b3db027c9119e9b2ef12e0ba7"
+  },
+  "runtime_image": {
+    "repository": "docker.io/diegosouzapw/omniroute",
+    "digest": "sha256:b08a12e876baa8a5ccadd1ebbe346fe7267dba3b1c9f4fd6bb02070fae41ab6c",
+    "source": "https://github.com/diegosouzapw/OmniRoute"
+  }
+}

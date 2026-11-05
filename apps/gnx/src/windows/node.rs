@@ -110,7 +110,14 @@ impl Controller {
                     super::product_update::permit(Some(op))?;
                 }
                 if matches!(op, Operation::UpdateCheck | Operation::UpdateApply) {
-                    super::updates::execute(op == Operation::UpdateApply, catalog)
+                    super::updates::execute(op == Operation::UpdateApply, catalog).and_then(
+                        |(state, message)| {
+                            if op == Operation::UpdateApply {
+                                super::product_update::finish_components(state)?;
+                            }
+                            Ok((state, message))
+                        },
+                    )
                 } else if op == Operation::Deploy {
                     super::deploy::execute(bundle, &progress, recovery.as_ref())
                         .map(|message| (NodeState::Active, message))

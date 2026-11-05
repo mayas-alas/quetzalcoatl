@@ -36,7 +36,7 @@ temporary="$root/stack-dns/hosts.conf.new"
 {
     printf '# GnX Core private stack: public origins resolve to the existing gateway.\n'
     printf 'dhcp-host=%s,172.30.0.100\n' "$mac"
-    for name in app.gnx compute.gnx pocket.gnx rustfs.gnx s3.gnx netbird.gnx; do printf 'address=/%s/%s\n' "$name" "$bind"; done
+    for name in app.gnx compute.gnx pocket.gnx rustfs.gnx s3.gnx netbird.gnx f1.gnx intelligent.gnx omniroute.gnx api.gnx; do printf 'address=/%s/%s\n' "$name" "$bind"; done
 } > "$temporary"
 chmod 0644 "$temporary"
 if [[ -f "$root/stack-dns/hosts.conf" ]] && cmp -s "$temporary" "$root/stack-dns/hosts.conf"; then

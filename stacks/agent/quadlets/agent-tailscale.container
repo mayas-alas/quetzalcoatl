@@ -1,0 +1,24 @@
+[Unit]
+Description=GnX Agent tailscale
+Requires=agent-ui.service
+After=agent-ui.service
+
+[Container]
+Image=docker.io/tailscale/tailscale@sha256:ed6480b33c6eb67c9cbd203ed42b9fb57e361986725b6856def71b7a3d9e276c
+ContainerName=gnx-agent-tailscale
+Network=agent.network
+NetworkAlias=tailscale
+EnvironmentFile=/stacks/agent/secrets/tailscale.env
+Environment=TS_USERSPACE=true
+Environment=TS_AUTH_ONCE=true
+Environment=TS_STATE_DIR=/var/lib/tailscale
+Environment=TS_SERVE_CONFIG=/config/serve.json
+Volume=agent-tailscale-state.volume:/var/lib/tailscale
+Volume=/stacks/agent/config/serve.json:/config/serve.json:ro
+LogDriver=journald
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=180
+MemoryMax=192M

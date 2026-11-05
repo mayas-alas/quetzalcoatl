@@ -1,0 +1,7 @@
+secrets
+data
+.git
+**/node_modules
+**/.next
+**/.env*
+**/data

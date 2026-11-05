@@ -4,7 +4,7 @@ use super::{
     release_source::{self, wide},
     security,
 };
-use crate::protocol::{Operation, SERVICE, invalid};
+use crate::protocol::{NodeState, Operation, SERVICE, invalid};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -145,6 +145,11 @@ pub(super) fn permit(operation: Option<Operation>) -> io::Result<()> {
         Err(e) => Err(e),
         Ok(t)
             if t.phase == "complete"
+                || (t.phase == "components_pending"
+                    && matches!(
+                        operation,
+                        None | Some(Operation::Start | Operation::Stop | Operation::UpdateApply)
+                    ))
                 || ((!t.resume || operation.is_none())
                     && ["starting_service", "applying_components"].contains(&t.phase.as_str()))
                 || (!t.unresolved_recreation
@@ -458,7 +463,101 @@ pub fn apply(force: bool, discover: bool) -> io::Result<bool> {
 }
 
 pub fn resume() -> io::Result<bool> {
+    security::effective_admin()?;
+    let previous = read()?;
+    if !previous.force
+        && !previous.resume
+        && !previous.unresolved_recreation
+        && previous.install
+        && previous.inventory.is_some()
+        && ["interrupted", "components_pending"].contains(&previous.phase.as_str())
+        && (previous.phase == "components_pending"
+            || previous.message
+                == "producto instalado; componentes no confirmados, consultar recibos y eventos")
+    {
+        let _lease = maintenance::lease()?;
+        worker_absent()?;
+        let binary = service_binary()?;
+        if fs::canonicalize(std::env::current_exe()?)? != binary
+            || previous.binary != binary
+            || installer_package::installed()? != env!("CARGO_PKG_VERSION")
+            || release_source::version(&previous.target)?
+                > release_source::version(env!("CARGO_PKG_VERSION"))?
+        {
+            return Err(invalid(
+                "continuación exige CLI/MSI instalados coherentes, sin downgrade",
+            ));
+        }
+        let main = manager(ServiceManagerAccess::CONNECT)?
+            .open_service(SERVICE, ServiceAccess::QUERY_STATUS)
+            .map_err(io::Error::other)?;
+        security::require_idle_maintenance(
+            &binary,
+            &super::bootstrap::private_root()?.join(HELPER),
+            main.query_status().map_err(io::Error::other)?.process_id,
+        )?;
+        for asset in &previous.assets {
+            verify(asset)?;
+        }
+        crate::package::verify(
+            &binary
+                .parent()
+                .ok_or_else(|| invalid("ruta instalada inválida"))?
+                .join("payload"),
+        )?;
+        if security::read_private("prepared", 16)? != b"1" {
+            return Err(invalid("nodo no preparado"));
+        }
+        let applied = security::read_private("applied-version", 64)?;
+        if applied != previous.target.as_bytes() && applied != env!("CARGO_PKG_VERSION").as_bytes()
+        {
+            return Err(invalid("versión aplicada no coincide con la transacción"));
+        }
+        let owner = super::identity::Ownership::read()?;
+        let inventory = previous
+            .inventory
+            .as_ref()
+            .ok_or_else(|| invalid("falta inventario conservado"))?;
+        if inventory.sid != owner.sid
+            || inventory.distribution != owner.distribution_id
+            || inventory.removed
+            || inventory.partial
+        {
+            return Err(invalid("inventario e identidad del nodo difieren"));
+        }
+        if super::bootstrap::owned_account_sid()? != owner.sid {
+            return Err(invalid("identidad divergente"));
+        }
+        super::security::enable_profile_privileges()?;
+        let _identity = super::identity::Identity::open(&owner)?;
+        let mut transaction = previous;
+        phase(
+            &mut transaction,
+            "components_pending",
+            "instalación verificada; arranque y aplicación explícita de componentes pendientes; datos conservados",
+        )?;
+        println!(
+            "Instalación reconciliada sin reinstalar ni recrear WSL. Reinicia GnXCore para preparar el payload instalado, ejecuta gnx start y aplica explícitamente el catálogo instalado."
+        );
+        return Ok(true);
+    }
     apply_inner(false, false, true)
+}
+
+pub(super) fn finish_components(state: NodeState) -> io::Result<()> {
+    let mut transaction = match read() {
+        Ok(value) => value,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if transaction.phase == "components_pending" && state == NodeState::Active {
+        phase(
+            &mut transaction,
+            "complete",
+            "instalación y componentes reconciliados explícitamente; datos conservados; salud se verifica por separado",
+        )?;
+    }
+    Ok(())
 }
 
 fn apply_inner(force: bool, discover: bool, resume: bool) -> io::Result<bool> {
@@ -1037,8 +1136,27 @@ fn worker() -> io::Result<()> {
             }
             std::thread::sleep(Duration::from_secs(1));
         }
+        // SCM Running/applied-version can precede recovery releasing its semaphore.
+        let ready = Instant::now();
+        loop {
+            let observed = super::client(Operation::Status)?;
+            if !matches!(observed.state, NodeState::Busy | NodeState::Starting) {
+                if !observed.ok || !matches!(observed.state, NodeState::Active | NodeState::Stopped)
+                {
+                    return Err(invalid(
+                        "recuperación del servicio no confirmada por el pipe",
+                    ));
+                }
+                break;
+            }
+            if ready.elapsed() > Duration::from_secs(900) {
+                return Err(invalid("servicio ocupado tras recuperación"));
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
         drop(runtime_hold.take());
-        if !transaction.force && !transaction.resume {
+        let running_intent = security::read_private("intent", 16)? == b"running";
+        if !transaction.force && !transaction.resume && running_intent {
             phase(
                 &mut transaction,
                 "applying_components",

@@ -1,0 +1,47 @@
+#!/usr/bin/bash
+set -euo pipefail
+umask 077
+root=/var/lib/gnx-core
+private=$root/ca-private
+guest=172.30.0.15
+podman exec gnx-core-compute pvesh get /nodes/gnx-core-compute/lxc/1001/config --output-format json | jq -e '.hostname == "kluster" and .unprivileged == 1 and (.net0|contains("hwaddr=BC:24:11:39:64:A5"))' >/dev/null
+curl --fail --silent --output /dev/null "http://$guest:9992/"
+curl --fail --silent "http://$guest:9992/api/tasks/models" | jq -e 'type == "array" and any(.[]; .provider == "proxy" and (.name | type == "string" and length > 0))' >/dev/null
+ca_before=$(openssl x509 -in "$root/tls/root.crt" -noout -fingerprint -sha256)
+exec 9>"$private/lock"
+flock -x -w 30 9
+podman exec gnx-core-compute pct exec 1001 -- cat /stacks/agent/config/node.ext > /etc/gnx-core/node.ext.new
+grep -q 'DNS:agent.gnx' /etc/gnx-core/node.ext.new
+[[ $(sha256sum /etc/gnx-core/node.ext.new | cut -d" " -f1) == f38192864bced6a12ec10bd8e278cf77165ad643fd192553e0eaaa471a97a69c ]]
+install -m 0644 /etc/gnx-core/node.ext.new /etc/gnx-core/node.ext
+if ! openssl verify -CAfile "$root/tls/root.crt" -purpose sslserver -verify_hostname agent.gnx "$root/tls/node.crt" >/dev/null 2>&1; then
+    openssl req -new -key "$root/tls/node.key" -out "$root/tls/node.csr" -subj '/O=GnX Labs/CN=app.gnx'
+    openssl ca -batch -notext -config /etc/gnx-core/ca.cnf -extfile /etc/gnx-core/node.ext -in "$root/tls/node.csr" -out "$root/tls/node.crt.new" >/dev/null 2>&1
+    openssl verify -CAfile "$root/tls/root.crt" -purpose sslserver -verify_hostname agent.gnx "$root/tls/node.crt.new"
+    cmp <(openssl x509 -in "$root/tls/node.crt.new" -pubkey -noout) <(openssl pkey -in "$root/tls/node.key" -pubout)
+    chmod 0644 "$root/tls/node.crt.new"
+    mv "$root/tls/node.crt.new" "$root/tls/node.crt"
+fi
+[[ $(openssl x509 -in "$root/tls/root.crt" -noout -fingerprint -sha256) == "$ca_before" ]]
+flock -u 9
+exec 9>&-
+bind=$(ip -4 -o addr show dev eth0 | awk '{split($4,a,"/"); print a[1]; exit}')
+[[ "$bind" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+printf 'address=/agent.gnx/%s\n' "$bind" > "$root/stack-dns/agent.conf"
+chmod 0644 "$root/stack-dns/agent.conf"
+podman exec gnx-core-compute systemctl restart dnsmasq.service
+podman exec gnx-core-compute pct exec 1001 -- cat /stacks/agent/gateway.caddy > "$root/stack-gateway/agent.caddy.new"
+[[ $(sha256sum "$root/stack-gateway/agent.caddy.new" | cut -d" " -f1) == 8767438738ab1c21dfd086787b06a7ef11f106e65ce095e8531d9188fc9e651b ]]
+if [[ -e "$root/stack-gateway/agent.caddy" ]]; then cp "$root/stack-gateway/agent.caddy" "$root/stack-gateway/agent.caddy.previous"; fi
+mv "$root/stack-gateway/agent.caddy.new" "$root/stack-gateway/agent.caddy"
+if ! podman exec -i gnx-core-gateway caddy validate --config - --adapter caddyfile < /etc/gnx-core/Caddyfile; then
+    mv "$root/stack-gateway/agent.caddy" "$root/stack-gateway/agent.caddy.rejected"
+    if [[ -f "$root/stack-gateway/agent.caddy.previous" ]]; then mv "$root/stack-gateway/agent.caddy.previous" "$root/stack-gateway/agent.caddy"; fi
+    exit 1
+fi
+systemctl restart gnx-core-gateway.service
+podman exec gnx-core-compute pct exec 1001 -- cat /stacks/agent/config/landing.html > "$root/web/index.html.new"
+[[ $(sha256sum "$root/web/index.html.new" | cut -d" " -f1) == 39e9c4e36619d49c048c63b6c4cfc129e2642d57ca08aec1e8f3527bfb230190 ]]
+chmod 0644 "$root/web/index.html.new"
+mv "$root/web/index.html.new" "$root/web/index.html"
+echo AGENT_PRIVATE_INGRESS_OK

@@ -1,0 +1,25 @@
+[Unit]
+Description=GnX Agent agent
+Requires=agent-postgres.service agent-desktop.service agent-llm.service
+After=agent-postgres.service agent-desktop.service agent-llm.service
+
+[Container]
+Image=ghcr.io/bytebot-ai/bytebot-agent@sha256:a36e65ce6db772a4c6fa340a68c50bca0a493bc16b6f86d566ac8fc11c122b29
+ContainerName=gnx-agent
+Network=agent.network
+NetworkAlias=agent
+NetworkAlias=bytebot-agent
+EnvironmentFile=/stacks/agent/secrets/agent.env
+Environment=BYTEBOT_LLM_PROXY_URL=http://llm:8080/v1
+Environment=BYTEBOT_DESKTOP_BASE_URL=http://desktop:9990
+LogDriver=journald
+
+[Service]
+ExecStartPre=/usr/bin/bash -c 'for attempt in {1..40}; do /usr/bin/podman exec gnx-agent-postgres pg_isready -U agent -d bytebotdb >/dev/null 2>&1 && exit 0; sleep 2; done; exit 1'
+Restart=always
+RestartSec=5
+TimeoutStartSec=180
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

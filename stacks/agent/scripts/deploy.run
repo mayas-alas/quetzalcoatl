@@ -1,0 +1,33 @@
+#!/usr/bin/bash
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 && $(hostname) == kluster ]]
+root=/stacks/agent
+cd "$root"
+install -d -m 0700 secrets
+if [[ ! -f secrets/postgres.env ]]; then
+    password=$(openssl rand -hex 32)
+    printf 'POSTGRES_USER=agent\nPOSTGRES_DB=bytebotdb\nPOSTGRES_PASSWORD=%s\n' "$password" > secrets/postgres.env
+    printf 'DATABASE_URL=postgresql://agent:%s@postgres:5432/bytebotdb\nNODE_ENV=production\n' "$password" > secrets/agent.env
+    unset password
+fi
+[[ -s secrets/agent.env && -s /stacks/openui/secrets/apps.env ]]
+chmod 0600 secrets/*.env
+for component in postgres llm agent ui desktop; do
+    image=$(jq -er --arg component "$component" '.[$component]' images.json)
+    podman image exists "$image" || podman pull --quiet "$image"
+done
+for file in quadlets/*; do install -m 0644 "$file" "/etc/containers/systemd/$(basename "$file")"; done
+systemctl daemon-reload
+systemctl start agent-ui.service
+for attempt in {1..90}; do
+    if curl --fail --silent --output /dev/null http://127.0.0.1:9992/ &&
+       curl --fail --silent http://127.0.0.1:9992/api/tasks/models | jq -e 'length > 0 and .[0].provider == "proxy"' >/dev/null; then
+        printf 'AGENT_UI_AND_OMNIROUTE_MODELS_OK\n'
+        systemctl is-active agent-postgres.service agent-desktop.service agent-llm.service agent.service agent-ui.service
+        exit 0
+    fi
+    sleep 2
+done
+printf 'Agent startup not healthy; inspect native journal.\n' >&2
+exit 1

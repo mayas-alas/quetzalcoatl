@@ -23,7 +23,7 @@ if [[ ${1:-} == access || ${1:-} == mesh-access ]]; then
         {
             printf 'FTLCONF_dns_interface=tailscale0\nFTLCONF_dns_port=53\nFTLCONF_dns_listeningMode=NONE\nFTLCONF_misc_dnsmasq_lines=interface=tailscale0;except-interface=lo;bind-dynamic\nFTLCONF_dns_hosts='
             separator=''
-            for name in app.gnx compute.gnx pocket.gnx rustfs.gnx s3.gnx netbird.gnx; do printf '%s%s %s' "$separator" "$mesh_ip" "$name"; separator=';'; done
+            for name in app.gnx compute.gnx pocket.gnx rustfs.gnx s3.gnx netbird.gnx f1.gnx intelligent.gnx omniroute.gnx api.gnx; do printf '%s%s %s' "$separator" "$mesh_ip" "$name"; separator=';'; done
             printf '\n'
         } > /var/lib/gnx-core/dns.env.new
         chmod 0644 /var/lib/gnx-core/dns.env.new

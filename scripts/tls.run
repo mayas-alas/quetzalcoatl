@@ -38,7 +38,7 @@ openssl x509 -in "$root/tls/root.crt" -checkend 0 -noout
 if [[ -f "$root/tls/node.crt" ]]; then
         openssl verify -no_check_time -CAfile "$root/tls/root.crt" -purpose sslserver -verify_hostname app.gnx "$root/tls/node.crt"
         openssl verify -no_check_time -CAfile "$root/tls/root.crt" -purpose sslserver -verify_hostname compute.gnx "$root/tls/node.crt"
-        for name in pocket.gnx rustfs.gnx s3.gnx netbird.gnx; do
+        for name in pocket.gnx rustfs.gnx s3.gnx netbird.gnx f1.gnx intelligent.gnx omniroute.gnx api.gnx; do
             if ! openssl verify -no_check_time -CAfile "$root/tls/root.crt" -purpose sslserver -verify_hostname "$name" "$root/tls/node.crt" >/dev/null 2>&1; then names_changed=true; fi
         done
         serial=$(openssl x509 -in "$root/tls/node.crt" -noout -serial)

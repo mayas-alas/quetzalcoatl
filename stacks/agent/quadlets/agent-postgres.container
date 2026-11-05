@@ -1,0 +1,22 @@
+[Unit]
+Description=GnX Agent postgres
+
+[Container]
+Image=docker.io/library/postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+ContainerName=gnx-agent-postgres
+Network=agent.network
+NetworkAlias=postgres
+EnvironmentFile=/stacks/agent/secrets/postgres.env
+Volume=agent-postgres-data.volume:/var/lib/postgresql/data
+HealthCmd=pg_isready -U agent -d bytebotdb
+HealthInterval=10s
+LogDriver=journald
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=180
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

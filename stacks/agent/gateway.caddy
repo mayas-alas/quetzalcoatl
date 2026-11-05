@@ -1,0 +1,10 @@
+agent.gnx {
+    bind {$GNX_BIND}
+    tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+    basic_auth {
+        demo {$GNX_OPENUI_PASSWORD_HASH}
+    }
+    reverse_proxy {$GNX_OPENUI_GUEST}:9992 {
+        flush_interval -1
+    }
+}

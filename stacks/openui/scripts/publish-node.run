@@ -1,0 +1,52 @@
+#!/usr/bin/bash
+set -euo pipefail
+umask 077
+root=/var/lib/gnx-core
+podman exec gnx-core-compute pvesh get /nodes/gnx-core-compute/lxc/1001/config --output-format json | jq -e '.hostname == "kluster" and .unprivileged == 1 and (.net0|contains("hwaddr=BC:24:11:39:64:A5"))' >/dev/null
+podman exec gnx-core-compute pct exec 1001 -- /usr/bin/bash -c 'set -e; [[ $(systemctl show gnx-openui-build.service -p ActiveState --value) == inactive ]]; [[ $(systemctl show gnx-openui-build.service -p Result --value) == success ]]; systemctl is-active omniroute.service openui-f1.service openui-intelligent.service'
+# Add only the verified guest route and its DHCP reservation.
+existing=$(ip -j -4 route show exact 172.30.0.15/32)
+jq -e 'length == 0 or (length == 1 and .[0].gateway == "10.88.0.2" and .[0].dev == "podman0" and .[0].protocol == "static")' <<< "$existing" >/dev/null
+ip route replace 172.30.0.15/32 via 10.88.0.2 dev podman0 proto static
+install -d -m 0755 /etc/systemd/system/gnx-core-compute.service.d /etc/containers/systemd/gnx-core-gateway.container.d
+if [[ ! -e "$root/stack-dns/openui.conf" ]]; then printf 'dhcp-host=BC:24:11:39:64:A5,172.30.0.15\n' > "$root/stack-dns/openui.conf"; fi
+grep -Fxq 'dhcp-host=BC:24:11:39:64:A5,172.30.0.15' "$root/stack-dns/openui.conf"
+cat > /etc/systemd/system/gnx-core-compute.service.d/openui.conf <<'ROUTE'
+[Service]
+ExecStartPost=/usr/bin/ip route replace 172.30.0.15/32 via 10.88.0.2 dev podman0 proto static
+ROUTE
+podman exec gnx-core-compute systemctl restart dnsmasq.service
+# Import only the exact reviewed Caddy template; validate guest-supplied settings as data.
+podman exec gnx-core-compute pct exec 1001 -- cat /stacks/openui/gateway.caddy > "$root/stack-gateway/openui.caddy.new"
+[[ $(sha256sum "$root/stack-gateway/openui.caddy.new" | cut -d' ' -f1) == b1f31a1141fd108de932d7825e6efcb825d3279e519dc495bb8840a708f11a30 ]]
+podman exec gnx-core-compute pct exec 1001 -- cat /stacks/openui/secrets/ingress.env > "$root/secrets/openui-ingress.env"
+chmod 0600 "$root/secrets/openui-ingress.env"
+GNX_OPENUI_PASSWORD_HASH=$(sed -n 's/^GNX_OPENUI_PASSWORD_HASH=//p' "$root/secrets/openui-ingress.env")
+GNX_OPENUI_GUEST=$(sed -n 's/^GNX_OPENUI_GUEST=//p' "$root/secrets/openui-ingress.env")
+[[ "$GNX_OPENUI_PASSWORD_HASH" =~ ^\$2[aby]\$[0-9]{2}\$[A-Za-z0-9./]{53}$ && "$GNX_OPENUI_GUEST" == 172.30.0.15 ]]
+[[ $(wc -l < "$root/secrets/openui-ingress.env") == 2 ]]
+export GNX_OPENUI_PASSWORD_HASH GNX_OPENUI_GUEST
+code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"model":"__gnx_auth_check__","messages":[{"role":"user","content":"auth-check"}]}' http://172.30.0.15:20128/v1/chat/completions)
+[[ "$code" == 401 || "$code" == 403 ]]
+for port in 3101 3102; do curl --fail --silent --output /dev/null "http://172.30.0.15:$port/"; done
+# A .new file is outside the import glob, so invalid input cannot replace the active config.
+mv "$root/stack-gateway/openui.caddy.new" "$root/stack-gateway/openui.caddy"
+if ! podman exec --env GNX_OPENUI_PASSWORD_HASH --env GNX_OPENUI_GUEST -i gnx-core-gateway caddy validate --config - --adapter caddyfile < /etc/gnx-core/Caddyfile; then
+    mv "$root/stack-gateway/openui.caddy" "$root/stack-gateway/openui.caddy.rejected"
+    exit 1
+fi
+cat > /etc/containers/systemd/gnx-core-gateway.container.d/openui.conf <<'GATEWAY'
+[Container]
+EnvironmentFile=/var/lib/gnx-core/secrets/openui-ingress.env
+GATEWAY
+systemctl daemon-reload
+systemctl restart gnx-core-gateway.service
+# Keep access credentials private, never print them in diagnostics.
+{
+    printf 'OmniRoute: https://omniroute.gnx\nInitial password: '
+    podman exec gnx-core-compute pct exec 1001 -- sed -n 's/^INITIAL_PASSWORD=//p' /stacks/openui/secrets/omniroute.env
+    printf '\nDemos: https://f1.gnx and https://intelligent.gnx\nUser: demo\nPassword: '
+    podman exec gnx-core-compute pct exec 1001 -- cat /stacks/openui/secrets/demo-password
+} > "$root/secrets/openui-access.txt"
+chmod 0600 "$root/secrets/openui-access.txt"
+printf 'Ingress validated and published; inference API rejects anonymous calls with HTTP %s.\n' "$code"
