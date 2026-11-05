@@ -17,7 +17,7 @@ die "root and fixed Kluster arguments required\n"
 open my $status, '<', '/proc/self/status' or die "read parent capabilities: $!\n";
 my ($bounding) = map { /^CapBnd:\s+([a-f0-9]+)/ ? $1 : () } <$status>;
 close $status;
-die "PVE lacks CAP_SETFCAP\n" unless defined($bounding) && (hex($bounding) & (1 << 31));
+die "PVE lacks CAP_SETFCAP\n" unless defined($bounding) && (hex(substr($bounding, -8)) & 0x80000000);
 
 # Refuse template drift instead of clearing new administrator restrictions.
 my (%dropped, %active);
