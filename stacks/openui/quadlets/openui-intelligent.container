@@ -2,8 +2,8 @@
 Description=GnX Open Intelligent UI via OmniRoute
 After=network-online.target
 [Container]
-Image=localhost/gnx/openui-intelligent:0.0.36
-Pull=never
+Image=ghcr.io/mayas-alas/gnx-openui-intelligent@sha256:7b9ea0d3eceb575298eb936df7c1698d3e544bc69abff1e918d484f9cc3cff20
+Pull=missing
 ContainerName=gnx-openui-intelligent
 Network=openui.network
 EnvironmentFile=/stacks/openui/secrets/apps.env

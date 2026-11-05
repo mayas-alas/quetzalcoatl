@@ -19,10 +19,14 @@ Windows; no cambia el motor a Kubernetes ni amplía gnx deploy.
 2. Inspeccionar la instancia OmniRoute existente y completar runtime.json con su
    nombre exacto, endpoint privado y la IP observada del guest. No seleccionar
    otro contenedor por coincidencia de nombre.
-3. Ejecutar scripts/build.run: descarga las dos revisiones de sources.json y
-   construye sus imágenes con lockfiles, Node por digest y Next.js 16.4.5.
+3. Descargar las imágenes públicas de F1 e Intelligent fijadas por digest en
+   sus Quadlets. `scripts/deploy.run` las descarga antes de instalar las demos.
+   `scripts/build.run` sigue disponible para compilaciones locales de desarrollo,
+   pero produce etiquetas `localhost` que no sustituyen las imágenes fijadas.
 4. Ejecutar scripts/install.run: verifica el modo y contenedor declarados, prepara
-   directorios privados y arranca únicamente las dos demos. No reemplaza
+   directorios privados y arranca únicamente las dos demos. Si un Quadlet ya
+   instalado difiere, se detiene para revisión; no migra servicios existentes.
+   No reemplaza
    OmniRoute ni modifica sus llaves, modelos, volúmenes o configuración.
 5. Configurar el proveedor/modelos en la consola nativa de OmniRoute y guardar
    su API key de cliente y el modelo elegido en secrets/apps.env (0600). El
