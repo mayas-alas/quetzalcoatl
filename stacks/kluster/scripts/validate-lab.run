@@ -1,0 +1,21 @@
+#!/usr/bin/bash
+# Explicit manual acceptance on the pre-existing laboratory guest, never adoption by the service.
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 && $(hostname) == gnx-core-compute ]]
+source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+[[ $(pct exec 1002 -- hostname) == gnx-k3s-1002 ]]
+pct config 1002 | awk '/^dev0: path=\/dev\/kmsg,deny-write=1,mode=0400$/ {ok=1} END {exit !ok}'
+[[ $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) -ge 2097152 ]]
+bash "$source_dir/scripts/prepare-kernel.run" apply
+pct set 1002 --memory 3072
+pct exec 1002 -- /usr/bin/install -d -m 0700 /etc/gnx-app/config
+pct exec 1002 -- /usr/bin/install -d -m 0755 /etc/containers/systemd
+pct push 1002 "$source_dir/quadlets/registry.container" /etc/containers/systemd/registry.container --perms 0600
+for pair in assets.json:kluster-assets.json kubeshark-values.yaml:kluster-values.yaml demo.yaml:kluster-demo.yaml scripts/install.run:kluster-install.run scripts/health.run:kluster-health.run; do
+  pct push 1002 "$source_dir/${pair%:*}" "/etc/gnx-app/config/${pair#*:}" --perms 0600
+done
+pct exec 1002 -- /usr/bin/bash /etc/gnx-app/config/kluster-install.run
+pct exec 1002 -- /usr/local/bin/k3s kubectl get nodes -o wide
+pct exec 1002 -- /usr/local/bin/k3s kubectl get pods -A -o wide
+pct exec 1002 -- free -h

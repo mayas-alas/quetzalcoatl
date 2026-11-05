@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "sources": {
+    "kluster": {
+      "repository": "mayas-alas/gnx-kluster",
+      "revision": "286c55c8113ec3072c76995e097e3677386b42c6"
+    },
+    "kubeshark": {
+      "repository": "mayas-alas/gnx-kubeshark",
+      "revision": "b79aa01afc280f4b377c36ad96527b8d063dbfb7"
+    }
+  },
+  "downloads": {
+    "k3s": {
+      "url": "https://github.com/k3s-io/k3s/releases/download/v1.37.2%2Bk3s1/k3s",
+      "sha256": "265b3ee6a3198ef14033c63ef46cbb32370d83795199fb6d1b01f21575eddbda"
+    },
+    "helm": {
+      "url": "https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz",
+      "sha256": "0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b"
+    },
+    "chart": {
+      "url": "https://codeload.github.com/mayas-alas/gnx-kubeshark/tar.gz/b79aa01afc280f4b377c36ad96527b8d063dbfb7",
+      "sha256": "be2fd80e0c73355a0f6b2ea0ce6d311c4978eb37619bf03bfae5cfdb6cd9c2ca"
+    },
+    "kubeshark": {
+      "url": "https://github.com/kubeshark/kubeshark/releases/download/v53.6.0/kubeshark_linux_amd64",
+      "sha256": "c805fe70335ea9f4d1da6e2fe061541dfd727baeede1075981da178d6c80b537"
+    },
+    "kftui": {
+      "url": "https://github.com/hcavarsan/kftray/releases/download/v0.35.1/kftui_linux_amd64",
+      "sha256": "bedd3645ba4e5dd7fa58ff324bb5b38ab4bdca8c0ff32ecc1b772e0096197d04"
+    },
+    "kftray": {
+      "url": "https://github.com/hcavarsan/kftray/releases/download/v0.35.1/kftray_0.35.1_amd64.AppImage",
+      "sha256": "ce696a1966afe9b3fa07b172a0060fec90fc71e9cf1adf5d2734508471e5d726"
+    }
+  },
+  "images": {
+    "registry": "docker.io/library/registry@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e",
+    "demo": "docker.io/library/busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec"
+  }
+}

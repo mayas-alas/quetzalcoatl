@@ -1,0 +1,18 @@
+[Unit]
+Description=GnX Kluster OCI registry (loopback)
+[Container]
+Image=docker.io/library/registry@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e
+Pull=missing
+ContainerName=gnx-kluster-registry
+PublishPort=127.0.0.1:5000:5000
+Volume=/var/lib/gnx-app/registry:/var/lib/registry
+Volume=/var/lib/gnx-app/registry-tls/server:/certs:ro
+Environment=REGISTRY_HTTP_TLS_CERTIFICATE=/certs/server.crt
+Environment=REGISTRY_HTTP_TLS_KEY=/certs/server.key
+NoNewPrivileges=true
+DropCapability=all
+[Service]
+Restart=on-failure
+TimeoutStartSec=600
+[Install]
+WantedBy=multi-user.target

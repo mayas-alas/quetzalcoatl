@@ -497,7 +497,7 @@ fn pve_output_with_timeout(
 
 // Only fixed, credential-free preparation/manager operations may expose output.
 // Do not use this for file transfers, environments, OIDC, or arbitrary journal.
-fn preparation_detail(output: &super::identity::Output) -> String {
+pub(super) fn preparation_detail(output: &super::identity::Output) -> String {
     output
         .text()
         .chars()
@@ -524,7 +524,7 @@ pub(super) fn command(
             "/usr/bin/bash",
             "-s",
             "--",
-            "private-stack" | "dhcp"
+            "private-stack" | "dhcp" | "kluster"
         ]
     );
     let stage = if preparation {
@@ -884,6 +884,19 @@ pub fn execute(
     progress: &tokio::sync::mpsc::Sender<String>,
     recovery: Option<&MissingDeployment>,
 ) -> io::Result<String> {
+    execute_profile(bundle, progress, recovery, false)
+}
+
+pub(super) fn execute_kluster(progress: &tokio::sync::mpsc::Sender<String>) -> io::Result<String> {
+    execute_profile(Some(super::kluster::bundle()?), progress, None, true)
+}
+
+fn execute_profile(
+    bundle: Option<Bundle>,
+    progress: &tokio::sync::mpsc::Sender<String>,
+    recovery: Option<&MissingDeployment>,
+    kluster: bool,
+) -> io::Result<String> {
     security::require_system()?;
     log(progress, "Validando entrada, propiedad y CA del nodo.");
     let owner = Ownership::read()?;
@@ -929,8 +942,22 @@ pub fn execute(
         .parent()
         .ok_or_else(|| invalid("ruta inválida"))?
         .join("payload");
-    let resources: Resources = serde_json::from_slice(&fs::read(payload.join("config/lxc.json"))?)
-        .map_err(io::Error::other)?;
+    let mut resources: Resources =
+        serde_json::from_slice(&fs::read(payload.join("config/lxc.json"))?)
+            .map_err(io::Error::other)?;
+    if kluster {
+        resources = Resources {
+            cores: 2,
+            memory_mb: 3072,
+            swap_mb: 512,
+            disk_gb: 20,
+        };
+        log(
+            progress,
+            "Preparando kernel en la WSL dedicada para el perfil Kubernetes.",
+        );
+        super::kluster::prepare(&identity)?;
+    }
     if !(1..=8).contains(&resources.cores)
         || !(1024..=16384).contains(&resources.memory_mb)
         || resources.swap_mb > 4096
@@ -1016,7 +1043,7 @@ pub fn execute(
             "confirmación obsoleta; no se modifica el despliegue",
         ));
     }
-    let description = format!("GnX.Core:{digest}");
+    let description = format!("GnX.Core{}:{digest}", if kluster { ".Kluster" } else { "" });
     let receipt = if let Some(receipt) = saved {
         log(
             progress,
@@ -1131,20 +1158,40 @@ pub fn execute(
         )?;
         if exists.code == 1 {
             log(progress, "Copiando y verificando la base LXC.");
-            let linux = linux_path(&rootfs)?;
-            let destination = format!("gnx-core-compute:{template_path}");
-            let copied = identity.run(
-                &[
-                    "--distribution",
-                    DISTRO,
-                    "--exec",
-                    "/usr/bin/podman",
-                    "cp",
-                    &linux,
-                    &destination,
-                ],
-                Duration::from_secs(180),
-            )?;
+            let copied = if kluster {
+                let source = fs::File::open(&rootfs)?;
+                identity.run_pipe(
+                    &[
+                        "--distribution",
+                        DISTRO,
+                        "--exec",
+                        "/usr/bin/podman",
+                        "exec",
+                        "-i",
+                        "gnx-core-compute",
+                        "/usr/bin/dd",
+                        &format!("of={template_path}"),
+                        "status=none",
+                    ],
+                    &source,
+                    Duration::from_secs(180),
+                )?
+            } else {
+                let linux = linux_path(&rootfs)?;
+                let destination = format!("gnx-core-compute:{template_path}");
+                identity.run(
+                    &[
+                        "--distribution",
+                        DISTRO,
+                        "--exec",
+                        "/usr/bin/podman",
+                        "cp",
+                        &linux,
+                        &destination,
+                    ],
+                    Duration::from_secs(180),
+                )?
+            };
             if copied.code != 0 {
                 return Err(io::Error::other("copia de base LXC no confirmada"));
             }
@@ -1186,9 +1233,13 @@ pub fn execute(
                 "--hostname",
                 &hostname,
                 "--unprivileged",
-                "1",
+                if kluster { "0" } else { "1" },
                 "--features",
-                "nesting=1,keyctl=1,fuse=1",
+                if kluster {
+                    "nesting=1,fuse=1"
+                } else {
+                    "nesting=1,keyctl=1,fuse=1"
+                },
                 "--rootfs",
                 &format!("local:{}", resources.disk_gb),
                 "--cores",
@@ -1217,6 +1268,20 @@ pub fn execute(
             None,
             180,
         )?;
+        if kluster {
+            command(
+                &identity,
+                &[
+                    "pct",
+                    "set",
+                    &id,
+                    "--dev0",
+                    "path=/dev/kmsg,deny-write=1,mode=0400",
+                ],
+                None,
+                15,
+            )?;
+        }
         receipt
     };
     let id = receipt.vmid.to_string();
@@ -1232,11 +1297,23 @@ pub fn execute(
         .as_str()
         .map(|value| value.trim_end_matches('\n'))
         != Some(description.as_str())
-        || conf["unprivileged"].as_u64() != Some(1)
+        || if kluster {
+            conf.get("unprivileged")
+                .is_some_and(|value| value.as_u64() != Some(0))
+                || conf["dev0"].as_str() != Some("path=/dev/kmsg,deny-write=1,mode=0400")
+        } else {
+            conf["unprivileged"].as_u64() != Some(1)
+        }
     {
         return Err(invalid("propiedad del LXC no confirmada; no se modifica"));
     }
     if receipt.complete {
+        if kluster {
+            super::kluster::health(&identity, &id)?;
+            return Ok(format!(
+                "Kluster LXC {id}: nodo Ready, registry y demo disponibles; datos conservados."
+            ));
+        }
         log(
             progress,
             format!("LXC {id} ya desplegado: consultando su estado, sin reinstalar aplicaciones."),
@@ -1281,7 +1358,9 @@ pub fn execute(
             "/usr/bin/bash",
             "-s",
             "--",
-            if private_stack {
+            if kluster {
+                "kluster"
+            } else if private_stack {
                 "private-stack"
             } else {
                 "dhcp"
@@ -1410,6 +1489,13 @@ pub fn execute(
             }
         }
     }
+    if kluster {
+        log(
+            progress,
+            "Instalando K3s, registry, demo, Kubeshark y herramientas con versiones fijadas.",
+        );
+        super::kluster::install(&identity, &id)?;
+    }
     let mut args = vec!["pct", "exec", &id, "--", "/usr/bin/systemctl", "start"];
     log(
         progress,
@@ -1522,6 +1608,11 @@ pub fn execute(
             "LXC {id}: {} servicios activos mediante Quadlets; onboarding inicial {}. Salud, login y conectividad se comprueban por separado.",
             units.len(),
             if onboarded { "completado" } else { "pendiente" }
+        ));
+    }
+    if kluster {
+        return Ok(format!(
+            "Kluster LXC {id}: nodo Ready, registry TLS, demo y Kubeshark desplegados; captura y escritorio se verifican por separado."
         ));
     }
     Ok(format!(

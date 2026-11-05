@@ -21,6 +21,7 @@ pub enum Operation {
     // Internal installer operation, deliberately absent from CLI parsing/help.
     Retire,
     Deploy,
+    DeployKluster,
     UpdateCheck,
     UpdateApply,
     Recovery,
@@ -111,7 +112,12 @@ impl Request {
             (_, Some(_)) => return Err(invalid("esta operación no admite catálogos")),
             _ => {}
         }
-        if request.progress && request.operation != Operation::Deploy {
+        if request.progress
+            && !matches!(
+                request.operation,
+                Operation::Deploy | Operation::DeployKluster
+            )
+        {
             return Err(invalid("esta operación no admite progreso"));
         }
         if let Some(recovery) = &request.recover_missing {

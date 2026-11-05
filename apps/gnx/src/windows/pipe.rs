@@ -335,7 +335,7 @@ async fn request_once(
         secret,
         bundle,
         catalog,
-        progress: operation == Operation::Deploy,
+        progress: matches!(operation, Operation::Deploy | Operation::DeployKluster),
         recover_missing,
     };
     let bytes = Zeroizing::new(serde_json::to_vec(&request).map_err(io::Error::other)?);
@@ -362,7 +362,10 @@ async fn request_once(
     timeout(IO_TIMEOUT, write_frame(&mut pipe, &bytes)).await??;
     let limit = if matches!(
         operation,
-        Operation::Deploy | Operation::UpdateCheck | Operation::UpdateApply
+        Operation::Deploy
+            | Operation::DeployKluster
+            | Operation::UpdateCheck
+            | Operation::UpdateApply
     ) {
         Duration::from_secs(3600)
     } else if operation == Operation::Retire {

@@ -122,6 +122,8 @@ fn files(sid: &str) -> io::Result<Vec<String>> {
             }
         } else if name == "default-private-services.json" {
             super::deploy::validate_default_owner(sid)?;
+        } else if name == "kluster-input.json" {
+            super::kluster::validate_owner(sid)?;
         } else if ![
             "prepared",
             "identity.json",

@@ -1,0 +1,55 @@
+#!/usr/bin/bash
+# Fixed preparation on the dedicated WSL host. "apply" is also used in the authorized PVE lab.
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 ]]
+mode=${1:-check}
+[[ $mode == check || $mode == apply || $mode == enable ]]
+keys=(kernel.panic vm.overcommit_memory kernel.panic_on_oops vm.panic_on_oom kernel.keys.root_maxkeys kernel.keys.root_maxbytes)
+expected=(10 1 1 0 1000000 25000000)
+for i in "${!keys[@]}"; do
+  value=$(sysctl -n "${keys[$i]}")
+  printf '%s=%s requerido=%s\n' "${keys[$i]}" "$value" "${expected[$i]}"
+  if (( i >= 2 )) && [[ $value != "${expected[$i]}" ]]; then
+    echo 'Otro requisito del kernel difiere; se detuvo antes de modificar.' >&2
+    exit 1
+  fi
+done
+[[ $mode != check ]] || exit 0
+state=/var/lib/gnx-core/kluster-kernel
+if [[ $(hostname) == gnx-core-compute ]]; then state=/var/lib/vz/gnx-kluster-kernel; fi
+[[ ! -L $state ]]
+if [[ $mode == enable && ! -e $state/original.conf ]]; then
+  [[ $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) -ge 2097152 ]] || {
+    echo 'RAM disponible insuficiente para activar Kluster.' >&2; exit 1;
+  }
+fi
+install -d -m 0700 "$state"
+if [[ ! -e $state/original.conf ]]; then
+  (set -o noclobber; printf 'kernel.panic = %s\nvm.overcommit_memory = %s\n' "$(sysctl -n kernel.panic)" "$(sysctl -n vm.overcommit_memory)" > "$state/original.conf")
+fi
+[[ -f $state/original.conf && ! -L $state/original.conf && $(stat -c %u "$state/original.conf") == 0 ]]
+sysctl -w kernel.panic=10 vm.overcommit_memory=1
+[[ $(sysctl -n kernel.panic) == 10 && $(sysctl -n vm.overcommit_memory) == 1 ]]
+[[ $mode == enable ]] || exit 0
+[[ $(readlink -f "${BASH_SOURCE[0]}") == /etc/gnx-core/kluster-kernel.run ]]
+install -d -m 0755 /etc/systemd/system/gnx-core-compute.service.d
+cat > /etc/systemd/system/gnx-kluster-kernel.service <<'UNIT'
+[Unit]
+Description=GnX Kluster kernel prerequisites on dedicated WSL
+Before=gnx-core-compute.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/bash /etc/gnx-core/kluster-kernel.run apply
+[Install]
+WantedBy=multi-user.target
+UNIT
+cat > /etc/systemd/system/gnx-core-compute.service.d/kluster.conf <<'UNIT'
+[Unit]
+Requires=gnx-kluster-kernel.service
+After=gnx-kluster-kernel.service
+UNIT
+systemctl daemon-reload
+systemctl enable --now gnx-kluster-kernel.service
+echo 'GNX_KLUSTER_KERNEL_READY'

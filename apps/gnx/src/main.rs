@@ -21,12 +21,16 @@ fn run() -> std::io::Result<bool> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.as_slice() {
         [] => {
+            println!("gnx deploy --stack kluster");
             println!(
                 "gnx start | stop | status | enroll | password | recovery | deploy [carpeta] | update --check|--apply [catalogo.json] | update --force | update --resume"
             );
             Ok(true)
         }
         [arg] if arg == "--help" || arg == "-h" => {
+            println!(
+                "gnx deploy --stack kluster: prepara el kernel de la WSL dedicada y crea un LXC Kubernetes privilegiado propio; registry TLS, demo y Kubeshark. Cambia parámetros compartidos del kernel, conserva un respaldo y no adopta guests existentes."
+            );
             println!(
                 "gnx start | stop | status | enroll | password | recovery | deploy [carpeta]\ngnx update --check|--apply [catalogo.json]\ngnx update --force\ngnx update --apply --force\ngnx update --resume\nDeploy sin carpeta prepara private-services; muestra etapas sin secretos. Con carpeta mantiene el despliegue explícito. Check sin catálogo consulta releases públicas y muestra la transacción. Apply sin catálogo actualiza el producto por MSI/Burn y luego sus componentes; con catálogo solo aplica componentes. Force recrea el nodo instalado: borra datos, identidades y guests administrados tras inventario y confirmación interactiva. Apply --force selecciona primero la release pública. Resume también reconcilia instalaciones verificadas con componentes pendientes sin recrear WSL. Para recreaciones continúa la preparación de un nodo parcial propio tras una recreación interrumpida sin instalador pendiente; requiere PREPARAR, no borra ni restaura el nodo anterior. No reinicia Windows ni purga otras WSL. La entrega al worker no confirma finalización; consulta --check y eventos. Enroll/password solicitan entrada sin eco. Recovery crea un código de acceso de un solo uso del operador de Pocket ID; el enlace saldrá solo en esta consola y expira en 1 h, no se registra en journal."
             );
@@ -101,6 +105,12 @@ fn run() -> std::io::Result<bool> {
                 .map(|path| updates::Catalog::read(std::path::Path::new(path)))
                 .transpose()?;
             let response = windows::update(operation, catalog)?;
+            println!("{}", response.message);
+            Ok(response.ok)
+        }
+        #[cfg(windows)]
+        [arg, selector, name] if arg == "deploy" && selector == "--stack" && name == "kluster" => {
+            let response = windows::deploy_kluster()?;
             println!("{}", response.message);
             Ok(response.ok)
         }

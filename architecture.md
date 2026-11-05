@@ -240,13 +240,28 @@ no se acreditan por iniciar sus contenedores.
 
 ## Despliegue por Rust y PVE
 
+`DeployKluster` es una selección tipada independiente en el pipe administrativo.
+El servicio construye la entrada incorporada y la vincula a SID/GUID WSL en
+`kluster-input.json`. Un archivo cambiado o ajeno bloquea, sin crear otro guest.
+La preparación fija instala en la WSL dedicada una unidad oneshot anterior a
+compute para aplicar kernel.panic=10 y vm.overcommit_memory=1, con valores
+anteriores protegidos. No modifica .wslconfig ni reinicia WSL.
+
+Este perfil usa el recorrido PVE con descripción y privilegios propios, reserva
+previa del VMID, rootfs verificado transmitido por stdin y /dev/kmsg con escritura
+denegada. La entrada genérica conserva su LXC no privilegiado y las restricciones
+de dispositivos. K3s usa containerd; Podman/Quadlet gobiernan el registry local.
+Los binarios y el chart se verifican por SHA256; las imágenes y la demo local
+se consumen por digest. La finalización exige checks del nodo, TLS, demo y
+workloads. La captura y el cliente gráfico se aceptan por separado.
+
 La CLI recoge una carpeta administrativa y transmite un bundle acotado por el
 pipe existente. SYSTEM no resuelve paths aportados por el cliente. La admisión se
 repite en el servicio; se rechazan enlaces, escapes y directivas de host fuera del
 subconjunto admitido. No hay scripts suministrados por el usuario en el nodo.
 
 Rust verifica almacenamiento y base del runtime, reserva VMID/recibo antes de
-mutar y llama a `pct create` con argumentos fijos. El guest es no privilegiado,
+mutar y llama a `pct create` con argumentos fijos. El guest genérico es no privilegiado,
 con CPU/RAM/disco acotados. Un fallo preserva el recibo y el guest parcial, sin
 asignar otro identificador silenciosamente. Propiedad se comprueba por SID,
 digest de la entrada, VMID, descripción PVE y flag no privilegiado.
