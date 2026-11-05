@@ -249,7 +249,10 @@ anteriores protegidos. No modifica .wslconfig ni reinicia WSL.
 
 Este perfil usa el recorrido PVE con descripción y privilegios propios, reserva
 previa del VMID, rootfs verificado transmitido por stdin y /dev/kmsg con escritura
-denegada. La entrada genérica conserva su LXC no privilegiado y las restricciones
+denegada. Antes del primer arranque, la configuración nativa PVE restaura solo
+CAP_SETFCAP frente a las capacidades descartadas por Fedora, conservando las otras
+restricciones y un respaldo. Una política de plantilla distinta bloquea para revisión.
+La entrada genérica conserva su LXC no privilegiado y las restricciones
 de dispositivos. K3s usa containerd; Podman/Quadlet gobiernan el registry local.
 Los binarios y el chart se verifican por SHA256; las imágenes y la demo local
 se consumen por digest. La finalización exige checks del nodo, TLS, demo y

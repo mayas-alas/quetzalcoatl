@@ -525,10 +525,10 @@ pub(super) fn command(
             "-s",
             "--",
             "private-stack" | "dhcp" | "kluster"
-        ]
+        ] | ["/usr/bin/perl", "-", _, _, "apply" | "check"]
     );
     let stage = if preparation {
-        "preparación fija del guest"
+        "preparación fija del perfil LXC"
     } else {
         match args {
             ["pct", "exec", _, "--", "/usr/bin/install", ..] => "creación de directorios del guest",
@@ -1306,6 +1306,9 @@ fn execute_profile(
         }
     {
         return Err(invalid("propiedad del LXC no confirmada; no se modifica"));
+    }
+    if kluster {
+        super::kluster::configure_lxc(&identity, &id, &description, receipt.complete)?;
     }
     if receipt.complete {
         if kluster {

@@ -6,6 +6,7 @@ umask 077
 source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 [[ $(pct exec 1002 -- hostname) == gnx-k3s-1002 ]]
 pct config 1002 | awk '/^dev0: path=\/dev\/kmsg,deny-write=1,mode=0400$/ {ok=1} END {exit !ok}'
+perl "$source_dir/scripts/prepare-lxc.run" 1002 lab-1002 check
 [[ $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) -ge 2097152 ]]
 bash "$source_dir/scripts/prepare-kernel.run" apply
 pct set 1002 --memory 3072

@@ -12,6 +12,10 @@ por PVE y sus LXC. No modifica .wslconfig, memoria de WSL ni una WSL personal.
 El perfil crea un LXC privilegiado propio (2 CPU, 3 GiB RAM, 512 MiB swap, 20 GiB
 disco), fijando descripcion, recibo, base verificada y /dev/kmsg con escritura
 denegada. No convierte ni adopta 1001/1002, no modifica la admision generica.
+Antes del primer arranque restaura CAP_SETFCAP, que Fedora descarta y que el
+sandbox OCI necesita. Conserva las otras siete capacidades descartadas por las
+plantillas; una politica distinta bloquea para revision. Usa el bloqueo y la
+escritura nativos de PVE, con respaldo de la configuracion en /var/lib/vz.
 Preserva las reservas incompletas; la ausencia del guest o una entrada diferente
 requieren revision explicita y no asignan otro VMID silenciosamente.
 
@@ -54,6 +58,9 @@ mantenerse alcanzable; no se presupone publicacion por los dominios GnX.
 Con el codigo de esta rama disponible en PVE, ejecutar:
 
 ```bash
+pct shutdown 1002 --timeout 60
+perl stacks/kluster/scripts/prepare-lxc.run 1002 lab-1002 apply
+pct start 1002
 bash stacks/kluster/scripts/validate-lab.run
 ```
 

@@ -13,6 +13,11 @@ trap 'rm -rf -- "$temporary"' EXIT
 install -d -m 0700 "$temporary/downloads"
 for cmd in curl jq openssl podman systemctl tar; do command -v "$cmd" >/dev/null; done
 [[ $(uname -m) == x86_64 && $(jq -r .schema "$assets") == 1 ]]
+cap_bnd=$(awk '/^CapBnd:/ {print $2}' /proc/self/status)
+if (( (16#$cap_bnd & (1 << 31)) == 0 )); then
+  echo 'Falta CAP_SETFCAP: aplicar preparacion fija en PVE y reiniciar solo este LXC.' >&2
+  exit 1
+fi
 dd if=/dev/kmsg of=/dev/null count=0 status=none
 for pair in kernel.panic=10 vm.overcommit_memory=1; do
   key=${pair%=*}; [[ $(sysctl -n "$key") == "${pair#*=}" ]]

@@ -64,6 +64,10 @@ pub(super) fn bundle() -> io::Result<Bundle> {
             "config/kluster-kernel.run",
             include_str!("../../../../stacks/kluster/scripts/prepare-kernel.run"),
         ),
+        (
+            "config/kluster-lxc.run",
+            include_str!("../../../../stacks/kluster/scripts/prepare-lxc.run"),
+        ),
     ]
     .into_iter()
     .map(|(path, contents)| File {
@@ -138,6 +142,29 @@ pub(super) fn prepare(identity: &Identity) -> io::Result<()> {
             super::deploy::preparation_detail(&output)
         )));
     }
+    Ok(())
+}
+
+pub(super) fn configure_lxc(
+    identity: &Identity,
+    id: &str,
+    description: &str,
+    complete: bool,
+) -> io::Result<()> {
+    command(
+        identity,
+        &[
+            "/usr/bin/perl",
+            "-",
+            id,
+            description,
+            if complete { "check" } else { "apply" },
+        ],
+        Some(include_bytes!(
+            "../../../../stacks/kluster/scripts/prepare-lxc.run"
+        )),
+        30,
+    )?;
     Ok(())
 }
 
