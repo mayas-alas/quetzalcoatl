@@ -1,0 +1,84 @@
+#!/usr/bin/perl
+# Fixed PVE-side capability adjustment, before starting the owned guest.
+use strict;
+use warnings;
+use Cwd qw(abs_path);
+use File::Copy qw(copy);
+use File::Path qw(make_path);
+use File::Temp qw(tempdir);
+require PVE::LXC;
+require PVE::LXC::Config;
+
+my ($vmid, $owner, $mode) = @ARGV;
+die "root and fixed Kluster arguments required\n"
+    unless $> == 0 && @ARGV == 3 && $vmid =~ /^[1-9][0-9]{2,8}$/
+    && ($owner =~ /^GnX\.Core\.Kluster:[a-f0-9]{64}$/ || ($vmid == 1002 && $owner eq 'lab-1002'))
+    && $mode =~ /^(apply|check)$/;
+open my $status, '<', '/proc/self/status' or die "read parent capabilities: $!\n";
+my ($bounding) = map { /^CapBnd:\s+([a-f0-9]+)/ ? $1 : () } <$status>;
+close $status;
+die "PVE lacks CAP_SETFCAP\n" unless defined($bounding) && (hex(substr($bounding, -8)) & 0x80000000);
+
+# Refuse template drift instead of clearing new administrator restrictions.
+my (%dropped, %active);
+my $read_template;
+$read_template = sub {
+    my ($path) = @_;
+    my $resolved = abs_path($path) // die "missing LXC template: $path\n";
+    die "unexpected LXC include\n" unless $resolved =~ m{^/usr/share/lxc/config/};
+    die "recursive LXC include\n" if $active{$resolved}++;
+    if (-d $resolved) {
+        $read_template->($_) for sort glob "$resolved/*.conf";
+    } else {
+        open my $file, '<', $resolved or die "read LXC template: $!\n";
+        while (<$file>) {
+            s/#.*//;
+            if (/^\s*lxc\.include\s*=\s*(\S+)\s*$/) {
+                $read_template->($1);
+            } elsif (/^\s*lxc\.cap\.keep\s*=/) {
+                die "unexpected capability keep policy\n";
+            } elsif (/^\s*lxc\.cap\.drop\s*=\s*(.*?)\s*$/) {
+                my $value = $1;
+                if (length $value) { $dropped{$_} = 1 for split /\s+/, $value; }
+                else { %dropped = (); }
+            }
+        }
+        close $file or die "close LXC template: $!\n";
+    }
+    delete $active{$resolved};
+};
+$read_template->('/usr/share/lxc/config/fedora.common.conf');
+my @expected = sort qw(mac_admin mac_override setfcap sys_module sys_nice sys_pacct sys_rawio sys_time);
+die "LXC template capability policy changed; review required\n"
+    unless join(' ', sort keys %dropped) eq join(' ', @expected);
+my $drop = join(' ', grep { $_ ne 'setfcap' } @expected);
+
+PVE::LXC::Config->lock_config($vmid, sub {
+    my $conf = PVE::LXC::Config->load_config($vmid);
+    PVE::LXC::Config->check_lock($conf);
+    my $owned = $owner eq 'lab-1002'
+        ? ($conf->{hostname} // '') eq 'gnx-k3s-1002'
+        : ($conf->{description} // '') =~ /^\Q$owner\E\n?$/;
+    die "Kluster guest ownership/profile mismatch\n"
+        unless $owned && !($conf->{unprivileged} // 0) && ($conf->{ostype} // '') eq 'fedora'
+        && ($conf->{dev0} // '') eq 'path=/dev/kmsg,deny-write=1,mode=0400';
+    die "pending LXC configuration requires review\n" if keys %{$conf->{pending} // {}};
+    my $raw = $conf->{lxc} // [];
+    my $configured = @$raw == 2
+        && $raw->[0][0] eq 'lxc.cap.drop' && $raw->[0][1] eq ''
+        && $raw->[1][0] eq 'lxc.cap.drop' && $raw->[1][1] eq $drop;
+    if (!$configured) {
+        die "custom LXC configuration requires review\n" if @$raw;
+        die "Kluster capability adjustment is missing\n" if $mode eq 'check';
+        die "stop only LXC $vmid before applying capability adjustment\n" if PVE::LXC::check_running($vmid);
+        my $root = '/var/lib/vz/gnx-kluster-config';
+        make_path($root, {mode => 0700});
+        my $backup = tempdir("lxc-$vmid-XXXXXXXX", DIR => $root, CLEANUP => 0);
+        copy(PVE::LXC::Config->config_file($vmid), "$backup/$vmid.conf") or die "backup LXC config: $!\n";
+        chmod 0600, "$backup/$vmid.conf" or die "protect LXC backup: $!\n";
+        $conf->{lxc} = [['lxc.cap.drop', ''], ['lxc.cap.drop', $drop]];
+        PVE::LXC::Config->write_config($vmid, $conf);
+        print "Backup: $backup/$vmid.conf\n";
+    }
+    print "GNX_KLUSTER_LXC_CAPS_CONFIGURED (SETFCAP restored; other template drops preserved)\n";
+});

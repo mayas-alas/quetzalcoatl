@@ -4,4 +4,5 @@
 *.md text eol=lf
 config/** text eol=lf
 scripts/*.run text eol=lf
+stacks/kluster/** text eol=lf
 releases/v*/gnx.exe -filter -diff -merge -text

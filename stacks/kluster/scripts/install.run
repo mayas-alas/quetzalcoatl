@@ -1,0 +1,140 @@
+#!/usr/bin/bash
+# Fixed guest-only deployment. No build, untrusted shell input, tokens in argv, or TLS bypass.
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 ]]
+cfg=/etc/gnx-app/config
+assets=$cfg/kluster-assets.json
+state=/var/lib/gnx-app/kluster
+tools=/var/lib/gnx-app/tools
+install -d -m 0700 "$state" "$tools" /etc/rancher/k3s/config.yaml.d
+temporary=$(mktemp -d "$state/stage-XXXXXXXX")
+trap 'rm -rf -- "$temporary"' EXIT
+install -d -m 0700 "$temporary/downloads"
+for cmd in curl jq openssl podman systemctl tar; do command -v "$cmd" >/dev/null; done
+[[ $(uname -m) == x86_64 && $(jq -r .schema "$assets") == 1 ]]
+cap_bnd=$(awk '/^CapBnd:/ {print $2}' /proc/self/status)
+if (( (16#$cap_bnd & (1 << 31)) == 0 )); then
+  echo 'Falta CAP_SETFCAP: aplicar preparacion fija en PVE y reiniciar solo este LXC.' >&2
+  exit 1
+fi
+dd if=/dev/kmsg of=/dev/null count=0 status=none
+for pair in kernel.panic=10 vm.overcommit_memory=1; do
+  key=${pair%=*}; [[ $(sysctl -n "$key") == "${pair#*=}" ]]
+done
+systemctl mask chronyd.service var-lib-nfs-rpc_pipefs.mount
+systemctl start NetworkManager.service
+
+download() {
+  local name=$1 target=$2 url hash
+  url=$(jq -er --arg name "$name" '.downloads[$name].url' "$assets")
+  hash=$(jq -er --arg name "$name" '.downloads[$name].sha256' "$assets")
+  [[ $url == https://* && $hash =~ ^[a-f0-9]{64}$ ]]
+  if [[ -e $target ]]; then
+    [[ -f $target && ! -L $target ]]
+    [[ $(sha256sum "$target" | cut -d' ' -f1) == "$hash" ]] || { echo "Binario existente distinto: $name" >&2; exit 1; }
+    return
+  fi
+  curl -fSL --connect-timeout 10 --max-time 300 "$url" -o "$temporary/downloads/$name"
+  printf '%s  %s\n' "$hash" "$temporary/downloads/$name" | sha256sum -c -
+  install -m 0755 "$temporary/downloads/$name" "$target"
+}
+download k3s /usr/local/bin/k3s
+download helm "$tools/helm.tar.gz"
+download chart "$tools/kubeshark-source.tar.gz"
+download kubeshark /usr/local/bin/kubeshark
+download kftui /usr/local/bin/kftui
+download kftray "$tools/kftray.AppImage"
+tar -xzf "$tools/helm.tar.gz" -C "$temporary"
+install -m 0755 "$temporary/linux-amd64/helm" /usr/local/bin/helm
+
+# A private, guest-local registry CA; clients verify TLS on loopback.
+tls=/var/lib/gnx-app/registry-tls
+install -d -m 0700 "$tls" "$tls/server" /var/lib/gnx-app/registry
+if [[ ! -e $tls/ca.key && ! -e $tls/ca.crt ]]; then
+  openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 3650 \
+    -subj /CN=GnX-Kluster-Registry-CA -keyout "$tls/ca.key" -out "$tls/ca.crt" >/dev/null 2>&1
+fi
+[[ -f $tls/ca.key && -f $tls/ca.crt && ! -L $tls/ca.key && ! -L $tls/ca.crt ]]
+if [[ ! -f $tls/server/server.crt ]] || ! openssl x509 -checkend 2592000 -noout -in "$tls/server/server.crt" >/dev/null; then
+  openssl req -new -newkey rsa:2048 -nodes -subj /CN=localhost \
+    -keyout "$tls/server/server.key" -out "$temporary/server.csr" >/dev/null 2>&1
+  printf 'subjectAltName=IP:127.0.0.1,DNS:localhost\nextendedKeyUsage=serverAuth\n' > "$temporary/server.ext"
+  openssl x509 -req -sha256 -days 365 -in "$temporary/server.csr" -CA "$tls/ca.crt" -CAkey "$tls/ca.key" \
+    -set_serial "0x$(openssl rand -hex 16)" -extfile "$temporary/server.ext" -out "$tls/server/server.crt" >/dev/null 2>&1
+fi
+chmod 0600 "$tls/ca.key" "$tls/server/server.key"
+openssl verify -CAfile "$tls/ca.crt" "$tls/server/server.crt" >/dev/null
+install -d -m 0755 /etc/containers/certs.d/127.0.0.1:5000
+install -m 0644 "$tls/ca.crt" /etc/containers/certs.d/127.0.0.1:5000/ca.crt
+install -d -m 0755 /etc/systemd/system/registry.service.d
+printf '[Service]\nMemoryMax=192M\n' > /etc/systemd/system/registry.service.d/limits.conf
+systemctl daemon-reload
+systemctl restart registry.service
+timeout 30 bash -c 'until curl -fsS --cacert /var/lib/gnx-app/registry-tls/ca.crt https://127.0.0.1:5000/v2/ >/dev/null; do sleep 1; done'
+service_image=$(jq -er '.images["service-health"]' "$assets")
+podman pull "$service_image"
+podman tag "$service_image" 127.0.0.1:5000/gnx/service-health:1
+podman push --digestfile "$temporary/service-health.digest" 127.0.0.1:5000/gnx/service-health:1
+service_digest=$(cat "$temporary/service-health.digest")
+[[ $service_digest =~ ^sha256:[a-f0-9]{64}$ ]]
+
+# Drop-ins preserve an existing base config and cluster identity (lab 1002).
+cat > /etc/rancher/k3s/config.yaml.d/90-gnx-kluster.yaml <<'CONFIG'
+protect-kernel-defaults: true
+write-kubeconfig-mode: "0600"
+flannel-backend: host-gw
+disable:
+  - traefik
+  - servicelb
+  - metrics-server
+CONFIG
+cat > "$temporary/registries.yaml" <<'CONFIG'
+configs:
+  "127.0.0.1:5000":
+    tls:
+      ca_file: /var/lib/gnx-app/registry-tls/ca.crt
+CONFIG
+if [[ -e /etc/rancher/k3s/registries.yaml ]]; then
+  cmp -s "$temporary/registries.yaml" /etc/rancher/k3s/registries.yaml || { echo 'Registries existente distinto; se conserva.' >&2; exit 1; }
+else
+  install -m 0600 "$temporary/registries.yaml" /etc/rancher/k3s/registries.yaml
+fi
+install -d -m 0755 /etc/NetworkManager/conf.d
+printf '[keyfile]\nunmanaged-devices=interface-name:cni0;interface-name:flannel*;interface-name:veth*\n' > /etc/NetworkManager/conf.d/90-gnx-kluster.conf
+nmcli general reload
+if [[ ! -e /etc/systemd/system/k3s.service ]]; then
+  cat > /etc/systemd/system/k3s.service <<'UNIT'
+[Unit]
+Description=GnX Kluster K3s
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/k3s server
+KillMode=process
+Delegate=yes
+LimitNOFILE=1048576
+LimitNPROC=infinity
+TasksMax=infinity
+TimeoutStartSec=120
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+UNIT
+fi
+for tool in kubectl crictl ctr; do
+  if [[ ! -e /usr/local/bin/$tool ]]; then ln -s k3s "/usr/local/bin/$tool"; fi
+done
+systemctl daemon-reload
+systemctl enable k3s.service
+systemctl restart --no-block k3s.service
+timeout 120 bash -c 'until /usr/local/bin/k3s kubectl get --raw=/readyz --request-timeout=3s >/dev/null 2>&1; do sleep 2; done'
+/usr/local/bin/k3s kubectl wait --for=condition=Ready nodes --all --timeout=120s
+
+sed "s|127.0.0.1:5000/gnx/service-health:1|127.0.0.1:5000/gnx/service-health@$service_digest|g" "$cfg/kluster-service-health.yaml" > "$temporary/service-health.yaml"
+/usr/local/bin/k3s kubectl apply -f "$temporary/service-health.yaml"
+bash "$cfg/kluster-reconcile-observe.run"
+install -m 0600 "$assets" "$state/installed-assets.json"
+echo 'GNX_KLUSTER_INSTALLED'
