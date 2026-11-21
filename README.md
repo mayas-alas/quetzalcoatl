@@ -93,6 +93,9 @@ llega como control en vez de pegar, se indica cómo usar el pegado del terminal.
 Los instaladores publicados antes de este cambio pueden ocultar toda la entrada
 de `enroll`, sin asteriscos. La automatización por stdin no imprime máscaras ni eco.
 
+El acceso experimental `gnx connect list` / `gnx connect vm104` de las fuentes
+0.0.40 se usa **sin elevar**. Véase [conexión a la VM 104](docs/connect-vm104.md).
+
 ### Contraseña de PVE
 
 `gnx password` establece o cambia la contraseña de **`root@pam` en Proxmox**;

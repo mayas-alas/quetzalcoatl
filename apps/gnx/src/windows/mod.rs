@@ -1,5 +1,6 @@
 mod access;
 mod bootstrap;
+pub mod connect;
 mod console;
 mod deploy;
 mod identity;
