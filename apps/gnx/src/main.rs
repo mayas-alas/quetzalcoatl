@@ -25,11 +25,15 @@ fn run() -> std::io::Result<bool> {
             println!(
                 "gnx start | stop | status | enroll | password | recovery | deploy [carpeta] | update --check|--apply [catalogo.json] | update --force | update --resume"
             );
+            println!("gnx connect list | connect vm104");
             Ok(true)
         }
         [arg] if arg == "--help" || arg == "-h" => {
             println!(
                 "gnx deploy --stack kluster: prepara el kernel de la WSL dedicada y crea un LXC Kubernetes privilegiado propio; registro OCI con TLS, servicio HTTP y observabilidad de red. Cambia parámetros compartidos del kernel, conserva un respaldo y no adopta guests existentes."
+            );
+            println!(
+                "gnx connect list | connect vm104: acceso SSH manual de laboratorio; no muestra invitaciones ni consulta Proxmox."
             );
             println!(
                 "gnx start | stop | status | enroll | password | recovery | deploy [carpeta]\ngnx update --check|--apply [catalogo.json]\ngnx update --force\ngnx update --apply --force\ngnx update --resume\nDeploy sin carpeta prepara private-services; muestra etapas sin secretos. Con carpeta mantiene el despliegue explícito. Check sin catálogo consulta releases públicas y muestra la transacción. Apply sin catálogo actualiza el producto por MSI/Burn y luego sus componentes; con catálogo solo aplica componentes. Force recrea el nodo instalado: borra datos, identidades y guests administrados tras inventario y confirmación interactiva. Apply --force selecciona primero la release pública. Resume también reconcilia instalaciones verificadas con componentes pendientes sin recrear WSL. Para recreaciones continúa la preparación de un nodo parcial propio tras una recreación interrumpida sin instalador pendiente; requiere PREPARAR, no borra ni restaura el nodo anterior. No reinicia Windows ni purga otras WSL. La entrega al worker no confirma finalización; consulta --check y eventos. Enroll/password solicitan entrada sin eco. Recovery crea un código de acceso de un solo uso del operador de Pocket ID; el enlace saldrá solo en esta consola y expira en 1 h, no se registra en journal."
@@ -40,6 +44,8 @@ fn run() -> std::io::Result<bool> {
             println!("gnx {}", env!("CARGO_PKG_VERSION"));
             Ok(true)
         }
+        #[cfg(windows)]
+        [arg, rest @ ..] if arg == "connect" => windows::connect::run(rest),
         #[cfg(windows)]
         [arg] if arg == "--msi-uninstall" || arg == "--msi-recover" => {
             windows::installer(arg == "--msi-uninstall")?;

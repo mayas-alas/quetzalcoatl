@@ -44,6 +44,13 @@ Rechaza un binario distinto si esa versión ya existe. Un cambio del binario exi
 nueva versión; no eliminar ni sustituir el existente para eludir el gate.
 La versión procede del workspace `Cargo.toml`.
 
+Desde 0.0.40, compilar desde fuentes para Windows x64 también requiere el
+toolchain oficial Go **1.27.1** (`go` en PATH o `GNX_GO` con ruta absoluta).
+Cargo compila el adaptador Tailcat fijado y verificado por `go.sum` y lo
+incorpora al CLI; Go no se instala en el equipo de usuario. `-UseVersionedBinary`
+no requiere Go. Los [avisos de terceros](../apps/gnx/tunnel/THIRD_PARTY_NOTICES.txt)
+también se incluyen en el binario (`gnx connect --licenses`).
+
 ## Inputs offline
 
 El checkout no contiene los archivos grandes de empaquetado:
