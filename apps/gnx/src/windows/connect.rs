@@ -25,7 +25,7 @@ use windows_sys::Win32::{
 
 const ALIAS: &str = "vm104";
 const DESTINATION: &str = "gnx-incus-kini-lab";
-const USER: &str = "debian";
+const USER: &str = "gnxlab";
 const PIN: &str = "vm104.host.pub";
 const RELAY: &str = "gnx-tailcat-relay.exe";
 const KNOWN_HOSTS: &str = "known_hosts";

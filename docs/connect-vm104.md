@@ -1,26 +1,29 @@
 # `gnx connect`: VM 104
 
-Perfil de laboratorio de las fuentes `0.0.40`: `vm104` identifica
-`gnx-incus-kini-lab`, con sesión como `debian`. `list` muestra el perfil y el
+Perfil de laboratorio de las fuentes `0.0.41`: `vm104` identifica
+`gnx-incus-kini-lab`, con sesión como `gnxlab`. `list` muestra el perfil y el
 estado del pin local; no descubre guests, consulta PVE ni indica que el túnel
-esté disponible.
+esté disponible. La candidata `0.0.40` todavía muestra `debian`; no uses esa
+cuenta para `no-auth-ssh` si conserva privilegios administrativos.
 
 ## Preparar la identidad SSH
 
-Desde una consola confiable **dentro de la VM 104**, verifica `hostname` e
-`id -un`. Solo habilita la ventana si `debian` no tiene acceso administrativo
-efectivo (por ejemplo, `sudo` sin contraseña o acceso al socket de un motor
-privilegiado). No ejecutes el listener como root ni habilites permisos nuevos
-para este recorrido.
+El operador prepara `gnxlab` **dentro de la VM 104**, con contraseña bloqueada,
+grupo privado propio, sin `sudo` ni acceso a sockets de motores privilegiados.
+La preparación de la cuenta no habilita un listener ni cambia `debian`.
+Desde una consola confiable y una cuenta administrativa autorizada de esa VM,
+entra con `sudo -iu gnxlab` y verifica `hostname` e `id -un`. El SSH de
+Tailcat se ejecuta como el usuario del listener; el nombre que muestra GnX
+no cambia la cuenta efectiva en la VM.
 
-Como `debian`, prepara una vez la clave de host del SSH de Tailcat v0.7.0. Si ya
+Como `gnxlab`, prepara una vez la clave de host del SSH de Tailcat v0.7.0. Si ya
 existe, se conserva. Necesita OpenSSL y las herramientas base de Debian.
 
 ```sh
 (
   set -eu
   test "$(hostname)" = gnx-incus-kini-lab
-  test "$(id -un)" = debian
+  test "$(id -un)" = gnxlab
   umask 077
   dir="${XDG_CONFIG_HOME:-$HOME/.config}/tailcat/ssh"
   key="$dir/ssh_host_ed25519_key"
@@ -54,13 +57,13 @@ cambio automáticamente.
 
 ## Abrir una ventana de acceso
 
-En la VM y como `debian`, ejecuta esto en una consola privada (sin captura):
+En la VM y como `gnxlab`, ejecuta esto en una consola privada (sin captura):
 
 ```sh
 (
   set -eu
   test "$(hostname)" = gnx-incus-kini-lab
-  test "$(id -un)" = debian
+  test "$(id -un)" = gnxlab
   umask 077
   dir=$(mktemp -d)
   trap 'rm -f -- "$dir/invitation"; rmdir -- "$dir"' EXIT
@@ -74,7 +77,7 @@ En la VM y como `debian`, ejecuta esto en una consola privada (sin captura):
 Transfiere la invitación desde ese archivo mediante el almacén protegido
 acordado por el operador. No la consultes con `qm guest exec` (su resultado es
 capturable), ni la pegues en chat, DNS, argumentos o historial. Quien obtenga
-la invitación tiene acceso con los permisos de `debian`, incluidas las
+la invitación tiene acceso con los permisos de `gnxlab`, incluidas las
 funciones que ofrezca su SSH integrado. No hay `authorized_keys` de cliente.
 La VM necesita conectividad saliente para el rendezvous DERP; no se abre un
 puerto entrante ni se reconfigura OpenSSH, el firewall o Proxmox.
