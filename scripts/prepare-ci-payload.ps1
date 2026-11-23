@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory)][string]$Archive,
-    [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$Sha256
+    [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$Sha256,
+    [switch]$Preview
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -13,7 +14,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Cargo metadata failed' }
 $version = ($metadata.packages | Where-Object name -eq 'gnx').version
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid package version' }
 $payload = Join-Path $repo 'build/payload'
-$output = Join-Path $repo "build/releases/v$version"
+$outputRoot = if ($Preview) { 'build/previews' } else { 'build/releases' }
+$output = Join-Path $repo "$outputRoot/v$version"
 if ((Test-Path -LiteralPath $payload) -or (Test-Path -LiteralPath $output)) {
     throw 'CI input preparation requires an empty build destination; nothing overwritten'
 }

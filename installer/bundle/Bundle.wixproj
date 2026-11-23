@@ -4,7 +4,8 @@
     <OutputType>Bundle</OutputType>
     <OutputName>GnxCoreSetup</OutputName>
     <GnxVersion Condition="'$(GnxVersion)' == ''">0.0.1</GnxVersion>
-    <DefineConstants>MsiPackage=$(MSBuildProjectDirectory)\..\..\build\releases\v$(GnxVersion)\GnxCore.msi;Version=$(GnxVersion)</DefineConstants>
+    <GnxMsi Condition="'$(GnxMsi)' == ''">$(MSBuildProjectDirectory)\..\..\build\releases\v$(GnxVersion)\GnxCore.msi</GnxMsi>
+    <DefineConstants>MsiPackage=$(GnxMsi);Version=$(GnxVersion)</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Bundle.wxs" />

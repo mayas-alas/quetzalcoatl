@@ -10,7 +10,7 @@ terminal como supervisor.
 | Área | Incluido |
 | --- | --- |
 | Entrega | EXE Burn como entrada interactiva recomendada y MSI autocontenido como vía administrativa directa al mismo producto. |
-| Automatización | GitHub Action manual para compilar una versión nueva desde fuentes o empaquetar el CLI versionado, entregar MSI/EXE con hashes y, opcionalmente, publicar una pre-release con tag coincidente. |
+| Automatización | GitHub Action por cada push a main: compila las fuentes, verifica MSI/EXE preview y los conserva como candidato borrador por commit, sin publicar ni modificar el CLI canónico; vía manual para compilar una versión nueva o empaquetar el CLI versionado y, opcionalmente, publicar una pre-release con tag coincidente. |
 | Identidad | Servicio `GnXCore`, cuenta `gnxcoresvc`, WSL `gnx-core` y estado protegido propio. |
 | Control | `start`, `stop`, `status`, `enroll`, `password` y `deploy [carpeta]` mediante un pipe administrativo local; las fuentes 0.0.20 añaden `update --check|--apply [catalogo.json]`. |
 | Acceso | `app.gnx` y `compute.gnx`; el stack privado registrado añade Pocket ID, RustFS/S3 y NetBird por HTTPS. Acceso mesh sujeto a DNS, ACL y confianza del cliente. |

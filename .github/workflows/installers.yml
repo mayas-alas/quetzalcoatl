@@ -1,6 +1,8 @@
 name: Windows installers
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       cli_mode:
@@ -28,222 +30,35 @@ on:
 permissions:
   contents: read
 
+# Keep candidate and official release writes serialized across all refs/tags.
+# GitHub's max queue retains up to 100 pending runs instead of replacing one.
 concurrency:
-  group: installers-${{ github.ref }}
+  group: installers-release-writes
   cancel-in-progress: false
+  queue: max
 
 jobs:
+  automatic:
+    if: ${{ github.event_name == 'push' }}
+    permissions:
+      # The same runner stages the large installers as an unpublished candidate;
+      # handing them to another job would require multi-GiB Actions artifacts.
+      contents: write
+    uses: ./.github/workflows/package-windows.yml
+
   package:
-    runs-on: windows-2022
-    timeout-minutes: 60
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: write
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    defaults:
-      run:
-        shell: pwsh
-    env:
-      CLI_MODE: ${{ inputs.cli_mode }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
-        with:
-          persist-credentials: false
-
-      - name: Set up .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0, Node 24
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Check packaging prerequisites
-        id: version
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $drive = (Get-Item $env:GITHUB_WORKSPACE).PSDrive
-          if ($drive.Free -lt 12GB) { throw 'Packaging requires at least 12 GiB free; no validation will be skipped' }
-          $metadata = cargo metadata --no-deps --locked --format-version 1 | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw 'Cargo metadata failed' }
-          $version = ($metadata.packages | Where-Object name -eq 'gnx').version
-          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid package version' }
-          if ($env:CLI_MODE -notin @('versioned', 'source')) { throw 'Invalid CLI mode' }
-          if (-not (Test-Path -LiteralPath "releases/v$version/CHANGELOG.md" -PathType Leaf)) { throw 'Versioned changelog missing' }
-          $binary = "releases/v$version/gnx.exe"
-          if ($env:CLI_MODE -eq 'versioned' -and -not (Test-Path -LiteralPath $binary -PathType Leaf)) {
-            throw 'Versioned CLI missing; select source for a new version'
-          }
-          if ($env:CLI_MODE -eq 'source' -and (Test-Path -LiteralPath $binary)) {
-            throw 'Source mode requires a new version without an existing canonical CLI; never replace an immutable version'
-          }
-          "GNX_VERSION=$version" >> $env:GITHUB_ENV
-          "version=$version" >> $env:GITHUB_OUTPUT
-
-      - name: Download and verify offline inputs
-        env:
-          PAYLOAD_RELEASE: ${{ inputs.payload_release }}
-          PAYLOAD_SHA256: ${{ inputs.payload_sha256 }}
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ($env:PAYLOAD_RELEASE -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._-]*$') { throw 'Invalid input release tag' }
-          if ($env:PAYLOAD_SHA256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Invalid archive SHA256' }
-          $archive = Join-Path $env:RUNNER_TEMP 'gnx-offline-inputs.zip'
-          gh release download $env:PAYLOAD_RELEASE --pattern gnx-offline-inputs.zip --output $archive
-          if ($LASTEXITCODE -ne 0) { throw 'Offline input download failed' }
-          ./scripts/prepare-ci-payload.ps1 -Archive $archive -Sha256 $env:PAYLOAD_SHA256
-          Remove-Item -LiteralPath $archive
-
-      - name: Prepare pinned official Console asset
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $console = Get-Content config/console.json -Raw | ConvertFrom-Json
-          if ($console.path -notmatch '^console/rustfs-console-v[0-9]+\.[0-9]+\.[0-9]+\.zip$' -or $console.sha256 -notmatch '^[0-9a-f]{64}$') { throw 'Invalid pinned Console metadata' }
-          if ($console.url -ne "https://github.com/rustfs/console/releases/download/$($console.version)/rustfs-console-$($console.version).zip") { throw 'Unexpected Console origin' }
-          $destination = Join-Path $PWD "build/payload/$($console.path)"
-          New-Item -ItemType Directory -Force (Split-Path $destination -Parent) | Out-Null
-          Invoke-WebRequest -Uri $console.url -OutFile $destination
-          if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -ne $console.sha256) { throw 'Official Console asset SHA-256 mismatch' }
-
-      - name: Prepare pinned Go toolchain for Tailcat
-        if: ${{ inputs.cli_mode == 'source' }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $directory = Join-Path $env:RUNNER_TEMP 'go-1.27.1-gnx'
-          New-Item -ItemType Directory -Path $directory | Out-Null
-          $archive = Join-Path $directory 'go.zip'
-          Invoke-WebRequest -Uri 'https://go.dev/dl/go1.27.1.windows-amd64.zip' -OutFile $archive
-          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'a3911b5e0e1b1053f25ed0675f4c1c6aad1e2bfcf253df2b9be4caabd2edd95d') {
-            throw 'Official Go archive SHA-256 mismatch'
-          }
-          tar.exe -xf $archive -C $directory
-          if ($LASTEXITCODE -ne 0) { throw 'Go toolchain extraction failed' }
-          "GNX_GO=$(Join-Path $directory 'go/bin/go.exe')" >> $env:GITHUB_ENV
-          Remove-Item -LiteralPath $archive
-
-      - name: Check Rust sources
-        if: ${{ inputs.cli_mode == 'source' }}
-        run: |
-          cargo fmt --all -- --check
-          if ($LASTEXITCODE -ne 0) { throw 'Rust formatting failed' }
-          cargo clippy --locked -- -D warnings
-          if ($LASTEXITCODE -ne 0) { throw 'Rust static analysis failed' }
-          cargo test --locked --bin gnx windows::recreation::checks
-          if ($LASTEXITCODE -ne 0) { throw 'Inventory content normalization checks failed' }
-
-      - name: Compile and package a new CLI with canonical gates
-        if: ${{ inputs.cli_mode == 'source' }}
-        run: ./scripts/build.ps1 -Package
-
-      - name: Package the immutable versioned CLI with canonical gates
-        if: ${{ inputs.cli_mode == 'versioned' }}
-        run: ./scripts/build.ps1 -Package -UseVersionedBinary
-
-      - name: Separate user downloads from build metadata
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $output = "build/releases/v$env:GNX_VERSION"
-          $installers = Join-Path $PWD "$output/installers"
-          $metadata = Join-Path $PWD "$output/metadata"
-          New-Item -ItemType Directory -Path $installers, $metadata | Out-Null
-          foreach ($name in 'GnxCore.msi', 'GnxCoreSetup.exe') {
-            Move-Item -LiteralPath (Join-Path $output $name) -Destination $installers
-          }
-          $lines = foreach ($name in 'GnxCore.msi', 'GnxCoreSetup.exe') {
-            $file = Get-Item -LiteralPath (Join-Path $installers $name)
-            if ($file.Length -eq 0) { throw "Empty output: $name" }
-            "$((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $name"
-          }
-          [IO.File]::WriteAllText((Join-Path $installers 'SHA256SUMS.txt'), ($lines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
-          foreach ($name in 'gnx.exe', 'base-image.digest') {
-            Copy-Item -LiteralPath (Join-Path $output $name) -Destination $metadata
-          }
-          Copy-Item -LiteralPath (Join-Path $output 'build-provenance.json') -Destination (Join-Path $metadata 'canonical-build-provenance.json')
-          Copy-Item -LiteralPath (Join-Path $installers 'SHA256SUMS.txt') -Destination (Join-Path $metadata 'INSTALLER-SHA256SUMS.txt')
-          $head = git rev-parse --short=12 HEAD
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify packaged source commit' }
-          Copy-Item -LiteralPath "build/package/v$env:GNX_VERSION-$head/payload/manifest.json" -Destination $metadata
-          Copy-Item -LiteralPath "releases/v$env:GNX_VERSION/CHANGELOG.md" -Destination $metadata
-          $commit = git rev-parse HEAD
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify build commit' }
-          $rustc = rustc --version --verbose
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify Rust toolchain' }
-          $cargo = cargo --version
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify Cargo toolchain' }
-          $provenance = @{
-            version = $env:GNX_VERSION
-            source_commit = $commit
-            cli_mode = $env:CLI_MODE
-            compiled_from_source = ($env:CLI_MODE -eq 'source')
-            workflow_run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
-            runner_rustc = ($rustc -join "`n")
-            runner_cargo = $cargo
-          }
-          [IO.File]::WriteAllText((Join-Path $metadata 'build-provenance.json'), ($provenance | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
-          $technicalHashes = foreach ($name in 'gnx.exe', 'base-image.digest', 'manifest.json', 'CHANGELOG.md', 'build-provenance.json', 'canonical-build-provenance.json', 'INSTALLER-SHA256SUMS.txt') {
-            "$((Get-FileHash -LiteralPath (Join-Path $metadata $name) -Algorithm SHA256).Hash.ToLowerInvariant())  $name"
-          }
-          [IO.File]::WriteAllText((Join-Path $metadata 'BUILD-SHA256SUMS.txt'), ($technicalHashes -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
-          if ($env:CLI_MODE -eq 'source') {
-            "CLI compiled from source and MSI/EXE packaged with canonical gates. Preserve the generated canonical CLI from technical metadata for local reuse." >> $env:GITHUB_STEP_SUMMARY
-          } else {
-            "MSI/EXE packaged from the immutable versioned CLI; source recompilation was not executed." >> $env:GITHUB_STEP_SUMMARY
-          }
-          "CLI mode: $env:CLI_MODE. Installation and runtime acceptance were not executed." >> $env:GITHUB_STEP_SUMMARY
-          "## Technical build hashes (not user downloads)" >> $env:GITHUB_STEP_SUMMARY
-          [IO.File]::ReadAllText((Join-Path $metadata 'BUILD-SHA256SUMS.txt')).TrimEnd() >> $env:GITHUB_STEP_SUMMARY
-          [IO.File]::ReadAllText((Join-Path $metadata 'build-provenance.json')) >> $env:GITHUB_STEP_SUMMARY
-
-      - name: Preserve canonical CLI and technical provenance
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: gnx-technical-v${{ env.GNX_VERSION }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: build/releases/v${{ env.GNX_VERSION }}/metadata/
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Stage user draft release (installers and checksums only)
-        if: ${{ inputs.publish_release }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v${{ env.GNX_VERSION }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          # Artifact storage is account-scoped and limited; the ~3 GB installers do
-          # not fit the included quota. Staging hands over through a draft release,
-          # whose assets do not count against Actions artifact storage.
-          $stale = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw 'Listing releases failed' }
-          foreach ($candidate in $stale) {
-            if ($candidate.draft -and $candidate.tag_name -eq $env:RELEASE_TAG) {
-              gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/releases/$($candidate.id)" | Out-Null
-              if ($LASTEXITCODE -ne 0) { throw 'A stale draft release could not be removed; refusing to stage a duplicate' }
-              Write-Host "Removed stale draft $($candidate.id)"
-            }
-          }
-          $installers = Join-Path $PWD "build/releases/v$env:GNX_VERSION/installers"
-          foreach ($name in 'GnxCore.msi', 'GnxCoreSetup.exe', 'SHA256SUMS.txt') {
-            $file = Get-Item -LiteralPath (Join-Path $installers $name)
-            if ($file.Length -eq 0) { throw "Empty draft asset: $name" }
-          }
-          $changelog = [IO.File]::ReadAllText("releases/v$env:GNX_VERSION/CHANGELOG.md")
-          $notes = "$changelog`n`n## Procedencia`n`nCommit: ``$env:GITHUB_SHA```n`n[Empaquetado en GitHub Actions]($env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID). El empaquetado no acredita aceptacion en un host nuevo.`n"
-          if ($env:CLI_MODE -eq 'source') {
-            $notes += "`nCLI compilado desde fuentes en esta ejecucion.`n"
-          } else {
-            $notes += "`nCLI versionado reutilizado; esta ejecucion no recompilo las fuentes.`n"
-          }
-          $notesFile = Join-Path $env:RUNNER_TEMP 'release-notes.md'
-          [IO.File]::WriteAllText($notesFile, $notes, [Text.UTF8Encoding]::new($false))
-          gh release create $env:RELEASE_TAG --verify-tag --draft --prerelease --target $env:GITHUB_SHA `
-            --title "GnX Core $env:RELEASE_TAG — Windows x64 (candidata)" --notes-file $notesFile `
-            "$installers/GnxCoreSetup.exe#Instalador interactivo — recomendado" `
-            "$installers/GnxCore.msi#Paquete MSI — administracion" `
-            "$installers/SHA256SUMS.txt#SHA-256 de los instaladores"
-          if ($LASTEXITCODE -ne 0) { throw 'Draft release staging failed' }
+    uses: ./.github/workflows/package-windows.yml
+    with:
+      cli_mode: ${{ inputs.cli_mode }}
+      payload_release: ${{ inputs.payload_release }}
+      payload_sha256: ${{ inputs.payload_sha256 }}
+      publish_release: ${{ inputs.publish_release }}
 
   release:
-    if: ${{ inputs.publish_release }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
     needs: package
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -260,14 +75,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          draft=$(gh api "repos/$GH_REPO/releases" --jq ".[] | select(.draft and .tag_name == \"$RELEASE_TAG\") | .id" | head -n1)
-          if [[ -z "$draft" ]]; then
-            echo 'No staged draft release for this version; nothing to publish' >&2
-            exit 1
-          fi
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == "refs/tags/$RELEASE_TAG" ]]
+          drafts=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" |
+            jq -s --arg tag "$RELEASE_TAG" '[.[][] | select(.draft and .tag_name == $tag)]')
+          [[ $(echo "$drafts" | jq 'length') -eq 1 ]]
+          draft=$(echo "$drafts" | jq -r '.[0].id')
           meta=$(gh api "repos/$GH_REPO/releases/$draft")
           echo "$meta" | jq -e --arg tag "$RELEASE_TAG" --arg commit "$GITHUB_SHA" \
-            '.draft == true and .tag_name == $tag and .target_commitish == $commit' >/dev/null
+            --arg run "Workflow identity: $GITHUB_RUN_ID" \
+            '.draft == true and .immutable != true and .tag_name == $tag and .target_commitish == $commit and (.body | split("\n") | index($run) != null)' >/dev/null
           echo "$meta" | jq -e '.assets | length == 3' >/dev/null
           names=$(echo "$meta" | jq -r '[.assets[].name] | sort | join("\n")')
           [[ "$names" == "$(printf 'GnxCore.msi\nGnxCoreSetup.exe\nSHA256SUMS.txt' | sort)" ]]
@@ -295,5 +111,5 @@ jobs:
             exit 1
           fi
           cd ..
-          gh api -X PATCH "repos/$GH_REPO/releases/$draft" -F draft=false -f prerelease=true -F latest=false > /dev/null
+          gh api -X PATCH "repos/$GH_REPO/releases/$draft" -F draft=false -F prerelease=true -f make_latest=false > /dev/null
           printf 'Instaladores publicados: %s/%s/releases/tag/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"

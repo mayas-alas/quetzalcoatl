@@ -137,14 +137,67 @@ explícitas; CI no los hace automáticamente.
 
 ## GitHub Actions
 
-[Windows installers](../.github/workflows/installers.yml) se ejecuta manualmente
-con `workflow_dispatch`, en `windows-2022`. No se activa por pull requests ni instala
-el producto. El job de empaquetado requiere escritura: crea la release borrador de
-usuario y conserva un artefacto técnico pequeño con retención limitada. El job
-opcional de publicación requiere escritura y publica únicamente una pre-release
-tras completar los gates.
+[Windows installers](../.github/workflows/installers.yml) se ejecuta con cada push
+a `main`, sin filtros de rutas, y conserva `workflow_dispatch` con inputs tipados.
+Ambos llaman al [empaquetado común](../.github/workflows/package-windows.yml) en
+`windows-2022` (.NET 8, WiX 5.0.2 y Go fijado para compilar fuentes). No instala
+el producto. Todas las ejecuciones comparten un grupo de concurrencia para
+serializar las escrituras de candidatos y releases oficiales entre refs y tags.
+La [cola nativa `queue: max`](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
+conserva hasta 100 runs pendientes, sin reemplazar el pendiente anterior con
+cada push. Si se llena, GitHub cancela los runs adicionales; no es una cola ilimitada.
 
-`cli_mode` distingue dos rutas:
+El push usa exclusivamente [inputs fijados en Git](../config/ci-offline-inputs.json):
+tag `offline-inputs-v0.0.22`, asset `gnx-offline-inputs.zip`, 1531027888 bytes y
+SHA-256 `0ce6e8842caa14321b73e3c1ca38016f1425a49452190a71871c0cf213ea5a11`.
+No necesita inputs manuales ni secretos configurados. Utiliza el token
+automático; tamaño, checksum, allowlist ZIP, configuración,
+digest base, IDs OCI y catálogo siguen siendo obligatorios. Cambiar la configuración
+de inputs puede exigir actualizar este pin mediante revisión, nunca elegir `latest`.
+
+Cada push compila las fuentes de su commit, comprueba formato, Clippy y los checks
+de normalización existentes y ejecuta `scripts/build.ps1 -Package -Preview`.
+La preview conserva la versión del workspace y su changelog, pero guarda el CLI y
+MSI/EXE en `build/previews/v<versión>/` y el payload en
+`build/package/preview/v<versión>-<commit>/payload`. No adopta ni modifica
+`releases/v<versión>/gnx.exe`. Verifica versión/hash del CLI compilado, payload,
+MSI incorporado, versión MSI y bundle con los mismos gates canónicos; Burn recibe
+la ruta explícita del MSI preview. Es validación de construcción, no una entrega
+canónica o un instalador aceptado para instalar sobre el producto de igual versión.
+
+Cada preview correcta conserva MSI, EXE y `SHA256SUMS.txt` en un **borrador sin
+publicar** de GitHub Releases, con nombre único
+`ci-main-<commit completo>-<run>-<intento>`. Su destino es el commit exacto del
+push, nunca `main` resuelto más tarde. El resumen del run enlaza el candidato;
+los propietarios con permiso de escritura pueden descargarlo desde Releases.
+El script contrasta los dos hashes locales y los tres tamaños/digests SHA-256
+remotos. No modifica/elimina candidatos anteriores, no hace push de tags ni
+publica. Un fallo o respuesta incierta deja el candidato parcial para inspección
+y hace fallar el run; un nuevo intento usa otro nombre, sin sobrescribirlo.
+No hay limpieza automática de candidatos ni promoción de previews a `v<versión>`.
+
+El CLI preview queda solo en el runner; el artefacto
+`gnx-preview-<commit>-<run>-<intento>` contiene únicamente manifiesto, changelog,
+digest, procedencia y hashes, con tope de **1 MiB** y retención de **1 día**.
+Los ~3 GB de instaladores usan almacenamiento de Releases, separado de la cuota
+de artifacts. La procedencia identifica el commit, la compilación desde fuentes,
+modo preview, pin de inputs y hashes del CLI/instaladores. No se atribuye una
+instalación o aceptación runtime a estos candidatos de igual versión.
+
+El workflow parte de `contents: read`; los jobs de empaquetado requieren
+`contents: write` para adjuntar los instaladores grandes en el mismo runner sin
+transferirlos por artifacts. El token se expone a `gh` solo en los pasos que lo
+necesitan y checkout no conserva credenciales. La única escritura automática es
+crear/subir un candidato nuevo sin publicar; todas las rutas de **publicación**
+exigen explícitamente `workflow_dispatch` y `publish_release`. El borrador manual
+y la publicación requieren el tag `v<versión>` coincidente con el commit y no reemplazan
+una release publicada/inmutable. El job opcional publica únicamente una pre-release
+tras completar los gates. Se conserva el mínimo inicial de 12 GiB antes de descargar
+y se registra el espacio restante tras preparar inputs/toolchains y analizar fuentes,
+sin exigir una segunda reserva fija. Fallos de checksum, disco,
+toolchain, red o empaquetado hacen fallar el run; no se omiten validaciones.
+
+En la ejecución manual, `cli_mode` distingue dos rutas:
 
 - **`versioned`** (predeterminada): exige el CLI canónico y changelog del checkout;
   ejecuta `-Package -UseVersionedBinary`, sin recompilar Rust.
@@ -232,7 +285,8 @@ integridad del checkout.
    previamente creado sobre el commit elegido. El segundo job descarga los tres
    assets del borrador, verifica hashes y coincidencia tag/commit (que sean del
    mismo run) y solo entonces la publica como pre-release. Si esa verificación
-   falla, la release queda borrador y se puede repetir el job sin recompilar.
+   falla, la release queda borrador y se puede repetir el job dentro del mismo run
+   sin recompilar. El borrador debe registrar la identidad de ese run.
 
 No se suben resultados parciales si falla el empaquetado. Los instaladores no se
 firman con Authenticode por este workflow. Los hashes no sustituyen una firma de

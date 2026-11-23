@@ -1,6 +1,7 @@
 param(
     [switch]$Package,
     [switch]$UseVersionedBinary,
+    [switch]$Preview,
     [switch]$SealBase,
     [switch]$CheckpointOnly,
     [switch]$Resume,
@@ -12,6 +13,9 @@ param(
     [string]$PendingOperation
 )
 $ErrorActionPreference = 'Stop'
+if ($Preview -and (-not $Package -or $UseVersionedBinary -or $SealBase -or $CheckpointOnly -or $Resume)) {
+    throw '-Preview requires -Package from source and cannot modify/seal a canonical release or checkpoint only'
+}
 if ($UseVersionedBinary -and (-not $Package -or $SealBase)) {
     throw '-UseVersionedBinary requires -Package and cannot be combined with -SealBase'
 }
@@ -92,6 +96,12 @@ try {
     $release = Join-Path $repo "releases/v$version"
     if (-not (Test-Path -LiteralPath (Join-Path $release 'CHANGELOG.md') -PathType Leaf)) { throw 'Release changelog missing' }
     $releaseBinary = Join-Path $release 'gnx.exe'
+    # A preview compiles this checkout at its current version without adopting or
+    # replacing the immutable releases/v*/gnx.exe. All later package gates apply.
+    $outputRoot = if ($Preview) { 'build/previews' } else { 'build/releases' }
+    $output = Join-Path $repo "$outputRoot/v$version/"
+    New-Item -ItemType Directory -Force $output | Out-Null
+    if ($Preview) { $releaseBinary = Join-Path $output 'gnx.exe' }
     if ($UseVersionedBinary) {
         if (-not (Test-Path -LiteralPath $releaseBinary -PathType Leaf)) { throw 'Versioned CLI missing; build and version it before packaging' }
         if ((& $releaseBinary --version) -ne "gnx $version" -or $LASTEXITCODE -ne 0) { throw 'Versioned CLI version mismatch' }
@@ -105,14 +115,12 @@ try {
         if ($sourceHash -ne (Get-FileHash -LiteralPath $releaseBinary).Hash) { throw 'Versioned binary differs; increment version' }
     } else { Copy-Item -LiteralPath 'target/release/gnx.exe' -Destination $releaseBinary }
     if ($sourceHash -ne (Get-FileHash -LiteralPath $releaseBinary).Hash) { throw 'Release binary mismatch' }
-    $output = Join-Path $repo "build/releases/v$version/"
-    New-Item -ItemType Directory -Force $output | Out-Null
-    $sourcePaths = @(git ls-files --cached --others --exclude-standard -- Cargo.toml Cargo.lock apps/gnx config scripts stacks README.md architecture.md scope.md docs .github/workflows/installers.yml "releases/v$version/CHANGELOG.md")
+    $sourcePaths = @(git ls-files --cached --others --exclude-standard -- Cargo.toml Cargo.lock apps/gnx config scripts stacks installer README.md architecture.md scope.md docs .github/workflows "releases/v$version/CHANGELOG.md")
     if ($LASTEXITCODE -ne 0) { throw 'Cannot record source inventory' }
     $sourceFiles = @($sourcePaths | Sort-Object -Unique | ForEach-Object {
         if (Test-Path -LiteralPath $_ -PathType Leaf) { @{path=$_;sha256=(Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()} }
     })
-    $provenance = @{version=$version;source_commit=(git rev-parse HEAD);source_tree_dirty=(@(git status --porcelain).Count -ne 0);compiled_from_source=(-not $UseVersionedBinary);cli_sha256=$sourceHash.ToLowerInvariant();source_files=$sourceFiles;acceptance='not-established-by-build'}
+    $provenance = @{version=$version;preview=[bool]$Preview;source_commit=(git rev-parse HEAD);source_tree_dirty=(@(git status --porcelain).Count -ne 0);compiled_from_source=(-not $UseVersionedBinary);cli_sha256=$sourceHash.ToLowerInvariant();source_files=$sourceFiles;acceptance='not-established-by-build'}
     [IO.File]::WriteAllText((Join-Path $output 'build-provenance.json'),($provenance|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
     if ($SealBase) {
         $crane = Join-Path $repo 'build/tools/crane/crane.exe'
@@ -149,11 +157,12 @@ try {
     $baseDigestFile = Join-Path $output 'base-image.digest'
     if (-not (Test-Path $baseDigestFile)) { throw 'Seal the versioned base first with -SealBase' }
     $head = git rev-parse --short=12 HEAD
-    $stage = Join-Path $repo "build/package/v$version-$head/payload"
+    $stageRoot = if ($Preview) { 'build/package/preview' } else { 'build/package' }
+    $stage = Join-Path $repo "$stageRoot/v$version-$head/payload"
     New-Item -ItemType Directory -Force $stage,(Join-Path $stage 'images') | Out-Null
     $runtimeConfig = Join-Path $stage 'config'
     New-Item -ItemType Directory -Force $runtimeConfig | Out-Null
-    Get-ChildItem config | Where-Object { $_.Name -notin @('base-masks','bootc.json','base') } | Copy-Item -Recurse -Force -Destination $runtimeConfig
+    Get-ChildItem config | Where-Object { $_.Name -notin @('base-masks','bootc.json','base','ci-offline-inputs.json') } | Copy-Item -Recurse -Force -Destination $runtimeConfig
     New-Item -ItemType Directory -Force (Join-Path $stage 'scripts') | Out-Null
     Copy-Item scripts/*.run (Join-Path $stage 'scripts') -Force
     $inputs = @{ 'rootfs.tar' = 'build/payload/rootfs.tar' }
@@ -214,7 +223,8 @@ try {
     $media.Close()
     [Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) | Out-Null
     Remove-IntermediateCopy (Join-Path $repo 'installer/obj/Release/en-us/GnxCore.msi') $msi
-    Native 'EXE bundle build' { dotnet build installer/bundle/Bundle.wixproj -c Release -t:Rebuild "-p:OutputPath=$output" "-p:GnxVersion=$version" }
+    Native 'EXE bundle build' { dotnet build installer/bundle/Bundle.wixproj -c Release -t:Rebuild "-p:OutputPath=$output" "-p:GnxVersion=$version" "-p:GnxMsi=$msi" }
     Remove-IntermediateCopy (Join-Path $repo 'installer/bundle/obj/Release/GnxCoreSetup.exe') (Join-Path $output 'GnxCoreSetup.exe')
-    Copy-Item target/release/gnx.exe $output
+    if ($sourceHash -ne (Get-FileHash -LiteralPath $releaseBinary).Hash -or $sourceHash -ne (Get-FileHash target/release/gnx.exe).Hash) { throw 'Built CLI changed during packaging' }
+    Copy-Item target/release/gnx.exe $output -Force
 } finally { Pop-Location }
