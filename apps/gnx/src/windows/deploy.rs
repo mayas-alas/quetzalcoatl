@@ -29,7 +29,7 @@ fn log(progress: &tokio::sync::mpsc::Sender<String>, message: impl Into<String>)
     let _ = progress.try_send(message.into());
 }
 
-fn random_key() -> io::Result<String> {
+pub(super) fn random_key() -> io::Result<String> {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut bytes = zeroize::Zeroizing::new([0u8; 32]);
     security::random(bytes.as_mut())?;
@@ -884,19 +884,40 @@ pub fn execute(
     progress: &tokio::sync::mpsc::Sender<String>,
     recovery: Option<&MissingDeployment>,
 ) -> io::Result<String> {
-    execute_profile(bundle, progress, recovery, false)
+    execute_profile(bundle, progress, recovery, Profile::General)
 }
 
 pub(super) fn execute_kluster(progress: &tokio::sync::mpsc::Sender<String>) -> io::Result<String> {
-    execute_profile(Some(super::kluster::bundle()?), progress, None, true)
+    execute_profile(
+        Some(super::kluster::bundle()?),
+        progress,
+        None,
+        Profile::Kluster,
+    )
+}
+
+pub(super) fn execute_kestra(progress: &tokio::sync::mpsc::Sender<String>) -> io::Result<String> {
+    let bundle = super::kestra::bundle()?;
+    let message = execute_profile(Some(bundle), progress, None, Profile::Kestra)?;
+    Ok(format!(
+        "{message}\nKestra: UI en 127.0.0.1:8080 del guest; usuario admin@kestra.gnx. Credenciales en la entrada protegida kestra-input.json; consulta stacks/kestra/README.md. No se publica en el gateway."
+    ))
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Profile {
+    General,
+    Kluster,
+    Kestra,
 }
 
 fn execute_profile(
     bundle: Option<Bundle>,
     progress: &tokio::sync::mpsc::Sender<String>,
     recovery: Option<&MissingDeployment>,
-    kluster: bool,
+    profile: Profile,
 ) -> io::Result<String> {
+    let kluster = profile == Profile::Kluster;
     security::require_system()?;
     log(progress, "Validando entrada, propiedad y CA del nodo.");
     let owner = Ownership::read()?;
@@ -945,6 +966,11 @@ fn execute_profile(
     let mut resources: Resources =
         serde_json::from_slice(&fs::read(payload.join("config/lxc.json"))?)
             .map_err(io::Error::other)?;
+    // Kestra requires 4 GiB itself; leave capacity for PostgreSQL and the guest.
+    if profile == Profile::Kestra {
+        resources.memory_mb = resources.memory_mb.max(6144);
+        resources.cores = resources.cores.max(2);
+    }
     if kluster {
         resources = Resources {
             cores: 2,

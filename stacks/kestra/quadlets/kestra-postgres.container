@@ -1,0 +1,28 @@
+[Unit]
+Description=Kestra PostgreSQL
+
+[Container]
+# Official PostgreSQL 16.16-bookworm (multi-platform index, includes linux/amd64).
+Image=docker.io/library/postgres@sha256:cd0e9518bda5f2ea667ff84d22795d089720c883f288e215d97ce57437e8ef37
+Pull=missing
+ContainerName=kestra-postgres
+Network=kestra.network
+NetworkAlias=kestra-postgres
+EnvironmentFile=/etc/gnx-app/config/kestra-postgres.env
+Volume=/var/lib/gnx-app/kestra-postgres:/var/lib/postgresql/data:Z
+HealthCmd=pg_isready -h 127.0.0.1 -U kestra -d kestra
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=12
+HealthStartPeriod=30s
+HealthOnFailure=kill
+Notify=healthy
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=600s
+TimeoutStopSec=60s
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+[Unit]
+Description=Kestra standalone
+Requires=kestra-postgres.service
+After=kestra-postgres.service
+
+[Container]
+# Official Kestra v2.0.11 (multi-platform index, includes linux/amd64).
+Image=docker.io/kestra/kestra@sha256:149f8477bfd606465255a800b19051d6743e137541aa962aa84700f59414a66b
+Pull=missing
+ContainerName=kestra
+Network=kestra.network
+PublishPort=127.0.0.1:8080:8080
+Exec=server standalone --config /etc/kestra/application.yaml
+Volume=/etc/gnx-app/config/kestra.yml:/etc/kestra/application.yaml:ro,U,Z
+Volume=/var/lib/gnx-app/kestra-storage:/app/storage:U,Z
+Environment="JAVA_OPTS=-Xms512m -Xmx3g"
+DropCapability=all
+NoNewPrivileges=true
+StopTimeout=360
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=600s
+TimeoutStopSec=390s
+
+[Install]
+WantedBy=multi-user.target

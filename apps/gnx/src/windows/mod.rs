@@ -5,6 +5,7 @@ mod console;
 mod deploy;
 mod identity;
 mod installer_package;
+mod kestra;
 mod kluster;
 mod maintenance;
 mod node;

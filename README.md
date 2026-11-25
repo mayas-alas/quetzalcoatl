@@ -202,3 +202,9 @@ nodo con `gnx stop` no es lo mismo que detener el servicio Windows.
 
 Código propio: [GNU AGPLv3](LICENSE), `AGPL-3.0-only`.
 Las imágenes y dependencias de terceros conservan sus respectivas licencias.
+
+## Kestra opcional
+
+`gnx deploy --stack kestra` prepara Kestra y PostgreSQL mediante Quadlets en un
+LXC no privilegiado, con credenciales persistentes y UI en el loopback del guest.
+Véanse acceso, recursos y límites en [Kestra](stacks/kestra/README.md).

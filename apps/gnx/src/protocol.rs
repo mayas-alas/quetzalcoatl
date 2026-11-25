@@ -22,6 +22,7 @@ pub enum Operation {
     Retire,
     Deploy,
     DeployKluster,
+    DeployKestra,
     UpdateCheck,
     UpdateApply,
     Recovery,
@@ -115,7 +116,7 @@ impl Request {
         if request.progress
             && !matches!(
                 request.operation,
-                Operation::Deploy | Operation::DeployKluster
+                Operation::Deploy | Operation::DeployKluster | Operation::DeployKestra
             )
         {
             return Err(invalid("esta operación no admite progreso"));

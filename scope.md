@@ -29,6 +29,12 @@ artefactos técnicos de CI, no descargas adicionales para instalar.
 
 ## Despliegue de Quadlets
 
+Las fuentes 0.0.42 incorporan `gnx deploy --stack kestra`: Kestra con PostgreSQL
+en un LXC no privilegiado propio, con UI solo en loopback del guest y sin socket
+del host. Configuración y credenciales persisten mediante el estado protegido;
+no se activa al instalar. Véanse recursos, acceso y límites en
+[Kestra](stacks/kestra/README.md). Su aceptación runtime requiere comprobación aparte.
+
 Las fuentes incorporan el perfil fijo `gnx deploy --stack kluster`: preparación
 del kernel en la WSL dedicada y un LXC Kubernetes privilegiado propio, con
 registry TLS, servicio HTTP y observabilidad de red. Su selección no modifica la admisión

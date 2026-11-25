@@ -240,6 +240,18 @@ no se acreditan por iniciar sus contenedores.
 
 ## Despliegue por Rust y PVE
 
+`DeployKestra` selecciona un bundle fijo incorporado en Rust: red bridge,
+PostgreSQL y Kestra standalone. Antes de reservar el LXC, `kestra-input.json`
+conserva archivos y secretos aleatorios bajo las ACL Windows, ligados al SID/GUID
+WSL. La reinstalación/actualización reutiliza esos bytes sin rotar credenciales
+ni reconciliar definiciones nuevas sobre un guest completado. El inventario de
+recreación valida el ownership de esta entrada. La operación usa el despliegue
+genérico no privilegiado con 2 vCPU y al menos 6 GiB RAM; systemd/Quadlet controla
+lifecycle y espera la salud PostgreSQL antes de Kestra. Solo se publica el puerto
+8080 en loopback del guest, sin rutas del gateway ni socket de contenedores.
+Los datos son bind mounts bajo `/var/lib/gnx-app/`; los assets incorporados llegan
+en el CLI del instalador, no mediante descarga de scripts.
+
 `DeployKluster` es una selección tipada independiente en el pipe administrativo.
 El servicio construye la entrada incorporada y la vincula a SID/GUID WSL en
 `kluster-input.json`. Un archivo cambiado o ajeno bloquea, sin crear otro guest.

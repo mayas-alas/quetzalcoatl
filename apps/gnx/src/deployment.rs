@@ -242,6 +242,7 @@ fn validate_quadlet(text: &str) -> io::Result<()> {
                     | "Notify"
                     | "DropCapability"
                     | "NoNewPrivileges"
+                    | "StopTimeout"
             ),
             "Service" => matches!(
                 key,

@@ -118,6 +118,9 @@ impl Controller {
                             Ok((state, message))
                         },
                     )
+                } else if op == Operation::DeployKestra {
+                    super::deploy::execute_kestra(&progress)
+                        .map(|message| (NodeState::Active, message))
                 } else if op == Operation::DeployKluster {
                     super::deploy::execute_kluster(&progress)
                         .map(|message| (NodeState::Active, message))
@@ -152,7 +155,12 @@ impl Controller {
                 }
                 Response::new(request, state != NodeState::Degraded, state, &message)
             }
-            Ok(Err(error)) if matches!(op, Operation::Deploy | Operation::DeployKluster) => {
+            Ok(Err(error))
+                if matches!(
+                    op,
+                    Operation::Deploy | Operation::DeployKluster | Operation::DeployKestra
+                ) =>
+            {
                 let mut response = Response::new(
                     request,
                     false,

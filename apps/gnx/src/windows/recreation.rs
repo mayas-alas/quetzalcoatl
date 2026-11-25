@@ -124,6 +124,8 @@ fn files(sid: &str) -> io::Result<Vec<String>> {
             super::deploy::validate_default_owner(sid)?;
         } else if name == "kluster-input.json" {
             super::kluster::validate_owner(sid)?;
+        } else if name == "kestra-input.json" {
+            super::kestra::validate_owner(sid)?;
         } else if ![
             "prepared",
             "identity.json",

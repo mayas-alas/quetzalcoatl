@@ -335,7 +335,10 @@ async fn request_once(
         secret,
         bundle,
         catalog,
-        progress: matches!(operation, Operation::Deploy | Operation::DeployKluster),
+        progress: matches!(
+            operation,
+            Operation::Deploy | Operation::DeployKluster | Operation::DeployKestra
+        ),
         recover_missing,
     };
     let bytes = Zeroizing::new(serde_json::to_vec(&request).map_err(io::Error::other)?);
@@ -364,6 +367,7 @@ async fn request_once(
         operation,
         Operation::Deploy
             | Operation::DeployKluster
+            | Operation::DeployKestra
             | Operation::UpdateCheck
             | Operation::UpdateApply
     ) {

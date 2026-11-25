@@ -21,7 +21,7 @@ fn run() -> std::io::Result<bool> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.as_slice() {
         [] => {
-            println!("gnx deploy --stack kluster");
+            println!("gnx deploy --stack kluster|kestra");
             println!(
                 "gnx start | stop | status | enroll | password | recovery | deploy [carpeta] | update --check|--apply [catalogo.json] | update --force | update --resume"
             );
@@ -29,6 +29,9 @@ fn run() -> std::io::Result<bool> {
             Ok(true)
         }
         [arg] if arg == "--help" || arg == "-h" => {
+            println!(
+                "gnx deploy --stack kestra: Kestra y PostgreSQL en un LXC propio no privilegiado, 2 vCPU/6 GiB RAM; UI solo en loopback del guest, sin socket del host. Configuración y credenciales persistentes protegidas."
+            );
             println!(
                 "gnx deploy --stack kluster: prepara el kernel de la WSL dedicada y crea un LXC Kubernetes privilegiado propio; registro OCI con TLS, servicio HTTP y observabilidad de red. Cambia parámetros compartidos del kernel, conserva un respaldo y no adopta guests existentes."
             );
@@ -111,6 +114,12 @@ fn run() -> std::io::Result<bool> {
                 .map(|path| updates::Catalog::read(std::path::Path::new(path)))
                 .transpose()?;
             let response = windows::update(operation, catalog)?;
+            println!("{}", response.message);
+            Ok(response.ok)
+        }
+        #[cfg(windows)]
+        [arg, selector, name] if arg == "deploy" && selector == "--stack" && name == "kestra" => {
+            let response = windows::client(protocol::Operation::DeployKestra)?;
             println!("{}", response.message);
             Ok(response.ok)
         }
