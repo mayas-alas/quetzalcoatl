@@ -1,0 +1,28 @@
+[Unit]
+Description=GNX published desktop (Debian session)
+
+[Container]
+Image=docker.io/library/node@sha256:40168539433ce47c04c4106f8ca42aee6f493cff42c08dede9e1f2ca0398b05b
+Pull=never
+ContainerName=gnx-preview-ui
+Network=preview.network
+PublishPort=3000:3000
+User=1000
+Group=1000
+WorkingDir=/opt/gnx-desktop
+Exec=node server/index.mjs
+Environment=HOST=0.0.0.0
+Environment=PORT=3000
+Environment=NODE_ENV=production
+Volume=/var/lib/gnx-app/preview/desktop:/opt/gnx-desktop:ro
+DropCapability=all
+NoNewPrivileges=true
+ReadOnly=true
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=90s
+
+[Install]
+WantedBy=multi-user.target

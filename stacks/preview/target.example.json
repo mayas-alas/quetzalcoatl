@@ -1,0 +1,10 @@
+{
+  "vmid": null,
+  "digest": null,
+  "mac": null,
+  "guest": null,
+  "gateway": null,
+  "next_hop": null,
+  "interface": null,
+  "ca_sha256": null
+}

@@ -1,0 +1,18 @@
+# GNX_PREVIEW_GUEST is validated as an IPv4 address by preview-access.run.
+ui.kernel.gnx {
+    bind {$GNX_BIND}
+    tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+    header Cross-Origin-Opener-Policy same-origin
+    header Cross-Origin-Embedder-Policy require-corp
+    header Cross-Origin-Resource-Policy same-origin
+    reverse_proxy {$GNX_PREVIEW_GUEST}:3000 {
+        # Keep upstream ETag/Range/Content-Range and WASM MIME. No encode/filter.
+        header_up Accept-Encoding identity
+        flush_interval -1
+    }
+}
+notas.gnx {
+    bind {$GNX_BIND}
+    tls /etc/gnx/tls/node.crt /etc/gnx/tls/node.key
+    reverse_proxy {$GNX_PREVIEW_GUEST}:5230
+}

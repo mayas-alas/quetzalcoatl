@@ -1,0 +1,83 @@
+#!/usr/bin/bash
+# Fixed ingress reconciliation on the existing GNX Linux node, never PVE provisioning.
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 ]]
+root=/var/lib/gnx-core
+mode=${1:?register or reconcile required}
+[[ "$mode" == register || "$mode" == reconcile ]]
+exec 8>/run/gnx-preview-access.lock
+flock -x -w 30 8
+registry=$root/preview-stack.json
+if [[ "$mode" == register ]]; then candidate=${2:?managed target JSON required}; else candidate=$registry; fi
+[[ -e "$candidate" ]] || { [[ "$mode" == reconcile ]]; exit; }
+[[ -f "$candidate" && ! -L "$candidate" && $(stat -c %u "$candidate") == 0 && $(stat -c %a "$candidate") == 600 ]]
+jq -e '
+  keys == ["ca_sha256","digest","gateway","guest","interface","mac","next_hop","vmid"] and
+  (.vmid|type == "number") and .vmid == (.vmid|floor) and .vmid >= 100 and .vmid <= 999999999 and
+  (.digest|test("^[a-f0-9]{64}$")) and (.ca_sha256|test("^[a-f0-9]{64}$")) and
+  (.mac|test("^([A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}$")) and
+  ([.gateway,.guest,.next_hop]|all(type == "string" and test("^([0-9]{1,3}\\.){3}[0-9]{1,3}$") and (split(".")|all(tonumber < 256)))) and
+  .guest != .gateway and (.interface|test("^[a-zA-Z0-9_-]{1,15}$"))
+' "$candidate" >/dev/null
+id=$(jq -r .vmid "$candidate")
+digest=$(jq -r .digest "$candidate")
+mac=$(jq -r .mac "$candidate")
+guest=$(jq -r .guest "$candidate")
+gateway=$(jq -r .gateway "$candidate")
+hop=$(jq -r .next_hop "$candidate")
+device=$(jq -r .interface "$candidate")
+[[ $(openssl x509 -in "$root/tls/root.crt" -outform DER | sha256sum | cut -d' ' -f1) == $(jq -r .ca_sha256 "$candidate") ]]
+for name in ui.kernel.gnx notas.gnx compute.gnx; do
+    openssl verify -CAfile "$root/tls/root.crt" -CRLfile "$root/ca-private/root.crl.pem" -crl_check -purpose sslserver -verify_hostname "$name" "$root/tls/node.crt" >/dev/null
+done
+# This is the existing backend, using its existing CA/name validation.
+curl --fail --silent --cacert "$root/tls/root.crt" https://compute.gnx/api2/json/version >/dev/null
+ip -j -4 addr show dev "$device" | jq -e 'length == 1' >/dev/null
+ip -j -4 addr | jq -e --arg ip "$gateway" 'any(.[].addr_info[]; .local == $ip)' >/dev/null
+podman exec gnx-core-compute pvesh get "/nodes/gnx-core-compute/lxc/$id/config" --output-format json |
+    jq -e --arg owner "GnX.Core:$digest" --arg mac "$mac" --arg guest "$guest" '
+      .unprivileged == 1 and .hostname == "gnx-preview" and (.description|rtrimstr("\n")) == $owner and
+      (.net0|ascii_downcase|contains("hwaddr=" + ($mac|ascii_downcase))) and (.net0|contains("ip=" + $guest + "/"))' >/dev/null
+if [[ -e "$registry" ]]; then
+    [[ ! -L "$registry" && $(stat -c %u "$registry") == 0 && $(stat -c %a "$registry") == 600 ]]
+    # A changed VMID, route, CA or bundle requires a separate reviewed migration.
+    diff -q <(jq -S . "$registry") <(jq -S . "$candidate") >/dev/null
+fi
+existing=$(ip -j -4 route show exact "$guest/32")
+jq -e --arg hop "$hop" --arg device "$device" 'length == 0 or (length == 1 and .[0].gateway == $hop and .[0].dev == $device and .[0].protocol == "static")' <<< "$existing" >/dev/null
+if [[ ! -e "$registry" ]]; then
+    (set -o noclobber; cat "$candidate" > "$registry")
+    chmod 0600 "$registry"
+fi
+ip route replace "$guest/32" via "$hop" dev "$device" proto static
+for unit in preview-ui.service preview-memos.service; do
+    [[ $(podman exec gnx-core-compute pct exec "$id" -- systemctl show "$unit" -p ActiveState --value) == active ]]
+done
+for port in 3000 5230; do curl --fail --silent --output /dev/null "http://$guest:$port/"; done
+install -d -m 0755 "$root/stack-gateway" "$root/stack-dns" /etc/containers/systemd/gnx-core-gateway.container.d
+printf 'GNX_PREVIEW_GUEST=%s\n' "$guest" > "$root/preview.env.new"
+chmod 0600 "$root/preview.env.new"
+export GNX_PREVIEW_GUEST=$guest
+install -m 0644 /etc/gnx-core/preview.caddy "$root/stack-gateway/preview.caddy.new"
+# Validate every existing stack and the candidate, without importing Preview twice.
+{
+    sed '\|^import /etc/gnx-stack-gateway/\*.caddy$|d' /etc/gnx-core/Caddyfile
+    for file in "$root"/stack-gateway/*.caddy; do
+        [[ -e "$file" ]] || continue
+        [[ "$file" != "$root/stack-gateway/preview.caddy" ]] || continue
+        [[ ! -L "$file" && $(basename "$file") =~ ^[a-z0-9_.-]+$ ]]
+        printf '\nimport /etc/gnx-stack-gateway/%s\n' "$(basename "$file")"
+    done
+    printf '\nimport /etc/gnx-stack-gateway/preview.caddy.new\n'
+} |
+    podman exec --env GNX_PREVIEW_GUEST -i gnx-core-gateway caddy validate --config - --adapter caddyfile
+mv "$root/preview.env.new" "$root/preview.env"
+printf '[Container]\nEnvironmentFile=/var/lib/gnx-core/preview.env\n' > /etc/containers/systemd/gnx-core-gateway.container.d/preview.conf
+mv "$root/stack-gateway/preview.caddy.new" "$root/stack-gateway/preview.caddy"
+printf 'address=/ui.kernel.gnx/%s\naddress=/notas.gnx/%s\n' "$gateway" "$gateway" > "$root/stack-dns/preview.conf"
+chmod 0644 "$root/stack-dns/preview.conf"
+systemctl daemon-reload
+podman exec gnx-core-compute systemctl restart dnsmasq.service
+systemctl --no-block try-restart gnx-core-gateway.service
+printf 'Preview ingress reconciled; trusted-client acceptance is separate.\n'
