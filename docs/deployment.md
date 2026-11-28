@@ -1,5 +1,10 @@
 # Quadlets a un LXC nuevo
 
+El corte [GNX Preview Linux](../stacks/preview/README.md) entrega UI y Memos con
+Quadlets nativos y artefactos OCI offline sobre infraestructura ya aprovisionada.
+Reutiliza rutas, límites compatibles, registro por stack, Caddy, split DNS y CA;
+su bundle técnico no es una carpeta admitida por `gnx deploy` ni crea el LXC.
+
 Disponible desde 0.0.16; `.network` y el caso fijo privado se incorporaron en 0.0.17.
 La candidata 0.0.18 añade espera de disponibilidad PVE mediante healthcheck nativo.
 Entrada administrativa por la CLI instalada:

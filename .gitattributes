@@ -5,4 +5,6 @@
 config/** text eol=lf
 scripts/*.run text eol=lf
 stacks/kluster/** text eol=lf
+stacks/preview/** text eol=lf
+.github/workflows/preview-linux.yml text eol=lf
 releases/v*/gnx.exe -filter -diff -merge -text

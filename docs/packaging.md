@@ -1,5 +1,12 @@
 # Compilación y empaquetado
 
+El [bundle técnico GNX Preview Linux](../stacks/preview/README.md) tiene versión y
+workflow propios: valida y archiva el desktop publicado y dos imágenes OCI por
+digest, sin recompilar el núcleo ni cambiar GnxCoreSetup.exe v0.0.41. Conserva
+manifiesto, checksums y procedencia; CI solo genera artefactos. Su publicación
+deliberada por el coordinador queda sujeta a la aceptación HTTPS desde un cliente
+confiable. Las reglas MSI/EXE de este documento siguen rigiendo la vía Windows.
+
 ## Herramientas y salidas
 
 - Windows x64, Rust/Cargo compatible con `Cargo.toml` y `Cargo.lock`.

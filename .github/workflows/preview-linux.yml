@@ -1,0 +1,49 @@
+name: GNX Preview Linux bundle
+
+on:
+  pull_request:
+    paths: ['stacks/preview/**', 'config/pki/node.ext', 'config/compute/stack-dns.conf', 'scripts/tls.run', 'scripts/configure.run', 'apps/gnx/src/windows/access.rs', '.github/workflows/preview-linux.yml']
+  push:
+    branches: [main]
+    paths: ['stacks/preview/**', 'config/pki/node.ext', 'config/compute/stack-dns.conf', 'scripts/tls.run', 'scripts/configure.run', 'apps/gnx/src/windows/access.rs', '.github/workflows/preview-linux.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v4.4.0
+        with:
+          node-version: '26.13.1'
+          package-manager-cache: false
+      - name: Validate source format (no compilation)
+        run: |
+          node --check stacks/preview/scripts/bundle.mjs
+          node stacks/preview/scripts/bundle.mjs
+          git diff --check
+          bash -n stacks/preview/scripts/*.run scripts/tls.run scripts/configure.run
+      - name: Prepare native packaging tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y skopeo
+      - name: Package pinned desktop and offline OCI archives
+        run: node stacks/preview/scripts/bundle.mjs --package
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gnx-preview-linux-${{ github.sha }}
+          path: |
+            build/gnx-preview-*/*.tar.gz
+            build/gnx-preview-*/manifest.json
+            build/gnx-preview-*/provenance.json
+            build/gnx-preview-*/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+      - name: Record acceptance boundary
+        run: echo 'Offline candidate only. Coordinator reviews trusted-client e2e before deliberate release publication; this workflow cannot publish.' >> "$GITHUB_STEP_SUMMARY"
