@@ -1,0 +1,24 @@
+[Unit]
+Description=GNX private notes (Memos)
+
+[Container]
+Image=docker.io/neosmemo/memos@sha256:3bb5532dfd643aefe6088fe5fa451823728a20f4cff8a2fd9d6d7ef7c27df001
+Pull=never
+ContainerName=gnx-preview-memos
+Network=preview.network
+PublishPort=5230:5230
+User=10001:10001
+Environment=MEMOS_MODE=prod
+Environment=MEMOS_INSTANCE_URL=https://notas.gnx
+Volume=/var/lib/gnx-app/preview/memos:/var/opt/memos
+Volume=/etc/gnx-app/config/preview/memos:/etc/memos/config:ro
+DropCapability=all
+NoNewPrivileges=true
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=90s
+
+[Install]
+WantedBy=multi-user.target

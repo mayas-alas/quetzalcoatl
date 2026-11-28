@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "name": "gnx-preview",
+  "version": "0.1.0",
+  "platform": "linux/amd64",
+  "desktop": {
+    "release": "v0.2.0-261127-4d08ae3",
+    "url": "https://github.com/mayas-alas/gnxkernel/releases/download/v0.2.0-261127-4d08ae3/gnx-desktop.tar.gz",
+    "sha256": "4af141d9a8f48cee8cd5389eed5ff5b3651f681f8c11e2039e9bdd67fd03443f",
+    "archive": "payload/gnx-desktop.tar.gz",
+    "directory": "/var/lib/gnx-app/preview/desktop",
+    "session": "debian"
+  },
+  "images": {
+    "node": {
+      "version": "26.13.1-bookworm-slim",
+      "reference": "docker.io/library/node@sha256:40168539433ce47c04c4106f8ca42aee6f493cff42c08dede9e1f2ca0398b05b",
+      "archive": "images/node.oci.tar"
+    },
+    "memos": {
+      "version": "26.11.2",
+      "reference": "docker.io/neosmemo/memos@sha256:3bb5532dfd643aefe6088fe5fa451823728a20f4cff8a2fd9d6d7ef7c27df001",
+      "archive": "images/memos.oci.tar"
+    }
+  },
+  "services": {
+    "ui": { "origin": "https://ui.kernel.gnx", "port": 3000, "unit": "preview-ui.service" },
+    "notas": { "origin": "https://notas.gnx", "port": 5230, "unit": "preview-memos.service" },
+    "compute": { "origin": "https://compute.gnx", "managed": false }
+  },
+  "volumes": {
+    "memos": { "source": "/var/lib/gnx-app/preview/memos", "target": "/var/opt/memos", "uid": 10001 },
+    "config": "/etc/gnx-app/config/preview"
+  }
+}

@@ -29,6 +29,12 @@ artefactos técnicos de CI, no descargas adicionales para instalar.
 
 ## Despliegue de Quadlets
 
+El [bundle GNX Preview Linux](stacks/preview/README.md) entrega el desktop
+publicado de gnxkernel y Memos privado para un LXC no privilegiado ya preparado,
+con OCI offline, Caddy, split DNS y la CA existente. Tiene registro separado y
+no amplía `gnx deploy`, no prepara PVE ni reemplaza el EXE Windows v0.0.41.
+Su empaquetado CI no acredita aplicación ni aceptación HTTPS.
+
 Las fuentes 0.0.42 incorporan `gnx deploy --stack kestra`: Kestra con PostgreSQL
 en un LXC no privilegiado propio, con UI solo en loopback del guest y sin socket
 del host. Configuración y credenciales persisten mediante el estado protegido;

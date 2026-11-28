@@ -1,0 +1,43 @@
+#!/usr/bin/bash
+# Run only inside the separately authorized, non-privileged GNX Preview LXC.
+set -euo pipefail
+umask 077
+[[ $(id -u) == 0 && $(systemd-detect-virt --container) == lxc ]]
+[[ $(hostname) == gnx-preview && $(uname -m) == x86_64 ]]
+# UID 0 in an unprivileged LXC maps to a nonzero host UID.
+awk '$1 == 0 && $2 != 0 {found=1} END {exit !found}' /proc/self/uid_map
+bundle=${1:?extracted verified bundle required}
+cd "$bundle"
+sha256sum --strict -c SHA256SUMS
+for cmd in podman skopeo systemctl tar jq; do command -v "$cmd" >/dev/null; done
+[[ ! -e /etc/gnx-app/config/preview/installed.json ]]
+# A new install only. Existing data/configuration requires a reviewed backup/migration.
+[[ ! -e /var/lib/gnx-app/preview && ! -e /etc/gnx-app/config/preview ]]
+for unit in preview-ui.container preview-memos.container preview.network; do [[ ! -e /etc/containers/systemd/$unit ]]; done
+for role in node memos; do
+    ref=$(jq -er --arg role "$role" '.images[$role].reference' manifest.json)
+    [[ "$ref" =~ ^docker\.io/(library/node|neosmemo/memos)@sha256:[a-f0-9]{64}$ ]]
+    # Preserve the registry manifest digest in local storage; no network fallback.
+    skopeo copy --preserve-digests "oci-archive:images/$role.oci.tar" "containers-storage:$ref"
+    podman image exists "$ref"
+    [[ $(podman image inspect --format '{{.Os}}/{{.Architecture}}' "$ref") == linux/amd64 ]]
+done
+node_image=$(jq -r .images.node.reference manifest.json)
+podman run --rm --pull=never --network=none "$node_image" node --input-type=module -e '
+  if (process.version !== "v26.13.1" || typeof WebAssembly.Suspending !== "function" || typeof WebAssembly.promising !== "function") process.exit(1);
+'
+[[ $(sha256sum payload/gnx-desktop.tar.gz | cut -d' ' -f1) == $(jq -r .desktop.sha256 manifest.json) ]]
+install -d -m 0755 /var/lib/gnx-app/preview/desktop /var/lib/gnx-app/preview/memos /etc/gnx-app/config/preview/memos /etc/containers/systemd
+tar -xzf payload/gnx-desktop.tar.gz --no-same-owner -C /var/lib/gnx-app/preview/desktop
+[[ -f /var/lib/gnx-app/preview/desktop/server/index.mjs ]]
+chmod -R a+rX /var/lib/gnx-app/preview/desktop
+chown 10001:10001 /var/lib/gnx-app/preview/memos
+install -m 0644 config/memos/instance.json /etc/gnx-app/config/preview/memos/instance.json
+install -m 0644 quadlets/* /etc/containers/systemd/
+install -m 0600 manifest.json /etc/gnx-app/config/preview/installed.json
+systemctl daemon-reload
+systemctl start preview-ui.service preview-memos.service
+for unit in preview-ui.service preview-memos.service; do
+    [[ $(systemctl show "$unit" -p ActiveState --value) == active ]]
+done
+printf 'Preview units active; first administrator and HTTPS acceptance remain manual.\n'

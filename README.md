@@ -18,11 +18,16 @@ la CLI; la página no recibe archivos ni ejecuta operaciones administrativas.
 
 ## Instalación
 
+El [bundle GNX Preview Linux](stacks/preview/README.md) es un corte técnico para
+infraestructura existente: escritorio en `https://ui.kernel.gnx` y Memos privado
+en `https://notas.gnx`, conservando el PVE real en `https://compute.gnx`. Su
+aceptación HTTPS y publicación requieren la comprobación del coordinador.
+
 Requiere Windows x64 con WSL2 y virtualización disponibles. Los instaladores
 incluyen el filesystem Linux y las cuatro imágenes OCI del núcleo; no instalan
 los prerrequisitos Windows que falten. No se garantiza cualquier host limpio.
 
-Descarga la [candidata 0.0.28 para Windows x64](https://github.com/mayas-alas/quetzalcoatl/releases/tag/v0.0.28).
+Descarga la [candidata 0.0.41 para Windows x64](https://github.com/mayas-alas/quetzalcoatl/releases/tag/v0.0.41).
 Incluye `GnxCoreSetup.exe`, `GnxCore.msi` y `SHA256SUMS.txt`. La release es pública;
 no requiere una sesión GitHub para descargar esos archivos.
 
