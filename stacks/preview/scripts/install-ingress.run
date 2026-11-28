@@ -11,6 +11,7 @@ sha256sum --strict -c SHA256SUMS
 [[ -f "$target" && ! -L "$target" && $(stat -c %u "$target") == 0 && $(stat -c %a "$target") == 600 ]]
 jq -e '.ca_sha256|test("^[a-f0-9]{64}$")' "$target" >/dev/null
 [[ $(openssl x509 -in /var/lib/gnx-core/tls/root.crt -outform DER | sha256sum | cut -d' ' -f1) == $(jq -r .ca_sha256 "$target") ]]
+bash scripts/preview-access.run preflight "$target"
 # No CA generation here. SAN renewal uses the existing tls.run, CA and database.
 install -m 0644 integration/config/pki/node.ext /etc/gnx-core/node.ext
 install -m 0755 integration/scripts/tls.run /etc/gnx-core/tls.run

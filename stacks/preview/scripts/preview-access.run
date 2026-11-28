@@ -4,12 +4,12 @@ set -euo pipefail
 umask 077
 [[ $(id -u) == 0 ]]
 root=/var/lib/gnx-core
-mode=${1:?register or reconcile required}
-[[ "$mode" == register || "$mode" == reconcile ]]
+mode=${1:?preflight, register or reconcile required}
+[[ "$mode" == preflight || "$mode" == register || "$mode" == reconcile ]]
 exec 8>/run/gnx-preview-access.lock
 flock -x -w 30 8
 registry=$root/preview-stack.json
-if [[ "$mode" == register ]]; then candidate=${2:?managed target JSON required}; else candidate=$registry; fi
+if [[ "$mode" != reconcile ]]; then candidate=${2:?managed target JSON required}; else candidate=$registry; fi
 [[ -e "$candidate" ]] || { [[ "$mode" == reconcile ]]; exit; }
 [[ -f "$candidate" && ! -L "$candidate" && $(stat -c %u "$candidate") == 0 && $(stat -c %a "$candidate") == 600 ]]
 jq -e '
@@ -28,7 +28,9 @@ gateway=$(jq -r .gateway "$candidate")
 hop=$(jq -r .next_hop "$candidate")
 device=$(jq -r .interface "$candidate")
 [[ $(openssl x509 -in "$root/tls/root.crt" -outform DER | sha256sum | cut -d' ' -f1) == $(jq -r .ca_sha256 "$candidate") ]]
-for name in ui.kernel.gnx notas.gnx compute.gnx; do
+names=(compute.gnx)
+if [[ "$mode" != preflight ]]; then names+=(ui.kernel.gnx notas.gnx); fi
+for name in "${names[@]}"; do
     openssl verify -CAfile "$root/tls/root.crt" -CRLfile "$root/ca-private/root.crl.pem" -crl_check -purpose sslserver -verify_hostname "$name" "$root/tls/node.crt" >/dev/null
 done
 # This is the existing backend, using its existing CA/name validation.
@@ -46,6 +48,10 @@ if [[ -e "$registry" ]]; then
 fi
 existing=$(ip -j -4 route show exact "$guest/32")
 jq -e --arg hop "$hop" --arg device "$device" 'length == 0 or (length == 1 and .[0].gateway == $hop and .[0].dev == $device and .[0].protocol == "static")' <<< "$existing" >/dev/null
+if [[ "$mode" == preflight ]]; then
+    printf 'Managed target, existing compute TLS and ownership validated.\n'
+    exit 0
+fi
 if [[ ! -e "$registry" ]]; then
     (set -o noclobber; cat "$candidate" > "$registry")
     chmod 0600 "$registry"
