@@ -53,7 +53,7 @@ revoca enlaces compartidos que un administrador cree posteriormente.
 ## Empaquetado y aplicación deliberada
 
 La Action [GNX Preview Linux bundle](../../.github/workflows/preview-linux.yml)
-valida formato y empaqueta los artefactos fijados en PR, push relevante a main o
+valida formato/generación nativa Quadlet y empaqueta los artefactos fijados en PR, push relevante a main o
 ejecución manual. No compila el producto, no publica releases ni accede a PVE.
 Para reproducir en un builder Linux con Node, curl, skopeo, GNU tar y gzip:
 
@@ -62,7 +62,8 @@ node stacks/preview/scripts/bundle.mjs
 node stacks/preview/scripts/bundle.mjs --package
 ```
 
-Se requiere checkout comprometido. El directorio ignorado
+Se requiere checkout comprometido; en PR se usa su commit de cabecera exacto.
+El directorio ignorado
 `build/gnx-preview-<versión>-<commit>/` conserva el bundle, manifiesto,
 `provenance.json` y `SHA256SUMS`. La procedencia identifica commit, epoch del
 commit, herramientas, entradas originales y config digests OCI. Tar ordena

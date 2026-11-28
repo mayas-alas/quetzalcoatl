@@ -86,6 +86,7 @@ assert(!existsSync(output), 'Output exists; inspect it before a new packaging at
 const bundle = join(output, 'bundle');
 mkdirSync(bundle, { recursive: true });
 for (const file of sourceFiles) copy(file, join(bundle, relative(base, file)));
+copy(join(repo, 'LICENSE'), join(bundle, 'LICENSE'));
 for (const path of ['config/pki/node.ext', 'config/compute/stack-dns.conf', 'scripts/tls.run', 'scripts/configure.run']) {
   copy(join(repo, path), join(bundle, 'integration', path));
 }
