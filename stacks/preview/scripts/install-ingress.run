@@ -15,6 +15,8 @@ jq -e '.ca_sha256|test("^[a-f0-9]{64}$")' "$target" >/dev/null
 install -m 0644 integration/config/pki/node.ext /etc/gnx-core/node.ext
 install -m 0755 integration/scripts/tls.run /etc/gnx-core/tls.run
 bash /etc/gnx-core/tls.run refresh
+# Wait for the native gateway job scheduled by refresh before checking compute TLS.
+systemctl try-restart gnx-core-gateway.service
 install -m 0644 gateway.caddy /etc/gnx-core/preview.caddy
 install -m 0755 scripts/preview-access.run /etc/gnx-core/preview-access.run
 install -d -m 0755 /var/lib/gnx-core/stack-dns

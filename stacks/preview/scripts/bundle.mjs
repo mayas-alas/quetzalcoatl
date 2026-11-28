@@ -19,6 +19,9 @@ const files = (dir) => readdirSync(dir).sort().flatMap((name) => {
   return lstatSync(path).isDirectory() ? files(path) : [path];
 });
 const copy = (from, to) => { mkdirSync(dirname(to), { recursive: true }); copyFileSync(from, to); };
+// Package only reviewed Git inputs, never an ignored local target or credential file.
+const sourceFiles = run('git', ['ls-files', '-z', '--', 'stacks/preview'], { cwd: repo })
+  .split('\0').filter(Boolean).map((path) => join(repo, path));
 
 assert.equal(manifest.schema, 1);
 assert.equal(manifest.name, 'gnx-preview');
@@ -58,7 +61,8 @@ const admission = files(join(base, 'quadlets')).concat(files(join(base, 'config'
 assert(admission.length <= 32);
 assert(admission.every((file) => readFileSync(file).length <= 16384));
 assert(admission.reduce((total, file) => total + readFileSync(file).length, 0) <= 49152);
-for (const file of files(base)) {
+for (const file of sourceFiles) {
+  assert(!lstatSync(file).isSymbolicLink(), `Symlink forbidden: ${file}`);
   assert(!readFileSync(file).includes(13), `CRLF forbidden: ${file}`);
 }
 const caddy = readFileSync(join(repo, 'config/gateway/Caddyfile'), 'utf8');
@@ -81,7 +85,7 @@ const output = join(repo, 'build', `gnx-preview-${manifest.version}-${commit}`);
 assert(!existsSync(output), 'Output exists; inspect it before a new packaging attempt');
 const bundle = join(output, 'bundle');
 mkdirSync(bundle, { recursive: true });
-for (const file of files(base)) copy(file, join(bundle, relative(base, file)));
+for (const file of sourceFiles) copy(file, join(bundle, relative(base, file)));
 for (const path of ['config/pki/node.ext', 'config/compute/stack-dns.conf', 'scripts/tls.run', 'scripts/configure.run']) {
   copy(join(repo, path), join(bundle, 'integration', path));
 }
@@ -93,7 +97,7 @@ const desktopFiles = run('tar', ['-tzf', join(bundle, manifest.desktop.archive)]
 assert(desktopFiles.some((name) => /^\.\/server\/index\.mjs$/.test(name)));
 assert(desktopFiles.some((name) => /public\/distros\/debian-[a-f0-9]+\.erofs$/.test(name)), 'Published Debian image missing');
 assert(desktopFiles.every((name) => !name.startsWith('/') && !name.split('/').includes('..')), 'Unsafe desktop archive path');
-const tar = (source, dest) => run('tar', ['--sort=name', `--mtime=@${epoch}`, '--owner=0', '--group=0', '--numeric-owner', '--format=gnu', '-cf', dest, '-C', source, '.']);
+const tar = (source, dest) => run('tar', ['--sort=name', `--mtime=@${epoch}`, '--owner=0', '--group=0', '--numeric-owner', '--mode=u=rwX,go=rX', '--format=gnu', '-cf', dest, '-C', source, '.']);
 const imageConfigs = {};
 for (const [role, image] of Object.entries(manifest.images)) {
   const input = join(output, 'inputs', role);
