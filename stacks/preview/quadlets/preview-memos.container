@@ -7,8 +7,7 @@ Pull=never
 ContainerName=gnx-preview-memos
 Network=preview.network
 PublishPort=5230:5230
-User=10001
-Group=10001
+User=10001:10001
 Environment=MEMOS_MODE=prod
 Environment=MEMOS_INSTANCE_URL=https://notas.gnx
 Volume=/var/lib/gnx-app/preview/memos:/var/opt/memos
