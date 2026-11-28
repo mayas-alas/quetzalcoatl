@@ -19,7 +19,9 @@ install -m 0644 gateway.caddy /etc/gnx-core/preview.caddy
 install -m 0755 scripts/preview-access.run /etc/gnx-core/preview-access.run
 install -d -m 0755 /var/lib/gnx-core/stack-dns
 if [[ ! -e /var/lib/gnx-core/stack-dns/preview.conf ]]; then printf '# No preview registered.\n' > /var/lib/gnx-core/stack-dns/preview.conf; fi
-install -m 0644 integration/config/compute/stack-dns.conf /etc/gnx-core/stack-dns.conf
+[[ -f /etc/gnx-core/stack-dns.conf && ! -L /etc/gnx-core/stack-dns.conf && $(stat -c %u /etc/gnx-core/stack-dns.conf) == 0 ]]
+# Keep the inode: the running compute has this file bind-mounted read-only.
+cat integration/config/compute/stack-dns.conf > /etc/gnx-core/stack-dns.conf
 install -m 0755 integration/scripts/configure.run /etc/gnx-core/configure.run
 bash /etc/gnx-core/preview-access.run register "$target"
 if ip link show tailscale0 >/dev/null 2>&1; then bash /etc/gnx-core/configure.run mesh-access; fi

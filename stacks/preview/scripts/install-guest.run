@@ -4,6 +4,8 @@ set -euo pipefail
 umask 077
 [[ $(id -u) == 0 && $(systemd-detect-virt --container) == lxc ]]
 [[ $(hostname) == gnx-preview && $(uname -m) == x86_64 ]]
+# UID 0 in an unprivileged LXC maps to a nonzero host UID.
+awk '$1 == 0 && $2 != 0 {found=1} END {exit !found}' /proc/self/uid_map
 bundle=${1:?extracted verified bundle required}
 cd "$bundle"
 sha256sum --strict -c SHA256SUMS
@@ -18,6 +20,7 @@ for role in node memos; do
     # Preserve the registry manifest digest in local storage; no network fallback.
     skopeo copy --preserve-digests "oci-archive:images/$role.oci.tar" "containers-storage:$ref"
     podman image exists "$ref"
+    [[ $(podman image inspect --format '{{.Os}}/{{.Architecture}}' "$ref") == linux/amd64 ]]
 done
 node_image=$(jq -r .images.node.reference manifest.json)
 podman run --rm --pull=never --network=none "$node_image" node --input-type=module -e '

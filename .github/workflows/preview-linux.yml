@@ -28,7 +28,7 @@ jobs:
           node --check stacks/preview/scripts/bundle.mjs
           node stacks/preview/scripts/bundle.mjs
           git diff --check
-          bash -n stacks/preview/scripts/*.run scripts/tls.run scripts/configure.run
+          for file in stacks/preview/scripts/*.run scripts/tls.run scripts/configure.run; do bash -n "$file"; done
       - name: Prepare native packaging tools
         run: |
           sudo apt-get update -qq
