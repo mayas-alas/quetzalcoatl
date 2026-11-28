@@ -97,6 +97,7 @@ const tar = (source, dest) => run('tar', ['--sort=name', `--mtime=@${epoch}`, '-
 const imageConfigs = {};
 for (const [role, image] of Object.entries(manifest.images)) {
   const input = join(output, 'inputs', role);
+  mkdirSync(dirname(input), { recursive: true });
   run('skopeo', ['copy', '--preserve-digests', `docker://${image.reference}`, `oci:${input}:${role}`]);
   const inspect = JSON.parse(run('skopeo', ['inspect', `oci:${input}:${role}`]));
   assert.equal(`${inspect.Os}/${inspect.Architecture}`, manifest.platform);

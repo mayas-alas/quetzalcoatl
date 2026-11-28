@@ -240,6 +240,15 @@ no se acreditan por iniciar sus contenedores.
 
 ## Despliegue por Rust y PVE
 
+El corte externo [GNX Preview Linux](stacks/preview/README.md) usa Quadlets
+nativos y un manifiesto versionado sobre un LXC ya aprovisionado. El desktop
+publicado se monta de solo lectura en Node fijado por digest; Memos conserva
+su estado bajo `/var/lib/gnx-app/preview/`. `preview-stack.json` vincula
+VMID/digest/MAC y target administrado con la CA verificada. Su reconciliador
+reusa los imports Caddy, la ruta `/32` y split DNS del nodo sin reemplazar el
+registro privado ni el transporte TLS de compute. No añade una selección al
+pipe ni código de creación de guests; su aplicación/e2e es independiente.
+
 `DeployKestra` selecciona un bundle fijo incorporado en Rust: red bridge,
 PostgreSQL y Kestra standalone. Antes de reservar el LXC, `kestra-input.json`
 conserva archivos y secretos aleatorios bajo las ACL Windows, ligados al SID/GUID
